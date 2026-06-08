@@ -132,20 +132,30 @@ export default function ImportPage() {
     setLoading(true);
     setError(null);
     try {
+      // Pre-flight: verify/refresh token before sending large file
+      // This prevents ECONNABORTED caused by expired JWT mid-upload
+      await apiClient.get('/auth/me').catch(async () => {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+          const { data: tokens } = await apiClient.post('/auth/refresh', { refreshToken });
+          localStorage.setItem('access_token',  tokens.accessToken);
+          localStorage.setItem('refresh_token', tokens.refreshToken);
+        }
+      });
+
       const fd = new FormData();
       fd.append('file', file);
       const params = new URLSearchParams({ type: importType });
       if (sheetName) params.set('sheet', sheetName);
 
-      // Do NOT set Content-Type manually — Axios sets it with the correct multipart boundary
       const { data } = await apiClient.post(`/imports/upload?${params}`, fd);
       setBatchId(data.batchId);
       setSummary(data.summary);
       setStep(2);
-      // Load first page of preview automatically
       await loadPreview(data.batchId, 1, 'all');
     } catch (err: any) {
-      setError(err.response?.data?.message ?? 'Upload failed');
+      const msg = err.response?.data?.message ?? err.message ?? 'Upload failed';
+      setError(msg);
     } finally {
       setLoading(false);
     }
