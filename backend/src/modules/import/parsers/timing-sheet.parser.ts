@@ -115,16 +115,23 @@ export function parseTimingSheet(
   workbook: XLSX.WorkBook,
   sheetName?: string,
 ): { rows: ParsedShiftCode[]; errors: string[] } {
-  // Find the Timing sheet (flexible name matching)
+  const availableSheets = workbook.SheetNames;
+
+  // Find the Timing sheet — flexible name matching
   const targetSheet = sheetName
     ?? workbook.SheetNames.find(n =>
-        /timing|توقيت|shift.?code|code/i.test(n)
+        /timing|توقيت|shift.?code|^code$|^shifts?$/i.test(n)
       )
     ?? workbook.SheetNames[0];
 
   const ws = workbook.Sheets[targetSheet];
   if (!ws) {
-    return { rows: [], errors: [`Sheet not found: ${targetSheet}`] };
+    return {
+      rows: [],
+      errors: [
+        `Sheet not found: "${targetSheet}". Available sheets: ${availableSheets.join(', ')}`,
+      ],
+    };
   }
 
   const raw: any[][] = XLSX.utils.sheet_to_json(ws, {
@@ -134,38 +141,92 @@ export function parseTimingSheet(
   });
 
   if (raw.length < 2) {
-    return { rows: [], errors: ['Timing sheet has no data rows'] };
+    return {
+      rows: [],
+      errors: [
+        `Sheet "${targetSheet}" has no data. Available sheets: ${availableSheets.join(', ')}`,
+      ],
+    };
   }
 
-  // Detect header row (first row with a "code"-like value)
+  // Detect header row — scan up to 15 rows, look for any time-like or code-like header
   let headerRowIdx = 0;
-  for (let i = 0; i < Math.min(5, raw.length); i++) {
-    const row = raw[i].map((c: any) => String(c ?? '').toLowerCase());
-    if (row.some(c => /code|shift|كود|رمز/.test(c))) {
+  for (let i = 0; i < Math.min(15, raw.length); i++) {
+    const row = raw[i].map((c: any) => String(c ?? '').toLowerCase().trim());
+    const hasCodeLike = row.some(c =>
+      /code|shift|كود|رمز|الشيفت|الكود|رمز.?الشيفت|shift.?code/i.test(c)
+    );
+    const hasTimeLike = row.some(c =>
+      /start|end|time|بداية|نهاية|وقت|from|to/i.test(c)
+    );
+    if (hasCodeLike || hasTimeLike) {
       headerRowIdx = i;
       break;
     }
   }
 
-  const headers = raw[headerRowIdx].map((h: any) => String(h ?? '').toLowerCase().trim());
+  const headers = raw[headerRowIdx].map((h: any) =>
+    String(h ?? '').toLowerCase().trim().replace(/\s+/g, ' ')
+  );
 
-  // Column index lookup
+  // Flexible column lookup
   const col = (patterns: RegExp[]): number =>
     headers.findIndex(h => patterns.some(p => p.test(h)));
 
-  const colCode  = col([/^code$/, /shift.?code/, /^كود/, /^رمز/]);
-  const colDesc  = col([/desc|description|وصف|اسم/]);
-  const colStart = col([/^start$/, /start.?time/, /بداية/, /^from$/]);
-  const colEnd   = col([/^end$/, /end.?time/, /نهاية/, /^to$/]);
-  const colStart2 = col([/start.?2/, /split.?start/, /بداية.?2/]);
-  const colEnd2   = col([/end.?2/, /split.?end/, /نهاية.?2/]);
-  const colWork  = col([/work.?hour|ساعات.?عمل|working/]);
-  const colBreak = col([/break/, /استراحة/]);
-  const colTotal = col([/total/, /إجمالي|اجمالي/]);
+  // Code column — very broad set of patterns
+  let colCode = col([
+    /^code$/,
+    /shift.?code/,
+    /code.?shift/,
+    /^shift$/,
+    /^كود$/,
+    /^رمز$/,
+    /الكود/,
+    /كود.?الشيفت/,
+    /رمز.?الشيفت/,
+    /^الشيفت$/,
+    /shift.?name/,
+    /^abbr/,
+    /^symbol/,
+    /^id$/,
+  ]);
+
+  // Fallback: if still -1, use the first non-empty column as the code column
+  // (common in simple timing tables where row 0 is just the shift code)
+  if (colCode === -1) {
+    const firstDataRow = raw[headerRowIdx + 1] ?? [];
+    // Find first column that has a short string value (looks like a shift code)
+    for (let c = 0; c < Math.min(headers.length, 5); c++) {
+      const headerVal = headers[c];
+      const dataVal   = String(firstDataRow[c] ?? '').trim();
+      // Accept if: header is empty (no header) OR header looks generic AND data is short like a code
+      if (dataVal.length > 0 && dataVal.length <= 10) {
+        colCode = c;
+        break;
+      }
+    }
+  }
 
   if (colCode === -1) {
-    return { rows: [], errors: ['Cannot locate Code column in Timing sheet'] };
+    return {
+      rows: [],
+      errors: [
+        `Cannot locate Code column in sheet "${targetSheet}". ` +
+        `Headers found: [${headers.filter(Boolean).join(', ')}]. ` +
+        `Available sheets: ${availableSheets.join(', ')}. ` +
+        `Tip: Select the correct sheet name in the "Sheet Name" field.`,
+      ],
+    };
   }
+
+  const colDesc  = col([/desc|description|وصف|الوصف|اسم|name/]);
+  const colStart = col([/^start$/, /start.?time/, /^from$/, /بداية/, /وقت.?بداية/, /^time.?in$/]);
+  const colEnd   = col([/^end$/, /end.?time/, /^to$/, /نهاية/, /وقت.?نهاية/, /^time.?out$/]);
+  const colStart2 = col([/start.?2/, /split.?start/, /بداية.?2/, /2.?start/]);
+  const colEnd2   = col([/end.?2/, /split.?end/, /نهاية.?2/, /2.?end/]);
+  const colWork  = col([/work.?hour/, /ساعات.?عمل/, /working/, /work.?hrs/, /^hours?$/]);
+  const colBreak = col([/break/, /استراحة/, /rest/]);
+  const colTotal = col([/total/, /إجمالي/, /اجمالي/, /total.?hour/]);
 
   const results: ParsedShiftCode[] = [];
   const errors: string[] = [];

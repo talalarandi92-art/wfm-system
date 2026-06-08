@@ -109,14 +109,20 @@ export default function ImportPage() {
     setError(null);
     setAvailableSheets([]);
     setSheetName('');
-    // Auto-detect sheet names
+    // Auto-detect sheet names — show loading state on the drop zone
     try {
       const fd = new FormData();
       fd.append('file', f);
-      const { data } = await apiClient.post('/imports/sheets', fd);
-      setAvailableSheets(data.sheetNames ?? []);
+      const { data } = await apiClient.post('/imports/sheets', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      const sheets: string[] = data.sheetNames ?? [];
+      setAvailableSheets(sheets);
+      // Auto-select the most likely Timing/Shifts sheet
+      const autoSheet = sheets.find(s => /timing|توقيت/i.test(s)) ?? '';
+      if (autoSheet) setSheetName(autoSheet);
     } catch {
-      // Non-critical, user can type sheet name
+      // Non-critical — user can type sheet name manually
     }
   };
 
@@ -285,17 +291,43 @@ export default function ImportPage() {
             {/* Sheet selector */}
             <div>
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                {ar ? 'اسم الورقة (اختياري)' : 'Sheet Name (optional)'}
+                {ar ? 'اختر ورقة العمل' : 'Select Sheet'}
+                {availableSheets.length > 0 && (
+                  <span className="ms-1 text-blue-500">
+                    ({availableSheets.length} {ar ? 'ورقة' : 'sheets'})
+                  </span>
+                )}
               </label>
               {availableSheets.length > 0 ? (
-                <select
-                  value={sheetName}
-                  onChange={e => setSheetName(e.target.value)}
-                  className="input-field text-sm w-full"
-                >
-                  <option value="">{ar ? '— تلقائي —' : '— Auto detect —'}</option>
-                  {availableSheets.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                <>
+                  <select
+                    value={sheetName}
+                    onChange={e => setSheetName(e.target.value)}
+                    className="input-field text-sm w-full"
+                  >
+                    <option value="">{ar ? '— تلقائي —' : '— Auto detect —'}</option>
+                    {availableSheets.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {availableSheets.map(s => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setSheetName(s)}
+                        className={`
+                          text-xs px-2 py-0.5 rounded-full border transition-colors
+                          ${sheetName === s
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'border-gray-200 dark:border-gray-700 text-gray-500 hover:border-blue-400 hover:text-blue-600'}
+                        `}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </>
               ) : (
                 <input
                   type="text"
