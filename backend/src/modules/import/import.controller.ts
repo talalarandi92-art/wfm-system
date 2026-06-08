@@ -2,7 +2,7 @@ import {
   Controller, Post, Get, Param, Query, Body,
   UseGuards, UseInterceptors, UploadedFile,
   ParseUUIDPipe, ParseIntPipe, DefaultValuePipe,
-  BadRequestException,
+  BadRequestException, Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -28,6 +28,7 @@ const MAX_FILE_MB = 50;
 @UseGuards(JwtAuthGuard)
 @Controller('imports')
 export class ImportController {
+  private readonly logger = new Logger(ImportController.name);
   constructor(private readonly svc: ImportService) {}
 
   /** Upload workbook → parse → return preview */
@@ -56,13 +57,17 @@ export class ImportController {
     @Query('sheet') sheetName: string,
     @CurrentUser() user: any,
   ) {
-    if (!file) throw new BadRequestException('No file uploaded');
-    if (!['timing', 'shifts', 'schedule'].includes(importType)) {
-      throw new BadRequestException('type must be: timing | shifts | schedule');
+    try {
+      if (!file) throw new BadRequestException('No file uploaded');
+      if (!['timing', 'shifts', 'schedule'].includes(importType)) {
+        throw new BadRequestException('type must be: timing | shifts | schedule');
+      }
+      this.logger.log(`Upload: type=${importType} sheet=${sheetName} size=${file?.size} user=${user?.id}`);
+      return await this.svc.upload(user.tenantId, user.id, file, importType, sheetName);
+    } catch (err) {
+      this.logger.error(`Upload failed: ${err?.message}`, err?.stack);
+      throw err;
     }
-    return this.svc.upload(
-      user.tenantId, user.id, file, importType, sheetName,
-    );
   }
 
   /** List available sheet names in an uploaded file */
@@ -76,10 +81,17 @@ export class ImportController {
     }),
   )
   async listSheets(@UploadedFile() file: Express.Multer.File) {
-    if (!file) throw new BadRequestException('No file uploaded');
-    const XLSX = await import('xlsx');
-    const wb = XLSX.read(file.buffer, { type: 'buffer' });
-    return { sheetNames: wb.SheetNames };
+    try {
+      this.logger.log(`listSheets called, file=${file?.originalname}, size=${file?.size}`);
+      if (!file) throw new BadRequestException('No file uploaded');
+      const XLSX = await import('xlsx');
+      const wb = XLSX.read(file.buffer, { type: 'buffer' });
+      this.logger.log(`Sheets found: ${wb.SheetNames.join(', ')}`);
+      return { sheetNames: wb.SheetNames };
+    } catch (err) {
+      this.logger.error(`listSheets failed: ${err?.message}`, err?.stack);
+      throw err;
+    }
   }
 
   /** Get preview + paginated rows for a batch */

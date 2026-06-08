@@ -1,7 +1,7 @@
 import {
   Injectable, BadRequestException, NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { ImportBatch } from '../../database/entities/import-batch.entity';
@@ -27,7 +27,7 @@ export class ImportService {
     @InjectRepository(ImportBatch) private batchRepo: Repository<ImportBatch>,
     @InjectRepository(ImportRow)   private rowRepo:   Repository<ImportRow>,
     @InjectRepository(ShiftCode)   private shiftCodeRepo: Repository<ShiftCode>,
-    private dataSource: DataSource,
+    @InjectDataSource()            private dataSource: DataSource,
   ) {}
 
   /** Step 1 — Upload file, parse, store rows, return preview */
