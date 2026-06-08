@@ -81,3 +81,9 @@ ehthumbs.db
 # --- TypeORM ---
 ormconfig.js
 ormconfig.ts
+
+# --- Claude Code local settings (machine-specific paths) ---
+.claude/
+
+# --- Duplicate instruction file artifacts ---
+CLAUDE.md.md
