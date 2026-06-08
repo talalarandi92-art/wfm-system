@@ -113,9 +113,8 @@ export default function ImportPage() {
     try {
       const fd = new FormData();
       fd.append('file', f);
-      const { data } = await apiClient.post('/imports/sheets', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // Do NOT set Content-Type manually — Axios sets it with the correct boundary
+      const { data } = await apiClient.post('/imports/sheets', fd);
       const sheets: string[] = data.sheetNames ?? [];
       setAvailableSheets(sheets);
       // Auto-select the most likely Timing/Shifts sheet
@@ -138,9 +137,8 @@ export default function ImportPage() {
       const params = new URLSearchParams({ type: importType });
       if (sheetName) params.set('sheet', sheetName);
 
-      const { data } = await apiClient.post(`/imports/upload?${params}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // Do NOT set Content-Type manually — Axios sets it with the correct multipart boundary
+      const { data } = await apiClient.post(`/imports/upload?${params}`, fd);
       setBatchId(data.batchId);
       setSummary(data.summary);
       setStep(2);

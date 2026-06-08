@@ -7,11 +7,16 @@ export const apiClient: AxiosInstance = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Attach access token to every request
+// Attach access token + fix Content-Type for FormData requests
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = localStorage.getItem('access_token');
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // If body is FormData, delete the default application/json Content-Type
+  // so Axios can set multipart/form-data with the correct boundary automatically
+  if (config.data instanceof FormData && config.headers) {
+    delete config.headers['Content-Type'];
   }
   return config;
 });
