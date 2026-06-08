@@ -4,9 +4,6 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as XLSX from 'xlsx';
-import * as path from 'path';
-import * as fs from 'fs';
-
 import { ImportBatch } from '../../database/entities/import-batch.entity';
 import { ImportRow } from '../../database/entities/import-row.entity';
 import { ShiftCode } from '../../database/entities/shift-code.entity';
@@ -14,7 +11,15 @@ import { ShiftCode } from '../../database/entities/shift-code.entity';
 import { parseTimingSheet } from './parsers/timing-sheet.parser';
 import { parseShiftsSheet } from './parsers/shifts-sheet.parser';
 
+/** User-facing type aliases (short names the UI sends) */
 export type ImportType = 'timing' | 'shifts' | 'schedule';
+
+/** Map UI type → PostgreSQL import_type_enum values */
+const TYPE_TO_DB: Record<string, string> = {
+  timing:   'timing_sheet',
+  shifts:   'shifts_sheet',
+  schedule: 'monthly_matrix',
+};
 
 @Injectable()
 export class ImportService {
@@ -66,14 +71,14 @@ export class ImportService {
     const warningRows = parsedRows.filter(r => r.warnings?.length > 0).length;
     const validRows   = totalRows - errorRows;
 
-    // Create batch record
+    // Create batch record — use DB enum values for importType and status
     const batch = this.batchRepo.create({
       tenantId,
-      importType,
+      importType:       TYPE_TO_DB[importType] ?? importType,
       originalFilename: file.originalname,
       storedFilename:   file.originalname,
       fileSizeBytes:    file.size,
-      status:           'previewing',
+      status:           'processing',   // DB enum: uploaded|processing|validated|committed|failed|cancelled
       totalRows,
       validRows,
       errorRows,
@@ -81,8 +86,9 @@ export class ImportService {
       skippedRows:      0,
       createdById:      userId,
       metadata: {
-        sheetNames: workbook.SheetNames,
-        parsedSheet: sheetName ?? workbook.SheetNames[0],
+        sheetNames:   workbook.SheetNames,
+        parsedSheet:  sheetName ?? workbook.SheetNames[0],
+        importTypeUi: importType,
         globalErrors,
       },
     });
@@ -198,28 +204,30 @@ export class ImportService {
 
     const validRows = skipErrors ? rows.filter(r => r.status !== 'error') : rows;
 
-    await this.batchRepo.update(batchId, { status: 'committing' });
+    // 'processing' is the closest DB enum value for "committing in progress"
+    await this.batchRepo.update(batchId, { status: 'processing' });
 
     let committed = 0;
     let skipped   = 0;
 
     try {
-      if (batch.importType === 'timing') {
+      // Match against DB enum values
+      if (batch.importType === 'timing_sheet' || batch.importType === 'timing') {
         committed = await this.commitTimingRows(tenantId, validRows);
-      } else if (batch.importType === 'shifts') {
+      } else if (batch.importType === 'shifts_sheet' || batch.importType === 'shifts') {
         committed = await this.commitShiftsRows(tenantId, validRows);
       }
       skipped = rows.length - validRows.length;
     } catch (err) {
-      await this.batchRepo.update(batchId, { status: 'error' });
+      await this.batchRepo.update(batchId, { status: 'failed' }); // DB enum: failed
       throw err;
     }
 
     await this.batchRepo.update(batchId, {
-      status:      'committed',
-      committedAt: new Date(),
+      status:        'committed',
+      committedAt:   new Date(),
       committedById: userId,
-      skippedRows: skipped,
+      skippedRows:   skipped,
     });
 
     return {
@@ -299,30 +307,47 @@ export class ImportService {
       const d = row.parsedData;
       if (!d?.employeeNo || !d?.attendanceDate) continue;
 
-      // Raw SQL upsert so we don't need a full AttendanceRecord entity yet
+      // Try to resolve shift_code text → shift_codes.id UUID
+      let shiftCodeId: string | null = null;
+      if (d.shiftCode) {
+        const scRow = await this.dataSource.query(
+          `SELECT id FROM shift_codes WHERE tenant_id = $1 AND code = $2 LIMIT 1`,
+          [tenantId, d.shiftCode],
+        );
+        shiftCodeId = scRow[0]?.id ?? null;
+      }
+
+      // Build the notes field to store raw shift code text if we couldn't resolve it
+      const notes = [
+        d.notes,
+        d.shiftCode && !shiftCodeId ? `shift:${d.shiftCode}` : null,
+      ].filter(Boolean).join(' | ') || null;
+
       await this.dataSource.query(
         `INSERT INTO attendance_records (
            id, tenant_id, employee_id, attendance_date,
-           shift_code, punch_in, punch_out,
+           scheduled_shift_code_id,
+           punch_in, punch_out,
            system_login, system_logout,
            punch_late_minutes, system_late_minutes,
            punch_early_out_minutes, system_early_out_minutes,
            ot_minutes, is_missing_punch, is_missing_system,
-           is_wfh, notes, source, created_at, updated_at
+           is_wfh, notes, created_at, updated_at
          )
          SELECT
            gen_random_uuid(), $1,
            e.id, $3::date,
-           $4, $5::timestamptz, $6::timestamptz,
+           $4::uuid,
+           $5::timestamptz, $6::timestamptz,
            $7::timestamptz, $8::timestamptz,
            $9, $10, $11, $12,
            $13, $14, $15,
-           $16, $17, 'import', now(), now()
+           $16, $17, now(), now()
          FROM employees e
          WHERE e.tenant_id = $1 AND e.employee_no = $2
          ON CONFLICT (tenant_id, employee_id, attendance_date)
          DO UPDATE SET
-           shift_code              = EXCLUDED.shift_code,
+           scheduled_shift_code_id = EXCLUDED.scheduled_shift_code_id,
            punch_in                = EXCLUDED.punch_in,
            punch_out               = EXCLUDED.punch_out,
            system_login            = EXCLUDED.system_login,
@@ -341,20 +366,20 @@ export class ImportService {
           tenantId,
           d.employeeNo,
           d.attendanceDate,
-          d.shiftCode   ?? null,
-          d.punchIn     ?? null,
-          d.punchOut    ?? null,
-          d.systemLogin ?? null,
+          shiftCodeId,
+          d.punchIn      ?? null,
+          d.punchOut     ?? null,
+          d.systemLogin  ?? null,
           d.systemLogout ?? null,
-          d.punchLateMinutes      ?? 0,
-          d.systemLateMinutes     ?? 0,
-          d.punchEarlyOutMinutes  ?? 0,
-          d.systemEarlyOutMinutes ?? 0,
-          d.otMinutes ?? 0,
+          d.punchLateMinutes       ?? 0,
+          d.systemLateMinutes      ?? 0,
+          d.punchEarlyOutMinutes   ?? 0,
+          d.systemEarlyOutMinutes  ?? 0,
+          d.otMinutes     ?? 0,
           d.isMissingPunch  ?? false,
           d.isMissingSystem ?? false,
-          d.isWfh ?? false,
-          d.notes ?? null,
+          d.isWfh  ?? false,
+          notes,
         ],
       );
       count++;
@@ -369,7 +394,10 @@ export class ImportService {
       .orderBy('b.created_at', 'DESC')
       .take(50);
 
-    if (importType) qb.andWhere('b.import_type = :importType', { importType });
+    if (importType) {
+      const dbType = TYPE_TO_DB[importType] ?? importType;
+      qb.andWhere('b.import_type = :importType', { importType: dbType });
+    }
     return qb.getMany();
   }
 }
