@@ -1,0 +1,6 @@
+# Place real schedule workbooks here for parser development.
+# These files are gitignored — never commit real operational data.
+# Accepted formats: .xlsx, .xls
+#
+# Expected files:
+#   - CC Schedule workbook (contains: Timing sheet, Shifts sheet, Monthly matrices, HC, Outages)

@@ -1,0 +1,77 @@
+version: '3.9'
+
+# ============================================================
+# WFM PLATFORM — Docker Compose (Development)
+# ============================================================
+# Prerequisites: Docker Desktop installed and running.
+# Usage:
+#   1. Copy .env.example to .env and fill in passwords.
+#   2. docker-compose up -d
+#   3. Database is auto-initialized on first start.
+#
+# NOTE: This mounts database/migrations/ into postgres init dir.
+# The schema and seed SQL run automatically on first container
+# startup when the data volume is empty.
+# For subsequent runs after schema changes, destroy the volume:
+#   docker-compose down -v && docker-compose up -d
+# ============================================================
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: wfm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-init: runs all *.sql files in this directory on first start
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - wfm_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: wfm_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - wfm_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  wfm_network:
+    driver: bridge
