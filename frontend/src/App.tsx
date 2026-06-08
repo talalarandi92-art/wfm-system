@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { authApi } from '@/api/client';
 import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
+import ImportPage from '@/pages/Import';
 import Placeholder from '@/pages/Placeholder';
 import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="scorecard"  element={<Placeholder title="Scorecard" />} />
           <Route path="employees"  element={<Placeholder title="Employees" />} />
           <Route path="users"      element={<Placeholder title="Users" />} />
+          <Route path="import"     element={<ImportPage />} />
           <Route path="reports"    element={<Placeholder title="Reports" />} />
           <Route path="settings"   element={<Placeholder title="Settings" />} />
         </Route>

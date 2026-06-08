@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Clock, FileText, BarChart3,
   Radio, AlertTriangle, Users, Settings, UserCog, Award,
-  ChevronLeft, ChevronRight,
+  Upload, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
@@ -19,6 +19,7 @@ const navItems = [
   { key: 'scorecard',  icon: Award,           path: '/scorecard',  permission: 'scorecard.view_own' },
   { key: 'employees',  icon: Users,           path: '/employees',  permission: 'employees.view' },
   { key: 'users',      icon: UserCog,         path: '/users',      permission: 'users.view' },
+  { key: 'import',     icon: Upload,          path: '/import',     permission: 'settings.view' },
   { key: 'reports',    icon: BarChart3,       path: '/reports',    permission: 'reports.view' },
   { key: 'settings',   icon: Settings,        path: '/settings',   permission: 'settings.view' },
 ];

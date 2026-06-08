@@ -3,9 +3,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
-import { AuthModule } from '@modules/auth/auth.module';
-import { UsersModule } from '@modules/users/users.module';
+import { AuthModule }   from '@modules/auth/auth.module';
+import { UsersModule }  from '@modules/users/users.module';
 import { HealthModule } from '@modules/health/health.module';
+import { ImportModule } from '@modules/import/import.module';
 import { TenantMiddleware } from '@common/middleware/tenant.middleware';
 
 @Module({
@@ -53,6 +54,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     AuthModule,
     UsersModule,
     HealthModule,
+    ImportModule,
   ],
   providers: [
     // Apply ThrottlerGuard globally
