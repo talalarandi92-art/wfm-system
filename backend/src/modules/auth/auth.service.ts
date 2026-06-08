@@ -129,7 +129,7 @@ export class AuthService {
     });
 
     // Store bcrypt hash of new refresh token (rotation)
-    const rounds = this.config.get<number>('BCRYPT_ROUNDS', 10);
+    const rounds = Number(this.config.get<number>('BCRYPT_ROUNDS', 10));
     const refreshHash = await bcrypt.hash(refreshToken, rounds);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);

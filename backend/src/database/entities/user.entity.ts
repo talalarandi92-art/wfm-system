@@ -47,7 +47,7 @@ export class User {
   @Column({ name: 'must_change_password', default: true })
   mustChangePassword: boolean;
 
-  @Column({ name: 'refresh_token_hash', length: 255, nullable: true, select: false })
+  @Column({ name: 'refresh_token_hash', type: 'varchar', length: 255, nullable: true, select: false })
   refreshTokenHash: string | null;
 
   @Column({ name: 'refresh_token_expires_at', type: 'timestamptz', nullable: true, select: false })
