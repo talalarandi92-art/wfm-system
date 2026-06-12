@@ -1002,6 +1002,30 @@ export class SprinklrService {
     );
     if (!stats.length) return { violations: 0 };
 
+    // Tracking coverage — we can only judge what the extension actually observed.
+    // Snapshots arrive every ~30s while tracking is on, so "tracking covered moment X"
+    // means a snapshot exists NEAR X. A snapshot hours earlier followed by a gap
+    // (extension closed) must NOT count as coverage.
+    const snapTimes: { captured_at: string }[] = await this.dataSource.query(
+      `SELECT captured_at FROM integration_snapshots
+       WHERE tenant_id = $1 AND source = 'sprinklr'
+         AND captured_at BETWEEN ($2::date::timestamptz - interval '9 hours')
+                             AND ($2::date::timestamptz + interval '33 hours')
+       ORDER BY captured_at ASC`,
+      [tenantId, date],
+    );
+    const snapMs = snapTimes.map(r => new Date(r.captured_at).getTime());
+    const hasSnapNear = (ms: number, beforeTolMin: number, afterTolMin: number) =>
+      snapMs.some(t => t >= ms - beforeTolMin * 60000 && t <= ms + afterTolMin * 60000);
+
+    // Remove stale OPEN violations for the date — they get recomputed fresh below.
+    // Reviewed/justified ones are kept (human decisions are never auto-deleted).
+    await this.dataSource.query(
+      `DELETE FROM agent_violations
+       WHERE tenant_id = $1 AND violation_date = $2::date AND status = 'open'`,
+      [tenantId, date],
+    );
+
     // 2. Scheduled shifts for the date (TIME columns → timestamptz, cross-midnight aware)
     const schedules: any[] = await this.dataSource.query(
       `SELECT ar.employee_id,
@@ -1051,6 +1075,7 @@ export class SprinklrService {
     };
 
     let count = 0;
+    const newHigh: { id: string; agentName: string; type: string; minutes: number | null }[] = [];
     for (const s of stats) {
       const breakdown = typeof s.break_breakdown === 'object'
         ? (s.break_breakdown || {}) : JSON.parse(s.break_breakdown || '{}');
@@ -1078,7 +1103,13 @@ export class SprinklrService {
       }
 
       // ── late_login: first Sprinklr activity after scheduled shift start ──
-      if (sched?.scheduled_start && s.first_login && !approved) {
+      // Only judged when tracking already covered the shift start — otherwise the
+      // agent may have been online before the extension started watching.
+      const shiftStartMs = sched?.scheduled_start ? new Date(sched.scheduled_start).getTime() : null;
+      // Coverage = a snapshot exists within [start, start + grace] (tracking live at shift start)
+      const trackingCoveredStart = shiftStartMs != null
+        && hasSnapNear(shiftStartMs, 0, cfg.lateGraceMin);
+      if (sched?.scheduled_start && s.first_login && !approved && trackingCoveredStart) {
         const lateMin = Math.round(
           (new Date(s.first_login).getTime() - new Date(sched.scheduled_start).getTime()) / 60000);
         if (lateMin > cfg.lateGraceMin) {
@@ -1093,7 +1124,13 @@ export class SprinklrService {
       }
 
       // ── early_logout: last Sprinklr activity before scheduled shift end ──
-      if (sched?.scheduled_end && s.last_logout && !approved) {
+      // Only judged when the shift has actually ENDED and tracking covered its end —
+      // an in-progress shift must never count as "left early".
+      const shiftEndMs = sched?.scheduled_end ? new Date(sched.scheduled_end).getTime() : null;
+      const shiftOver  = shiftEndMs != null && Date.now() > shiftEndMs;
+      // Coverage = a snapshot exists within [end - grace, end + 5] (tracking live at shift end)
+      const trackingCoveredEnd = shiftEndMs != null && hasSnapNear(shiftEndMs, cfg.earlyGraceMin, 5);
+      if (sched?.scheduled_end && s.last_logout && !approved && shiftOver && trackingCoveredEnd) {
         const earlyMin = Math.round(
           (new Date(sched.scheduled_end).getTime() - new Date(s.last_logout).getTime()) / 60000);
         if (earlyMin > cfg.earlyGraceMin) {
@@ -1149,7 +1186,7 @@ export class SprinklrService {
 
       // Upsert all violations for this agent/date
       for (const v of violations) {
-        await this.dataSource.query(
+        const res = await this.dataSource.query(
           `INSERT INTO agent_violations
              (tenant_id, violation_date, sprinklr_agent_id, agent_name, agent_email, employee_id,
               violation_type, severity, minutes, shift_start, shift_end, actual_at, details)
@@ -1163,7 +1200,8 @@ export class SprinklrService {
              shift_start = EXCLUDED.shift_start,
              shift_end   = EXCLUDED.shift_end,
              actual_at   = EXCLUDED.actual_at,
-             details     = EXCLUDED.details`,
+             details     = EXCLUDED.details
+           RETURNING id, (xmax = 0) AS is_new`,
           [
             tenantId, date, s.sprinklr_agent_id, s.agent_name, s.agent_email || '', s.employee_id,
             v.type, v.severity, v.minutes,
@@ -1172,11 +1210,66 @@ export class SprinklrService {
           ],
         );
         count++;
+        if (res?.[0]?.is_new && v.severity === 'high') {
+          newHigh.push({ id: res[0].id, agentName: s.agent_name, type: v.type, minutes: v.minutes });
+        }
       }
     }
 
-    this.logger.log(`[${tenantId}] Violations computed for ${date}: ${count}`);
+    // Notify WFM/RTA users about NEW high-severity violations (deduped by violation id)
+    if (newHigh.length) {
+      await this.notifyViolations(tenantId, date, newHigh).catch(e =>
+        this.logger.warn(`Violation notifications failed: ${e.message}`));
+    }
+
+    this.logger.log(`[${tenantId}] Violations computed for ${date}: ${count} (${newHigh.length} new high)`);
     return { violations: count };
+  }
+
+  private static readonly VIOLATION_LABELS: Record<string, { en: string; ar: string }> = {
+    excess_break:             { en: 'Excess break (>limit)',     ar: 'بريك زائد عن الحد' },
+    late_login:               { en: 'Late login',                ar: 'تأخير عن الشفت' },
+    early_logout:             { en: 'Early logout',              ar: 'خروج مبكر' },
+    off_schedule:             { en: 'Off-schedule activity',     ar: 'شغل خارج الجدول' },
+    unauthorized_meeting:     { en: 'Unauthorized meeting',      ar: 'ميتنج بدون موافقة' },
+    unauthorized_manual_dial: { en: 'Unauthorized manual dial',  ar: 'Manual Dial بدون إذن' },
+  };
+
+  private async notifyViolations(
+    tenantId: string, date: string,
+    items: { id: string; agentName: string; type: string; minutes: number | null }[],
+  ): Promise<void> {
+    // Recipients: active WFM / RTA / admin users
+    const recipients: { id: string }[] = await this.dataSource.query(
+      `SELECT DISTINCT u.id FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN roles r ON r.id = ur.role_id
+       WHERE u.tenant_id = $1 AND u.status = 'active'
+         AND r.code IN ('wfm_analyst', 'rta', 'platform_admin')`,
+      [tenantId],
+    );
+    if (!recipients.length) return;
+
+    for (const it of items) {
+      const label = SprinklrService.VIOLATION_LABELS[it.type] ?? { en: it.type, ar: it.type };
+      const mins  = it.minutes != null ? ` (${it.minutes} min)` : '';
+      const minsAr = it.minutes != null ? ` (${it.minutes} دقيقة)` : '';
+      for (const r of recipients) {
+        await this.dataSource.query(
+          `INSERT INTO notifications
+             (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar,
+              entity_type, entity_id, action_url)
+           VALUES ($1,$2,'violation',$3,$4,$5,$6,'agent_violation',$7,'/rta')`,
+          [
+            tenantId, r.id,
+            `Violation: ${label.en}`, `مخالفة: ${label.ar}`,
+            `${it.agentName} — ${label.en}${mins} on ${date}`,
+            `${it.agentName} — ${label.ar}${minsAr} بتاريخ ${date}`,
+            it.id,
+          ],
+        );
+      }
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
