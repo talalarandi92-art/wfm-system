@@ -109,31 +109,32 @@ export class BreakSchedulerService {
     >(
       `
       SELECT
-        sr.employee_id,
+        ar.employee_id,
         e.employee_no,
         (e.first_name_en || ' ' || COALESCE(e.last_name_en,'')) AS employee_name,
         e.gender,
         e.function_id,
-        (sr.entry_date + ss.start_time::interval)::timestamptz AS shift_start,
-        CASE WHEN ss.is_cross_midnight THEN
-          (sr.entry_date + INTERVAL '1 day' + ss.end_time::interval)::timestamptz
+        (ar.attendance_date::text || ' ' || ar.scheduled_start::text || '+03')::timestamptz AS shift_start,
+        CASE WHEN ar.scheduled_end <= ar.scheduled_start THEN
+          ((ar.attendance_date + 1)::text || ' ' || ar.scheduled_end::text || '+03')::timestamptz
         ELSE
-          (sr.entry_date + ss.end_time::interval)::timestamptz
+          (ar.attendance_date::text  || ' ' || ar.scheduled_end::text || '+03')::timestamptz
         END AS shift_end,
         COALESCE(bf.fairness_score, 0) AS fairness_score
-      FROM schedule_entries sr
-      JOIN employees e ON e.id = sr.employee_id
-      JOIN shift_codes ss ON ss.code = sr.shift_code_display AND ss.tenant_id = sr.tenant_id
-      LEFT JOIN break_fairness bf ON bf.employee_id = sr.employee_id
-        AND bf.tenant_id = sr.tenant_id
+      FROM attendance_records ar
+      JOIN employees e ON e.id = ar.employee_id
+      LEFT JOIN shift_codes ss ON ss.id = ar.scheduled_shift_code_id
+      LEFT JOIN break_fairness bf ON bf.employee_id = ar.employee_id
+        AND bf.tenant_id = ar.tenant_id
         AND bf.period_year  = EXTRACT(YEAR  FROM $2::date)
         AND bf.period_month = EXTRACT(MONTH FROM $2::date)
-      WHERE sr.tenant_id = $1
-        AND sr.entry_date = $2::date
-        AND ss.is_working_shift = TRUE
-        AND ss.is_leave_code = FALSE
+      WHERE ar.tenant_id = $1
+        AND ar.attendance_date = $2::date
+        AND ar.scheduled_start IS NOT NULL AND ar.scheduled_end IS NOT NULL
+        AND COALESCE(ss.is_working_shift, TRUE) = TRUE
+        AND COALESCE(ss.is_leave_code, FALSE)  = FALSE
         ${functionId ? 'AND e.function_id = $3' : ''}
-      ORDER BY fairness_score ASC, sr.employee_id
+      ORDER BY fairness_score ASC, ar.employee_id
       `,
       functionId
         ? [tenantId, scheduleDate, functionId]
@@ -222,7 +223,10 @@ export class BreakSchedulerService {
       const shiftEnd = new Date(emp.shift_end);
       const shiftDurationMin = (shiftEnd.getTime() - shiftStart.getTime()) / 60000;
 
-      let empFairnessScore = emp.fairness_score;
+      // DELTA for this run only — the ledger UPSERT adds it to the stored score.
+      // (pg returns numeric as a string; using emp.fairness_score directly here
+      //  caused string concatenation → numeric overflow.)
+      let empFairnessScore = 0;
       let slotNumber = 0;
 
       for (const bt of sortedTypes) {
