@@ -135,16 +135,20 @@ export class SprinklrService {
       agentsBusy:      q.agentsBusy      || agentsByQueue[q.queueId]?.busy || 0,
     }));
 
-    // Total available: prefer queue-level sums; fall back to all-agent counts
-    const totalAvailableFromQueues = queues.reduce((s, q) => s + q.agentsAvailable, 0);
-    const totalBusyFromQueues      = queues.reduce((s, q) => s + q.agentsBusy, 0);
+    // Count unique agents by status — avoids double-counting agents who appear in
+    // multiple queues (e.g. the same person handles both WhatsApp and Live Chat).
+    // Agent-level count is always preferred over queue-level sums for the summary.
     const allAvailAgents = snap.agents.filter(a => a.status === 'available' || a.status === 'idle').length;
     const allBusyAgents  = snap.agents.filter(a => a.status === 'busy' || a.status === 'away').length;
+    const totalAvailableFromQueues = queues.reduce((s, q) => s + q.agentsAvailable, 0);
+    const totalBusyFromQueues      = queues.reduce((s, q) => s + q.agentsBusy, 0);
 
     const totalWaiting   = queues.reduce((s, q) => s + q.waiting, 0);
     const totalInProgress= queues.reduce((s, q) => s + q.inProgress, 0);
-    const totalAvailable = totalAvailableFromQueues || allAvailAgents;
-    const totalBusy      = totalBusyFromQueues      || allBusyAgents;
+    // Agent-level counts are deduplicated (each person once).
+    // Fall back to queue-sums only when the agents array is empty.
+    const totalAvailable = allAvailAgents || totalAvailableFromQueues;
+    const totalBusy      = allBusyAgents  || totalBusyFromQueues;
     const avgSla         = queues.length
       ? queues.reduce((s, q) => s + (q.slaPct ?? 100), 0) / queues.length
       : 100;

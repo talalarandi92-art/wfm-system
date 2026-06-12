@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Calendar, ChevronLeft, ChevronRight, Users,
   Filter, RefreshCw, Eye,
@@ -142,11 +142,12 @@ interface SaveResult {
 }
 
 // ─── Shift Cell ───────────────────────────────────────────────────────────────
-function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth }: {
+function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSelected }: {
   day: DayEntry | undefined;
   date: string;
   emp: Employee;
   colWidth: number;
+  isSelected?: boolean;
   onCellClick: (emp: Employee, date: string, day: DayEntry | undefined) => void;
   onHistoryClick?: (emp: Employee, date: string) => void;
 }) {
@@ -164,7 +165,10 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth }: {
           onClick={() => onCellClick(emp, date, day)}
           className="w-full h-14 rounded-lg flex items-center justify-center
                      hover:bg-white/[0.03] transition-colors"
-          style={{ border: '1px dashed rgba(255,255,255,0.05)' }}
+          style={{
+            border: isSelected ? '2px solid rgba(99,102,241,0.7)' : '1px dashed rgba(255,255,255,0.05)',
+            boxShadow: isSelected ? '0 0 0 3px rgba(99,102,241,0.18), inset 0 0 12px rgba(99,102,241,0.08)' : undefined,
+          }}
         />
       </td>
     );
@@ -183,7 +187,13 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth }: {
         onClick={() => onCellClick(emp, date, day)}
         className="w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5
                    transition-all duration-150 hover:scale-[1.03] hover:z-10 relative"
-        style={{ background: style.bg, border: `1px solid ${style.border}` }}
+        style={{
+          background: isSelected ? `${style.bg}` : style.bg,
+          border: isSelected ? `2px solid rgba(99,102,241,0.8)` : `1px solid ${style.border}`,
+          boxShadow: isSelected ? `0 0 0 3px rgba(99,102,241,0.2), 0 0 16px rgba(99,102,241,0.15)` : undefined,
+          transform: isSelected ? 'scale(1.05)' : undefined,
+          zIndex: isSelected ? 10 : undefined,
+        }}
       >
         {/* Shift code */}
         <span className="text-[11px] font-bold leading-none tracking-wide" style={{ color: style.text }}>
@@ -261,14 +271,13 @@ const SOURCE_LABELS: Record<string, { ar: string; en: string; color: string }> =
 const QUICK_CODES = ['M','B','C','N','E','EE','MD','MN','AM','M20','B20','C20','N20','OFF','L','SL','ABS','H'];
 
 // ─── Day Detail Modal (with inline edit mode + save result + timeline button) ──
-function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang }: {
-  emp: Employee;
-  date: string;
-  day: DayEntry | undefined;
+function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }: {
+  emp: Employee; date: string; day: DayEntry | undefined;
   onClose: () => void;
   onSaved: () => void;
   onTimeline?: (emp: Employee, date: string) => void;
   lang: 'ar' | 'en';
+  anchor?: { gridLeft: number; gridWidth: number; vpH: number };
 }) {
   const ar = lang === 'ar';
   const [editMode, setEditMode]   = useState(false);
@@ -315,91 +324,157 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang }: {
     }
   };
 
+  // Centre modal inside the schedule grid area
+  const modalStyle = (() => {
+    const W = 356, maxH = Math.min(560, (anchor?.vpH ?? window.innerHeight) - 40);
+    if (anchor) {
+      const left = anchor.gridLeft + anchor.gridWidth / 2 - W / 2;
+      const top  = (anchor.vpH / 2) - (maxH / 2);
+      return {
+        top: Math.max(16, top),
+        left: Math.max(12, left),
+        width: W,
+        maxHeight: maxH,
+      };
+    }
+    return { top: '50%' as const, left: '50%' as const, transform: 'translate(-50%,-50%)', width: W, maxHeight: maxH };
+  })();
+
+  /* ── initials avatar ── */
+  const initials = emp.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+  const accentColor = style.text ?? '#a5b4fc';
+  const accentBg    = style.bg  ?? 'rgba(99,102,241,0.15)';
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.8)' }}
-      onClick={onClose}
-    >
+    <>
+      {/* ── Backdrop ── */}
+      <div className="fixed inset-0 z-50" style={{ background: 'rgba(2,6,18,0.72)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
+
+      {/* ── Card ── */}
       <div
-        className="relative rounded-2xl w-full max-w-sm flex flex-col"
+        className="fixed z-50 flex flex-col"
         style={{
-          background: 'linear-gradient(145deg,#0f1626,#131929)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.65)',
-          maxHeight: '90vh',
+          ...modalStyle,
+          borderRadius: 20,
+          background: 'linear-gradient(160deg,#0d1424 0%,#0a1020 100%)',
+          border: '1px solid rgba(255,255,255,0.09)',
+          boxShadow: `0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px ${accentColor}20`,
+          animation: 'nx-slide 0.16s cubic-bezier(.22,.68,0,1.2)',
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div
-          className="rounded-t-2xl px-5 py-4 flex items-start justify-between flex-shrink-0"
-          style={{ background: style.bg, borderBottom: `1px solid ${style.border || 'rgba(255,255,255,0.06)'}` }}
-        >
-          <div>
-            <p className="text-xs font-medium opacity-70" style={{ color: style.text || '#94a3b8' }}>
-              {dateInfo.day} {dateInfo.dd} {dateInfo.mon}
-            </p>
-            <h3 className="text-base font-bold text-white mt-0.5">{emp.name}</h3>
-            <p className="text-xs mt-0.5" style={{ color: style.text || '#94a3b8' }}>{emp.functionName}</p>
-          </div>
-          <div className="flex items-center gap-1.5 ms-2">
-            {day && day.category !== 'no_data' && day.code && (
-              <div
-                className="text-sm font-extrabold px-3 py-1.5 rounded-xl"
-                style={{ background: style.bg, color: style.text, border: `1px solid ${style.border}` }}
+
+        {/* ══════ HEADER ══════ */}
+        <div className="flex-shrink-0 relative overflow-hidden rounded-t-[20px]">
+          {/* colour band */}
+          <div style={{ height: 3, background: `linear-gradient(90deg,${accentColor}80,${accentColor}20,transparent)` }} />
+
+          <div className="px-5 pt-4 pb-3 flex items-start gap-3">
+            {/* avatar */}
+            <div
+              className="w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-extrabold flex-shrink-0 mt-0.5"
+              style={{ background: accentBg, color: accentColor, border: `1px solid ${accentColor}35` }}
+            >
+              {initials}
+            </div>
+
+            {/* name + meta */}
+            <div className="flex-1 min-w-0">
+              <h3 className="text-[15px] font-bold text-white leading-tight truncate">{emp.name}</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                #{emp.employeeNo}
+                {emp.functionName ? ` · ${emp.functionName}` : ''}
+                {emp.employmentType ? ` · ${emp.employmentType}` : ''}
+              </p>
+            </div>
+
+            {/* date pill + close */}
+            <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+              <button
+                onClick={onClose}
+                className="w-7 h-7 rounded-xl flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-all"
               >
-                {day.code}
+                <X size={14} />
+              </button>
+              <div
+                className="text-[10px] font-semibold px-2.5 py-1 rounded-xl"
+                style={{ background: 'rgba(255,255,255,0.06)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.08)' }}
+              >
+                {dateInfo.day} {dateInfo.dd} {dateInfo.mon}
               </div>
-            )}
-            <button onClick={onClose} className="text-slate-400 hover:text-white p-1">
-              <X size={16} />
-            </button>
+            </div>
           </div>
+
+          {/* shift badge row */}
+          {day && day.category !== 'no_data' && day.code && (
+            <div className="px-5 pb-4 flex items-center gap-2">
+              <div
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-extrabold"
+                style={{ background: accentBg, color: accentColor, border: `1px solid ${accentColor}40` }}
+              >
+                <Clock size={12} />
+                {day.code}
+                {day.label && day.label !== day.code && (
+                  <span className="text-[10px] font-medium opacity-70 ms-1">{day.label}</span>
+                )}
+              </div>
+              {day.isWfh && (
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-semibold"
+                  style={{ background: 'rgba(6,182,212,0.12)', color: '#22d3ee', border: '1px solid rgba(6,182,212,0.25)' }}>
+                  <Home size={10} />
+                  {ar ? 'من البيت' : 'WFH'}
+                </div>
+              )}
+              {day.lateMinutes > 0 && (
+                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-xl text-[10px] font-semibold ms-auto"
+                  style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.22)' }}>
+                  <AlertCircle size={10} />
+                  {ar ? 'متأخر' : 'Late'} {fmtMin(day.lateMinutes)}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
         </div>
 
-        {/* ── Scrollable body ─────────────────────────────────────────────── */}
+        {/* ══════ BODY ══════ */}
         <div className="overflow-y-auto flex-1 px-5 py-4 space-y-3">
 
-          {/* ── Save Result panel (replaces form after successful save) ────── */}
+          {/* ── SAVE RESULT ── */}
           {saveResult && (
             <div className="space-y-3">
-              {/* Success header */}
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-                style={{ background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.22)' }}>
-                <CheckCircle2 size={16} className="text-emerald-400 flex-shrink-0" />
+              <div className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                style={{ background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.18)' }}>
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(52,211,153,0.15)' }}>
+                  <CheckCircle2 size={16} className="text-emerald-400" />
+                </div>
                 <div>
-                  <p className="text-xs font-bold text-emerald-400">
-                    {ar ? 'تم حفظ التعديل بنجاح' : 'Edit saved successfully'}
-                  </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    {ar ? `${saveResult.employeeName} · ${saveResult.functionName}` : `${saveResult.employeeName} · ${saveResult.functionName}`}
-                  </p>
+                  <p className="text-xs font-bold text-emerald-400">{ar ? 'تم الحفظ بنجاح' : 'Saved successfully'}</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">{saveResult.employeeName} · {saveResult.functionName}</p>
                 </div>
               </div>
 
-              {/* HC Impact */}
-              <div className="rounded-xl px-4 py-3 space-y-2"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                  {ar ? 'تأثير على الحضور (HC)' : 'HC Coverage Impact'}
+              {/* HC impact */}
+              <div className="rounded-2xl px-4 py-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-3">
+                  {ar ? 'تأثير على الحضور' : 'HC Coverage Impact'}
                 </p>
-                <div className="flex items-center justify-center gap-4">
-                  <div className="text-center">
-                    <p className="text-[10px] text-slate-500 mb-1">{ar ? 'قبل' : 'Before'}</p>
-                    <span className="text-2xl font-extrabold text-slate-300">{saveResult.hcBefore}</span>
-                  </div>
-                  <ArrowRight size={18} className="text-slate-600" />
-                  <div className="text-center">
-                    <p className="text-[10px] text-slate-500 mb-1">{ar ? 'بعد' : 'After'}</p>
-                    <span className={`text-2xl font-extrabold ${saveResult.hcDelta > 0 ? 'text-emerald-400' : saveResult.hcDelta < 0 ? 'text-rose-400' : 'text-slate-300'}`}>
-                      {saveResult.hcAfter}
-                    </span>
-                  </div>
+                <div className="flex items-center justify-center gap-6">
+                  {[
+                    { label: ar ? 'قبل' : 'Before', val: saveResult.hcBefore, color: '#94a3b8' },
+                    { label: ar ? 'بعد' : 'After',  val: saveResult.hcAfter,  color: saveResult.hcDelta > 0 ? '#34d399' : saveResult.hcDelta < 0 ? '#f87171' : '#94a3b8' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="text-center">
+                      <p className="text-[10px] text-slate-500 mb-1">{label}</p>
+                      <span className="text-3xl font-extrabold" style={{ color }}>{val}</span>
+                    </div>
+                  ))}
                   {saveResult.hcDelta !== 0 && (
                     <div className="text-center">
-                      <p className="text-[10px] text-slate-500 mb-1">{ar ? 'الفرق' : 'Delta'}</p>
-                      <span className={`text-lg font-extrabold ${saveResult.hcDelta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      <p className="text-[10px] text-slate-500 mb-1">{ar ? 'الفرق' : 'Δ'}</p>
+                      <span className={`text-xl font-extrabold ${saveResult.hcDelta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {saveResult.hcDelta > 0 ? `+${saveResult.hcDelta}` : saveResult.hcDelta}
                       </span>
                     </div>
@@ -407,139 +482,142 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang }: {
                 </div>
               </div>
 
-              {/* Source of change */}
               {saveResult.sourceOfChange && (() => {
                 const src = SOURCE_LABELS[saveResult.sourceOfChange];
                 return src ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-[10px]">
                     <GitBranch size={11} className="text-slate-500" />
-                    <span className="text-[10px] text-slate-500">{ar ? 'مصدر التغيير:' : 'Source:'}</span>
-                    <span
-                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                      style={{ background: `${src.color}18`, color: src.color, border: `1px solid ${src.color}30` }}
-                    >
+                    <span className="text-slate-500">{ar ? 'المصدر:' : 'Source:'}</span>
+                    <span className="font-semibold px-2 py-0.5 rounded-full"
+                      style={{ background: `${src.color}18`, color: src.color, border: `1px solid ${src.color}30` }}>
                       {ar ? src.ar : src.en}
                     </span>
                   </div>
                 ) : null;
               })()}
 
-              {/* Requires approval notice */}
               {saveResult.requiresApproval && (
                 <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl"
-                  style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}>
-                  <ShieldAlert size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                  style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.22)' }}>
+                  <ShieldAlert size={13} className="text-amber-400 mt-0.5 flex-shrink-0" />
                   <p className="text-[11px] text-amber-300 leading-relaxed">
-                    {ar
-                      ? 'هذا التعديل يتطلب موافقة من المشرف بسبب انتهاك قاعدة'
-                      : 'This edit requires supervisor approval due to a rule violation'}
+                    {ar ? 'يتطلب موافقة المشرف بسبب انتهاك قاعدة' : 'Requires supervisor approval — rule violation'}
                   </p>
                 </div>
               )}
 
-              {/* Validation flags */}
-              {saveResult.validations.length > 0 && (
-                <div className="space-y-1.5">
-                  {saveResult.validations.map((v, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-2 px-3 py-2 rounded-xl text-[11px]"
-                      style={{
-                        background: v.severity === 'error' ? 'rgba(239,68,68,0.08)' : v.severity === 'warning' ? 'rgba(245,158,11,0.07)' : 'rgba(99,102,241,0.07)',
-                        border: `1px solid ${v.severity === 'error' ? 'rgba(239,68,68,0.2)' : v.severity === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)'}`,
-                        color: v.severity === 'error' ? '#f87171' : v.severity === 'warning' ? '#fbbf24' : '#a5b4fc',
-                      }}
-                    >
-                      {v.severity === 'error'
-                        ? <ShieldAlert size={12} className="flex-shrink-0 mt-0.5" />
-                        : <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />}
-                      {ar ? v.messageAr : v.messageEn}
-                    </div>
-                  ))}
+              {saveResult.validations.map((v, i) => (
+                <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-xl text-[11px]"
+                  style={{
+                    background: v.severity === 'error' ? 'rgba(239,68,68,0.07)' : v.severity === 'warning' ? 'rgba(245,158,11,0.07)' : 'rgba(99,102,241,0.07)',
+                    border: `1px solid ${v.severity === 'error' ? 'rgba(239,68,68,0.2)' : v.severity === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)'}`,
+                    color: v.severity === 'error' ? '#f87171' : v.severity === 'warning' ? '#fbbf24' : '#a5b4fc',
+                  }}>
+                  {v.severity === 'error' ? <ShieldAlert size={12} className="mt-0.5 flex-shrink-0" /> : <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />}
+                  {ar ? v.messageAr : v.messageEn}
                 </div>
-              )}
+              ))}
 
               {saveResult.validations.length === 0 && !saveResult.requiresApproval && (
                 <div className="flex items-center gap-2 text-[11px] text-emerald-400">
                   <ShieldCheck size={13} />
-                  {ar ? 'لا انتهاكات للقواعد' : 'No rule violations detected'}
+                  {ar ? 'لا انتهاكات للقواعد' : 'No rule violations'}
                 </div>
               )}
             </div>
           )}
 
-          {/* ── View mode ──────────────────────────────────────────────── */}
+          {/* ── VIEW MODE ── */}
           {!editMode && !saveResult && (
-            <>
+            <div className="space-y-2.5">
               {(!day || day.category === 'no_data') ? (
-                <p className="text-slate-400 text-sm text-center py-4">
-                  {ar ? 'لا يوجد بيانات لهذا اليوم' : 'No shift data for this day'}
-                </p>
+                <div className="flex flex-col items-center py-8 gap-2 text-slate-500">
+                  <Info size={22} className="opacity-40" />
+                  <p className="text-sm">{ar ? 'لا يوجد بيانات لهذا اليوم' : 'No shift data for this day'}</p>
+                </div>
               ) : (
                 <>
-                  {day.label && <Row icon={<Clock size={13} />} label={ar ? 'الوردية' : 'Shift'} value={day.label} />}
-                  {day.start && <Row icon={<Info size={13} />} label={ar ? 'الوقت' : 'Time'} value={`${fmt12(day.start)} → ${fmt12(day.end)}`} />}
-                  {day.start && <Row icon={<Clock size={13} />} label={ar ? '24 ساعة' : '24h'} value={`${fmt24(day.start)} – ${fmt24(day.end)}`} />}
-                  {day.punchIn && <Row icon={<CheckCircle2 size={13} />} label={ar ? 'بصمة الدخول' : 'Punch In'} value={day.punchIn.slice(11,16)} color="text-emerald-400" />}
-                  {day.lateMinutes > 0 && <Row icon={<AlertCircle size={13} />} label={ar ? 'تأخير' : 'Late'} value={fmtMin(day.lateMinutes)} color="text-rose-400" />}
-                  {day.otMinutes > 0 && <Row icon={<TrendingUp size={13} />} label={ar ? 'أوفرتايم' : 'Overtime'} value={fmtMin(day.otMinutes)} color="text-amber-400" />}
-                  {day.isWfh && <Row icon={<Home size={13} />} label={ar ? 'نوع العمل' : 'Work Type'} value={ar ? 'من البيت' : 'Work From Home'} color="text-cyan-400" />}
+                  {/* time card */}
+                  {day.start && (
+                    <div className="rounded-2xl p-3 grid grid-cols-2 gap-2"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      <div>
+                        <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">{ar ? 'بداية' : 'Start'}</p>
+                        <p className="text-base font-extrabold text-white">{fmt12(day.start)}</p>
+                        <p className="text-[10px] text-slate-500">{fmt24(day.start)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">{ar ? 'نهاية' : 'End'}</p>
+                        <p className="text-base font-extrabold text-white">{fmt12(day.end)}</p>
+                        <p className="text-[10px] text-slate-500">{fmt24(day.end)}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* stats row */}
+                  {(day.punchIn || day.lateMinutes > 0 || day.otMinutes > 0) && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {day.punchIn && (
+                        <div className="rounded-xl px-3 py-2.5 text-center"
+                          style={{ background: 'rgba(52,211,153,0.07)', border: '1px solid rgba(52,211,153,0.15)' }}>
+                          <p className="text-[9px] text-emerald-500 uppercase tracking-wider mb-1">{ar ? 'بصمة' : 'Punch'}</p>
+                          <p className="text-sm font-bold text-emerald-400">{day.punchIn.slice(11,16)}</p>
+                        </div>
+                      )}
+                      {day.lateMinutes > 0 && (
+                        <div className="rounded-xl px-3 py-2.5 text-center"
+                          style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                          <p className="text-[9px] text-rose-400 uppercase tracking-wider mb-1">{ar ? 'تأخير' : 'Late'}</p>
+                          <p className="text-sm font-bold text-rose-400">{fmtMin(day.lateMinutes)}</p>
+                        </div>
+                      )}
+                      {day.otMinutes > 0 && (
+                        <div className="rounded-xl px-3 py-2.5 text-center"
+                          style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.15)' }}>
+                          <p className="text-[9px] text-amber-400 uppercase tracking-wider mb-1">{ar ? 'أوفر' : 'OT'}</p>
+                          <p className="text-sm font-bold text-amber-400">{fmtMin(day.otMinutes)}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
-              <Row icon={<Users size={13} />} label={ar ? 'الموظف' : 'Employee'} value={`#${emp.employeeNo} · ${emp.employmentType}`} />
-              {emp.functionName && (
-                <Row icon={<Building2 size={13} />} label={ar ? 'القسم' : 'Function'} value={emp.functionName} />
-              )}
 
-              {/* Timeline / history badge */}
+              {/* timeline badge */}
               {(day?.editCount ?? 0) > 0 && (
                 <button
                   onClick={() => { onTimeline?.(emp, date); onClose(); }}
-                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all mt-1 group"
-                  style={{ background: 'rgba(96,165,250,0.07)', border: '1px solid rgba(96,165,250,0.2)', color: '#60a5fa' }}
+                  className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all group"
+                  style={{ background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.18)', color: '#60a5fa' }}
                 >
                   <div className="flex items-center gap-1.5">
                     <History size={12} />
-                    {ar
-                      ? `تاريخ التغييرات — عُدِّل ${day!.editCount} مرة`
-                      : `Change Timeline — edited ${day!.editCount}×`}
-                    {day?.lastEditBy && (
-                      <span className="text-[10px] text-slate-500">
-                        {ar ? 'آخر تعديل:' : 'last by'} {day.lastEditBy}
-                      </span>
-                    )}
+                    {ar ? `عُدِّل ${day!.editCount} مرة` : `Edited ${day!.editCount}×`}
+                    {day?.lastEditBy && <span className="text-slate-500 text-[10px] ms-1">{ar ? 'بواسطة' : 'by'} {day.lastEditBy}</span>}
                   </div>
-                  <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
+                  <ArrowRight size={11} className="group-hover:translate-x-0.5 transition-transform" />
                 </button>
               )}
 
-              {/* Inline last-edit history (collapsible) */}
+              {/* inline history */}
               {history.length > 0 && (
                 <>
-                  <button
-                    onClick={() => setShowHistory(!showHistory)}
-                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors"
-                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', color: '#64748b' }}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <BadgeCheck size={12} />
-                      {ar ? 'آخر تعديل مخزّن' : 'Stored edit notes'}
-                    </div>
+                  <button onClick={() => setShowHistory(!showHistory)}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-[11px] transition-colors"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', color: '#64748b' }}>
+                    <div className="flex items-center gap-1.5"><BadgeCheck size={12} />{ar ? 'سجل التعديلات' : 'Edit notes'}</div>
                     <ChevronDown size={12} style={{ transform: showHistory ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }} />
                   </button>
-
                   {showHistory && (
                     <div className="space-y-2">
                       {history.slice(-3).map((h: any, i: number) => {
                         const et = EDIT_TYPES.find(e => e.value === h.type);
                         return (
                           <div key={i} className="rounded-xl px-3 py-2.5 space-y-1.5"
-                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
                             <div className="flex items-center justify-between">
-                              <span
-                                className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                                style={{ background: `${et?.color ?? '#64748b'}18`, color: et?.color ?? '#94a3b8', border: `1px solid ${et?.color ?? '#64748b'}30` }}
-                              >
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                                style={{ background: `${et?.color ?? '#64748b'}18`, color: et?.color ?? '#94a3b8', border: `1px solid ${et?.color ?? '#64748b'}30` }}>
                                 {ar ? et?.ar : et?.en}
                               </span>
                               <span className="text-[10px] text-slate-500">
@@ -562,108 +640,91 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang }: {
                   )}
                 </>
               )}
-            </>
+            </div>
           )}
 
-          {/* ── Edit mode ──────────────────────────────────────────────── */}
+          {/* ── EDIT MODE ── */}
           {editMode && !saveResult && (
             <div className="space-y-4">
 
-              {/* Current → new shift reminder */}
-              <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <span className="text-slate-400">{ar ? 'الحالية:' : 'Current:'}</span>
-                <span className="font-bold text-slate-200">
-                  {day?.code || (ar ? 'فارغة' : 'empty')}
-                  {day?.start ? ` (${fmt24(day.start)}–${fmt24(day.end)})` : ''}
-                </span>
-                {newCode && (
-                  <>
-                    <ArrowRight size={12} className="text-slate-500" />
-                    <span className="font-extrabold text-indigo-300">{newCode}</span>
-                  </>
-                )}
+              {/* from → to preview */}
+              <div className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.18)' }}>
+                <div className="text-center">
+                  <p className="text-[9px] text-slate-500 mb-1">{ar ? 'الحالية' : 'Current'}</p>
+                  <span className="text-sm font-extrabold text-slate-300">{day?.code || '—'}</span>
+                </div>
+                <ArrowRight size={14} className="text-slate-600 flex-shrink-0" />
+                <div className="text-center">
+                  <p className="text-[9px] text-slate-500 mb-1">{ar ? 'الجديدة' : 'New'}</p>
+                  <span className={`text-sm font-extrabold ${newCode ? 'text-indigo-300' : 'text-slate-600'}`}>{newCode || '?'}</span>
+                </div>
               </div>
 
-              {/* Edit type selector */}
+              {/* edit type */}
               <div>
-                <p className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                  {ar ? 'نوع التعديل' : 'Edit Type'}
-                </p>
-                <div className="grid grid-cols-3 gap-1">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">{ar ? 'نوع التعديل' : 'Edit Type'}</p>
+                <div className="grid grid-cols-3 gap-1.5">
                   {EDIT_TYPES.map(et => (
-                    <button
-                      key={et.value}
-                      onClick={() => setEditType(et.value)}
-                      className="text-[10px] font-semibold px-2 py-1.5 rounded-xl transition-all leading-tight"
+                    <button key={et.value} onClick={() => setEditType(et.value)}
+                      className="text-[10px] font-semibold py-2 px-1 rounded-xl transition-all leading-tight"
                       style={{
-                        background: editType === et.value ? `${et.color}22` : 'rgba(255,255,255,0.03)',
-                        border: editType === et.value ? `1px solid ${et.color}60` : '1px solid rgba(255,255,255,0.08)',
-                        color: editType === et.value ? et.color : '#64748b',
-                      }}
-                    >
+                        background: editType === et.value ? `${et.color}20` : 'rgba(255,255,255,0.03)',
+                        border: editType === et.value ? `1px solid ${et.color}55` : '1px solid rgba(255,255,255,0.07)',
+                        color: editType === et.value ? et.color : '#475569',
+                      }}>
                       {ar ? et.ar : et.en}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* New shift code */}
+              {/* shift code */}
               <div>
-                <p className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                  {ar ? 'الوردية الجديدة' : 'New Shift Code'}
-                </p>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">{ar ? 'الوردية الجديدة' : 'New Shift'}</p>
                 <input
                   type="text"
                   value={newCode}
                   onChange={e => setNewCode(e.target.value.toUpperCase())}
-                  placeholder={ar ? 'مثال: N أو OFF أو L' : 'e.g. N, OFF, L, MD'}
-                  className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500 mb-2"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                  placeholder={ar ? 'مثال: N أو OFF' : 'e.g. N, OFF, MD'}
+                  className="w-full px-3 py-2.5 rounded-xl text-sm font-bold text-white outline-none focus:ring-2 focus:ring-indigo-500/50 mb-2.5"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
                 />
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {QUICK_CODES.map(c => (
-                    <button
-                      key={c}
-                      onClick={() => setNewCode(c)}
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-lg transition-all"
+                    <button key={c} onClick={() => setNewCode(c)}
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all"
                       style={{
-                        background: newCode === c ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)',
-                        border: newCode === c ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.08)',
-                        color: newCode === c ? '#a5b4fc' : '#64748b',
-                      }}
-                    >
+                        background: newCode === c ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.04)',
+                        border: newCode === c ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.07)',
+                        color: newCode === c ? '#a5b4fc' : '#475569',
+                      }}>
                       {c}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Reason */}
+              {/* reason */}
               <div>
-                <p className="text-[11px] font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                  {ar ? 'تفاصيل السبب' : 'Reason / Details'}
-                  <span className="text-rose-400 ms-1">*</span>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                  {ar ? 'السبب' : 'Reason'} <span className="text-rose-500">*</span>
                 </p>
-                <textarea
-                  rows={3}
-                  value={reason}
-                  onChange={e => setReason(e.target.value)}
-                  placeholder={ar ? 'اكتب سبب التعديل بوضوح...' : 'Explain the reason for this change...'}
-                  className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                <textarea rows={3} value={reason} onChange={e => setReason(e.target.value)}
+                  placeholder={ar ? 'اكتب سبب التعديل...' : 'Explain the reason...'}
+                  className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
                 />
                 <p className="text-[10px] text-slate-600 mt-1">
                   {reason.length}/200 {ar ? 'حرف' : 'chars'}
-                  {reason.length < 3 && reason.length > 0 ? (ar ? ' · قصير جداً' : ' · too short') : ''}
+                  {reason.length > 0 && reason.length < 3 ? <span className="text-rose-500 ms-1">{ar ? '· قصير جداً' : '· too short'}</span> : null}
                 </p>
               </div>
 
-              {/* Error */}
               {error && (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-rose-400"
-                  style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                  <AlertCircle size={12} />
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs text-rose-400"
+                  style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  <AlertCircle size={12} className="flex-shrink-0" />
                   {error}
                 </div>
               )}
@@ -671,81 +732,58 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang }: {
           )}
         </div>
 
-        {/* ── Footer actions ───────────────────────────────────────────────── */}
-        <div
-          className="flex items-center gap-2 px-5 py-3 flex-shrink-0 rounded-b-2xl"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.2)' }}
-        >
-          {/* After save */}
+        {/* ══════ FOOTER ══════ */}
+        <div className="flex-shrink-0 px-4 py-3 flex items-center gap-2"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.25)', borderRadius: '0 0 20px 20px' }}>
+
           {saveResult && (
             <>
-              <button
-                onClick={() => { onTimeline?.(emp, date); onClose(); }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold
-                           text-blue-300 hover:text-white transition-all"
-                style={{ background: 'rgba(96,165,250,0.1)', border: '1px solid rgba(96,165,250,0.25)' }}
-              >
-                <History size={13} />
-                {ar ? 'عرض التاريخ' : 'View Timeline'}
+              <button onClick={() => { onTimeline?.(emp, date); onClose(); }}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold transition-all"
+                style={{ background: 'rgba(96,165,250,0.08)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.22)' }}>
+                <History size={13} />{ar ? 'عرض التاريخ' : 'View Timeline'}
               </button>
-              <button
-                onClick={onClose}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold
-                           text-white transition-all"
-                style={{ background: 'linear-gradient(135deg,#059669,#10b981)' }}
-              >
-                <CheckCircle2 size={13} />
-                {ar ? 'تم' : 'Done'}
+              <button onClick={onClose}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold text-white transition-all"
+                style={{ background: 'linear-gradient(135deg,#059669,#10b981)' }}>
+                <CheckCircle2 size={13} />{ar ? 'تم' : 'Done'}
               </button>
             </>
           )}
 
-          {/* Edit mode */}
           {editMode && !saveResult && (
             <>
-              <button
-                onClick={() => { setEditMode(false); setError(null); setNewCode(''); setReason(''); }}
-                disabled={saving}
-                className="flex-1 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-colors"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
-              >
+              <button onClick={() => { setEditMode(false); setError(null); setNewCode(''); setReason(''); }} disabled={saving}
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
                 {ar ? 'إلغاء' : 'Cancel'}
               </button>
-              <button
-                onClick={handleSave}
-                disabled={saving || !newCode.trim() || reason.trim().length < 3}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold
-                           text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ background: 'linear-gradient(135deg,#4f46e5,#6366f1)' }}
-              >
+              <button onClick={handleSave} disabled={saving || !newCode.trim() || reason.trim().length < 3}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold text-white transition-all disabled:opacity-35 disabled:cursor-not-allowed"
+                style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)' }}>
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                {saving ? (ar ? 'يحفظ...' : 'Saving…') : (ar ? 'حفظ التعديل' : 'Save Edit')}
+                {saving ? (ar ? 'يحفظ...' : 'Saving…') : (ar ? 'حفظ' : 'Save')}
               </button>
             </>
           )}
 
-          {/* View mode */}
           {!editMode && !saveResult && (
             <>
               <button onClick={onClose}
-                className="flex-1 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-colors"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
                 {ar ? 'إغلاق' : 'Close'}
               </button>
-              <button
-                onClick={() => setEditMode(true)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold
-                           text-indigo-300 hover:text-white transition-all"
-                style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)' }}
-              >
-                <Pencil size={13} />
-                {ar ? 'تعديل الوردية' : 'Edit Shift'}
+              <button onClick={() => setEditMode(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all"
+                style={{ background: `linear-gradient(135deg,${accentColor}22,${accentColor}15)`, color: accentColor, border: `1px solid ${accentColor}35` }}>
+                <Pencil size={13} />{ar ? 'تعديل الوردية' : 'Edit Shift'}
               </button>
             </>
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1470,6 +1508,9 @@ export default function SchedulePage() {
   const [loading, setLoading]           = useState(false);
   const [expandedFuncs, setExpandedFuncs] = useState<Set<string>>(new Set());
   const [modal, setModal]               = useState<{ emp: Employee; date: string; day: DayEntry | undefined } | null>(null);
+  const [modalAnchor, setModalAnchor]   = useState<{ gridLeft: number; gridWidth: number; vpH: number } | null>(null);
+  const [selectedCell, setSelectedCell] = useState<{ empId: string; date: string } | null>(null);
+  const gridRef                         = useRef<HTMLDivElement>(null);
   const [showLegend, setShowLegend]     = useState(false);
   const [showAuditLog, setShowAuditLog] = useState(false);
   const [auditLog, setAuditLog]         = useState<AuditEntry[]>([]);
@@ -1835,7 +1876,7 @@ export default function SchedulePage() {
 
       {/* ── Grid ─────────────────────────────────────────────────────────── */}
       {!loading && gridData && (
-        <div className="space-y-3 anim-fadeUp">
+        <div ref={gridRef} className="space-y-3 anim-fadeUp">
           {gridData.functions.map(func => {
             const expanded = expandedFuncs.has(func.id);
             // Only compute per-day counts when rendering header (cheap, just counting)
@@ -1996,7 +2037,16 @@ export default function SchedulePage() {
                                 emp={emp}
                                 day={emp.days[d]}
                                 colWidth={colWidth}
-                                onCellClick={(e, date, day) => weekStatus?.status !== 'locked' && setModal({ emp: e, date, day })}
+                                isSelected={selectedCell?.empId === emp.employeeId && selectedCell?.date === d}
+                              onCellClick={(e, date, day) => {
+                                if (weekStatus?.status === 'locked') return;
+                                const gr = gridRef.current?.getBoundingClientRect();
+                                setModalAnchor(gr
+                                  ? { gridLeft: gr.left, gridWidth: gr.width, vpH: window.innerHeight }
+                                  : null);
+                                setSelectedCell({ empId: e.employeeId, date });
+                                setModal({ emp: e, date, day });
+                              }}
                                 onHistoryClick={(e, date) => setTimelineTarget({ emp: e, date })}
                               />
                             ))}
@@ -2032,7 +2082,8 @@ export default function SchedulePage() {
           date={modal.date}
           day={modal.day}
           lang={lang}
-          onClose={() => setModal(null)}
+          anchor={modalAnchor ?? undefined}
+          onClose={() => { setModal(null); setSelectedCell(null); setModalAnchor(null); }}
           onSaved={() => { loadGrid(); loadAuditLog(); }}
           onTimeline={(emp, date) => setTimelineTarget({ emp, date })}
         />

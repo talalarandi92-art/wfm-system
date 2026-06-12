@@ -90,11 +90,31 @@ export class GeneratorService {
     if (!pool.length) throw new BadRequestException('No active employees in scope.');
 
     const { from, to } = this.weekRange(weekStart);
-    const [ytdDist, lastShifts, consecDays] = await Promise.all([
-      this.loadYtdDistribution(tenantId, pool.map(e => e.id), from),
+    const [ytdDist, lastShifts, consecDays, leaveRows] = await Promise.all([
+      // preSwap=true: fairness on the PRE-swap schedule (user rule — swaps must not game rotation)
+      this.loadYtdDistribution(tenantId, pool.map(e => e.id), from, true),
       this.loadLastShifts(tenantId, pool.map(e => e.id), from),
       this.loadConsecutiveDays(tenantId, pool.map(e => e.id), from),
+      // Approved leaves overlapping the target week → unavailable days
+      this.ds.query(
+        `SELECT r.employee_id, rl.start_date::date::text AS start_date, rl.end_date::date::text AS end_date
+         FROM requests r
+         JOIN request_leaves rl ON rl.request_id = r.id
+         WHERE r.tenant_id = $1 AND r.status = 'approved'
+           AND rl.start_date <= $3::date AND rl.end_date >= $2::date`,
+        [tenantId, from, to],
+      ).catch(() => []),
     ]);
+
+    // empId → Set of week dates covered by approved leave
+    const onLeave = new Map<string, Set<string>>();
+    for (const lv of leaveRows) {
+      for (const date of dates) {
+        if (date >= lv.start_date && date <= lv.end_date) {
+          (onLeave.get(lv.employee_id) ?? onLeave.set(lv.employee_id, new Set()).get(lv.employee_id)!).add(date);
+        }
+      }
+    }
 
     const mixByDate = new Map<string, Record<string, number>>();
     const demandDays: any[] = [];
@@ -114,6 +134,7 @@ export class GeneratorService {
     const roster = assignRoster(dates, mixByDate, pool, ytdDist, lastShifts, consecDays, {
       minRestHours: options.minRestHours,
       offDaysPerWeek: options.offDaysPerWeek,
+      onLeave,
     });
 
     // ── 4. Shape the output: grid + per-day coverage + honest gaps ───────────
@@ -130,32 +151,127 @@ export class GeneratorService {
     }));
 
     const totalResidual = demandDays.reduce((s, d) => s + d.residualGaps.length, 0);
+
+    // Current operational context — the plan is anchored to TODAY's reality
+    const [liveSnap] = await this.ds.query(
+      `SELECT agents_json, captured_at FROM integration_snapshots
+       WHERE tenant_id = $1 AND source = 'sprinklr'
+       ORDER BY captured_at DESC LIMIT 1`, [tenantId]).catch(() => [null]);
+    const liveAgents = liveSnap
+      ? (Array.isArray(liveSnap.agents_json) ? liveSnap.agents_json : JSON.parse(liveSnap.agents_json || '[]'))
+      : [];
+    const [permRow] = await this.ds.query(
+      `SELECT COUNT(*) AS cnt FROM requests r
+       JOIN request_permissions rp ON rp.request_id = r.id
+       WHERE r.tenant_id = $1 AND r.status = 'approved'
+         AND rp.permission_date = (NOW() AT TIME ZONE 'Asia/Kuwait')::date
+         AND rp.start_time <= (NOW() AT TIME ZONE 'Asia/Kuwait')::time
+         AND rp.end_time   >= (NOW() AT TIME ZONE 'Asia/Kuwait')::time`,
+      [tenantId]).catch(() => [{ cnt: 0 }]);
+
+    const days = demandDays.map(d => {
+      const onLeaveCount = [...onLeave.values()].filter(s => s.has(d.date)).length;
+      const requiredPeak = Math.max(...d.requiredCurve);
+      const staffedPeak  = Math.max(...d.staffedCurve);
+      // Risk verdict per day: gaps in the daytime window are what matters
+      // (pre-07:00 gaps are coverable only by prior-day MD tails — known limitation)
+      const daytimeGaps = d.residualGaps.filter((g: any) => +g.interval.slice(0, 2) >= 7);
+      const riskStatus = daytimeGaps.length > 0 ? 'critical'
+        : staffedPeak < requiredPeak * 0.95 ? 'warning' : 'safe';
+      return {
+        date: d.date, mix: d.mix,
+        requiredPeak, staffedPeak,
+        availablePool: pool.length - onLeaveCount,
+        onApprovedLeave: onLeaveCount,
+        riskStatus,
+        requiredCurve: d.requiredCurve, staffedCurve: d.staffedCurve,
+        residualGaps: d.residualGaps,
+      };
+    });
+
     return {
       weekStart, weekEnd: dates[6], mode: 'demand-driven',
+      currentContext: {
+        activeEmployees: pool.length,
+        liveOnlineNow: liveAgents.filter((a: any) =>
+          ['available', 'idle', 'busy'].includes(a.status)).length,
+        onActivePermissionNow: +(permRow?.cnt ?? 0),
+        liveCapturedAt: liveSnap?.captured_at ?? null,
+      },
       demand: {
         basis: byWeekday.size >= 5
           ? `P90 per weekday over ${allCurves.length} measured days`
           : `sparse history (${allCurves.length} measured day(s)) — same curve applied to all weekdays; accuracy improves as data accumulates`,
         demandScale,
-        days: demandDays.map(d => ({
-          date: d.date, mix: d.mix,
-          requiredPeak: Math.max(...d.requiredCurve),
-          staffedPeak:  Math.max(...d.staffedCurve),
-          requiredCurve: d.requiredCurve, staffedCurve: d.staffedCurve,
-          residualGaps: d.residualGaps,
-        })),
+        days,
       },
       grid,
       unfilled: roster.unfilled,
       warnings: roster.warnings,
       summary: {
         employees: pool.length,
-        totalShiftsPlanned: roster.assignments.filter(a => a.code !== 'OFF').length,
+        totalShiftsPlanned: roster.assignments.filter(a => a.code !== 'OFF' && a.code !== 'L').length,
         totalOffDays:       roster.assignments.filter(a => a.code === 'OFF').length,
+        totalLeaveDays:     roster.assignments.filter(a => a.code === 'L').length,
         unfilledSlots:      roster.unfilled.length,
         residualGapIntervals: totalResidual,
         femaleNWarnings:    roster.warnings.length,
+        criticalDays: days.filter(d => d.riskStatus === 'critical').length,
+        safeDays:     days.filter(d => d.riskStatus === 'safe').length,
+        fairnessBasis: 'pre-swap (approved swaps reversed before counting — swaps cannot game rotation)',
       },
+    };
+  }
+
+  /**
+   * Shift-rate comparison: each employee's rotation distribution BEFORE
+   * approved swaps (the fairness basis) vs AFTER (what actually runs).
+   * Answers «روتيشن ٪ قبل التبديلات و٪ بعد التبديلات».
+   */
+  async getShiftRateComparison(tenantId: string, weekStart: string, functionIds?: string[]) {
+    const fns = await this.loadEmployees(tenantId, functionIds);
+    const pool = fns.flatMap(f => f.employees);
+    if (!pool.length) return { weekStart, rows: [] };
+    const ids = pool.map(e => e.id);
+
+    const [pre, post] = await Promise.all([
+      this.loadYtdDistribution(tenantId, ids, weekStart, true),   // swaps reversed
+      this.loadYtdDistribution(tenantId, ids, weekStart, false),  // as scheduled today
+    ]);
+
+    const CATS = ['morning', 'afternoon', 'evening', 'night', 'midnight'] as const;
+    const pctView = (d?: ShiftDistribution) => {
+      const working = d ? CATS.reduce((s, c) => s + (d as any)[c], 0) : 0;
+      const out: Record<string, { count: number; pct: number }> = {};
+      for (const c of CATS) {
+        const count = d ? (d as any)[c] : 0;
+        out[c] = { count, pct: working ? +((count / working) * 100).toFixed(1) : 0 };
+      }
+      return { byCategory: out, workingTotal: working };
+    };
+
+    const rows = pool.map(e => {
+      const a = pctView(pre.get(e.id));
+      const b = pctView(post.get(e.id));
+      const delta: Record<string, number> = {};
+      let changed = false;
+      for (const c of CATS) {
+        delta[c] = +(b.byCategory[c].pct - a.byCategory[c].pct).toFixed(1);
+        if (delta[c] !== 0) changed = true;
+      }
+      return {
+        employeeId: e.id, employeeNo: e.employeeNo, name: e.name,
+        gender: e.gender, functionName: e.functionName,
+        preSwap: a, postSwap: b, deltaPct: delta, affectedBySwaps: changed,
+      };
+    });
+
+    return {
+      weekStart,
+      fairnessBasis: 'preSwap — the generator uses these numbers so swaps cannot game rotation',
+      affectedEmployees: rows.filter(r => r.affectedBySwaps).length,
+      rows: rows.sort((x, y) => Number(y.affectedBySwaps) - Number(x.affectedBySwaps)
+        || x.name.localeCompare(y.name)),
     };
   }
 
@@ -252,10 +368,19 @@ export class GeneratorService {
   }
 
   // ── Load YTD shift distribution ─────────────────────────────────────────────
+  /**
+   * YTD shift distribution for fairness.
+   *
+   * FAIRNESS RULE (user decision): fairness is computed on the schedule
+   * BEFORE approved shift swaps. Swapping must never game the rotation —
+   * if you traded your midnight away, it still counts as YOURS.
+   * `preSwap=true` (generator default) reverses approved swaps before counting.
+   */
   private async loadYtdDistribution(
     tenantId: string,
     employeeIds: string[],
     weekStart: string,
+    preSwap = true,
   ): Promise<Map<string, ShiftDistribution>> {
     const yearStart = `${weekStart.substring(0, 4)}-01-01`;
     const yesterday = new Date(weekStart);
@@ -275,6 +400,40 @@ export class GeneratorService {
          AND ar.attendance_date BETWEEN $3 AND $4`,
       [tenantId, employeeIds, yearStart, ytdEnd],
     );
+
+    // Reverse approved swaps: restore each side's ORIGINAL shift times
+    if (preSwap) {
+      const swaps = await this.ds.query(
+        `SELECT r.employee_id AS requester_id, rs.target_employee_id,
+                rs.requester_date::date::text AS requester_date,
+                rs.target_date::date::text    AS target_date,
+                sc1.start_time AS req_start, sc1.end_time AS req_end,
+                sc2.start_time AS tgt_start, sc2.end_time AS tgt_end
+         FROM request_shift_swaps rs
+         JOIN requests r ON r.id = rs.request_id AND r.status = 'approved'
+         LEFT JOIN shift_codes sc1 ON sc1.id = rs.requester_shift_code_id
+         LEFT JOIN shift_codes sc2 ON sc2.id = rs.target_shift_code_id
+         WHERE r.tenant_id = $1
+           AND rs.requester_date BETWEEN $2 AND $3`,
+        [tenantId, yearStart, ytdEnd],
+      ).catch(() => []);
+
+      if (swaps.length) {
+        // (employeeId|date) → original times
+        const original = new Map<string, { start: string | null; end: string | null }>();
+        for (const s of swaps) {
+          original.set(`${s.requester_id}|${s.requester_date}`, { start: s.req_start, end: s.req_end });
+          if (s.target_employee_id) {
+            original.set(`${s.target_employee_id}|${s.target_date ?? s.requester_date}`,
+              { start: s.tgt_start, end: s.tgt_end });
+          }
+        }
+        for (const r of rows) {
+          const o = original.get(`${r.employee_id}|${r.attendance_date}`);
+          if (o) { r.scheduled_start = o.start; r.scheduled_end = o.end; }
+        }
+      }
+    }
 
     const emptyDist = (): ShiftDistribution => ({
       morning: 0, afternoon: 0, evening: 0, night: 0, midnight: 0,

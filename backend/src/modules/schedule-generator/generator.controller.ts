@@ -74,6 +74,21 @@ export class GeneratorController {
     return this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
   }
 
+  /**
+   * GET /schedule-generator/shift-rate?weekStart=YYYY-MM-DD
+   * Rotation % per employee BEFORE approved swaps (fairness basis) vs AFTER.
+   */
+  @Get('shift-rate')
+  getShiftRate(
+    @Request() req: any,
+    @Query('weekStart') weekStart?: string,
+  ) {
+    const ws = /^\d{4}-\d{2}-\d{2}$/.test(weekStart ?? '')
+      ? weekStart!
+      : new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    return this.svc.getShiftRateComparison(req.user.tenantId, ws);
+  }
+
   /** Save generated schedule as draft */
   @Post('save')
   @RequirePermissions('schedule.create')

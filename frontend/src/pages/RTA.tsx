@@ -2467,7 +2467,8 @@ export default function RTAPage() {
       .sort((a, b) => b.waiting - a.waiting),
     [live?.queues, qFilter]);
 
-  const agAvail   = useMemo(() => (live?.agents ?? []).filter(a => a.status === 'available').length, [live]);
+  // Count idle as available (logged-in but not handling = available)
+  const agAvail   = useMemo(() => (live?.agents ?? []).filter(a => a.status === 'available' || a.status === 'idle').length, [live]);
   const agBusy    = useMemo(() => (live?.agents ?? []).filter(a => a.status === 'busy').length, [live]);
   const agBreak   = useMemo(() => (live?.agents ?? []).filter(a => a.status === 'break' || a.status === 'away').length, [live]);
   const agOffline = useMemo(() => (live?.agents ?? []).filter(a => a.status === 'offline' || a.status === 'unknown').length, [live]);
@@ -2548,7 +2549,7 @@ export default function RTAPage() {
         <div className="flex-shrink-0 grid grid-cols-5 gap-2 px-4 pt-2.5 pb-2">
           <KpiCard label={ar ? 'إجمالي الانتظار' : 'Waiting'}  val={s.totalWaiting}   color="#f59e0b" icon={Clock} />
           <KpiCard label={ar ? 'قيد التنفيذ'     : 'Active'}   val={s.totalInProgress} color="#818cf8" icon={Activity} />
-          <KpiCard label={ar ? 'إيجنت متاح'      : 'Available'} val={agAvail}           color="#22c55e" icon={UserCheck} />
+          <KpiCard label={ar ? 'إيجنت متاح'      : 'Available'} val={s.totalAvailable || agAvail} color="#22c55e" icon={UserCheck} />
           <KpiCard label={ar ? 'في استراحة'      : 'On Break'}  val={agBreak}           color={agBreak > 0 ? '#818cf8' : '#475569'} icon={Coffee}
             sub={breakData && breakData.unauthorizedCount > 0 ? `${breakData.unauthorizedCount} ${ar ? 'غير مرخّص' : 'unauth'}` : undefined} />
           <KpiCard label={ar ? 'متوسط SLA'       : 'Avg SLA'}  val={`${s.avgSla}%`}   color={slaColor(s.avgSla)} icon={TrendingUp} />
@@ -2578,8 +2579,8 @@ export default function RTAPage() {
       {live && live.agents.length > 0 && (
         <div className="flex-shrink-0 grid grid-cols-4 gap-2 px-4 pb-2">
           {[
-            { l: ar ? 'متاح' : 'Available', v: agAvail,   c: '#22c55e' },
-            { l: ar ? 'مشغول': 'Busy',      v: agBusy,    c: '#f59e0b' },
+            { l: ar ? 'متاح' : 'Available', v: s?.totalAvailable || agAvail, c: '#22c55e' },
+            { l: ar ? 'مشغول': 'Busy',      v: s?.totalBusy      || agBusy,  c: '#f59e0b' },
             { l: ar ? 'برك'  : 'Break',     v: agBreak,   c: '#818cf8' },
             { l: ar ? 'أوف'  : 'Offline',   v: agOffline, c: '#475569' },
           ].map(item => (

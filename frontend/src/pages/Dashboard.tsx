@@ -381,9 +381,14 @@ export default function Dashboard() {
       const adh  = adhR.status  === 'fulfilled' ? adhR.value.data  : null;
       const vio  = vioR.status  === 'fulfilled' ? vioR.value.data  : null;
       const agents: any[] = live?.agents ?? [];
+      const agOnline = agents.filter((a: any) => ['available', 'idle', 'busy'].includes(a.status)).length;
+      const agBusy   = agents.filter((a: any) => a.status === 'busy').length;
+      // Prefer queue-level counts (more reliable) when agent-level shows 0
+      const qAvail = live?.summary?.totalAvailable ?? 0;
+      const qBusy  = live?.summary?.totalBusy ?? 0;
       setLiveOps({
-        online:        agents.filter((a: any) => ['available', 'idle', 'busy'].includes(a.status)).length,
-        busy:          agents.filter((a: any) => a.status === 'busy').length,
+        online:        agOnline  || (qAvail + qBusy),
+        busy:          agBusy    || qBusy,
         onBreak:       agents.filter((a: any) => a.status === 'break' || a.status === 'away').length,
         waiting:       live?.summary?.totalWaiting ?? 0,
         queuesAtRisk:  live?.atRisk?.length ?? 0,

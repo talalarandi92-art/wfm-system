@@ -129,7 +129,11 @@ export function assignRoster(
   ytdDist: Map<string, ShiftDistribution>,
   lastShiftBeforeWeek: Map<string, ShiftDef>,
   priorConsecutive: Map<string, number>,
-  opts: { minRestHours: number; offDaysPerWeek: number; maxConsecutive?: number },
+  opts: {
+    minRestHours: number; offDaysPerWeek: number; maxConsecutive?: number;
+    /** empId → dates with APPROVED leave — assigned 'L', excluded from staffing */
+    onLeave?: Map<string, Set<string>>;
+  },
 ): DemandRosterResult {
   const MAX_CONSEC = opts.maxConsecutive ?? 6;
   const assignments: DemandAssignment[] = [];
@@ -186,8 +190,19 @@ export function assignRoster(
     const mix = { ...(mixByDate.get(date) ?? {}) };
     const assignedToday = new Set<string>(offToday.get(date));
 
+    // Approved leave first — these people are NOT available, full stop
+    for (const emp of employees) {
+      if (opts.onLeave?.get(emp.id)?.has(date) && !assignedToday.has(emp.id)) {
+        assignments.push({ employeeId: emp.id, date, code: 'L' });
+        assignedToday.add(emp.id);
+        consec.set(emp.id, 0);
+        prevShift.set(emp.id, SHIFTS.OFF);
+      }
+    }
+
     // Register OFF assignments
     for (const id of offToday.get(date)!) {
+      if (opts.onLeave?.get(id)?.has(date)) continue; // leave already covers the day
       assignments.push({ employeeId: id, date, code: 'OFF' });
       consec.set(id, 0);
       prevShift.set(id, SHIFTS.OFF);
