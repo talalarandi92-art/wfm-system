@@ -639,6 +639,60 @@ export class SprinklrService {
   // ═══════════════════════════════════════════════════════════════════════════
   //  AGENT ↔ EMPLOYEE MAPPING (lookup by email: sprinklr → users → employees)
   // ═══════════════════════════════════════════════════════════════════════════
+  /**
+   * Resolve a Sprinklr agent to a system employee.
+   * 1. Exact: users.email → users.employee_id (when the agent has a WFM account).
+   * 2. Heuristic (dual-signal, NOT name-alone): corporate email pattern
+   *    f.lastname@boutiqaat.com — first initial + surname must BOTH match the
+   *    employee record, and the match must be unique.
+   */
+  private async resolveEmployeeId(tenantId: string, email: string, agentName: string): Promise<string | null> {
+    if (!email) return null;
+
+    const rows = await this.dataSource.query(
+      `SELECT employee_id FROM users
+       WHERE tenant_id = $1 AND lower(email) = lower($2) AND employee_id IS NOT NULL LIMIT 1`,
+      [tenantId, email],
+    );
+    if (rows?.length) return rows[0].employee_id;
+
+    const m = email.toLowerCase().match(/^([a-z])\.([a-z]+)@/);
+    if (!m) return null;
+    const [, initial, emailLast] = m;
+
+    // Initial must match first name; full normalized name must end with the email surname
+    // (handles split surnames like "Abeer Al" + "shemari" → abeeralshemari ends with alshemari)
+    const cand = await this.dataSource.query(
+      `SELECT id, lower(first_name_en) AS fn FROM employees
+       WHERE tenant_id = $1
+         AND lower(left(first_name_en, 1)) = $2
+         AND regexp_replace(lower(coalesce(first_name_en,'') || coalesce(last_name_en,'')), '[^a-z]', '', 'g')
+             LIKE '%' || $3`,
+      [tenantId, initial, emailLast],
+    );
+    if (cand?.length === 1) return cand[0].id;
+
+    // Multiple candidates → disambiguate with the agent's display first name
+    if (cand?.length > 1 && agentName) {
+      const firstWord = agentName.trim().split(/\s+/)[0].toLowerCase();
+      const exact = cand.filter((c: any) => c.fn === firstWord);
+      if (exact.length === 1) return exact[0].id;
+    }
+
+    // Reversed corporate pattern: lastInitial.firstname@ (e.g. "Saleh Hassan" → h.saleh@)
+    // Initial must match the LAST name; email surname part must equal the first name.
+    const rev = await this.dataSource.query(
+      `SELECT id FROM employees
+       WHERE tenant_id = $1
+         AND lower(left(coalesce(last_name_en, first_name_en), 1)) = $2
+         AND regexp_replace(lower(coalesce(first_name_en,'')), '[^a-z]', '', 'g') = $3`,
+      [tenantId, initial, emailLast],
+    );
+    if (rev?.length === 1) return rev[0].id;
+
+    return null;
+  }
+
   private async upsertAgentMap(tenantId: string, agents: SprinklrAgent[]): Promise<void> {
     const real = agents.filter(a =>
       a.agentId && /^\d{4,}$/.test(a.agentId) &&
@@ -656,6 +710,9 @@ export class SprinklrService {
             [tenantId, a.email],
           );
           if (rows?.length) { userId = rows[0].id; employeeId = rows[0].employee_id; }
+          if (!employeeId) {
+            employeeId = await this.resolveEmployeeId(tenantId, a.email, a.agentName);
+          }
         }
         await this.dataSource.query(
           `INSERT INTO sprinklr_agent_map
@@ -806,14 +863,25 @@ export class SprinklrService {
       const frt       = this.toSeconds(this.pickMetric(g.lastMetrics, [/FIRST_RESPONSE/, /\bFRT\b/, /RESPONSE_TIME/]));
       const contacts  = this.pickMetric(g.lastMetrics, [/CASE.*HANDLED/, /HANDLED.*CASE/, /CASE_COUNT/, /CASES_RECEIVED/, /MESSAGE_COUNT/, /CONTACT/]);
 
-      // Resolve employee by email
+      // Resolve employee: persisted map first, then email/dual-signal resolver
       let employeeId: string | null = null;
-      if (g.email) {
-        const rows = await this.dataSource.query(
-          `SELECT employee_id FROM users WHERE tenant_id = $1 AND lower(email) = lower($2) LIMIT 1`,
-          [tenantId, g.email],
-        );
-        if (rows?.length) employeeId = rows[0].employee_id;
+      const mapped = await this.dataSource.query(
+        `SELECT employee_id FROM sprinklr_agent_map
+         WHERE tenant_id = $1 AND sprinklr_agent_id = $2 AND employee_id IS NOT NULL LIMIT 1`,
+        [tenantId, agentId],
+      );
+      if (mapped?.length) {
+        employeeId = mapped[0].employee_id;
+      } else if (g.email) {
+        employeeId = await this.resolveEmployeeId(tenantId, g.email, g.name);
+        if (employeeId) {
+          // Persist the resolved link so future lookups are instant
+          await this.dataSource.query(
+            `UPDATE sprinklr_agent_map SET employee_id = $3, last_seen = NOW()
+             WHERE tenant_id = $1 AND sprinklr_agent_id = $2`,
+            [tenantId, agentId, employeeId],
+          ).catch(() => undefined);
+        }
       }
 
       await this.dataSource.query(
