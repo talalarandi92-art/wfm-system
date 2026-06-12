@@ -1597,7 +1597,7 @@ export class SprinklrService {
     }
 
     const rows = await this.dataSource.query(
-      `SELECT a.*, e.employee_no,
+      `SELECT a.*, a.stat_date::text AS stat_date, e.employee_no,
               TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name
        FROM adherence_daily a
        JOIN employees e ON e.id = a.employee_id
@@ -1681,7 +1681,7 @@ export class SprinklrService {
   // ── Violations report ───────────────────────────────────────────────────────
   async getViolationsReport(tenantId: string, from: string, to: string) {
     const rows = await this.dataSource.query(
-      `SELECT v.*, e.employee_no,
+      `SELECT v.*, v.violation_date::text AS violation_date, e.employee_no,
               TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name
        FROM agent_violations v
        LEFT JOIN employees e ON e.id = v.employee_id
@@ -1739,7 +1739,7 @@ export class SprinklrService {
     }
 
     const rows = await this.dataSource.query(
-      `SELECT s.stat_date, s.sprinklr_agent_id, s.agent_name, s.agent_email,
+      `SELECT s.stat_date::text AS stat_date, s.sprinklr_agent_id, s.agent_name, s.agent_email,
               s.employee_id,
               e.employee_no,
               TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name,
