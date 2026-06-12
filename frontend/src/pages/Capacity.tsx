@@ -357,6 +357,39 @@ export default function CapacityPage() {
   const [cpoResult, setCpoResult] = useState<{ forecastedCalls: number } | null>(null);
   const [cpoLoading, setCpoLoading] = useState(false);
 
+  // Live Plan — measured Erlang-C plan from Sprinklr workload
+  const [livePlan, setLivePlan] = useState<any | null>(null);
+  const [livePlanLoading, setLivePlanLoading] = useState(false);
+  const [lpSaveMsg, setLpSaveMsg] = useState('');
+
+  const loadLivePlan = useCallback(() => {
+    setLivePlanLoading(true);
+    apiClient.get(`/capacity/live-plan?date=${date}`)
+      .then(r => setLivePlan(r.data))
+      .catch(() => setLivePlan(null))
+      .finally(() => setLivePlanLoading(false));
+  }, [date]);
+
+  useEffect(() => { loadLivePlan(); }, [loadLivePlan]);
+
+  const saveLivePlanScenario = async () => {
+    if (!livePlan) return;
+    try {
+      await apiClient.post('/capacity/scenarios', {
+        name: `Live Plan ${livePlan.date}`,
+        channel: 'omni',
+        scenarioType: 'base',
+        inputs: livePlan.assumptions,
+        results: { summary: livePlan.summary, coverage: livePlan.coverage },
+        notes: ar ? 'محفوظ من الخطة الحية' : 'Saved from live plan',
+      });
+      setLpSaveMsg(ar ? '✅ حُفظ السيناريو' : '✅ Scenario saved');
+    } catch {
+      setLpSaveMsg(ar ? '✗ فشل الحفظ' : '✗ Save failed');
+    }
+    setTimeout(() => setLpSaveMsg(''), 4000);
+  };
+
   /* ── Load functions ────────────────────────────────────────────────────── */
   useEffect(() => {
     apiClient.get('/capacity/functions').then((r: { data: Func[] }) => {
@@ -555,6 +588,81 @@ export default function CapacityPage() {
             </div>
           );
         })}
+      </div>
+
+      {/* ── LIVE PLAN — Erlang-C on measured Sprinklr workload ─────────────── */}
+      <div className={`rounded-xl border p-4 mb-5 ${dark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <Activity size={16} className="text-emerald-400" />
+          <span className={`text-sm font-semibold ${dark ? 'text-slate-200' : 'text-slate-700'}`}>
+            {ar ? 'الخطة الحية — من الحمل المُقاس فعلياً' : 'Live Plan — from measured workload'}
+          </span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full ${dark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'}`}>
+            Erlang-C · {ar ? 'سبرينكلر' : 'Sprinklr'}
+          </span>
+          <button onClick={loadLivePlan} disabled={livePlanLoading}
+            className={`ms-auto flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold ${dark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+            <RefreshCw size={12} className={livePlanLoading ? 'animate-spin' : ''} />
+            {ar ? 'تحديث' : 'Refresh'}
+          </button>
+          <button onClick={saveLivePlanScenario} disabled={!livePlan}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">
+            {ar ? 'حفظ كسيناريو' : 'Save scenario'}
+          </button>
+          {lpSaveMsg && <span className="text-xs font-bold text-emerald-400">{lpSaveMsg}</span>}
+        </div>
+
+        {!livePlan ? (
+          <p className={`text-xs ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+            {livePlanLoading ? (ar ? 'جاري الحساب…' : 'Computing…') : (ar ? 'لا توجد بيانات سبرينكلر لهذا اليوم' : 'No Sprinklr data for this date')}
+          </p>
+        ) : (
+          <>
+            {/* Summary KPIs */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+              {[
+                { l: ar ? 'ذروة الحمل (إرلانج)' : 'Peak Erlangs', v: livePlan.summary.peakErlangs, c: 'text-indigo-400' },
+                { l: ar ? 'ذروة المطلوب' : 'Peak Required HC', v: livePlan.summary.peakRequiredHc, c: 'text-amber-400' },
+                { l: ar ? 'متوسط المطلوب' : 'Avg Required', v: livePlan.summary.avgRequiredHc, c: 'text-sky-400' },
+                { l: ar ? 'متوسط المجدول' : 'Avg Scheduled', v: livePlan.summary.avgScheduledHc, c: 'text-slate-300' },
+                { l: ar ? 'أسوأ عجز' : 'Worst Gap', v: livePlan.summary.worstGap, c: livePlan.summary.worstGap > 0 ? 'text-red-400' : 'text-emerald-400' },
+              ].map(k => (
+                <div key={k.l} className={`rounded-lg p-2.5 text-center ${dark ? 'bg-slate-900/60' : 'bg-slate-50'}`}>
+                  <div className={`text-xl font-black tabular-nums ${k.c}`}>{k.v}</div>
+                  <div className={`text-[10px] mt-0.5 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>{k.l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Interval bars: required vs scheduled */}
+            <div className="flex items-end gap-0.5 overflow-x-auto pb-1" style={{ height: 110 }}>
+              {livePlan.intervals.filter((x: any) => x.measured).map((iv: any) => {
+                const maxV = Math.max(1, livePlan.summary.peakRequiredHc);
+                return (
+                  <div key={iv.interval} className="flex flex-col items-center gap-0.5" style={{ minWidth: 30 }}
+                    title={`${iv.interval} — ${ar ? 'مطلوب' : 'req'} ${iv.requiredHc} / ${ar ? 'مجدول' : 'sched'} ${iv.scheduledHc} | ${iv.totalErlangs} Erlangs | ${iv.channels.map((c: any) => `${c.channel}:${c.erlangs}`).join(' ')}`}>
+                    <div className="flex items-end gap-px" style={{ height: 80 }}>
+                      <div className="rounded-t" style={{ width: 11, height: Math.max(2, (iv.requiredHc / maxV) * 80), background: iv.risk === 'critical' ? '#ef4444' : iv.risk === 'warning' ? '#f59e0b' : '#34d399' }} />
+                      <div className="rounded-t" style={{ width: 11, height: Math.max(2, (iv.scheduledHc / maxV) * 80), background: 'rgba(129,140,248,0.5)' }} />
+                    </div>
+                    <span className={`text-[8px] tabular-nums ${dark ? 'text-slate-500' : 'text-slate-400'}`}>{iv.interval}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-4 mt-1">
+              <span className={`text-[10px] flex items-center gap-1 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+                <span className="w-2 h-2 rounded-sm inline-block bg-emerald-400" /> {ar ? 'مطلوب (Erlang-C + انكماش)' : 'Required (Erlang-C + shrinkage)'}
+              </span>
+              <span className={`text-[10px] flex items-center gap-1 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+                <span className="w-2 h-2 rounded-sm inline-block" style={{ background: 'rgba(129,140,248,0.6)' }} /> {ar ? 'مجدول' : 'Scheduled'}
+              </span>
+              <span className={`text-[10px] ms-auto ${dark ? 'text-slate-600' : 'text-slate-400'}`}>
+                {livePlan.assumptions.method} · SL {Math.round(livePlan.assumptions.targetSL * 100)}%/{livePlan.assumptions.targetAnswerSec}s · {ar ? 'انكماش' : 'shrink'} {Math.round(livePlan.assumptions.shrinkage * 100)}% · {ar ? 'تزامن' : 'conc'} ×{livePlan.assumptions.concurrency}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* CPO Forecaster */}

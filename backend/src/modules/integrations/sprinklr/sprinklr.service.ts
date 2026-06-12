@@ -1694,33 +1694,83 @@ export class SprinklrService {
     const overallAvg = withData.length
       ? withData.reduce((s, h) => s + h.contacts, 0) / withData.length : 0;
 
-    // Weekday means (0=Sun..6=Sat)
+    // ── Methodology (Cleveland, "Call Center Management on Fast Forward"):
+    //  - weekday seasonality index over trailing window
+    //  - linear trend on day index (least squares)
+    //  - P50 (median) and P90 bands per weekday — size staffing to P90, not P50
+    //  - MAPE backtest (one-day-ahead) when ≥14 days to report honest accuracy
     const weekday: Record<number, number[]> = {};
     withData.forEach(h => {
       const wd = new Date(h.date).getDay();
       (weekday[wd] = weekday[wd] || []).push(h.contacts);
     });
 
-    const forecast: { date: string; predictedContacts: number; method: string }[] = [];
+    const pct = (arr: number[], p: number) => {
+      if (!arr.length) return 0;
+      const s = [...arr].sort((a, b) => a - b);
+      const idx = Math.min(s.length - 1, Math.max(0, Math.ceil((p / 100) * s.length) - 1));
+      return s[idx];
+    };
+
+    // Linear trend (least squares over day index)
+    let slope = 0;
+    if (withData.length >= 7) {
+      const n = withData.length;
+      const xs = withData.map((_, i) => i);
+      const ys = withData.map(h => h.contacts);
+      const xb = xs.reduce((a, b) => a + b, 0) / n;
+      const yb = ys.reduce((a, b) => a + b, 0) / n;
+      const num = xs.reduce((s, x, i) => s + (x - xb) * (ys[i] - yb), 0);
+      const den = xs.reduce((s, x) => s + (x - xb) ** 2, 0);
+      slope = den > 0 ? num / den : 0;
+    }
+
+    const forecast: {
+      date: string; predictedContacts: number; p50: number; p90: number; method: string;
+    }[] = [];
     for (let i = 1; i <= daysAhead; i++) {
       const d  = new Date(Date.now() + 3 * 3600e3 + i * 86400e3);
       const ds = d.toISOString().slice(0, 10);
       const wd = d.getDay();
-      const wdVals = weekday[wd];
-      const predicted = wdVals?.length
+      const wdVals = weekday[wd] ?? [];
+      const base = wdVals.length
         ? wdVals.reduce((s, v) => s + v, 0) / wdVals.length
         : overallAvg;
+      const trendAdj = slope * (withData.length - 1 + i);
+      const predicted = Math.max(0, base + (withData.length >= 7 ? trendAdj - slope * (withData.length - 1) : 0));
       forecast.push({
         date: ds,
         predictedContacts: Math.round(predicted),
-        method: wdVals?.length ? `weekday-avg(${wdVals.length})` : 'overall-avg',
+        p50: Math.round(wdVals.length ? pct(wdVals, 50) : overallAvg),
+        p90: Math.round(wdVals.length ? pct(wdVals, 90) : overallAvg * 1.3),
+        method: wdVals.length ? `weekday-seasonal+trend(${wdVals.length})` : 'overall-avg',
       });
+    }
+
+    // MAPE backtest: one-day-ahead naive-seasonal forecast vs actuals
+    let mape: number | null = null;
+    if (withData.length >= 14) {
+      const errs: number[] = [];
+      for (let i = 7; i < withData.length; i++) {
+        const target = withData[i];
+        const wd = new Date(target.date).getDay();
+        const priorSame = withData.slice(0, i).filter(h => new Date(h.date).getDay() === wd);
+        if (!priorSame.length || target.contacts === 0) continue;
+        const pred = priorSame.reduce((s, h) => s + h.contacts, 0) / priorSame.length;
+        errs.push(Math.abs(pred - target.contacts) / target.contacts);
+      }
+      if (errs.length) mape = +(100 * errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(1);
     }
 
     return {
       history: hist,
       forecast,
-      confidence: withData.length >= 14 ? 'medium' : (withData.length >= 7 ? 'low' : 'insufficient-data'),
+      accuracy: { mape, backtestDays: withData.length >= 14 ? withData.length - 7 : 0,
+                  note: 'MAPE = mean absolute % error of one-day-ahead backtest. <15% strong, <25% usable.' },
+      confidence: withData.length >= 28 ? 'high'
+                : withData.length >= 14 ? 'medium'
+                : withData.length >= 7  ? 'low' : 'insufficient-data',
+      sizingGuidance: 'Staff to P90, not the point forecast (Cleveland). P50 sizing misses SLA half the days.',
       note: withData.length < 7
         ? 'Need at least 7 days of contact data for a meaningful forecast. Forecast will improve as daily data accumulates.'
         : null,

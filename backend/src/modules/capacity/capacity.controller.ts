@@ -60,4 +60,54 @@ export class CapacityController {
   ) {
     return this.svc.calculateEmail(this.tid(user), body.functionId, body.date, body.inputs);
   }
+
+  /**
+   * GET /capacity/live-plan?date=YYYY-MM-DD&sl=0.8&answerSec=60&aht=300&shrinkage=0.25
+   * Capacity plan from MEASURED Sprinklr workload (Erlang-C on concurrent load),
+   * per 30-min interval vs scheduled HC.
+   */
+  @Get('live-plan')
+  getLivePlan(
+    @CurrentUser() user: any,
+    @Query('date') date?: string,
+    @Query('sl') sl?: string,
+    @Query('answerSec') answerSec?: string,
+    @Query('aht') aht?: string,
+    @Query('shrinkage') shrinkage?: string,
+    @Query('occupancy') occupancy?: string,
+    @Query('concurrency') concurrency?: string,
+  ) {
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '')
+      ? date!
+      : new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    return this.svc.getLivePlan(this.tid(user), d, {
+      targetSL:        sl          ? Math.min(0.99, Math.max(0.5, +sl))        : undefined,
+      targetAnswerSec: answerSec   ? Math.max(5, +answerSec)                   : undefined,
+      ahtSec:          aht         ? Math.max(30, +aht)                        : undefined,
+      shrinkage:       shrinkage   ? Math.min(0.9, Math.max(0, +shrinkage))    : undefined,
+      occupancyCap:    occupancy   ? Math.min(0.95, Math.max(0.5, +occupancy)) : undefined,
+      concurrency:     concurrency ? Math.max(1, +concurrency)                 : undefined,
+    });
+  }
+
+  /** Saved scenarios */
+  @Get('scenarios')
+  listScenarios(@CurrentUser() user: any, @Query('channel') channel?: string) {
+    return this.svc.listScenarios(this.tid(user), channel);
+  }
+
+  @Post('scenarios')
+  @RequirePermissions('hc.edit')
+  saveScenario(
+    @CurrentUser() user: any,
+    @Body() body: { name: string; channel: string; scenarioType?: string; inputs: any; results: any; notes?: string },
+  ) {
+    return this.svc.saveScenario(this.tid(user), user.id, body);
+  }
+
+  @Post('scenarios/delete')
+  @RequirePermissions('hc.edit')
+  deleteScenario(@CurrentUser() user: any, @Body() body: { id: string }) {
+    return this.svc.deleteScenario(this.tid(user), body.id);
+  }
 }

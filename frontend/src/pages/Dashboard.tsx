@@ -93,7 +93,7 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
         flex:1, minWidth:0,
         background: dark ? (hov?'rgba(255,255,255,0.07)':'rgba(255,255,255,0.04)') : (hov?'#f8faff':'#fff'),
         border: `1px solid ${hov ? color+'50' : dark?'rgba(255,255,255,0.08)':'rgba(0,0,0,0.07)'}`,
-        borderRadius: 16, padding: '16px 18px',
+        borderRadius: 16, padding: '14px 16px',
         cursor: onClick?'pointer':'default',
         boxShadow: hov ? `0 8px 28px ${color}22, 0 0 0 1px ${color}18` : dark?'none':'0 1px 3px rgba(0,0,0,0.04)',
         transition: 'all 0.2s cubic-bezier(.4,0,.2,1)',
@@ -106,26 +106,26 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
       <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background: hov?color:`${color}30`, borderRadius:'16px 16px 0 0', transition:'background 0.2s' }} />
 
       {/* header row */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:10, gap:6 }}>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:7, flex:1, minWidth:0 }}>
           <div style={{
-            width:32, height:32, borderRadius:9,
+            width:28, height:28, borderRadius:8, flexShrink:0,
             background: hov ? `${color}22` : `${color}15`,
             display:'flex', alignItems:'center', justifyContent:'center',
-            transition:'background 0.2s',
+            transition:'background 0.2s', marginTop:1,
           }}>
-            <Icon size={15} style={{ color, transition:'transform 0.2s', transform: hov?'scale(1.2)':'scale(1)' }} strokeWidth={2.2} />
+            <Icon size={13} style={{ color, transition:'transform 0.2s', transform: hov?'scale(1.2)':'scale(1)' }} strokeWidth={2.2} />
           </div>
-          <span style={{ fontSize:12, fontWeight:500, color: dark?'#64748b':'#94a3b8' }}>
+          <span style={{ fontSize:11, fontWeight:500, color: dark?'#64748b':'#94a3b8', lineHeight:1.35 }}>
             {ar ? titleAr : title}
           </span>
         </div>
-        {donut !== undefined && <Donut pct={donut} color={color} size={54} />}
+        {donut !== undefined && <Donut pct={donut} color={color} size={46} />}
       </div>
 
       {/* value */}
       <div style={{
-        fontSize:30, fontWeight:800, letterSpacing:'-0.04em', lineHeight:1,
+        fontSize:26, fontWeight:800, letterSpacing:'-0.04em', lineHeight:1,
         color: dark ? '#f1f5f9' : '#0f172a',
         marginBottom:8,
       }}>
@@ -134,18 +134,18 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
 
       {/* trend badge */}
       {trendPct !== undefined && (
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:5, flexWrap:'wrap' }}>
           <span style={{
             display:'inline-flex', alignItems:'center', gap:3,
-            fontSize:11, fontWeight:700, padding:'3px 8px', borderRadius:20,
+            fontSize:10, fontWeight:700, padding:'2px 7px', borderRadius:20,
             background: up ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.1)',
             color: up ? '#10b981' : '#ef4444',
             border: `1px solid ${up?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.15)'}`,
           }}>
-            {up ? <ChevronUp size={10}/> : <ChevronDown size={10}/>}
+            {up ? <ChevronUp size={9}/> : <ChevronDown size={9}/>}
             {Math.abs(trendPct).toFixed(1)}%
           </span>
-          <span style={{ fontSize:11, color: dark?'#475569':'#94a3b8' }}>
+          <span style={{ fontSize:10, color: dark?'#475569':'#94a3b8' }}>
             {ar ? trendLabelAr : trendLabel}
           </span>
         </div>
@@ -488,13 +488,13 @@ export default function Dashboard() {
       )}
 
       {data && !loading && (
-        <div style={{ display:'flex', gap:20 }}>
+        <div style={{ display:'flex', gap:16 }}>
 
           {/* ══ MAIN ══════════════════════════════════════════════════════ */}
           <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:18 }}>
 
             {/* ── KPI row (5 cards, single row) ────────────────────────── */}
-            <div style={{ display:'flex', gap:12 }}>
+            <div style={{ display:'flex', gap:10 }}>
               <KpiCard icon={Users}     color="#6366f1" title="Total Headcount"     titleAr="إجمالي الموظفين"
                 numValue={data.employees.total}
                 trendPct={3.2} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
@@ -566,18 +566,22 @@ export default function Dashboard() {
             {/* ── Charts row ───────────────────────────────────────────── */}
             <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16 }}>
 
-              <div style={{ ...card, padding:'18px 20px' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:tp }}>{ar?'المتوقع مقابل المجدول مقابل الفعلي':'Forecast vs Scheduled vs Actual'}</div>
-                  <div style={{ display:'flex', gap:12, alignItems:'center' }}>
-                    {[{c:'#818cf8',l:ar?'توقع':'Forecast'},{c:'#38bdf8',l:ar?'مجدول':'Scheduled'},{c:'#34d399',l:ar?'فعلي':'Actual'}].map(x=>(
-                      <span key={x.l} style={{ display:'flex',alignItems:'center',gap:5,fontSize:11,color:ts }}>
-                        <span style={{ width:20,height:2.5,borderRadius:2,background:x.c,display:'inline-block' }} />{x.l}
-                      </span>
-                    ))}
+              <div style={{ ...card, padding:'16px 20px' }}>
+                <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12, gap:8 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:tp, lineHeight:1.3 }}>
+                    {ar ? 'المتوقع مقابل المجدول مقابل الفعلي' : 'Forecast vs Scheduled vs Actual'}
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6, flexShrink:0 }}>
                     <select style={{ fontSize:11,background:'transparent',border:`1px solid ${dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)'}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer' }}>
                       <option>{ar?'ساعات':'Hours'}</option>
                     </select>
+                    <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+                      {[{c:'#818cf8',l:ar?'توقع':'Forecast'},{c:'#38bdf8',l:ar?'مجدول':'Scheduled'},{c:'#34d399',l:ar?'فعلي':'Actual'}].map(x=>(
+                        <span key={x.l} style={{ display:'flex',alignItems:'center',gap:4,fontSize:10,color:ts }}>
+                          <span style={{ width:16,height:2.5,borderRadius:2,background:x.c,display:'inline-block' }} />{x.l}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
                 <LineChart data={data.trend} dark={dark} ar={ar} />
