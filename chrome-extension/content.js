@@ -1,7 +1,9 @@
 'use strict';
-console.log('[WFM Bridge] content.js v14 loaded ✓');
+console.log('[WFM Bridge] content.js v15 loaded ✓');
 
 const SEND_INTERVAL_MS = 30_000;
+const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
+const CACHE_STALE_MS   = 15 * 60_000; // cached agent status older than this → 'unknown'
 
 // ── Inject page-context script ────────────────────────────────────────────────
 const script = document.createElement('script');
@@ -709,12 +711,15 @@ function buildSnapshot() {
   // Priority 0: Persistent cache — all agents ever seen, with latest known status
   // Use reportingQuery live status if available, otherwise use cached status
   Object.entries(agentCache).forEach(([agentId, cached]) => {
+    // A status we haven't refreshed in 15+ min is stale — report 'unknown'
+    // instead of pretending the agent is still available/busy.
+    const fresh = Date.now() - (cached.lastSeen || 0) < CACHE_STALE_MS;
     agentMap.set(agentId, {
       agentId,
       agentName:      cached.name,
       email:          cached.email || agentMetrics[agentId]?.email || '',
-      status:         cached.status || 'unknown',
-      statusRaw:      cached.statusRaw || '',
+      status:         fresh ? (cached.status || 'unknown') : 'unknown',
+      statusRaw:      fresh ? (cached.statusRaw || '') : '',
       currentChannel: '',
       queueId:        '',
       loginTime:      '',
@@ -772,9 +777,14 @@ function buildSnapshot() {
 }
 
 // ── Send ──────────────────────────────────────────────────────────────────────
-let lastHash = '';
+let lastHash   = '';
+let lastSendAt = 0;
 
 function trySend(force = false) {
+  // Hard rate limit: Sprinklr fires entityFeed/reportingQuery continuously and the
+  // KEY_OPS immediate-send was flooding the backend (8 snapshots/min). 20s floor.
+  if (Date.now() - lastSendAt < MIN_SEND_GAP_MS) return;
+
   const snapshot = buildSnapshot();
 
   const hash = snapshot.queues.map(q => `${q.queueName}:${q.waiting}:${q.inProgress}`).join('|')
@@ -791,9 +801,28 @@ function trySend(force = false) {
   }
 
   sendCount++;
+  lastSendAt = Date.now();
   console.log(`[WFM Bridge] sending snapshot #${sendCount}: ${snapshot.queues.length} queues, ${snapshot.agents.length} agents via ${snapshot.captureMethod}`);
   chrome.runtime.sendMessage({ type: 'SPRINKLR_SNAPSHOT', snapshot });
 }
+
+// ── Background-driven pull ────────────────────────────────────────────────────
+// Chrome throttles setInterval in background tabs (→ "extension keeps dropping").
+// The service worker pulls via chrome.alarms (unthrottled) every minute; message
+// handlers fire even in throttled tabs, so the data keeps flowing.
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === 'PULL_SNAPSHOT') {
+    try {
+      const snapshot = buildSnapshot();
+      lastSendAt = Date.now();
+      sendCount++;
+      sendResponse({ ok: true, snapshot });
+    } catch (e) {
+      sendResponse({ ok: false, error: String(e) });
+    }
+    return true;
+  }
+});
 
 // ── Timers ────────────────────────────────────────────────────────────────────
 // Spread attempts during page load (Sprinklr SPA takes time to render)

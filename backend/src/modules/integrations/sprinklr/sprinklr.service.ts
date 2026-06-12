@@ -368,16 +368,17 @@ export class SprinklrService {
 
   private async computeBreakHistory(tenantId: string, hours: number) {
     try {
+      // Latest first then reverse — ASC+LIMIT would drop today's data when busy
       const snapshots: { captured_at: string; agents_json: any }[] =
-        await this.dataSource.query(
+        (await this.dataSource.query(
           `SELECT captured_at, agents_json
            FROM integration_snapshots
            WHERE tenant_id = $1 AND source = 'sprinklr'
              AND captured_at >= NOW() - ($2 || ' hours')::interval
-           ORDER BY captured_at ASC
-           LIMIT 600`,
+           ORDER BY captured_at DESC
+           LIMIT 2000`,
           [tenantId, hours],
-        );
+        )).reverse();
 
       if (!snapshots.length) return [];
 
@@ -549,16 +550,18 @@ export class SprinklrService {
   // ── Agent Timeline (working hours tracker) ────────────────────────────────
   async getAgentTimeline(tenantId: string, hours = 10) {
     try {
+      // Take the LATEST snapshots then restore chronological order — ASC+LIMIT
+      // would truncate to the oldest slice and silently drop today's data.
       const snapshots: { captured_at: string; agents_json: any }[] =
-        await this.dataSource.query(
+        (await this.dataSource.query(
           `SELECT captured_at, agents_json
            FROM integration_snapshots
            WHERE tenant_id = $1 AND source = 'sprinklr'
              AND captured_at >= NOW() - ($2 || ' hours')::interval
-           ORDER BY captured_at ASC
-           LIMIT 500`,
+           ORDER BY captured_at DESC
+           LIMIT 2000`,
           [tenantId, hours],
-        );
+        )).reverse();
 
       if (!snapshots.length) return [];
 

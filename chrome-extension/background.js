@@ -97,11 +97,35 @@ async function wfmLogin(config) {
   return authInFlight;
 }
 
-// ── Alarms: retry failed pushes + proactive token refresh ─────────────────────
+// ── Alarms: retry failed pushes + proactive token refresh + tab pull ──────────
 chrome.alarms.create('wfm_retry',         { periodInMinutes: 1 });
 chrome.alarms.create('wfm_token_refresh', { periodInMinutes: 10 }); // token lives 15 min
+chrome.alarms.create('wfm_pull',          { periodInMinutes: 1 });  // background-tab safe
+
+// Chrome throttles content-script timers in background tabs, which made the
+// bridge "keep disconnecting" whenever the Sprinklr tab lost focus. Alarms in
+// the service worker are NOT throttled — pull a snapshot from the tab directly.
+async function pullFromSprinklrTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://*.sprinklr.com/*' });
+    for (const tab of tabs) {
+      try {
+        const res = await chrome.tabs.sendMessage(tab.id, { type: 'PULL_SNAPSHOT' });
+        if (res?.ok && res.snapshot) {
+          await chrome.storage.local.set({ lastHeartbeat: Date.now(), sprinklrUrl: tab.url });
+          await handleSnapshot(res.snapshot);
+          return; // one good snapshot per cycle is enough
+        }
+      } catch { /* tab not ready / no content script — try next */ }
+    }
+  } catch { /* tabs API unavailable — ignore */ }
+}
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'wfm_pull') {
+    await pullFromSprinklrTabs();
+  }
+
   if (alarm.name === 'wfm_retry') {
     const { pendingSnapshot } = await chrome.storage.local.get('pendingSnapshot');
     if (pendingSnapshot) await pushToWfm(pendingSnapshot);
@@ -258,7 +282,9 @@ async function getStatus() {
     queueCount:      data.lastPushQueueCount ?? 0,
     agentCount:      data.lastPushAgentCount ?? 0,
     sprinklrUrl:     data.sprinklrUrl ?? '',
-    connected:       Date.now() - (data.lastHeartbeat ?? 0) < 30_000,
+    // 90s window: heartbeats throttle in background tabs; the 1-min alarm pull
+    // refreshes lastHeartbeat, so anything under 90s means the bridge is alive.
+    connected:       Date.now() - (data.lastHeartbeat ?? 0) < 90_000,
   };
 }
 
