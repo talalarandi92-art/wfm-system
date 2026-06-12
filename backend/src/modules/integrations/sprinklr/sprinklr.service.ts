@@ -774,6 +774,33 @@ export class SprinklrService {
       if (exact.length === 1) return exact[0].id;
     }
 
+    // Still ambiguous → if the candidates are DUPLICATE rows of the same person
+    // (identical normalized full name), link to the OPERATIONAL record: the one
+    // with the most attendance/schedule data (tie → lowest employee_no).
+    // This is not name-alone matching — the email dual-signal already passed;
+    // we are only choosing WHICH duplicate row represents the person.
+    if (cand?.length > 1) {
+      const ranked = await this.dataSource.query(
+        `SELECT e.id,
+                regexp_replace(lower(coalesce(e.first_name_en,'') || coalesce(e.last_name_en,'')), '[^a-z]', '', 'g') AS norm_name,
+                e.employee_no,
+                COUNT(ar.id) AS att_count
+         FROM employees e
+         LEFT JOIN attendance_records ar ON ar.employee_id = e.id
+         WHERE e.id = ANY($1::uuid[])
+         GROUP BY e.id, norm_name, e.employee_no
+         ORDER BY att_count DESC, e.employee_no ASC`,
+        [cand.map((c: any) => c.id)],
+      );
+      const names = new Set(ranked.map((r: any) => r.norm_name));
+      if (names.size === 1 && ranked.length) {
+        this.logger.log(
+          `Duplicate employees for ${email}: linked to #${ranked[0].employee_no} ` +
+          `(${ranked[0].att_count} attendance rows) — merge duplicates in Employee Merge to finalize`);
+        return ranked[0].id;
+      }
+    }
+
     // Reversed corporate pattern: lastInitial.firstname@ (e.g. "Saleh Hassan" → h.saleh@)
     // Initial must match the LAST name; email surname part must equal the first name.
     const rev = await this.dataSource.query(
@@ -1671,6 +1698,8 @@ export class SprinklrService {
 
   // Intraday: scheduled HC vs actual online HC per 30-min interval
   async getAdherenceIntraday(tenantId: string, date: string) {
+    // Both today's shifts AND yesterday's cross-midnight tails (MD 23:00→08:00
+    // on D-1 staffs D's early morning) — composed as absolute timestamps.
     const schedules: any[] = await this.dataSource.query(
       `SELECT (attendance_date::text || ' ' || scheduled_start::text || '+03')::timestamptz AS scheduled_start,
               CASE WHEN scheduled_end <= scheduled_start
@@ -1678,7 +1707,9 @@ export class SprinklrService {
                    ELSE (attendance_date::text  || ' ' || scheduled_end::text || '+03')::timestamptz
               END AS scheduled_end
        FROM attendance_records
-       WHERE tenant_id = $1 AND attendance_date = $2::date
+       WHERE tenant_id = $1
+         AND (attendance_date = $2::date
+              OR (attendance_date = ($2::date - 1) AND scheduled_end <= scheduled_start))
          AND scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL`,
       [tenantId, date],
     );

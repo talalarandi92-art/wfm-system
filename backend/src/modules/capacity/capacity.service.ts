@@ -571,13 +571,22 @@ export class CapacityService {
       [tenantId, date],
     );
 
-    // 2. Scheduled HC per interval — ALL working employees (cross-midnight aware)
-    const shifts: any[] = await this.ds.query(
-      `SELECT scheduled_start, scheduled_end FROM attendance_records
-       WHERE tenant_id = $1 AND attendance_date = $2::date
-         AND scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL`,
-      [tenantId, date],
-    );
+    // 2. Scheduled HC per interval — ALL working employees (cross-midnight aware).
+    // Night coverage truth: an MD shift on day D-1 (23:00→08:00) staffs day D's
+    // early-morning intervals — load BOTH days and credit yesterday's tails.
+    const [shifts, prevTails]: any[][] = await Promise.all([
+      this.ds.query(
+        `SELECT scheduled_start, scheduled_end FROM attendance_records
+         WHERE tenant_id = $1 AND attendance_date = $2::date
+           AND scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL`,
+        [tenantId, date]),
+      this.ds.query(
+        `SELECT scheduled_end FROM attendance_records
+         WHERE tenant_id = $1 AND attendance_date = ($2::date - 1)
+           AND scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL
+           AND scheduled_end <= scheduled_start`,   // cross-midnight only
+        [tenantId, date]),
+    ]);
 
     const dayStart = new Date(`${date}T00:00:00+03:00`).getTime();
     const parse = (v: any) => (Array.isArray(v) ? v : JSON.parse(v || '[]'));
@@ -629,13 +638,15 @@ export class CapacityService {
       const mm = i % 2 === 0 ? '00' : '30';
       const label = `${hh}:${mm}`;
 
+      const slotMin = i * 30;
       const scheduled = shifts.filter(sh => {
         const st = this.parseTimeMin(sh.scheduled_start);
         let en = this.parseTimeMin(sh.scheduled_end);
         if (en <= st) en += 24 * 60;
-        const slotMin = i * 30;
         return st < slotMin + 30 && en > slotMin;
-      }).length;
+      }).length
+        // + yesterday's cross-midnight tails covering [00:00, end) today
+        + prevTails.filter((t: any) => this.parseTimeMin(t.scheduled_end) > slotMin).length;
 
       const actualSamples = onlineByInterval.get(i) ?? [];
       const actualHc = actualSamples.length ? Math.round(avg(actualSamples)) : null;
@@ -729,11 +740,18 @@ export class CapacityService {
         `SELECT id, name, channel_type FROM functions
          WHERE tenant_id = $1 AND is_active = true ORDER BY sort_order, name`, [tenantId]),
       this.ds.query(
-        `SELECT e.function_id, ar.scheduled_start, ar.scheduled_end
+        `SELECT e.function_id, ar.scheduled_start, ar.scheduled_end, false AS is_prev_tail
          FROM attendance_records ar
          JOIN employees e ON e.id = ar.employee_id
          WHERE ar.tenant_id = $1 AND ar.attendance_date = $2::date
-           AND ar.scheduled_start IS NOT NULL AND ar.scheduled_end IS NOT NULL`,
+           AND ar.scheduled_start IS NOT NULL AND ar.scheduled_end IS NOT NULL
+         UNION ALL
+         SELECT e.function_id, ar.scheduled_start, ar.scheduled_end, true AS is_prev_tail
+         FROM attendance_records ar
+         JOIN employees e ON e.id = ar.employee_id
+         WHERE ar.tenant_id = $1 AND ar.attendance_date = ($2::date - 1)
+           AND ar.scheduled_start IS NOT NULL AND ar.scheduled_end IS NOT NULL
+           AND ar.scheduled_end <= ar.scheduled_start`,
         [tenantId, date]),
       this.ds.query(
         `SELECT m.sprinklr_agent_id, e.function_id
@@ -772,11 +790,16 @@ export class CapacityService {
     }
     const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 
-    // Scheduled per function per hour (shift overlap, cross-midnight aware)
+    // Scheduled per function per hour — cross-midnight aware on BOTH sides:
+    // today's shifts cover [start, …); yesterday's cross-midnight tails cover [00:00, end)
     const schedCount = (fnId: string, hour: number) => {
       const hStart = hour * 60, hEnd = hStart + 60;
       return shifts.filter((sh: any) => {
         if (sh.function_id !== fnId) return false;
+        if (sh.is_prev_tail) {
+          const en = this.parseTimeMin(sh.scheduled_end);
+          return en > hStart; // tail occupies [0, en) of TODAY
+        }
         const st = this.parseTimeMin(sh.scheduled_start);
         let en = this.parseTimeMin(sh.scheduled_end);
         if (en <= st) en += 24 * 60;
