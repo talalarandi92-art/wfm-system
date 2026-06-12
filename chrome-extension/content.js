@@ -1,5 +1,5 @@
 'use strict';
-console.log('[WFM Bridge] content.js v16 loaded ✓');
+console.log('[WFM Bridge] content.js v16.1 loaded ✓ (metrics diagnostics)');
 
 const SEND_INTERVAL_MS = 30_000;
 const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
@@ -262,6 +262,9 @@ function updateQueueCache(queues) {
   }
 }
 
+// Diagnostic raw samples (temporary — until the metrics parser is confirmed)
+const lastRawSamples = {};
+
 // Key ops to watch for immediate send
 const KEY_OPS = new Set([
   'getWorkQueueStatsV2', 'entityFeed', 'runningCalls', 'reportingQuery',
@@ -283,6 +286,13 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
       // Harvest agent names/emails/measurements from every reportingQuery variant
       if (opName === 'reportingQuery') {
         try { harvestReportingQuery(payload.data); } catch (e) { /* shape varies */ }
+        // Diagnostic: keep the latest raw payload so the backend can inspect the
+        // agents-table structure (Case Count / FRT / Handle Time columns) until
+        // the metrics parser is tuned to the real shape. Removed once confirmed.
+        try { lastRawSamples.reportingQuery = JSON.stringify(payload.data).slice(0, 40000); } catch (e) {}
+      }
+      if (opName === 'queries' || opName === 'sinkPerformanceData') {
+        try { lastRawSamples[opName] = JSON.stringify(payload.data).slice(0, 40000); } catch (e) {}
       }
 
       // Harvest user emails from any user-related op (richest email source)
@@ -844,6 +854,7 @@ function buildSnapshot() {
     summary:       { totalWaiting, totalAvailable: totalAvail, runningCalls },
     captureMethod: apiQueues.length ? (sprinklrOps.has('entityFeedStats') ? 'api/entityFeed' : 'api')
                   : (queues.length ? 'cache' : (domQ.length ? 'dom' : 'empty')),
+    debugSamples: Object.keys(lastRawSamples).length ? lastRawSamples : undefined,
     opsDetected:   [...sprinklrOps.keys()],
   };
 }
