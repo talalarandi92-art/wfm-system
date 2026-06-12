@@ -62,6 +62,10 @@ interface BreakRequest {
   status: 'pending' | 'approved' | 'rejected' | 'auto_approved';
   min_coverage_gap: number;
   auto_approve_eligible: boolean;
+  coverage_after_json?: { live?: {
+    availableNow?: number; availableAfter?: number; totalWaiting?: number;
+    atRiskQueues?: { name: string }[]; decision?: string; fresh?: boolean;
+  } };
   reviewed_by?: string;
   reviewed_at?: string;
   review_comment?: string;
@@ -240,7 +244,26 @@ export default function BreaksPage() {
       });
       setShowRequestModal(false);
       setReqReason('');
-      alert(data.autoApproved ? 'تمت الموافقة التلقائية ✅' : 'تم إرسال الطلب بنجاح');
+      // Show the live queue impact behind the decision
+      const lv = data.liveImpact;
+      let msg = data.autoApproved
+        ? '✅ تمت الموافقة التلقائية — وضع الطوابير يسمح'
+        : '⏳ الطلب قيد مراجعة الـ RTA';
+      if (lv?.availableNow != null) {
+        msg += `\n\nالتأثير المباشر:\n• المتاحين الآن: ${lv.availableNow} ← ${lv.availableAfter} بعد الموافقة`
+            + `\n• عملاء بالانتظار: ${lv.totalWaiting}`
+            + `\n• طوابير بخطر: ${lv.atRiskQueues?.length ?? 0}`;
+        if (!data.autoApproved) {
+          const REASONS: Record<string, string> = {
+            pending_no_live_data:   'السبب: لا توجد بيانات حية من سبرينكلر',
+            pending_queues_at_risk: 'السبب: يوجد طوابير تحت الخطر الآن',
+            pending_low_coverage:   `السبب: التغطية ستنزل تحت الحد الأدنى (${lv.minAvailableThreshold} متاحين)`,
+            pending_schedule_gap:   'السبب: فجوة في تغطية الجدول',
+          };
+          msg += `\n${REASONS[lv.decision] ?? ''}`;
+        }
+      }
+      alert(msg);
       load();
     } catch (e: any) {
       alert(e?.response?.data?.message ?? 'Failed to submit request');
@@ -611,6 +634,31 @@ export default function BreaksPage() {
                             </div>
                           ))}
                         </div>
+
+                        {/* Live queue impact at submission time (Sprinklr bridge) */}
+                        {(() => {
+                          const lv = req.coverage_after_json?.live;
+                          if (!lv || lv.availableNow == null) return null;
+                          const risky = (lv.atRiskQueues?.length ?? 0) > 0;
+                          return (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${divider}` }}>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: '#22d3ee', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                📡 {ar ? 'وضع الكيوز وقت الطلب' : 'Live queues at request time'}
+                              </span>
+                              <span style={{ fontSize: 10, color: ts(dark) }}>
+                                {ar ? 'متاحين' : 'Available'}: <b style={{ color: tp(dark) }}>{lv.availableNow}</b> ← <b style={{ color: (lv.availableAfter ?? 0) >= 3 ? '#4ade80' : '#f87171' }}>{lv.availableAfter}</b>
+                              </span>
+                              <span style={{ fontSize: 10, color: ts(dark) }}>
+                                {ar ? 'بالانتظار' : 'Waiting'}: <b style={{ color: tp(dark) }}>{lv.totalWaiting}</b>
+                              </span>
+                              <span style={{ fontSize: 10, color: risky ? '#f87171' : '#4ade80', fontWeight: 700 }}>
+                                {risky
+                                  ? (ar ? `⚠ ${lv.atRiskQueues!.length} طابور بخطر` : `⚠ ${lv.atRiskQueues!.length} queue(s) at risk`)
+                                  : (ar ? '✓ الطوابير سليمة' : '✓ Queues healthy')}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })()}

@@ -11,6 +11,120 @@ export class BreaksService {
     private readonly scheduler: BreakSchedulerService,
   ) {}
 
+  // ── Live queue state (Sprinklr bridge) — drives the auto-approve decision ──
+  // Thresholds: auto-approve only when, AFTER this agent leaves, at least
+  // MIN_AVAILABLE agents remain AND no queue is at risk.
+  private static readonly MIN_AVAILABLE_AFTER_BREAK = 3;
+
+  private async getLiveQueueState(tenantId: string): Promise<{
+    fresh: boolean; capturedAt: string | null;
+    availableNow: number; busyNow: number; onBreakNow: number;
+    totalWaiting: number; atRiskQueues: { name: string; waiting: number; slaPct: number }[];
+  } | null> {
+    try {
+      const [row] = await this.dataSource.query(
+        `SELECT captured_at, queues_json, agents_json FROM integration_snapshots
+         WHERE tenant_id = $1 AND source = 'sprinklr'
+         ORDER BY captured_at DESC LIMIT 1`,
+        [tenantId],
+      );
+      if (!row) return null;
+      const parse = (v: any) => (Array.isArray(v) ? v : JSON.parse(v || '[]'));
+      const agents: any[] = parse(row.agents_json);
+      const queues: any[] = parse(row.queues_json);
+      const atRisk = queues
+        .filter(q => (q.slaPct ?? 100) < 80 || (q.waiting ?? 0) > 50)
+        .map(q => ({ name: q.queueName, waiting: q.waiting ?? 0, slaPct: q.slaPct ?? 100 }));
+      return {
+        fresh:        Date.now() - new Date(row.captured_at).getTime() < 5 * 60_000,
+        capturedAt:   row.captured_at,
+        availableNow: agents.filter(a => a.status === 'available' || a.status === 'idle').length,
+        busyNow:      agents.filter(a => a.status === 'busy').length,
+        onBreakNow:   agents.filter(a => a.status === 'break' || a.status === 'away').length,
+        totalWaiting: queues.reduce((s, q) => s + (q.waiting ?? 0), 0),
+        atRiskQueues: atRisk,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Notifications: employee + RTA/WFM ──────────────────────────────────────
+  private async notifyBreakEvent(tenantId: string, opts: {
+    employeeId: string; requestId: string;
+    status: 'auto_approved' | 'pending' | 'approved' | 'rejected';
+    window: string;             // "14:30–14:45"
+    impactLine?: string;        // EN impact summary
+    impactLineAr?: string;      // AR impact summary
+    reason?: string;
+  }): Promise<void> {
+    const TXT: Record<string, { t: string; ta: string; b: string; ba: string }> = {
+      auto_approved: {
+        t: 'Break auto-approved',           ta: 'تمت الموافقة على البريك تلقائياً',
+        b: `Your break ${opts.window} was auto-approved — queue coverage allows it.`,
+        ba: `بريكك ${opts.window} اعتُمد تلقائياً — وضع الطوابير يسمح.`,
+      },
+      pending: {
+        t: 'Break request pending review',  ta: 'طلب البريك قيد المراجعة',
+        b: `Your break request ${opts.window} needs RTA review. ${opts.impactLine ?? ''}`,
+        ba: `طلب بريكك ${opts.window} يحتاج مراجعة الـ RTA. ${opts.impactLineAr ?? ''}`,
+      },
+      approved: {
+        t: 'Break approved',                ta: 'تمت الموافقة على البريك',
+        b: `Your break ${opts.window} was approved.`,
+        ba: `تمت الموافقة على بريكك ${opts.window}.`,
+      },
+      rejected: {
+        t: 'Break request rejected',        ta: 'تم رفض طلب البريك',
+        b: `Your break request ${opts.window} was rejected. ${opts.reason ?? ''}`,
+        ba: `تم رفض طلب بريكك ${opts.window}. ${opts.reason ?? ''}`,
+      },
+    };
+    const txt = TXT[opts.status];
+
+    try {
+      // 1. The employee (their user account)
+      await this.dataSource.query(
+        `INSERT INTO notifications
+           (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar,
+            entity_type, entity_id, action_url)
+         SELECT $1, u.id, 'break_request', $2, $3, $4, $5, 'break_request', $6, '/breaks'
+         FROM users u WHERE u.tenant_id = $1 AND u.employee_id = $7 AND u.status = 'active'`,
+        [tenantId, txt.t, txt.ta, txt.b, txt.ba, opts.requestId, opts.employeeId],
+      );
+
+      // 2. RTA / WFM — only for events they act on or must watch live
+      if (opts.status === 'pending' || opts.status === 'auto_approved') {
+        const empRows = await this.dataSource.query(
+          `SELECT TRIM(CONCAT(first_name_en,' ',COALESCE(last_name_en,''))) AS name
+           FROM employees WHERE id = $1`, [opts.employeeId]);
+        const empName = empRows?.[0]?.name ?? 'Employee';
+        const rtaTitle   = opts.status === 'pending' ? 'Break request needs review' : 'Break auto-approved';
+        const rtaTitleAr = opts.status === 'pending' ? 'طلب بريك يحتاج مراجعة'      : 'بريك معتمد تلقائياً';
+        await this.dataSource.query(
+          `INSERT INTO notifications
+             (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar,
+              entity_type, entity_id, action_url)
+           SELECT $1, u.id, 'break_request', $2, $3, $4, $5, 'break_request', $6, '/breaks'
+           FROM users u
+           JOIN user_roles ur ON ur.user_id = u.id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE u.tenant_id = $1 AND u.status = 'active'
+             AND r.code IN ('rta', 'wfm_analyst')
+             AND u.username <> 'wfm-bridge'`,
+          [
+            tenantId, rtaTitle, rtaTitleAr,
+            `${empName} — ${opts.window}. ${opts.impactLine ?? ''}`,
+            `${empName} — ${opts.window}. ${opts.impactLineAr ?? ''}`,
+            opts.requestId,
+          ],
+        );
+      }
+    } catch (e: any) {
+      this.logger.warn(`Break notification failed: ${e.message}`);
+    }
+  }
+
   // ── Generate break schedule for a date ──────────────────────────────────────
   async generate(tenantId: string, scheduleDate: string, functionId?: string) {
     const result = await this.scheduler.generateForDate(tenantId, scheduleDate, functionId);
@@ -123,7 +237,7 @@ export class BreaksService {
     reason?: string;
     breakSlotId?: string;
   }) {
-    // Calculate coverage impact
+    // 1. Scheduled coverage impact (from break slots / schedule)
     const coverageBefore = await this.getCoverageSnapshot(tenantId, dto.scheduleDate, dto.requestedStart, dto.requestedEnd);
 
     // Simulate coverage after approving request
@@ -134,8 +248,39 @@ export class BreaksService {
       gap: c.gap - 1,
     }));
 
-    const minGap = Math.min(...coverageAfter.map(c => c.gap));
-    const autoApproveEligible = minGap >= 0; // safe to auto-approve if no gap
+    // Math.min() of an empty array is Infinity — would auto-approve everything!
+    const minGap = coverageAfter.length
+      ? Math.min(...coverageAfter.map(c => c.gap))
+      : null;
+    const scheduledOk = minGap == null ? true : minGap >= 0; // unknown schedule → don't block on it
+
+    // 2. LIVE queue state (Sprinklr bridge) — the real-time gate
+    const live = await this.getLiveQueueState(tenantId);
+    const availableAfter = live ? live.availableNow - 1 : null;
+    const liveOk = !!live && live.fresh
+      && availableAfter! >= BreaksService.MIN_AVAILABLE_AFTER_BREAK
+      && live.atRiskQueues.length === 0;
+
+    // Auto-approve ONLY when both the schedule and the live queues allow it.
+    // No fresh live data → human (RTA) decides.
+    const autoApproveEligible = scheduledOk && liveOk;
+
+    const liveImpact = live ? {
+      capturedAt:     live.capturedAt,
+      fresh:          live.fresh,
+      availableNow:   live.availableNow,
+      availableAfter,
+      busyNow:        live.busyNow,
+      onBreakNow:     live.onBreakNow,
+      totalWaiting:   live.totalWaiting,
+      atRiskQueues:   live.atRiskQueues,
+      decision:       autoApproveEligible ? 'auto_approved'
+                      : !live.fresh ? 'pending_no_live_data'
+                      : live.atRiskQueues.length ? 'pending_queues_at_risk'
+                      : availableAfter! < BreaksService.MIN_AVAILABLE_AFTER_BREAK ? 'pending_low_coverage'
+                      : 'pending_schedule_gap',
+      minAvailableThreshold: BreaksService.MIN_AVAILABLE_AFTER_BREAK,
+    } : { capturedAt: null, fresh: false, decision: 'pending_no_live_data' as const };
 
     const [req] = await this.dataSource.query(
       `INSERT INTO break_requests
@@ -155,9 +300,9 @@ export class BreaksService {
         dto.requestedStart,
         dto.requestedEnd,
         dto.reason ?? null,
-        JSON.stringify(coverageBefore),
-        JSON.stringify(coverageAfter),
-        minGap,
+        JSON.stringify({ intervals: coverageBefore, live: liveImpact }),
+        JSON.stringify({ intervals: coverageAfter,  live: liveImpact }),
+        minGap ?? 0,
         autoApproveEligible,
       ],
     );
@@ -173,11 +318,27 @@ export class BreaksService {
       );
     }
 
+    // Notify the employee + RTA/WFM with the live impact
+    const window = `${dto.requestedStart.slice(0, 5)}–${dto.requestedEnd.slice(0, 5)}`;
+    const lv = liveImpact as any;
+    const impactLine = lv.availableNow != null
+      ? `Available now ${lv.availableNow} → ${lv.availableAfter} after. Waiting: ${lv.totalWaiting}. At-risk queues: ${lv.atRiskQueues?.length ?? 0}.`
+      : 'No live queue data.';
+    const impactLineAr = lv.availableNow != null
+      ? `المتاحين الآن ${lv.availableNow} ← ${lv.availableAfter} بعد الموافقة. بالانتظار: ${lv.totalWaiting}. طوابير بخطر: ${lv.atRiskQueues?.length ?? 0}.`
+      : 'لا توجد بيانات حية من الطوابير.';
+    void this.notifyBreakEvent(tenantId, {
+      employeeId, requestId: req.id,
+      status: autoApproveEligible ? 'auto_approved' : 'pending',
+      window, impactLine, impactLineAr,
+    });
+
     return {
       requestId: req.id,
       status: req.status,
       autoApproved: req.auto_approve_eligible,
       coverageImpact: { before: coverageBefore, after: coverageAfter, minGap },
+      liveImpact,
     };
   }
 
@@ -248,12 +409,12 @@ export class BreaksService {
     if (!req) throw new NotFoundException('Break request not found');
     if (req.status !== 'pending') throw new BadRequestException('Request is not pending');
 
-    // Coverage re-check before approval
+    // Coverage re-check before approval (empty coverage → no data, don't block)
     const coverage = await this.getCoverageSnapshot(
       tenantId, req.schedule_date, req.requested_start, req.requested_end,
     );
-    const minGap = Math.min(...coverage.map(c => c.gap - 1));
-    if (minGap < -1) {
+    const minGap = coverage.length ? Math.min(...coverage.map(c => c.gap - 1)) : null;
+    if (minGap != null && minGap < -1) {
       throw new BadRequestException(
         `Approval would cause critical undercoverage (gap: ${minGap}). Reject or reschedule.`,
       );
@@ -277,13 +438,20 @@ export class BreaksService {
       );
     }
 
+    void this.notifyBreakEvent(tenantId, {
+      employeeId: req.employee_id, requestId,
+      status: 'approved',
+      window: `${String(req.requested_start).slice(0, 5)}–${String(req.requested_end).slice(0, 5)}`,
+    });
+
     return { success: true, message: 'Break request approved.' };
   }
 
   // ── Reject request ───────────────────────────────────────────────────────────
   async rejectRequest(tenantId: string, requestId: string, reviewerId: string, reason: string) {
     const [req] = await this.dataSource.query(
-      `SELECT id, status FROM break_requests WHERE id = $1 AND tenant_id = $2`,
+      `SELECT id, status, employee_id, requested_start, requested_end
+       FROM break_requests WHERE id = $1 AND tenant_id = $2`,
       [requestId, tenantId],
     );
     if (!req) throw new NotFoundException('Break request not found');
@@ -296,6 +464,13 @@ export class BreaksService {
        WHERE id = $3 AND tenant_id = $4`,
       [reviewerId, reason, requestId, tenantId],
     );
+
+    void this.notifyBreakEvent(tenantId, {
+      employeeId: req.employee_id, requestId,
+      status: 'rejected',
+      window: `${String(req.requested_start).slice(0, 5)}–${String(req.requested_end).slice(0, 5)}`,
+      reason,
+    });
 
     return { success: true, message: 'Break request rejected.' };
   }
@@ -464,8 +639,8 @@ export class BreaksService {
         AND hi.interval_start::time <= bs.planned_end
         AND hi.interval_end::time   >= bs.planned_start
        WHERE hi.tenant_id = $1 AND hi.snapshot_date = $2::date
-         AND hi.interval_start >= $3::interval
-         AND hi.interval_end   <= $4::interval
+         AND hi.interval_start::time >= $3::time
+         AND hi.interval_end::time   <= $4::time
        GROUP BY hi.interval_start, hi.interval_end, hi.required_hc, hi.scheduled_hc
        ORDER BY hi.interval_start`,
       [tenantId, scheduleDate, startTime, endTime],

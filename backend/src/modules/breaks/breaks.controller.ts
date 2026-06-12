@@ -142,7 +142,7 @@ export class BreaksController {
     @Param('id') id: string,
     @Body() body: { comment?: string },
   ) {
-    return this.breaksService.approveRequest(req.user.tenantId, id, req.user.sub, body.comment);
+    return this.breaksService.approveRequest(req.user.tenantId, id, req.user.id, body.comment);
   }
 
   // ── Break requests: reject ────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ export class BreaksController {
     @Param('id') id: string,
     @Body() body: { reason: string },
   ) {
-    return this.breaksService.rejectRequest(req.user.tenantId, id, req.user.sub, body.reason);
+    return this.breaksService.rejectRequest(req.user.tenantId, id, req.user.id, body.reason);
   }
 
   // ── Record actual break time (RTA) ────────────────────────────────────────────
