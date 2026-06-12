@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Calendar, ChevronLeft, ChevronRight, Users,
   Filter, RefreshCw, Eye,
@@ -345,7 +346,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
   const accentColor = style.text ?? '#a5b4fc';
   const accentBg    = style.bg  ?? 'rgba(99,102,241,0.15)';
 
-  return (
+  return createPortal(
     <>
       {/* ── Backdrop ── */}
       <div className="fixed inset-0 z-50" style={{ background: 'rgba(2,6,18,0.72)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
@@ -783,7 +784,8 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 

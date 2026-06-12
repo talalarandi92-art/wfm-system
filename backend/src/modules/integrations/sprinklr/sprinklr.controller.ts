@@ -296,6 +296,17 @@ export class SprinklrController {
   }
 
   /**
+   * GET /integrations/sprinklr/metric-keys
+   * Diagnostics: distinct Sprinklr measurement keys captured (with samples) —
+   * used to tune AHT/FRT/Case-Count extraction to the real column names.
+   */
+  @Get('metric-keys')
+  @ApiOperation({ summary: 'Distinct agent metric keys captured from Sprinklr (diagnostics)' })
+  getMetricKeys(@Request() req: any) {
+    return this.sprinklr.getMetricKeys(req.user.tenantId);
+  }
+
+  /**
    * GET /integrations/sprinklr/compliance-config
    * Current violation thresholds (break limit, grace periods…).
    */

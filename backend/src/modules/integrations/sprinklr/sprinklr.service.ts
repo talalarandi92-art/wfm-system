@@ -841,9 +841,48 @@ export class SprinklrService {
   }
 
   // Sprinklr times often come in milliseconds — normalize to seconds.
+  // Threshold 3h: an AHT/FRT above 10,800 "units" is far likelier ms than s
+  // (8s arrives as 8000ms, 11min50s as 710000ms). Tunable once metric-keys
+  // diagnostics confirm the real units.
   private toSeconds(v: number | null): number | null {
     if (v == null) return null;
-    return v > 100_000 ? Math.round(v / 1000) : Math.round(v);
+    return v > 10_800 ? Math.round(v / 1000) : Math.round(v);
+  }
+
+  // ── Diagnostics: which measurement keys is Sprinklr actually sending? ──────
+  // Used to tune pickMetric regexes to the real column names (Agent Case Count,
+  // Agent Case First Response Time, Agent Average Case Handle Time…).
+  async getMetricKeys(tenantId: string) {
+    const snaps: { agents_json: any }[] = await this.dataSource.query(
+      `SELECT agents_json FROM integration_snapshots
+       WHERE tenant_id = $1 AND source = 'sprinklr'
+         AND captured_at > NOW() - interval '6 hours'
+       ORDER BY captured_at DESC LIMIT 200`,
+      [tenantId],
+    );
+    const keys = new Map<string, { samples: number[]; agents: number }>();
+    for (const s of snaps) {
+      const agents: any[] = Array.isArray(s.agents_json) ? s.agents_json : JSON.parse(s.agents_json || '[]');
+      for (const a of agents) {
+        if (!a.metrics) continue;
+        for (const [k, v] of Object.entries(a.metrics)) {
+          if (typeof v !== 'number') continue;
+          const e = keys.get(k) ?? { samples: [], agents: 0 };
+          if (e.samples.length < 5) e.samples.push(v);
+          e.agents++;
+          keys.set(k, e);
+        }
+      }
+    }
+    return {
+      distinctKeys: keys.size,
+      keys: [...keys.entries()]
+        .map(([key, e]) => ({ key, occurrences: e.agents, samples: e.samples }))
+        .sort((a, b) => b.occurrences - a.occurrences),
+      note: keys.size === 0
+        ? 'No agent metrics captured yet — open the Supervisor agents view (Case Count / FRT / Handle Time columns) with extension v16 loaded.'
+        : null,
+    };
   }
 
   async computeDailyStats(tenantId: string, date: string): Promise<{ agents: number }> {
@@ -954,9 +993,15 @@ export class SprinklrService {
         total_break: Math.round(brk),
       };
 
-      const aht       = this.toSeconds(this.pickMetric(g.lastMetrics, [/HANDLE_TIME/, /\bAHT\b/, /HANDLING_TIME/]));
-      const frt       = this.toSeconds(this.pickMetric(g.lastMetrics, [/FIRST_RESPONSE/, /\bFRT\b/, /RESPONSE_TIME/]));
-      const contacts  = this.pickMetric(g.lastMetrics, [/CASE.*HANDLED/, /HANDLED.*CASE/, /CASE_COUNT/, /CASES_RECEIVED/, /MESSAGE_COUNT/, /CONTACT/]);
+      // Patterns match the Supervisor console columns:
+      //  Agent Average Case Handle Time / Agent Case First Response Time / Agent Case Count
+      const aht       = this.toSeconds(this.pickMetric(g.lastMetrics,
+        [/AV(G|ERAGE).*HANDL/i, /HANDL.*TIME/i, /\bAHT\b/i, /PROCESSING_TIME/i]));
+      const frt       = this.toSeconds(this.pickMetric(g.lastMetrics,
+        [/FIRST.*RESPONSE/i, /\bFRT\b/i, /RESPONSE.*TIME/i]));
+      const contacts  = this.pickMetric(g.lastMetrics,
+        [/CASE.*COUNT/i, /COUNT.*CASE/i, /CASE.*HANDLED/i, /HANDLED.*CASE/i,
+         /CASES_RECEIVED/i, /MESSAGE_COUNT/i, /CONTACT/i]);
 
       // Resolve employee: persisted map first, then email/dual-signal resolver
       let employeeId: string | null = null;
@@ -1755,14 +1800,26 @@ export class SprinklrService {
       [tenantId, from, to],
     );
 
-    // Per-day totals for the summary strip
-    const byDate: Record<string, { agents: number; workingMinutes: number; contacts: number }> = {};
+    // Per-day totals for the summary strip — including daily avg AHT/FRT
+    const byDate: Record<string, {
+      agents: number; workingMinutes: number; contacts: number;
+      avgAhtSec: number | null; avgFrtSec: number | null;
+    }> = {};
+    const accum: Record<string, { aht: number[]; frt: number[] }> = {};
     for (const r of rows) {
       const d = String(r.stat_date).slice(0, 10);
-      byDate[d] = byDate[d] || { agents: 0, workingMinutes: 0, contacts: 0 };
+      byDate[d] = byDate[d] || { agents: 0, workingMinutes: 0, contacts: 0, avgAhtSec: null, avgFrtSec: null };
+      accum[d] = accum[d] || { aht: [], frt: [] };
       byDate[d].agents++;
       byDate[d].workingMinutes += +r.total_working_minutes || 0;
       byDate[d].contacts       += +r.contacts_received     || 0;
+      if (r.aht_seconds != null && +r.aht_seconds > 0) accum[d].aht.push(+r.aht_seconds);
+      if (r.avg_response_seconds != null && +r.avg_response_seconds > 0) accum[d].frt.push(+r.avg_response_seconds);
+    }
+    for (const d of Object.keys(byDate)) {
+      const a = accum[d];
+      byDate[d].avgAhtSec = a.aht.length ? Math.round(a.aht.reduce((x, y) => x + y, 0) / a.aht.length) : null;
+      byDate[d].avgFrtSec = a.frt.length ? Math.round(a.frt.reduce((x, y) => x + y, 0) / a.frt.length) : null;
     }
 
     return { from, to, days: byDate, rows };

@@ -1618,7 +1618,10 @@ interface DailyRow {
 }
 interface DailyReport {
   from: string; to: string;
-  days: Record<string, { agents: number; workingMinutes: number; contacts: number }>;
+  days: Record<string, {
+    agents: number; workingMinutes: number; contacts: number;
+    avgAhtSec?: number | null; avgFrtSec?: number | null;
+  }>;
   rows: DailyRow[];
 }
 interface ContactForecast {
@@ -1760,6 +1763,12 @@ function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRefresh, 
                 <span>👥 {tot?.agents ?? dayRows.length}</span>
                 <span>⏱ {fmtMin(tot?.workingMinutes ?? 0)}</span>
                 <span>📨 {tot?.contacts || '—'}</span>
+                <span title={ar ? 'متوسط زمن المعالجة لليوم' : 'Daily avg handle time'}>
+                  AHT <b style={{ color: tot?.avgAhtSec ? '#fbbf24' : '#475569' }}>{fmtSec(tot?.avgAhtSec ?? null)}</b>
+                </span>
+                <span title={ar ? 'متوسط زمن أول رد لليوم' : 'Daily avg first response'}>
+                  FRT <b style={{ color: tot?.avgFrtSec ? '#34d399' : '#475569' }}>{fmtSec(tot?.avgFrtSec ?? null)}</b>
+                </span>
               </div>
             </div>
             <div style={{ overflowX: 'auto' }}>
