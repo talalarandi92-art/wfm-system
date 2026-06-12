@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "WFM Bridge — Sprinklr Connector",
+  "version": "1.2.0",
+  "description": "Reads Sprinklr queue data and syncs it to the WFM Platform in real-time.",
+
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "webRequest"
+  ],
+
+  "host_permissions": [
+    "https://*.sprinklr.com/*",
+    "http://localhost:3000/*",
+    "https://wfm.boutiqaat.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://*.sprinklr.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "WFM Bridge",
+    "default_icon": {
+      "16":  "icons/icon16.png",
+      "32":  "icons/icon32.png",
+      "48":  "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16":  "icons/icon16.png",
+    "32":  "icons/icon32.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["https://*.sprinklr.com/*"]
+    }
+  ]
+}

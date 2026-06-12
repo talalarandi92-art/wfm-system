@@ -10,9 +10,11 @@ import {
   ApiTags, ApiBearerAuth, ApiConsumes, ApiOperation,
   ApiQuery, ApiParam,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { JwtAuthGuard }   from '../../common/guards/jwt-auth.guard';
 import { CurrentUser }    from '../../common/decorators/current-user.decorator';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { ImportService, ImportType } from './import.service';
 
 const ALLOWED_MIME = [
@@ -33,6 +35,8 @@ export class ImportController {
 
   /** Upload workbook → parse → return preview */
   @Post('upload')
+  @RequirePermissions('attendance.import')
+  @Throttle({ default: { ttl: 3600000, limit: 20 } })
   @ApiOperation({ summary: 'Upload an Excel workbook and get a parse preview' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
@@ -113,6 +117,8 @@ export class ImportController {
 
   /** Commit a previewed batch to real tables */
   @Post(':batchId/commit')
+  @RequirePermissions('attendance.import')
+  @Throttle({ default: { ttl: 3600000, limit: 10 } })
   @ApiOperation({ summary: 'Commit a validated import batch to the database' })
   @ApiParam({ name: 'batchId', type: String })
   async commit(
@@ -125,6 +131,7 @@ export class ImportController {
 
   /** List recent import batches */
   @Get()
+  @RequirePermissions('import.view')
   @ApiOperation({ summary: 'List import batches' })
   @ApiQuery({ name: 'type', required: false, enum: ['timing', 'shifts', 'schedule'] })
   async list(

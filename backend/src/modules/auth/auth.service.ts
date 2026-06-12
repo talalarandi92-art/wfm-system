@@ -1,23 +1,92 @@
 import {
-  Injectable, UnauthorizedException, ForbiddenException,
+  Injectable, UnauthorizedException, ForbiddenException, Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 import { User } from '@database/entities/user.entity';
 import { JwtPayload } from './strategies/jwt.strategy';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(User) private usersRepo: Repository<User>,
+    @InjectDataSource() private ds: DataSource,
     private jwtService: JwtService,
     private config: ConfigService,
   ) {}
 
-  async login(email: string, password: string, tenantId?: string) {
+  /** Append an immutable audit entry — failure must NEVER block the caller */
+  private async writeAudit(opts: {
+    tenantId: string;
+    actorId?: string | null;
+    actorEmail?: string | null;
+    action: string;
+    entityId?: string | null;
+    metadata?: Record<string, unknown>;
+    ip?: string | null;
+    userAgent?: string | null;
+  }): Promise<void> {
+    try {
+      // Validate IP — PostgreSQL inet cast rejects malformed values
+      const safeIp = /^[\d:.a-fA-F]+$/.test(opts.ip ?? '') ? opts.ip : null;
+      await this.ds.query(
+        `INSERT INTO audit_logs
+           (tenant_id, actor_id, actor_email, action, module,
+            entity_type, entity_id, metadata, ip_address, user_agent)
+         VALUES ($1, $2, $3, $4, 'auth', 'user', $5, $6::jsonb, $7::inet, $8)`,
+        [
+          opts.tenantId,
+          opts.actorId   ?? null,
+          opts.actorEmail ?? null,
+          opts.action,
+          opts.entityId  ?? null,
+          opts.metadata ? JSON.stringify(opts.metadata) : null,
+          safeIp,
+          opts.userAgent ?? null,
+        ],
+      );
+    } catch (err) {
+      this.logger.warn(`Audit write failed [${opts.action}]: ${err?.message}`);
+    }
+  }
+
+  /** Linked employee summary for the login/me payload (null when not linked) */
+  async getLinkedEmployee(employeeId: string | null) {
+    if (!employeeId) return null;
+    const rows = await this.ds.query(
+      `SELECT e.id, e.employee_no,
+              e.first_name_en || ' ' || e.last_name_en AS full_name,
+              e.gender, f.id AS function_id, f.name AS function_name
+       FROM employees e
+       LEFT JOIN functions f ON f.id = e.function_id
+       WHERE e.id = $1`,
+      [employeeId],
+    );
+    if (!rows.length) return null;
+    const r = rows[0];
+    return {
+      id: r.id,
+      employeeNo: r.employee_no,
+      fullName: r.full_name,
+      gender: r.gender,
+      functionId: r.function_id,
+      functionName: r.function_name,
+    };
+  }
+
+  async login(
+    email: string,
+    password: string,
+    tenantId?: string,
+    ip?: string,
+    userAgent?: string,
+  ) {
     // Load password hash (select: false field needs explicit select)
     const user = await this.usersRepo
       .createQueryBuilder('u')
@@ -29,10 +98,33 @@ export class AuthService {
       .andWhere(tenantId ? 'u.tenantId = :tenantId' : '1=1', { tenantId })
       .getOne();
 
+    // No audit on "user not found" — prevents timing-based user enumeration
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     if (user.status === 'locked') {
-      throw new ForbiddenException('Account is locked. Contact your administrator.');
+      if (user.lockedUntil && user.lockedUntil < new Date()) {
+        // Auto-unlock — lock window has passed
+        await this.ds.query(
+          `UPDATE users SET status='active', failed_attempts=0, locked_at=NULL, locked_until=NULL WHERE id=$1`,
+          [user.id],
+        );
+        user.status = 'active';
+      } else {
+        await this.writeAudit({
+          tenantId: user.tenantId,
+          actorId: user.id,
+          actorEmail: user.email,
+          action: 'LOGIN_BLOCKED',
+          entityId: user.id,
+          metadata: { reason: 'account_locked', lockedUntil: user.lockedUntil?.toISOString() },
+          ip,
+          userAgent,
+        });
+        const until = user.lockedUntil
+          ? ` Locked until ${user.lockedUntil.toISOString()}.`
+          : '';
+        throw new ForbiddenException(`Account is locked. Contact your administrator.${until}`);
+      }
     }
     if (user.status !== 'active') {
       throw new ForbiddenException('Account is not active.');
@@ -40,28 +132,69 @@ export class AuthService {
 
     const passwordValid = await bcrypt.compare(password, user.passwordHash);
     if (!passwordValid) {
-      // Increment failed attempts
+      const maxAttempts = this.config.get<number>('MAX_FAILED_LOGIN_ATTEMPTS', 5);
+      const lockMinutes = this.config.get<number>('LOCK_DURATION_MINUTES', 30);
+      const newAttempts = user.failedAttempts + 1;
+
+      await this.writeAudit({
+        tenantId: user.tenantId,
+        actorId: user.id,
+        actorEmail: user.email,
+        action: 'LOGIN_FAILED',
+        entityId: user.id,
+        metadata: { reason: 'wrong_password', attempt: newAttempts, maxAttempts },
+        ip,
+        userAgent,
+      });
+
       await this.usersRepo.update(user.id, {
         failedAttempts: () => 'failed_attempts + 1',
       });
 
-      const maxAttempts = this.config.get<number>('MAX_FAILED_LOGIN_ATTEMPTS', 5);
-      if (user.failedAttempts + 1 >= maxAttempts) {
+      if (newAttempts >= maxAttempts) {
+        const lockedUntil = new Date(Date.now() + lockMinutes * 60 * 1000);
         await this.usersRepo.update(user.id, {
           status: 'locked',
           lockedAt: new Date(),
+          lockedUntil,
         });
-        throw new ForbiddenException('Account locked after too many failed attempts.');
+        await this.writeAudit({
+          tenantId: user.tenantId,
+          actorId: user.id,
+          actorEmail: user.email,
+          action: 'ACCOUNT_LOCKED',
+          entityId: user.id,
+          metadata: { lockedUntil: lockedUntil.toISOString(), lockMinutes },
+          ip,
+          userAgent,
+        });
+        throw new ForbiddenException(
+          `Account locked after too many failed attempts. Try again after ${lockMinutes} minutes.`,
+        );
       }
 
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Reset failed attempts on success
+    // Successful login
     await this.usersRepo.update(user.id, {
       failedAttempts: 0,
       lastLoginAt: new Date(),
     });
+
+    await this.writeAudit({
+      tenantId: user.tenantId,
+      actorId: user.id,
+      actorEmail: user.email,
+      action: 'LOGIN_SUCCESS',
+      entityId: user.id,
+      metadata: { roles: user.roles?.map(r => r.code) ?? [] },
+      ip,
+      userAgent,
+    });
+
+    // Lazy cleanup — purge expired blacklist rows on each successful login
+    this.ds.query(`DELETE FROM revoked_tokens WHERE expires_at < NOW()`).catch(() => {});
 
     return this.issueTokenPair(user);
   }
@@ -104,11 +237,58 @@ export class AuthService {
     return this.issueTokenPair(user);
   }
 
-  async logout(userId: string) {
+  async logout(
+    userId: string,
+    tenantId?: string,
+    ip?: string,
+    userAgent?: string,
+    actorEmail?: string,
+    jti?: string,
+  ) {
+    // Revoke refresh token (DB hash cleared)
     await this.usersRepo.update(userId, {
       refreshTokenHash: null,
       refreshTokenExpiresAt: null,
     });
+
+    // Blacklist the access token's JTI until its natural expiry elapses.
+    if (jti) {
+      const expiresAt = new Date(
+        Date.now() + this.parseExpiryMs(
+          this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m'),
+        ) + 60_000, // +1 min buffer
+      );
+      await this.ds
+        .query(
+          `INSERT INTO revoked_tokens(jti, user_id, expires_at)
+           VALUES ($1, $2, $3) ON CONFLICT (jti) DO NOTHING`,
+          [jti, userId, expiresAt],
+        )
+        .catch((err) =>
+          this.logger.warn(`Failed to blacklist token JTI: ${err?.message}`),
+        );
+    }
+
+    if (tenantId) {
+      await this.writeAudit({
+        tenantId,
+        actorId: userId,
+        actorEmail: actorEmail ?? null,
+        action: 'LOGOUT',
+        entityId: userId,
+        metadata: jti ? { jtiRevoked: true } : undefined,
+        ip,
+        userAgent,
+      });
+    }
+  }
+
+  private parseExpiryMs(expiry: string): number {
+    const match = /^(\d+)([smhd])$/.exec(expiry);
+    if (!match) return 15 * 60 * 1000;
+    const n = parseInt(match[1], 10);
+    const units: Record<string, number> = { s: 1e3, m: 60e3, h: 3600e3, d: 86400e3 };
+    return n * (units[match[2]] ?? 60e3);
   }
 
   private async issueTokenPair(user: User) {
@@ -116,6 +296,7 @@ export class AuthService {
       sub: user.id,
       tenantId: user.tenantId,
       email: user.email,
+      jti: randomUUID(), // unique per-token ID — enables revocation on logout
     };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -139,6 +320,8 @@ export class AuthService {
       refreshTokenExpiresAt: expiresAt,
     });
 
+    const employee = await this.getLinkedEmployee(user.employeeId ?? null);
+
     return {
       accessToken,
       refreshToken,
@@ -152,6 +335,8 @@ export class AuthService {
         mustChangePassword: user.mustChangePassword,
         roles: user.roles?.map(r => r.code) ?? [],
         permissions: user.permissionCodes,
+        employeeId: user.employeeId ?? null,
+        employee,
       },
     };
   }

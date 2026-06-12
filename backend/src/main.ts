@@ -5,6 +5,9 @@ import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import * as cookieParser from 'cookie-parser';
 import * as compression from 'compression';
+import * as express from 'express';
+import * as path from 'path';
+import * as fs from 'fs';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -62,6 +65,11 @@ async function bootstrap() {
       swaggerOptions: { persistAuthorization: true },
     });
   }
+
+  // Serve uploaded files (outage attachments, etc.)
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+  app.use('/uploads', express.static(uploadsDir));
 
   // Graceful shutdown
   app.enableShutdownHooks();

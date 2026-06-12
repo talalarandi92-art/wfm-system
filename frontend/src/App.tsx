@@ -5,7 +5,25 @@ import { useAuthStore } from '@/store/auth.store';
 import { authApi } from '@/api/client';
 import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
-import ImportPage from '@/pages/Import';
+import ImportPage          from '@/pages/Import';
+import AttendanceDashboard from '@/pages/AttendanceDashboard';
+import SchedulePage           from '@/pages/Schedule';
+import ScheduleGeneratorPage from '@/pages/ScheduleGenerator';
+import ShiftRotationPage      from '@/pages/ShiftRotation';
+import RequestsPage            from '@/pages/Requests';
+import CapacityPage            from '@/pages/Capacity';
+import EmployeeMergePage       from '@/pages/EmployeeMerge';
+import UserManagementPage      from '@/pages/UserManagement';
+import EmployeesPage           from '@/pages/Employees';
+import RTAPage                 from '@/pages/RTA';
+import OutagesPage             from '@/pages/Outages';
+import TechnicalIssuesPage     from '@/pages/TechnicalIssues';
+import ScorecardPage           from '@/pages/Scorecard';
+import BreaksPage              from '@/pages/Breaks';
+import ReportsPage             from '@/pages/Reports';
+import SettingsPage            from '@/pages/Settings';
+import CalendarPage            from '@/pages/Calendar';
+import SkillsPage              from '@/pages/Skills';
 import Placeholder from '@/pages/Placeholder';
 import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -16,7 +34,8 @@ export default function App() {
 
   // Apply direction and dark mode on mount / lang change
   useEffect(() => {
-    document.documentElement.lang = lang;
+    // Use ar-u-hc-h23 to keep Arabic text support while forcing 24h clock in datetime pickers
+    document.documentElement.lang = lang === 'ar' ? 'ar-u-hc-h23' : 'en-GB';
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     document.documentElement.classList.toggle('dark', dark);
   }, [lang, dark]);
@@ -47,18 +66,25 @@ export default function App() {
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard"  element={<Dashboard />} />
-          <Route path="schedule"   element={<Placeholder title="Schedule" />} />
-          <Route path="attendance" element={<Placeholder title="Attendance" />} />
-          <Route path="requests"   element={<Placeholder title="Requests" />} />
-          <Route path="capacity"   element={<Placeholder title="Capacity Planning" />} />
-          <Route path="rta"        element={<Placeholder title="Live Monitoring" />} />
-          <Route path="outages"    element={<Placeholder title="Outages" />} />
-          <Route path="scorecard"  element={<Placeholder title="Scorecard" />} />
-          <Route path="employees"  element={<Placeholder title="Employees" />} />
-          <Route path="users"      element={<Placeholder title="Users" />} />
+          <Route path="schedule"     element={<SchedulePage />} />
+          <Route path="generator"   element={<ScheduleGeneratorPage />} />
+          <Route path="rotation"    element={<ShiftRotationPage />} />
+          <Route path="attendance" element={<AttendanceDashboard />} />
+          <Route path="requests"   element={<RequestsPage />} />
+          <Route path="breaks"     element={<BreaksPage />} />
+          <Route path="capacity"   element={<CapacityPage />} />
+          <Route path="rta"              element={<RTAPage />} />
+          <Route path="outages"         element={<OutagesPage />} />
+          <Route path="technical-issues" element={<TechnicalIssuesPage />} />
+          <Route path="scorecard"  element={<ScorecardPage />} />
+          <Route path="employees"  element={<EmployeesPage />} />
+          <Route path="employee-merge" element={<EmployeeMergePage />} />
+          <Route path="users"      element={<UserManagementPage />} />
           <Route path="import"     element={<ImportPage />} />
-          <Route path="reports"    element={<Placeholder title="Reports" />} />
-          <Route path="settings"   element={<Placeholder title="Settings" />} />
+          <Route path="reports"    element={<ReportsPage />} />
+          <Route path="settings"   element={<SettingsPage />} />
+          <Route path="calendar"   element={<CalendarPage />} />
+          <Route path="skills"     element={<SkillsPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -1,3 +1,12 @@
+export interface LinkedEmployee {
+  id: string;
+  employeeNo: string;
+  fullName: string;
+  gender: string;
+  functionId: string | null;
+  functionName: string | null;
+}
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -7,6 +16,8 @@ export interface AuthUser {
   mustChangePassword: boolean;
   roles: string[];
   permissions: string[];
+  employeeId?: string | null;
+  employee?: LinkedEmployee | null;
 }
 
 export interface LoginResponse {

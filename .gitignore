@@ -87,3 +87,12 @@ ormconfig.ts
 
 # --- Duplicate instruction file artifacts ---
 CLAUDE.md.md
+
+# --- Runtime artefacts (local dev servers) ---
+*.pid
+server.out
+server.err
+backend/server.out
+backend/server.err
+frontend/frontend.out
+frontend/frontend.err

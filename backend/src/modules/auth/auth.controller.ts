@@ -1,6 +1,7 @@
 import {
-  Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get,
+  Controller, Post, Body, UseGuards, HttpCode, HttpStatus, Get, Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import {
   ApiTags, ApiOperation, ApiBearerAuth, ApiOkResponse,
 } from '@nestjs/swagger';
@@ -24,8 +25,10 @@ export class AuthController {
   @Throttle({ default: { ttl: 60000, limit: 10 } }) // Stricter limit on login
   @ApiOperation({ summary: 'Login — returns access + refresh tokens' })
   @ApiOkResponse({ description: 'JWT token pair and user context' })
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto.email, dto.password);
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip;
+    const userAgent = req.headers['user-agent'];
+    return this.authService.login(dto.email, dto.password, undefined, ip, userAgent);
   }
 
   @Public()
@@ -41,15 +44,25 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Logout — revokes refresh token' })
-  logout(@CurrentUser() user: User) {
-    return this.authService.logout(user.id);
+  logout(@CurrentUser() user: User, @Req() req: Request) {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip;
+    const userAgent = req.headers['user-agent'];
+    return this.authService.logout(
+      user.id,
+      (user as any).tenantId,
+      ip,
+      userAgent,
+      (user as any).email ?? user.email,
+      (user as any).jti,  // JTI attached by JwtStrategy.validate() for blacklisting
+    );
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Get current user profile and permissions' })
-  me(@CurrentUser() user: User) {
+  async me(@CurrentUser() user: User) {
+    const employee = await this.authService.getLinkedEmployee(user.employeeId ?? null);
     return {
       id: user.id,
       email: user.email,
@@ -59,6 +72,8 @@ export class AuthController {
       mustChangePassword: user.mustChangePassword,
       roles: user.roles?.map(r => r.code) ?? [],
       permissions: user.permissionCodes,
+      employeeId: user.employeeId ?? null,
+      employee,
     };
   }
 }

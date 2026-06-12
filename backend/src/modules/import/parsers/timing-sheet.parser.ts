@@ -69,6 +69,45 @@ function toTimeStr(val: any): string | null {
   return null;
 }
 
+/**
+ * Parse human time-range text like "10 PM - 5 AM" or the split form
+ * "3 PM - 5 PM / 7 PM - 12 AM" (used by Ramadan shifts in the Timing sheet).
+ */
+function parseTimeRangeText(val: any): {
+  start: string | null; end: string | null;
+  start2: string | null; end2: string | null;
+} | null {
+  if (typeof val !== 'string') return null;
+  const t = val.trim();
+  if (!t.includes('-')) return null;
+
+  const toHHMM = (s: string): string | null => {
+    const m = s.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+    if (!m) return null;
+    let h = parseInt(m[1]) % 12;
+    if (/pm/i.test(m[3])) h += 12;
+    return `${String(h).padStart(2, '0')}:${m[2] ?? '00'}`;
+  };
+
+  const segments = t.split('/').map(s => s.trim()).filter(Boolean);
+  const ranges: Array<{ start: string; end: string }> = [];
+  for (const seg of segments) {
+    const parts = seg.split('-').map(s => s.trim());
+    if (parts.length !== 2) return null;
+    const start = toHHMM(parts[0]);
+    const end   = toHHMM(parts[1]);
+    if (!start || !end) return null;
+    ranges.push({ start, end });
+  }
+  if (!ranges.length) return null;
+  return {
+    start:  ranges[0].start,
+    end:    ranges[0].end,
+    start2: ranges[1]?.start ?? null,
+    end2:   ranges[1]?.end   ?? null,
+  };
+}
+
 function toNumber(val: any): number | null {
   if (val == null || val === '' || val === '-') return null;
   const n = parseFloat(String(val));
@@ -149,19 +188,29 @@ export function parseTimingSheet(
     };
   }
 
-  // Detect header row — scan up to 15 rows, look for any time-like or code-like header
-  let headerRowIdx = 0;
+  // Detect header row — first prefer a row with an explicit code-column header
+  // ("Shift Mark", "Code"…), because banner rows like "Normal Shifts |
+  // Ramadan Shifts | Shift Start Time" above it also contain time-like text.
+  const CODE_HEADER = /^(code|shift.?mark|shift.?code|كود|رمز|الكود|الشيفت)$/i;
+  let headerRowIdx = -1;
   for (let i = 0; i < Math.min(15, raw.length); i++) {
     const row = raw[i].map((c: any) => String(c ?? '').toLowerCase().trim());
-    const hasCodeLike = row.some(c =>
-      /code|shift|كود|رمز|الشيفت|الكود|رمز.?الشيفت|shift.?code/i.test(c)
-    );
-    const hasTimeLike = row.some(c =>
-      /start|end|time|بداية|نهاية|وقت|from|to/i.test(c)
-    );
-    if (hasCodeLike || hasTimeLike) {
-      headerRowIdx = i;
-      break;
+    if (row.some(c => CODE_HEADER.test(c))) { headerRowIdx = i; break; }
+  }
+  if (headerRowIdx < 0) {
+    headerRowIdx = 0;
+    for (let i = 0; i < Math.min(15, raw.length); i++) {
+      const row = raw[i].map((c: any) => String(c ?? '').toLowerCase().trim());
+      const hasCodeLike = row.some(c =>
+        /code|shift|كود|رمز|الشيفت|الكود|رمز.?الشيفت|shift.?code/i.test(c)
+      );
+      const hasTimeLike = row.some(c =>
+        /start|end|time|بداية|نهاية|وقت|from|to/i.test(c)
+      );
+      if (hasCodeLike || hasTimeLike) {
+        headerRowIdx = i;
+        break;
+      }
     }
   }
 
@@ -176,6 +225,7 @@ export function parseTimingSheet(
   // Code column — very broad set of patterns
   let colCode = col([
     /^code$/,
+    /^shift.?mark$/,
     /shift.?code/,
     /code.?shift/,
     /^shift$/,
@@ -231,18 +281,51 @@ export function parseTimingSheet(
   const results: ParsedShiftCode[] = [];
   const errors: string[] = [];
 
+  // First occurrence wins: the sheet repeats the same codes lower down in a
+  // "Ramadan Shifts" section with different times — the Normal Shifts section
+  // at the top is the authoritative definition for duplicated codes.
+  const mainSeen = new Set<string>();
+
   for (let i = headerRowIdx + 1; i < raw.length; i++) {
     const row = raw[i];
     const rawCode = row[colCode];
     if (rawCode == null || String(rawCode).trim() === '') continue;
 
     const code = String(rawCode).trim().toUpperCase();
+    if (mainSeen.has(code)) continue;
+    if (/^shift.?mark$/i.test(code)) continue; // repeated section headers
+    mainSeen.add(code);
     const warnings: string[] = [];
 
-    const startTime  = toTimeStr(colStart  >= 0 ? row[colStart]  : null);
-    const endTime    = toTimeStr(colEnd    >= 0 ? row[colEnd]    : null);
-    const startTime2 = toTimeStr(colStart2 >= 0 ? row[colStart2] : null);
-    const endTime2   = toTimeStr(colEnd2   >= 0 ? row[colEnd2]   : null);
+    const rawStart = colStart >= 0 ? row[colStart] : null;
+    const rawEnd   = colEnd   >= 0 ? row[colEnd]   : null;
+
+    let startTime  = toTimeStr(rawStart);
+    let endTime    = toTimeStr(rawEnd);
+    let startTime2 = toTimeStr(colStart2 >= 0 ? row[colStart2] : null);
+    let endTime2   = toTimeStr(colEnd2   >= 0 ? row[colEnd2]   : null);
+
+    // Time cell may hold a text range like "10 PM - 5 AM" or a split
+    // "3 PM - 5 PM / 7 PM - 12 AM" (Ramadan style)
+    if (!startTime) {
+      const range = parseTimeRangeText(rawStart);
+      if (range) {
+        startTime  = range.start;
+        endTime    = endTime ?? range.end;
+        startTime2 = startTime2 ?? range.start2;
+        endTime2   = endTime2 ?? range.end2;
+      }
+    }
+
+    // Leave/absence rows hold their label in the time columns
+    // ("OFF | Day Off | Day Off", "AMS | 07:00 | Sick Leave")
+    let textDescription: string | null = null;
+    for (const v of [rawStart, rawEnd]) {
+      if (typeof v === 'string' && v.trim() && !toTimeStr(v) && !parseTimeRangeText(v)) {
+        textDescription = v.trim();
+        break;
+      }
+    }
     const workingHours = toNumber(colWork  >= 0 ? row[colWork]  : null);
     const breakHours   = toNumber(colBreak >= 0 ? row[colBreak] : null);
     const totalHours   = toNumber(colTotal >= 0 ? row[colTotal] : null);
@@ -267,7 +350,7 @@ export function parseTimingSheet(
 
     results.push({
       code,
-      description: colDesc >= 0 ? String(row[colDesc] ?? '').trim() || null : null,
+      description: (colDesc >= 0 ? String(row[colDesc] ?? '').trim() || null : null) ?? textDescription,
       startTime,
       endTime,
       startTime2,
@@ -288,6 +371,60 @@ export function parseTimingSheet(
       rowNumber: i + 1,
       warnings,
     });
+  }
+
+  // ── Ramadan side block ─────────────────────────────────────────────────────
+  // The Boutiqaat Timing sheet has a second column group headed "Ramadan
+  // Shifts" (codes MR/BR/CR/… with times in the next one or two cells).
+  const seenCodes = new Set(results.map(r => r.code));
+  for (let r = 0; r < Math.min(5, raw.length); r++) {
+    for (let c = 0; c < (raw[r]?.length ?? 0); c++) {
+      if (c === colCode) continue;
+      if (!/ramadan/i.test(String(raw[r]?.[c] ?? ''))) continue;
+
+      let blanks = 0;
+      for (let i = r + 1; i < raw.length && blanks < 3; i++) {
+        const rawCode = String(raw[i]?.[c] ?? '').trim();
+        if (!rawCode) { blanks++; continue; }
+        blanks = 0;
+        if (!/^[A-Za-z][A-Za-z0-9]{0,9}$/.test(rawCode)) continue;
+        const code = rawCode.toUpperCase();
+        if (seenCodes.has(code)) continue;
+        seenCodes.add(code);
+
+        const cell1 = raw[i]?.[c + 1];
+        const cell2 = raw[i]?.[c + 2];
+        const range = parseTimeRangeText(cell1);
+        const startTime  = toTimeStr(cell1) ?? range?.start ?? null;
+        const endTime    = toTimeStr(cell2) ?? range?.end   ?? null;
+        const startTime2 = range?.start2 ?? null;
+        const endTime2   = range?.end2   ?? null;
+
+        results.push({
+          code,
+          description: 'Ramadan shift',
+          startTime,
+          endTime,
+          startTime2,
+          endTime2,
+          workingHours: null,
+          breakHours: null,
+          totalHours: null,
+          isSplitShift: startTime2 != null && endTime2 != null,
+          isCrossMidnight: detectCrossMidnight(startTime, endTime),
+          isWfh: /wfh/i.test(code),
+          isRamadan: true,
+          isSupervisorShift: /20$/.test(code),
+          isWorkingShift: true,
+          isLeaveCode: false,
+          isAbsenceCode: false,
+          allowsFemale: /^(MD|MN)/i.test(code) === false,
+          source: 'timing_sheet',
+          rowNumber: i + 1,
+          warnings: [],
+        });
+      }
+    }
   }
 
   return { rows: results, errors };

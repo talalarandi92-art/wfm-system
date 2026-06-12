@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!-- Run this file in browser, right-click each canvas → Save as PNG -->
+<html><body>
+<script>
+const sizes = [16, 32, 48, 128];
+sizes.forEach(s => {
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const ctx = c.getContext('2d');
+  // Background
+  const g = ctx.createLinearGradient(0,0,s,s);
+  g.addColorStop(0,'#4f46e5'); g.addColorStop(1,'#7c3aed');
+  ctx.fillStyle = g;
+  const r = s * 0.22;
+  ctx.beginPath();
+  ctx.moveTo(r,0); ctx.lineTo(s-r,0); ctx.quadraticCurveTo(s,0,s,r);
+  ctx.lineTo(s,s-r); ctx.quadraticCurveTo(s,s,s-r,s);
+  ctx.lineTo(r,s); ctx.quadraticCurveTo(0,s,0,s-r);
+  ctx.lineTo(0,r); ctx.quadraticCurveTo(0,0,r,0);
+  ctx.fill();
+  // Coffee emoji
+  ctx.font = `${s*0.55}px serif`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('☕', s/2, s/2+s*0.03);
+  c.style.margin='4px'; document.body.appendChild(c);
+  c.title = `icon${s}.png — right-click → Save image`;
+});
+</script>
+<p style="font-family:sans-serif;color:#333">Right-click each icon → "Save image as" → save to icons/ folder as icon16.png, icon32.png, icon48.png, icon128.png</p>
+</body></html>

@@ -44,6 +44,9 @@ export class User {
   @Column({ name: 'locked_at', type: 'timestamptz', nullable: true })
   lockedAt: Date;
 
+  @Column({ name: 'locked_until', type: 'timestamptz', nullable: true })
+  lockedUntil: Date | null;
+
   @Column({ name: 'must_change_password', default: true })
   mustChangePassword: boolean;
 
