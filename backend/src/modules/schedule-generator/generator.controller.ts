@@ -59,6 +59,21 @@ export class GeneratorController {
     return this.svc.generate(req.user.tenantId, body.weekStart, body.functionIds, body.options);
   }
 
+  /**
+   * POST /schedule-generator/generate-demand
+   * Demand-driven generation: shift mix optimized against the measured
+   * required-HC curve (capacity live-plan), then roster assignment under
+   * gender/rest/consecutive/fairness rules. Gaps reported honestly.
+   */
+  @Post('generate-demand')
+  @RequirePermissions('schedule.generate')
+  generateDemand(
+    @Request() req: any,
+    @Body() body: { weekStart: string; options?: any },
+  ) {
+    return this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
+  }
+
   /** Save generated schedule as draft */
   @Post('save')
   @RequirePermissions('schedule.create')

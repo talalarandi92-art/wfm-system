@@ -111,17 +111,40 @@ export class SprinklrService {
     }
 
     // Filter out DOM-scraping artefacts (date-range text picked up as queue name)
-    const queues = snap.queues.filter(q =>
+    const rawQueues = snap.queues.filter(q =>
       q.queueName &&
       !/^Selected date/i.test(q.queueName) &&
       !/^\d{2}\/\d{2}\/\d{4}/.test(q.queueName) &&
       q.queueName.length < 100,
     );
 
+    // Build per-queue agent counts from agent-level statuses as fallback when
+    // queue-level agentsAvailable / agentsBusy are not populated (0).
+    const agentsByQueue: Record<string, { avail: number; busy: number }> = {};
+    for (const a of snap.agents) {
+      const qid = a.queueId;
+      if (!qid) continue;
+      if (!agentsByQueue[qid]) agentsByQueue[qid] = { avail: 0, busy: 0 };
+      if (a.status === 'available' || a.status === 'idle') agentsByQueue[qid].avail++;
+      if (a.status === 'busy' || a.status === 'away') agentsByQueue[qid].busy++;
+    }
+
+    const queues = rawQueues.map(q => ({
+      ...q,
+      agentsAvailable: q.agentsAvailable || agentsByQueue[q.queueId]?.avail || 0,
+      agentsBusy:      q.agentsBusy      || agentsByQueue[q.queueId]?.busy || 0,
+    }));
+
+    // Total available: prefer queue-level sums; fall back to all-agent counts
+    const totalAvailableFromQueues = queues.reduce((s, q) => s + q.agentsAvailable, 0);
+    const totalBusyFromQueues      = queues.reduce((s, q) => s + q.agentsBusy, 0);
+    const allAvailAgents = snap.agents.filter(a => a.status === 'available' || a.status === 'idle').length;
+    const allBusyAgents  = snap.agents.filter(a => a.status === 'busy' || a.status === 'away').length;
+
     const totalWaiting   = queues.reduce((s, q) => s + q.waiting, 0);
     const totalInProgress= queues.reduce((s, q) => s + q.inProgress, 0);
-    const totalAvailable = queues.reduce((s, q) => s + q.agentsAvailable, 0);
-    const totalBusy      = queues.reduce((s, q) => s + q.agentsBusy, 0);
+    const totalAvailable = totalAvailableFromQueues || allAvailAgents;
+    const totalBusy      = totalBusyFromQueues      || allBusyAgents;
     const avgSla         = queues.length
       ? queues.reduce((s, q) => s + (q.slaPct ?? 100), 0) / queues.length
       : 100;
@@ -228,11 +251,11 @@ export class SprinklrService {
 
   private mapAgentStatus(raw: string): SprinklrSnapshot['agents'][0]['status'] {
     const s = (raw || '').toLowerCase();
-    if (s.includes('available') || s.includes('online')) return 'available';
-    if (s.includes('busy') || s.includes('engaged'))     return 'busy';
-    if (s.includes('break'))                             return 'break';
-    if (s.includes('away') || s.includes('wrap'))        return 'away';
-    if (s.includes('offline'))                           return 'offline';
+    if (s.includes('available') || s.includes('online') || s.includes('idle') || s.includes('ready') || s.includes('logged in') || s.includes('loggedin')) return 'available';
+    if (s.includes('busy') || s.includes('engaged') || s.includes('handling') || s.includes('active')) return 'busy';
+    if (s.includes('break') || s.includes('bio') || s.includes('lunch') || s.includes('prayer') || s.includes('tea')) return 'break';
+    if (s.includes('away') || s.includes('wrap') || s.includes('acw')) return 'away';
+    if (s.includes('offline') || s.includes('logged out') || s.includes('loggedout')) return 'offline';
     return 'unknown';
   }
 

@@ -560,9 +560,10 @@ export class CapacityService {
     const concurrency  = opts?.concurrency ?? 4;          // Boutiqaat confirmed
     const effPerAgent  = effectiveServersPerAgent(concurrency);
 
-    // 1. Snapshots for the operational day (Kuwait)
-    const snaps: { captured_at: string; queues_json: any }[] = await this.ds.query(
-      `SELECT captured_at, queues_json FROM integration_snapshots
+    // 1. Snapshots for the operational day (Kuwait) — queues for workload,
+    //    agents for the ACTUAL live headcount per interval
+    const snaps: { captured_at: string; queues_json: any; agents_json: any }[] = await this.ds.query(
+      `SELECT captured_at, queues_json, agents_json FROM integration_snapshots
        WHERE tenant_id = $1 AND source = 'sprinklr'
          AND captured_at BETWEEN ($2::date::timestamptz - interval '3 hours')
                              AND ($2::date::timestamptz + interval '21 hours')
@@ -583,10 +584,21 @@ export class CapacityService {
 
     type Acc = { inProg: number[]; waiting: number[] };
     const byInterval: Map<number, Map<string, Acc>> = new Map();
+    const onlineByInterval: Map<number, number[]> = new Map();  // actual live HC samples
+    const ONLINE_STATUSES = new Set(['available', 'idle', 'busy']);
 
     for (const s of snaps) {
       const idx = Math.floor((new Date(s.captured_at).getTime() - dayStart) / (30 * 60000));
       if (idx < 0 || idx >= 48) continue;
+
+      // Actual headcount: agents online in this snapshot
+      const agents: any[] = parse(s.agents_json);
+      const online = agents.filter(a =>
+        ONLINE_STATUSES.has(a.status) && a.agentId && /^\d/.test(String(a.agentId))).length;
+      const arr = onlineByInterval.get(idx) ?? [];
+      arr.push(online);
+      onlineByInterval.set(idx, arr);
+
       const queues: any[] = parse(s.queues_json);
       const perCh = byInterval.get(idx) ?? new Map<string, Acc>();
       const chAgg: Record<string, { p: number; w: number }> = {};
@@ -625,10 +637,13 @@ export class CapacityService {
         return st < slotMin + 30 && en > slotMin;
       }).length;
 
+      const actualSamples = onlineByInterval.get(i) ?? [];
+      const actualHc = actualSamples.length ? Math.round(avg(actualSamples)) : null;
+
       const perCh = byInterval.get(i);
       if (!perCh) {
-        intervals.push({ interval: label, measured: false, scheduledHc: scheduled,
-          channels: [], totalErlangs: 0, requiredHc: null, gap: null, risk: 'no-data' });
+        intervals.push({ interval: label, measured: false, scheduledHc: scheduled, actualHc,
+          channels: [], totalErlangs: 0, requiredHc: null, gap: null, actualGap: null, risk: 'no-data' });
         continue;
       }
 
@@ -672,7 +687,11 @@ export class CapacityService {
         interval: label, measured: true,
         channels: channels.sort((a, b) => b.erlangs - a.erlangs),
         totalErlangs: +intervalErlangs.toFixed(1),
-        requiredHc: required, scheduledHc: scheduled, gap,
+        requiredHc: required,
+        scheduledHc: scheduled,
+        actualHc,                                       // live online agents (measured)
+        gap,                                            // required − scheduled (plan gap)
+        actualGap: actualHc != null ? required - actualHc : null,  // required − actual (live gap)
         serviceLevel: +serviceLevel(netAgents * effPerAgent, intervalErlangs, targetSec, ahtSec).toFixed(3),
         risk: gap > 3 ? 'critical' : gap > 0 ? 'warning' : 'ok',
       });

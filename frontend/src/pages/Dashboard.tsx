@@ -105,31 +105,30 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
       {/* top accent */}
       <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background: hov?color:`${color}30`, borderRadius:'16px 16px 0 0', transition:'background 0.2s' }} />
 
-      {/* header row */}
-      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:10, gap:6 }}>
-        <div style={{ display:'flex', alignItems:'flex-start', gap:7, flex:1, minWidth:0 }}>
-          <div style={{
-            width:28, height:28, borderRadius:8, flexShrink:0,
-            background: hov ? `${color}22` : `${color}15`,
-            display:'flex', alignItems:'center', justifyContent:'center',
-            transition:'background 0.2s', marginTop:1,
-          }}>
-            <Icon size={13} style={{ color, transition:'transform 0.2s', transform: hov?'scale(1.2)':'scale(1)' }} strokeWidth={2.2} />
-          </div>
-          <span style={{ fontSize:11, fontWeight:500, color: dark?'#64748b':'#94a3b8', lineHeight:1.35 }}>
-            {ar ? titleAr : title}
-          </span>
+      {/* header row — icon + title only */}
+      <div style={{ display:'flex', alignItems:'center', gap:7, marginBottom:10 }}>
+        <div style={{
+          width:28, height:28, borderRadius:8, flexShrink:0,
+          background: hov ? `${color}22` : `${color}15`,
+          display:'flex', alignItems:'center', justifyContent:'center',
+          transition:'background 0.2s',
+        }}>
+          <Icon size={13} style={{ color, transition:'transform 0.2s', transform: hov?'scale(1.2)':'scale(1)' }} strokeWidth={2.2} />
         </div>
-        {donut !== undefined && <Donut pct={donut} color={color} size={46} />}
+        <span style={{ fontSize:11, fontWeight:500, color: dark?'#64748b':'#94a3b8', lineHeight:1.35 }}>
+          {ar ? titleAr : title}
+        </span>
       </div>
 
-      {/* value */}
-      <div style={{
-        fontSize:26, fontWeight:800, letterSpacing:'-0.04em', lineHeight:1,
-        color: dark ? '#f1f5f9' : '#0f172a',
-        marginBottom:8,
-      }}>
-        {disp}
+      {/* value row — number + donut side by side */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+        <div style={{
+          fontSize:26, fontWeight:800, letterSpacing:'-0.04em', lineHeight:1,
+          color: dark ? '#f1f5f9' : '#0f172a',
+        }}>
+          {disp}
+        </div>
+        {donut !== undefined && <Donut pct={donut} color={color} size={44} />}
       </div>
 
       {/* trend badge */}
@@ -160,9 +159,12 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
   const d = data.slice(-7);
   if (!d.length) return <div style={{ height:180, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'#64748b' }}>{ar?'لا بيانات':'No data'}</div>;
 
-  const W=480, H=160, PL=36, PB=22, PT=10, PR=10;
+  const W=480, H=220, PL=36, PB=24, PT=18, PR=10;
   const cw=W-PL-PR, ch=H-PT-PB;
-  const maxV = Math.max(...d.map(x=>x.present+x.absent+x.leave), 1);
+
+  const scheduled = d.map(x=>x.present+Math.round((x.absent+x.leave)*0.3+2));
+  const forecast  = d.map(x=>x.present+Math.round((x.absent+x.leave)*0.5+4));
+  const maxV = Math.max(...d.map(x=>x.present+x.absent+x.leave), ...forecast, 1);
 
   const line = (vals: number[], clr: string) => {
     const pts = vals.map((v,i)=>{
@@ -172,9 +174,6 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
     }).join(' ');
     return <polyline points={pts} fill="none" stroke={clr} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />;
   };
-
-  const scheduled = d.map(x=>x.present+Math.round((x.absent+x.leave)*0.3+2));
-  const forecast  = d.map(x=>x.present+Math.round((x.absent+x.leave)*0.5+4));
 
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ overflow:'visible' }}>
@@ -231,7 +230,7 @@ function AdherenceChart({ data, dark, ar }: { data: DashData['trend']; dark: boo
   const d = data.slice(-7);
   if (!d.length) return <div style={{ height:160, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'#64748b' }}>{ar?'لا بيانات':'No data'}</div>;
   const [hov, setHov] = useState<number|null>(null);
-  const W=340, H=160, PL=28, PB=22, PT=10, PR=8;
+  const W=340, H=220, PL=28, PB=24, PT=14, PR=8;
   const cw=W-PL-PR, ch=H-PT-PB;
   const bw = Math.max(Math.floor(cw/d.length)-6, 8);
 
@@ -584,17 +583,21 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </div>
-                <LineChart data={data.trend} dark={dark} ar={ar} />
+                <div style={{ overflow:'hidden' }}>
+                  <LineChart data={data.trend} dark={dark} ar={ar} />
+                </div>
               </div>
 
-              <div style={{ ...card, padding:'18px 20px' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
-                  <div style={{ fontSize:13, fontWeight:600, color:tp }}>{ar?'مسار الالتزام بالجدول':'Schedule Adherence Trend'}</div>
-                  <select style={{ fontSize:11,background:'transparent',border:`1px solid ${dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)'}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer' }}>
+              <div style={{ ...card, padding:'16px 20px' }}>
+                <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12, gap:8 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:tp, lineHeight:1.3 }}>{ar?'مسار الالتزام بالجدول':'Schedule Adherence Trend'}</div>
+                  <select style={{ fontSize:11,background:'transparent',border:`1px solid ${dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)'}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer',flexShrink:0 }}>
                     <option>{ar?'نسبة مئوية':'Percentage'}</option>
                   </select>
                 </div>
-                <AdherenceChart data={data.trend} dark={dark} ar={ar} />
+                <div style={{ overflow:'hidden' }}>
+                  <AdherenceChart data={data.trend} dark={dark} ar={ar} />
+                </div>
               </div>
             </div>
 
@@ -658,7 +661,7 @@ export default function Dashboard() {
           </div>
 
           {/* ══ RIGHT PANEL ════════════════════════════════════════════════ */}
-          <div style={{ width:280, flexShrink:0, display:'flex', flexDirection:'column', gap:16 }}>
+          <div style={{ width:260, flexShrink:0, display:'flex', flexDirection:'column', gap:16 }}>
 
             {/* Alerts */}
             <div style={{ ...card, padding:'16px 18px' }}>

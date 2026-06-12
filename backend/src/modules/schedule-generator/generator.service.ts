@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
@@ -10,6 +10,8 @@ import {
   GeneratorResult,
 } from './generator.types';
 import { generateWeeklySchedule, buildWeekDates } from './generator.engine';
+import { computeShiftMix, assignRoster } from './demand.engine';
+import { CapacityService } from '../capacity/capacity.service';
 
 const DEFAULT_OPTIONS: GeneratorOptions = {
   minRestHours: 10,
@@ -21,7 +23,141 @@ const DEFAULT_OPTIONS: GeneratorOptions = {
 
 @Injectable()
 export class GeneratorService {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly capacity: CapacityService,
+  ) {}
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+   *  DEMAND-DRIVEN GENERATION — schedule built FROM the requirement curve.
+   *
+   *  1. Requirement: per-weekday 48×30-min required-HC curve from the capacity
+   *     live-plan over the trailing 14 days (P90 across same weekdays; with
+   *     sparse history the available days' element-wise max is used for all —
+   *     reported honestly in `demand.basis`).
+   *  2. Phase 1 — computeShiftMix: greedy set-cover → how many M/B/C/E/N/MD
+   *     each day needs.
+   *  3. Phase 2 — assignRoster: employees fill the mix under gender / rest /
+   *     consecutive / fairness rules; unfillable slots returned as gaps.
+   * ═══════════════════════════════════════════════════════════════════════════ */
+  async generateDemandDriven(
+    tenantId: string,
+    weekStart: string,
+    optionsIn?: Partial<GeneratorOptions> & { demandScale?: number },
+  ) {
+    const options = { ...DEFAULT_OPTIONS, ...(optionsIn ?? {}) };
+    const demandScale = Math.min(3, Math.max(0.3, optionsIn?.demandScale ?? 1));
+    const dates = buildWeekDates(weekStart);
+
+    // ── 1. Requirement curves from live-plan history ──────────────────────────
+    const histDates: string[] = [];
+    for (let i = 0; i <= 14; i++) {  // include TODAY — often the only measured day early on
+      const d = new Date(Date.now() + 3 * 3600e3 - i * 86400e3);
+      histDates.push(d.toISOString().slice(0, 10));
+    }
+    const plans = await Promise.all(
+      histDates.map(d => this.capacity.getLivePlan(tenantId, d).catch(() => null)),
+    );
+
+    // weekday (0-6) → list of measured 48-curves
+    const byWeekday = new Map<number, number[][]>();
+    const allCurves: number[][] = [];
+    for (let i = 0; i < plans.length; i++) {
+      const p = plans[i];
+      if (!p || p.coverage.measuredIntervals < 4) continue;
+      const curve = p.intervals.map((iv: any) => iv.measured ? (iv.requiredHc ?? 0) : 0);
+      const wd = new Date(histDates[i]).getDay();
+      (byWeekday.get(wd) ?? byWeekday.set(wd, []).get(wd)!).push(curve);
+      allCurves.push(curve);
+    }
+    if (!allCurves.length) {
+      throw new BadRequestException(
+        'No measured workload history yet — keep the Sprinklr bridge running, then retry. ' +
+        'لا يوجد تاريخ حمل مُقاس بعد — شغّل جسر سبرينكلر يوماً ثم أعد المحاولة.');
+    }
+
+    const p90 = (vals: number[]) => {
+      const s = [...vals].sort((a, b) => a - b);
+      return s[Math.min(s.length - 1, Math.ceil(0.9 * s.length) - 1)];
+    };
+    const curveFor = (samples: number[][]): number[] =>
+      Array.from({ length: 48 }, (_, i) => p90(samples.map(c => c[i])));
+    const fallback = curveFor(allCurves);
+
+    // ── 2+3. Per-day mix + roster ────────────────────────────────────────────
+    const fns = await this.loadEmployees(tenantId, options.functionIds);
+    const pool: EmployeeInfo[] = fns.flatMap(f => f.employees);
+    if (!pool.length) throw new BadRequestException('No active employees in scope.');
+
+    const { from, to } = this.weekRange(weekStart);
+    const [ytdDist, lastShifts, consecDays] = await Promise.all([
+      this.loadYtdDistribution(tenantId, pool.map(e => e.id), from),
+      this.loadLastShifts(tenantId, pool.map(e => e.id), from),
+      this.loadConsecutiveDays(tenantId, pool.map(e => e.id), from),
+    ]);
+
+    const mixByDate = new Map<string, Record<string, number>>();
+    const demandDays: any[] = [];
+    // Bodies available per day ≈ pool minus the OFF allowance
+    const maxStaffPerDay = Math.max(1, pool.length - Math.ceil(pool.length * options.offDaysPerWeek / 7));
+
+    for (const date of dates) {
+      const wd = new Date(date).getDay();
+      const samples = byWeekday.get(wd);
+      const required = (samples?.length ? curveFor(samples) : fallback)
+        .map(v => Math.ceil(v * demandScale));
+      const day = computeShiftMix(date, required, maxStaffPerDay);
+      mixByDate.set(date, day.mix);
+      demandDays.push(day);
+    }
+
+    const roster = assignRoster(dates, mixByDate, pool, ytdDist, lastShifts, consecDays, {
+      minRestHours: options.minRestHours,
+      offDaysPerWeek: options.offDaysPerWeek,
+    });
+
+    // ── 4. Shape the output: grid + per-day coverage + honest gaps ───────────
+    const byEmp = new Map<string, Record<string, string>>();
+    for (const a of roster.assignments) {
+      const m = byEmp.get(a.employeeId) ?? {};
+      m[a.date] = a.code;
+      byEmp.set(a.employeeId, m);
+    }
+    const grid = pool.map(e => ({
+      employeeId: e.id, employeeNo: e.employeeNo, name: e.name,
+      gender: e.gender, functionName: e.functionName,
+      days: byEmp.get(e.id) ?? {},
+    }));
+
+    const totalResidual = demandDays.reduce((s, d) => s + d.residualGaps.length, 0);
+    return {
+      weekStart, weekEnd: dates[6], mode: 'demand-driven',
+      demand: {
+        basis: byWeekday.size >= 5
+          ? `P90 per weekday over ${allCurves.length} measured days`
+          : `sparse history (${allCurves.length} measured day(s)) — same curve applied to all weekdays; accuracy improves as data accumulates`,
+        demandScale,
+        days: demandDays.map(d => ({
+          date: d.date, mix: d.mix,
+          requiredPeak: Math.max(...d.requiredCurve),
+          staffedPeak:  Math.max(...d.staffedCurve),
+          requiredCurve: d.requiredCurve, staffedCurve: d.staffedCurve,
+          residualGaps: d.residualGaps,
+        })),
+      },
+      grid,
+      unfilled: roster.unfilled,
+      warnings: roster.warnings,
+      summary: {
+        employees: pool.length,
+        totalShiftsPlanned: roster.assignments.filter(a => a.code !== 'OFF').length,
+        totalOffDays:       roster.assignments.filter(a => a.code === 'OFF').length,
+        unfilledSlots:      roster.unfilled.length,
+        residualGapIntervals: totalResidual,
+        femaleNWarnings:    roster.warnings.length,
+      },
+    };
+  }
 
   // ── Date helpers ────────────────────────────────────────────────────────────
   private fmtDate(d: Date): string {
