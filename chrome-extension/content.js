@@ -1,5 +1,5 @@
 'use strict';
-console.log('[WFM Bridge] content.js v16.3 loaded ✓ (hits-rows harvest)');
+console.log('[WFM Bridge] content.js v16.4 loaded ✓ (content-sniffing harvest)');
 
 const SEND_INTERVAL_MS = 30_000;
 const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
@@ -213,6 +213,49 @@ function harvestUserStates(obj, depth = 0) {
   return updated;
 }
 
+// ── Structure-agnostic metric harvester ───────────────────────────────────────
+// Walks ANY response tree; whenever an object carries a numeric user id AND
+// M_*-keyed numeric measurements (in itself or its projections/measurements),
+// it's an agent metrics row — regardless of endpoint or nesting.
+function harvestGenericMetricRows(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 8) return 0;
+  let harvested = 0;
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) harvested += harvestGenericMetricRows(item, depth + 1);
+    return harvested;
+  }
+
+  const id = String(
+    obj.key ?? obj.userId ?? obj.agentId ?? obj.user?.id ?? obj.groupDetails?.id ?? obj.id ?? '');
+  if (/^\d{6,}$/.test(id)) {
+    const metrics = {};
+    const grab = (o, d = 0) => {
+      if (!o || typeof o !== 'object' || d > 2) return;
+      for (const [k, v] of Object.entries(o)) {
+        if (typeof v === 'number' && /^M_[A-Z0-9_]{2,80}$/.test(k)) metrics[k] = v;
+        else if (v && typeof v === 'object' && !Array.isArray(v)) grab(v, d + 1);
+      }
+    };
+    grab(obj);
+    if (Object.keys(metrics).length) {
+      const name = obj.groupDetails?.name || obj.user?.name || obj.name
+        || obj.groupDetails?.objectAsUser?.name || '';
+      mergeAgentMetrics(id, isSyntheticName(name) ? '' : name, findEmail(obj.groupDetails) || findEmail(obj.user) || '', metrics);
+      harvested++;
+    }
+  }
+
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') harvested += harvestGenericMetricRows(v, depth + 1);
+  }
+  if (depth === 0 && harvested > 0) {
+    saveAgentMetricsDebounced();
+    console.log(`[WFM Bridge] 📊 generic harvest: ${harvested} metric rows | store: ${Object.keys(agentMetrics).length} agents`);
+  }
+  return harvested;
+}
+
 // Harvest agent rows from ANY reportingQuery response (all widget variants)
 function harvestReportingQuery(payloadData) {
   const rq = payloadData?.reportingQuery || payloadData?.data?.reportingQuery;
@@ -294,6 +337,26 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
   if (type === 'fetch_response' || type === 'xhr_response') {
     const urlMatch = payload.url?.match(/[?&]op=([^&]+)/);
     const opName   = payload.opName || (urlMatch ? decodeURIComponent(urlMatch[1]) : null);
+
+    // ── Content sniffing: the agents TABLE may ship through a REST endpoint
+    // with no op name at all. Any response whose body carries rows keyed by
+    // numeric user ids + M_* measurements IS our table — capture + harvest it
+    // regardless of endpoint name.
+    try {
+      const body = payload.data;
+      if (body && typeof body === 'object') {
+        const str = JSON.stringify(body);
+        if (str.length < 500_000
+            && /M_[A-Z][A-Z0-9_]+/.test(str)
+            && (/"key"\s*:\s*"\d{6,}"/.test(str) || /"userId"\s*:\s*\d{6,}/.test(str))) {
+          lastRawSamples.tableSample    = str.slice(0, 60000);
+          lastRawSamples.tableSampleUrl = payload.url?.split('?')[0] ?? '';
+          console.log('[WFM Bridge] 🧪 metrics-bearing payload from', lastRawSamples.tableSampleUrl, `(${str.length} bytes, op=${opName ?? 'none'})`);
+          try { harvestReportingQuery(body); } catch (e) {}
+          try { harvestGenericMetricRows(body); } catch (e) {}
+        }
+      }
+    } catch (e) { /* non-JSON or huge body */ }
 
     if (opName) {
       sprinklrOps.set(opName, payload.data);
