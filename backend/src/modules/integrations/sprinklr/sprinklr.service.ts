@@ -1039,6 +1039,80 @@ export class SprinklrService {
       this.logger.warn(`Violations compute failed: ${e.message}`));
     await this.computeAdherence(tenantId, today).catch(e =>
       this.logger.warn(`Adherence compute failed: ${e.message}`));
+    await this.harvestChannelDemand(tenantId, today).catch(e =>
+      this.logger.warn(`Channel demand harvest failed: ${e.message}`));
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CHANNEL DEMAND HARVEST — daily contact volumes per channel for the forecast.
+  //  Sprinklr's workQueueStats carries cumulative daily counters (names vary by
+  //  install). We mine every numeric key that looks like a work/case counter,
+  //  take (max − min) over the day per queue (monotonic delta), and pick the
+  //  best "received-like" counter; falls back to "completed-like".
+  // ═══════════════════════════════════════════════════════════════════════════
+  private async harvestChannelDemand(tenantId: string, date: string): Promise<void> {
+    const snaps: { queues_json: any }[] = await this.dataSource.query(
+      `SELECT queues_json FROM integration_snapshots
+       WHERE tenant_id = $1 AND source = 'sprinklr'
+         AND captured_at BETWEEN $2::date::timestamptz AND ($2::date::timestamptz + interval '24 hours')
+       ORDER BY captured_at ASC`,
+      [tenantId, date],
+    );
+    if (!snaps.length) return;
+
+    const RECEIVED = /(received|created|total|incoming|new).*(work|case|message|contact)|(work|case|message|contact).*(received|created|total|incoming|new)/i;
+    const HANDLED  = /(completed|closed|handled|resolved).*(work|case|message|contact)|(work|case|message|contact).*(completed|closed|handled|resolved)/i;
+
+    // channel → { counterKey → {min,max} ; peakWaiting }
+    type Track = { counters: Map<string, { min: number; max: number; kind: 'received' | 'handled' }>; peakWaiting: number };
+    const byChannel = new Map<string, Track>();
+
+    for (const s of snaps) {
+      const queues: any[] = Array.isArray(s.queues_json) ? s.queues_json : JSON.parse(s.queues_json || '[]');
+      for (const q of queues) {
+        const ch = q.channel || 'unknown';
+        const t = byChannel.get(ch) ?? { counters: new Map(), peakWaiting: 0 };
+        t.peakWaiting = Math.max(t.peakWaiting, q.waiting ?? 0);
+        const raw = q.statsRaw;
+        if (raw && typeof raw === 'object') {
+          for (const [k, v] of Object.entries(raw)) {
+            if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) continue;
+            const kind = RECEIVED.test(k) ? 'received' : HANDLED.test(k) ? 'handled' : null;
+            if (!kind) continue;
+            const key = `${q.queueId}|${k}`;
+            const c = t.counters.get(key) ?? { min: v, max: v, kind };
+            c.min = Math.min(c.min, v); c.max = Math.max(c.max, v);
+            t.counters.set(key, c);
+          }
+        }
+        byChannel.set(ch, t);
+      }
+    }
+
+    for (const [ch, t] of byChannel) {
+      // Sum deltas per queue, preferring received-like counters
+      const perQueueBest = new Map<string, { delta: number; kind: string }>();
+      for (const [key, c] of t.counters) {
+        const queueId = key.split('|')[0];
+        const delta = c.max - c.min;
+        const cur = perQueueBest.get(queueId);
+        const better = !cur
+          || (c.kind === 'received' && cur.kind !== 'received')
+          || (c.kind === cur.kind && delta > cur.delta);
+        if (better) perQueueBest.set(queueId, { delta, kind: c.kind });
+      }
+      const contacts = [...perQueueBest.values()].reduce((s, x) => s + x.delta, 0);
+
+      await this.dataSource.query(
+        `INSERT INTO channel_demand_daily (tenant_id, demand_date, channel, contacts, peak_waiting, source)
+         VALUES ($1, $2::date, $3, $4, $5, 'sprinklr')
+         ON CONFLICT (tenant_id, demand_date, channel) DO UPDATE SET
+           contacts = GREATEST(EXCLUDED.contacts, channel_demand_daily.contacts),
+           peak_waiting = GREATEST(EXCLUDED.peak_waiting, channel_demand_daily.peak_waiting),
+           computed_at = NOW()`,
+        [tenantId, date, ch, Math.round(contacts), t.peakWaiting],
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1698,15 +1772,32 @@ export class SprinklrService {
   //  CONTACT FORECAST — weekday-seasonal moving average over daily history
   // ═══════════════════════════════════════════════════════════════════════════
   async getContactForecast(tenantId: string, daysAhead = 7) {
+    // Two volume sources, take the stronger per day:
+    //  1. agent_daily_stats.contacts_received (per-agent widget metrics)
+    //  2. channel_demand_daily.contacts (queue cumulative counters — broader)
     const history: { stat_date: string; contacts: string; agents: string; working: string }[] =
       await this.dataSource.query(
-        `SELECT stat_date,
-                COALESCE(SUM(contacts_received), 0)     AS contacts,
-                COUNT(*)                                AS agents,
-                COALESCE(SUM(total_working_minutes), 0) AS working
-         FROM agent_daily_stats
-         WHERE tenant_id = $1 AND stat_date >= CURRENT_DATE - INTERVAL '28 days'
-         GROUP BY stat_date ORDER BY stat_date ASC`,
+        `SELECT d.stat_date,
+                GREATEST(COALESCE(a.contacts, 0), COALESCE(q.contacts, 0)) AS contacts,
+                COALESCE(a.agents, 0)  AS agents,
+                COALESCE(a.working, 0) AS working
+         FROM (
+           SELECT DISTINCT stat_date FROM agent_daily_stats
+           WHERE tenant_id = $1 AND stat_date >= CURRENT_DATE - INTERVAL '28 days'
+           UNION
+           SELECT DISTINCT demand_date FROM channel_demand_daily
+           WHERE tenant_id = $1 AND demand_date >= CURRENT_DATE - INTERVAL '28 days'
+         ) d(stat_date)
+         LEFT JOIN (
+           SELECT stat_date, SUM(contacts_received) AS contacts, COUNT(*) AS agents,
+                  SUM(total_working_minutes) AS working
+           FROM agent_daily_stats WHERE tenant_id = $1 GROUP BY stat_date
+         ) a ON a.stat_date = d.stat_date
+         LEFT JOIN (
+           SELECT demand_date, SUM(contacts) AS contacts
+           FROM channel_demand_daily WHERE tenant_id = $1 GROUP BY demand_date
+         ) q ON q.demand_date = d.stat_date
+         ORDER BY d.stat_date ASC`,
         [tenantId],
       );
 

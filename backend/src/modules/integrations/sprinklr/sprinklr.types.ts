@@ -16,6 +16,7 @@ export interface SprinklrQueue {
   agentsIdle?:     number;  // idle agents in this queue (from entityFeed)
   agentsLoggedIn?: number;  // total logged-in agents (from entityFeed)
   aht:             number;
+  statsRaw?:       Record<string, any>;  // full Sprinklr workQueueStats — mined for cumulative contact counters
 }
 
 export interface SprinklrAgent {

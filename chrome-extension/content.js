@@ -1,5 +1,5 @@
 'use strict';
-console.log('[WFM Bridge] content.js v15 loaded ✓');
+console.log('[WFM Bridge] content.js v16 loaded ✓');
 
 const SEND_INTERVAL_MS = 30_000;
 const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
@@ -155,6 +155,62 @@ function harvestUserEmails(obj, depth = 0) {
   return found;
 }
 
+// ── Harvest live statuses from state-mapping ops ──────────────────────────────
+// Sprinklr's activeUserCurrentStateMappings ("User Current Status") carries the
+// CURRENT status of ALL logged-in agents — far broader than reportingQuery
+// (which only covers agents visible in the open widget). Responses are FLAT.
+// Generic miner: find arrays of {numeric user id + status-like string}.
+const STATUS_WORD = /^(available|unavailable|busy|idle|away|offline|on\s?call|engaged|wrap.*|bio\s?break|break|lunch(\s?break)?|tea(\s?break)?|prayer(\s?break)?|meeting|training|coaching|manual\s?dial|outbound)/i;
+
+function harvestUserStates(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || depth > 4) return 0;
+  let updated = 0;
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const id = String(item.userId ?? item.agentId ?? item.user?.id ?? item.id ?? '');
+        if (/^\d{4,}$/.test(id)) {
+          // find a status-like string anywhere shallow in the item
+          let statusRaw = '';
+          const scan = (o, d = 0) => {
+            if (!o || typeof o !== 'object' || d > 2 || statusRaw) return;
+            for (const v of Object.values(o)) {
+              if (statusRaw) return;
+              if (typeof v === 'string' && v.length <= 40 && STATUS_WORD.test(v.trim())) statusRaw = v.trim();
+              else if (v && typeof v === 'object') scan(v, d + 1);
+            }
+          };
+          scan(item);
+          if (statusRaw) {
+            const norm = normalizeStatus(statusRaw);
+            const cached = agentCache[id];
+            if (cached) {
+              cached.status = norm; cached.statusRaw = statusRaw; cached.lastSeen = Date.now();
+            } else {
+              // status known but name not yet — keep a placeholder keyed by id;
+              // the name fills in when reportingQuery/users sees this agent
+              const known = agentMetrics[id]?.name;
+              if (known && !isSyntheticName(known)) {
+                agentCache[id] = { name: known, status: norm, statusRaw, email: agentMetrics[id]?.email || '', lastSeen: Date.now() };
+              }
+            }
+            updated++;
+            continue;
+          }
+        }
+      }
+      updated += harvestUserStates(item, depth + 1);
+    }
+    return updated;
+  }
+
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') updated += harvestUserStates(v, depth + 1);
+  }
+  return updated;
+}
+
 // Harvest agent rows from ANY reportingQuery response (all widget variants)
 function harvestReportingQuery(payloadData) {
   const rq = payloadData?.reportingQuery || payloadData?.data?.reportingQuery;
@@ -236,6 +292,18 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
           if (n > 0) {
             saveAgentMetricsDebounced();
             console.log(`[WFM Bridge] 📧 harvested ${n} user emails from ${opName}`);
+          }
+        } catch (e) { /* shape varies */ }
+      }
+
+      // Harvest LIVE statuses for ALL agents from state-mapping ops —
+      // this is the broad feed; reportingQuery only sees the open widget.
+      if (/state|status|presence/i.test(opName)) {
+        try {
+          const n = harvestUserStates(payload.data);
+          if (n > 0) {
+            saveAgentCache();
+            console.log(`[WFM Bridge] 🟢 live statuses updated for ${n} agents from ${opName}`);
           }
         } catch (e) { /* shape varies */ }
       }
@@ -341,6 +409,10 @@ function parseEntityFeedQueues() {
         agentsLoggedIn:  coerce(s.loggedInAgents),
         agentsBreak:     0,
         aht:             0,
+        // Full raw stats passthrough — the backend mines cumulative counters
+        // (total/completed/received works) to build per-queue daily contact
+        // volumes for the forecast. Field names vary; ship them all.
+        statsRaw:        s,
       };
     });
 }
@@ -873,4 +945,4 @@ function extractFirstArray(obj, depth = 0) {
   return null;
 }
 
-console.log('[WFM Bridge] content.js v14 — raw status labels for break/meeting/dial compliance');
+console.log('[WFM Bridge] content.js v16 — broad live statuses (state mappings) + raw queue counters');
