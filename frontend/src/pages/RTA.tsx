@@ -32,13 +32,23 @@ interface SpLive {
   summary: { totalWaiting: number; totalInProgress: number; totalAvailable: number; totalBusy: number; avgSla: number };
   atRisk: SpQueue[]; queues: SpQueue[]; agents: SpAgent[];
 }
-interface BreakAgent extends SpAgent {
-  isAuthorized: boolean; breakCount: number;
-  totalBreakMinutes: number; lastBreakStart: string | null;
+interface BreakAgent {
+  agentId: string; agentName: string;
+  employeeName: string | null; employeeNo: string | null; functionName: string | null;
+  status: string; statusRaw: string;
+  breakCount: number; totalBreakMinutes: number;
+  lastBreakStart: string | null;
+  breaks: { start: string; end: string; minutes: number }[];
+  currentlyBreaking?: boolean;
+  breakStartedAt?: string | null; minutesSoFar?: number | null;
+  isAuthorized?: boolean; authSource?: 'break_management' | 'permission' | null;
 }
 interface BreakTracker {
-  capturedAt: string | null; onBreakNow: BreakAgent[];
+  capturedAt: string | null; isStale?: boolean;
+  onBreakNow: BreakAgent[];
+  availableNow?: BreakAgent[]; busyNow?: BreakAgent[];
   unauthorizedCount: number; authorizedCount: number;
+  breakMgmtActiveRequests?: number;
   agentHistory: AgentBreakHistory[];
   activePermissions: ActivePermission[];
 }
@@ -502,20 +512,23 @@ function SummaryPanel({ live, agAvail, agBusy, agBreak, agOffline, breakData, ar
 /* ═══════════════════════════════════════════════════════════════════════════ */
 function BreaksPanel({ breakData, ar }: { breakData: BreakTracker | null; ar: boolean }) {
   const [sort, setSort] = useState<'breaks' | 'time' | 'name'>('breaks');
+  const [showAvail, setShowAvail] = useState(false);
   const history = [...(breakData?.agentHistory ?? [])].sort((a, b) =>
     sort === 'breaks' ? b.breakCount - a.breakCount
     : sort === 'time' ? b.totalBreakMinutes - a.totalBreakMinutes
     : a.name.localeCompare(b.name),
   );
-  const unauth = breakData?.onBreakNow.filter(a => !a.isAuthorized) ?? [];
+  const onBreak   = breakData?.onBreakNow ?? [];
+  const available = breakData?.availableNow ?? [];
 
   return (
     <div>
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-4 gap-3 mb-4">
         {[
-          { label: ar ? 'في استراحة الآن' : 'On Break Now', val: breakData?.onBreakNow.length ?? 0, color: '#818cf8' },
+          { label: ar ? 'في استراحة الآن' : 'On Break Now', val: onBreak.length, color: '#818cf8' },
           { label: ar ? 'مرخّص'           : 'Authorized',   val: breakData?.authorizedCount ?? 0,   color: '#22c55e' },
           { label: ar ? 'غير مرخّص'       : 'Unauthorized', val: breakData?.unauthorizedCount ?? 0,  color: '#ef4444' },
+          { label: ar ? 'متاحين الآن'     : 'Available Now', val: available.length, color: '#06b6d4' },
         ].map(item => (
           <div key={item.label} className="rounded-2xl p-3 text-center"
             style={{ background: `${item.color}08`, border: `1px solid ${item.color}22` }}>
@@ -525,21 +538,84 @@ function BreaksPanel({ breakData, ar }: { breakData: BreakTracker | null; ar: bo
         ))}
       </div>
 
-      {unauth.length > 0 && (
-        <div className="rounded-xl p-3 mb-4"
-          style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)' }}>
-          <p className="text-xs font-semibold mb-2 flex items-center gap-2" style={{ color: '#f87171' }}>
-            <AlertTriangle size={12} />
-            {ar ? 'استراحات غير مرخّصة — الآن' : 'Unauthorized Breaks — Now'}
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {unauth.map(a => (
-              <span key={a.agentId} className="text-[11px] px-2.5 py-1 rounded-xl"
-                style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
-                {a.agentName}{a.lastBreakStart ? ` · ${fmtTime(a.lastBreakStart)}` : ''}
-              </span>
-            ))}
-          </div>
+      {/* ── LIVE: who is on break right now — name, function, started, duration ── */}
+      {onBreak.length > 0 && (
+        <div className="mb-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 8 }}>
+          {onBreak.map(a => {
+            const over = (a.minutesSoFar ?? 0) > 30;
+            const c = !a.isAuthorized ? '#ef4444' : over ? '#f59e0b' : '#818cf8';
+            return (
+              <div key={a.agentId} className="rounded-2xl p-3"
+                style={{ background: `${c}0a`, border: `1px solid ${c}33`, position: 'relative', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', top: 0, insetInlineStart: 0, bottom: 0, width: 3, background: c }} />
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-bold truncate" style={{ color: '#e2e8f0' }}>
+                      {a.employeeName || a.agentName}
+                    </div>
+                    <div className="text-[9.5px] mt-0.5" style={{ color: '#64748b' }}>
+                      {a.functionName || (ar ? 'وظيفة غير مرتبطة' : 'Unlinked function')}
+                      {a.employeeNo ? ` · #${a.employeeNo}` : ''}
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full flex-shrink-0"
+                    style={{ background: `${c}1c`, color: c }}>
+                    {a.statusRaw || (ar ? 'استراحة' : 'Break')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 mt-2.5">
+                  <span className="text-[10px] tabular-nums flex items-center gap-1" style={{ color: '#94a3b8' }}>
+                    <Clock size={10} /> {ar ? 'بدأ' : 'Since'} {fmtTime(a.breakStartedAt ?? a.lastBreakStart)}
+                  </span>
+                  {a.minutesSoFar != null && (
+                    <span className="text-[13px] font-black tabular-nums" style={{ color: c }}>
+                      {fmtMin(a.minutesSoFar)} {over ? '⚠' : ''}
+                    </span>
+                  )}
+                  <span className="text-[9px] font-bold ms-auto px-1.5 py-0.5 rounded"
+                    style={{
+                      background: a.isAuthorized ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
+                      color: a.isAuthorized ? '#4ade80' : '#f87171',
+                    }}>
+                    {a.isAuthorized
+                      ? (a.authSource === 'break_management' ? (ar ? '✓ بريك مجدول' : '✓ Scheduled') : (ar ? '✓ استئذان' : '✓ Permission'))
+                      : (ar ? '✗ بدون إذن' : '✗ No approval')}
+                  </span>
+                </div>
+                {a.breakCount > 1 && (
+                  <div className="text-[9px] mt-1.5" style={{ color: '#64748b' }}>
+                    {ar ? `البريك رقم ${a.breakCount} اليوم — المجموع ${fmtMin(a.totalBreakMinutes)}`
+                        : `Break #${a.breakCount} today — total ${fmtMin(a.totalBreakMinutes)}`}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Available now board (collapsible) ── */}
+      {available.length > 0 && (
+        <div className="rounded-2xl mb-4 overflow-hidden" style={{ border: '1px solid rgba(6,182,212,0.2)', background: 'rgba(6,182,212,0.03)' }}>
+          <button onClick={() => setShowAvail(v => !v)}
+            className="w-full flex items-center gap-2 px-3 py-2 text-start">
+            <UserCheck size={12} style={{ color: '#22d3ee' }} />
+            <span className="text-xs font-bold" style={{ color: '#22d3ee' }}>
+              {ar ? `المتاحين الآن (${available.length})` : `Available Now (${available.length})`}
+            </span>
+            <span className="ms-auto text-[10px]" style={{ color: '#475569' }}>{showAvail ? '▲' : '▼'}</span>
+          </button>
+          {showAvail && (
+            <div className="flex flex-wrap gap-1.5 px-3 pb-3">
+              {available.map(a => (
+                <span key={a.agentId} className="text-[10px] px-2.5 py-1 rounded-xl"
+                  style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.18)', color: '#a5f3fc' }}>
+                  {a.employeeName || a.agentName}
+                  {a.functionName ? <span style={{ color: '#155e75' }}> · {a.functionName}</span> : ''}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -587,8 +663,13 @@ function BreaksPanel({ breakData, ar }: { breakData: BreakTracker | null; ar: bo
                     style={{ color: a.totalBreakMinutes > 60 ? '#f87171' : '#94a3b8' }}>
                     {a.totalBreakMinutes > 0 ? fmtMin(a.totalBreakMinutes) : '—'}
                   </span>
-                  <span className="text-center" style={{ color: '#475569' }}>
-                    {a.lastBreakStart ? fmtTime(a.lastBreakStart) : '—'}
+                  <span className="text-center tabular-nums" style={{ color: '#475569' }}>
+                    {(() => {
+                      const last = a.breaks?.[a.breaks.length - 1];
+                      if (isOnBreak && a.lastBreakStart) return `${fmtTime(a.lastBreakStart)} → …`;
+                      if (last) return `${fmtTime(last.start)} → ${fmtTime(last.end)}`;
+                      return a.lastBreakStart ? fmtTime(a.lastBreakStart) : '—';
+                    })()}
                   </span>
                   <span className="text-center">
                     {isOnBreak ? (

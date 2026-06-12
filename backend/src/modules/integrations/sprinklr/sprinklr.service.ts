@@ -326,41 +326,97 @@ export class SprinklrService {
     }
   }
 
-  // ── Break Tracker ──────────────────────────────────────────────────────────
+  // ── Break Tracker — full live dashboard ─────────────────────────────────────
+  // Who is on break NOW (name, function, raw label, started at, minutes so far),
+  // who is available, per-agent break history, and authorization via BOTH the
+  // permission requests AND the Break Management module (break_requests).
   async getBreakTracker(tenantId: string) {
     const snap = await this.getLatestSnapshot(tenantId);
-    const onBreakNow = snap?.agents.filter(a => a.status === 'break' || a.status === 'away') ?? [];
+    const agents = (snap?.agents ?? []).filter(a => !isSyntheticAgent(a as any) && a.agentName);
 
-    const [agentHistory, activePermissions] = await Promise.all([
-      this.computeBreakHistory(tenantId, 10),
+    const [agentHistory, activePermissions, empMap, activeBreakReqs] = await Promise.all([
+      this.computeBreakHistory(tenantId, 12),
       this.getActivePermissions(tenantId),
+      // sprinklr agent → employee + function
+      this.dataSource.query(
+        `SELECT m.sprinklr_agent_id, m.employee_id, e.employee_no,
+                TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name,
+                f.name AS function_name
+         FROM sprinklr_agent_map m
+         JOIN employees e ON e.id = m.employee_id
+         LEFT JOIN functions f ON f.id = e.function_id
+         WHERE m.tenant_id = $1 AND m.employee_id IS NOT NULL`,
+        [tenantId],
+      ).catch(() => []),
+      // Break Management: approved break requests covering RIGHT NOW
+      this.dataSource.query(
+        `SELECT employee_id FROM break_requests
+         WHERE tenant_id = $1 AND status = 'approved'
+           AND schedule_date  =  (NOW() AT TIME ZONE 'Asia/Kuwait')::date
+           AND requested_start <= (NOW() AT TIME ZONE 'Asia/Kuwait')::time
+           AND requested_end   >= (NOW() AT TIME ZONE 'Asia/Kuwait')::time`,
+        [tenantId],
+      ).catch(() => []),
     ]);
 
-    const permissionNames = activePermissions.map(p =>
-      (p.employee_name || '').toLowerCase(),
-    );
+    const empByAgent = new Map<string, any>(empMap.map((m: any) => [m.sprinklr_agent_id, m]));
+    const permEmpIds  = new Set(activePermissions.map((p: any) => p.employee_id).filter(Boolean));
+    const breakEmpIds = new Set(activeBreakReqs.map((b: any) => b.employee_id));
 
-    const enriched = onBreakNow.map(a => {
+    const decorate = (a: any) => {
+      const emp  = empByAgent.get(a.agentId);
       const hist = agentHistory.find(h => h.agentId === a.agentId);
-      const nameLower = (a.agentName || '').toLowerCase();
-      const isAuthorized = permissionNames.some(pn =>
-        pn && nameLower && (pn.includes(nameLower.slice(0, 6)) || nameLower.includes(pn.slice(0, 6))),
-      );
       return {
-        ...a,
-        isAuthorized,
-        breakCount: hist?.breakCount ?? 0,
+        agentId:        a.agentId,
+        agentName:      a.agentName,
+        employeeName:   emp?.employee_name ?? null,
+        employeeNo:     emp?.employee_no ?? null,
+        functionName:   emp?.function_name ?? null,
+        status:         a.status,
+        statusRaw:      a.statusRaw || '',
+        breakCount:        hist?.breakCount ?? 0,
         totalBreakMinutes: hist?.totalBreakMinutes ?? 0,
-        lastBreakStart: hist?.lastBreakStart ?? null,
-        currentlyBreaking: true,
+        lastBreakStart:    hist?.lastBreakStart ?? null,
+        breaks:            hist?.breaks ?? [],
       };
-    });
+    };
+
+    // On break now — with start time + running duration + authorization source
+    const onBreakNow = agents
+      .filter(a => a.status === 'break' || a.status === 'away')
+      .map(a => {
+        const d = decorate(a);
+        const emp = empByAgent.get(a.agentId);
+        const viaBreakMgmt  = !!emp && breakEmpIds.has(emp.employee_id);
+        const viaPermission = !!emp && permEmpIds.has(emp.employee_id);
+        const startedAt = d.lastBreakStart;
+        return {
+          ...d,
+          currentlyBreaking: true,
+          breakStartedAt: startedAt,
+          minutesSoFar: startedAt ? Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 60000)) : null,
+          isAuthorized: viaBreakMgmt || viaPermission,
+          authSource:   viaBreakMgmt ? 'break_management' : viaPermission ? 'permission' : null,
+        };
+      })
+      .sort((x, y) => (y.minutesSoFar ?? 0) - (x.minutesSoFar ?? 0));
+
+    // Available / busy right now — names + functions for the live board
+    const availableNow = agents
+      .filter(a => a.status === 'available' || a.status === 'idle')
+      .map(decorate)
+      .sort((x, y) => (x.employeeName || x.agentName).localeCompare(y.employeeName || y.agentName));
+    const busyNow = agents.filter(a => a.status === 'busy').map(decorate);
 
     return {
       capturedAt: snap?.capturedAt ?? null,
-      onBreakNow: enriched,
-      unauthorizedCount: enriched.filter(a => !a.isAuthorized).length,
-      authorizedCount:   enriched.filter(a => a.isAuthorized).length,
+      isStale:    snap?.isStale ?? true,
+      onBreakNow,
+      availableNow,
+      busyNow,
+      unauthorizedCount: onBreakNow.filter(a => !a.isAuthorized).length,
+      authorizedCount:   onBreakNow.filter(a => a.isAuthorized).length,
+      breakMgmtActiveRequests: activeBreakReqs.length,
       agentHistory,
       activePermissions,
     };
@@ -434,7 +490,7 @@ export class SprinklrService {
             timeline.breaks.push({ start: timeline.lastBreakStart, end: ts, minutes: mins });
             timeline.totalBreakMinutes += mins;
             timeline.currentlyBreaking = false;
-            timeline.lastBreakStart = null;
+            // keep lastBreakStart — the history table shows when the LAST break was
           }
           prevStatus[agent.agentId] = curr;
         }
@@ -447,25 +503,32 @@ export class SprinklrService {
   }
 
   // ── Active Permissions ─────────────────────────────────────────────────────
+  // Real schema: request_permissions (permission_date DATE + start/end TIME),
+  // employees has first/last name columns — NOT full_name.
   async getActivePermissions(tenantId: string) {
     try {
-      return this.dataSource.query(
-        `SELECT r.id, e.full_name AS employee_name, e.employee_no,
-                pr.starts_at, pr.ends_at, pr.reason,
-                r.status, r.approved_at,
+      return await this.dataSource.query(
+        `SELECT r.id, r.employee_id,
+                TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name,
+                e.employee_no,
+                (rp.permission_date::text || ' ' || rp.start_time::text || '+03')::timestamptz AS starts_at,
+                (rp.permission_date::text || ' ' || rp.end_time::text   || '+03')::timestamptz AS ends_at,
+                rp.reason, r.status,
                 f.name AS function_name
          FROM requests r
-         JOIN permission_requests pr ON pr.request_id = r.id
+         JOIN request_permissions rp ON rp.request_id = r.id
          JOIN employees e ON e.id = r.employee_id
          LEFT JOIN functions f ON f.id = e.function_id
          WHERE r.tenant_id = $1
            AND r.status = 'approved'
-           AND pr.starts_at <= NOW()
-           AND pr.ends_at >= NOW()
-         ORDER BY pr.starts_at`,
+           AND rp.permission_date = (NOW() AT TIME ZONE 'Asia/Kuwait')::date
+           AND rp.start_time <= (NOW() AT TIME ZONE 'Asia/Kuwait')::time
+           AND rp.end_time   >= (NOW() AT TIME ZONE 'Asia/Kuwait')::time
+         ORDER BY rp.start_time`,
         [tenantId],
       );
-    } catch {
+    } catch (e: any) {
+      this.logger.warn(`getActivePermissions failed: ${e.message}`);
       return [];
     }
   }
@@ -531,9 +594,11 @@ export class SprinklrService {
       this.dataSource.query(
         `SELECT COUNT(*) AS cnt
          FROM requests r
-         JOIN permission_requests pr ON pr.request_id = r.id
+         JOIN request_permissions rp ON rp.request_id = r.id
          WHERE r.tenant_id = $1 AND r.status = 'approved'
-           AND pr.starts_at <= NOW() AND pr.ends_at >= NOW()`,
+           AND rp.permission_date = (NOW() AT TIME ZONE 'Asia/Kuwait')::date
+           AND rp.start_time <= (NOW() AT TIME ZONE 'Asia/Kuwait')::time
+           AND rp.end_time   >= (NOW() AT TIME ZONE 'Asia/Kuwait')::time`,
         [tenantId],
       ).catch(() => [{ cnt: 0 }]),
     ]);
