@@ -1,5 +1,5 @@
 'use strict';
-console.log('[WFM Bridge] content.js v16.2 loaded ✓ (queries-op metrics)');
+console.log('[WFM Bridge] content.js v16.3 loaded ✓ (hits-rows harvest)');
 
 const SEND_INTERVAL_MS = 30_000;
 const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
@@ -218,22 +218,35 @@ function harvestReportingQuery(payloadData) {
   const rq = payloadData?.reportingQuery || payloadData?.data?.reportingQuery;
   if (!rq?.responses) return;
   let harvested = 0;
-  for (const resp of rq.responses) {
-    for (const group of (resp?.groupedData || [])) {
-      for (const item of (group?.responses || [])) {
-        const agentId = item.key || item.groupDetails?.id || '';
-        const name    = item.groupDetails?.name || '';
-        if (!agentId || !/^\d{4,}$/.test(String(agentId))) continue; // real Sprinklr user ids are numeric
-        if (name && isSyntheticName(name)) continue;                  // skip widget label rows
-        const email   = findEmail(item.groupDetails) || findEmail(item.additional);
-        const metrics = extractMeasurements(item);
-        if (name || email || Object.keys(metrics).length) {
-          mergeAgentMetrics(String(agentId), name, email, metrics);
-          harvested++;
-        }
-      }
+
+  const takeItem = (item) => {
+    if (!item || typeof item !== 'object') return;
+    const agentId = item.key
+      || item.groupDetails?.id
+      || item.userId || item.user?.id || item.id || '';
+    if (!agentId || !/^\d{4,}$/.test(String(agentId))) return; // real Sprinklr user ids are numeric
+    const name = item.groupDetails?.name || item.user?.name || item.name
+      || item.groupDetails?.objectAsUser?.name || '';
+    if (name && isSyntheticName(name)) return;                  // skip widget label rows
+    const email   = findEmail(item.groupDetails) || findEmail(item.user) || findEmail(item.additional);
+    const metrics = extractMeasurements(item);
+    if (name || email || Object.keys(metrics).length) {
+      mergeAgentMetrics(String(agentId), name, email, metrics);
+      harvested++;
     }
+  };
+
+  for (const resp of rq.responses) {
+    // Grouped widgets (status charts, agent groupings)
+    for (const group of (resp?.groupedData || [])) {
+      for (const item of (group?.responses || [])) takeItem(item);
+    }
+    // TABLE widgets return row objects in `hits` (search-style results)
+    for (const hit of (resp?.hits || [])) takeItem(hit);
+    // Some table variants nest rows one level deeper
+    for (const hit of (resp?.rows || [])) takeItem(hit);
   }
+
   if (harvested > 0) {
     saveAgentMetricsDebounced();
     console.log(`[WFM Bridge] 📊 reportingQuery harvested ${harvested} agent rows | metrics store: ${Object.keys(agentMetrics).length} agents`);
@@ -297,7 +310,16 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
         try { lastRawSamples.reportingQuery = JSON.stringify(payload.data).slice(0, 40000); } catch (e) {}
       }
       if (opName === 'queries' || opName === 'sinkPerformanceData') {
-        try { lastRawSamples[opName] = JSON.stringify(payload.data).slice(0, 40000); } catch (e) {}
+        try {
+          const str = JSON.stringify(payload.data);
+          lastRawSamples[opName] = str.slice(0, 40000);
+          // Protect the TABLE payload from being clobbered by summary widgets:
+          // table-like = non-empty hits/rows OR rows keyed by numeric user ids.
+          if (/"hits":\[\{/.test(str) || /"rows":\[\{/.test(str) || /"key":"\d{6,}"/.test(str)) {
+            lastRawSamples.tableSample = str.slice(0, 60000);
+            console.log('[WFM Bridge] 🧪 table-like payload captured from', opName, `(${str.length} bytes)`);
+          }
+        } catch (e) {}
       }
 
       // Harvest user emails from any user-related op (richest email source)
