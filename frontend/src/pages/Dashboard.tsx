@@ -95,7 +95,6 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
         border: `1px solid ${hov ? color+'50' : dark?'rgba(255,255,255,0.08)':'rgba(0,0,0,0.07)'}`,
         borderRadius: 16, padding: '16px 18px',
         cursor: onClick?'pointer':'default',
-        transform: hov ? 'translateY(-3px)' : 'none',
         boxShadow: hov ? `0 8px 28px ${color}22, 0 0 0 1px ${color}18` : dark?'none':'0 1px 3px rgba(0,0,0,0.04)',
         transition: 'all 0.2s cubic-bezier(.4,0,.2,1)',
         opacity: rdy ? 1 : 0,
@@ -364,6 +363,45 @@ export default function Dashboard() {
   const [error, setErr]   = useState(false);
   const [spin, setSpin]   = useState(false);
 
+  // Live operations from Sprinklr bridge (queues, adherence, violations)
+  const [liveOps, setLiveOps] = useState<{
+    online: number; busy: number; onBreak: number; waiting: number;
+    queuesAtRisk: number; avgAdherence: number | null; below85: number;
+    openViolations: number; isStale: boolean;
+  } | null>(null);
+
+  const loadLiveOps = useCallback(async () => {
+    try {
+      const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+      const [liveR, adhR, vioR] = await Promise.allSettled([
+        apiClient.get('/integrations/sprinklr/live'),
+        apiClient.get(`/integrations/sprinklr/adherence?from=${today}&to=${today}`),
+        apiClient.get(`/integrations/sprinklr/violations?from=${today}&to=${today}`),
+      ]);
+      const live = liveR.status === 'fulfilled' ? liveR.value.data : null;
+      const adh  = adhR.status  === 'fulfilled' ? adhR.value.data  : null;
+      const vio  = vioR.status  === 'fulfilled' ? vioR.value.data  : null;
+      const agents: any[] = live?.agents ?? [];
+      setLiveOps({
+        online:        agents.filter((a: any) => ['available', 'idle', 'busy'].includes(a.status)).length,
+        busy:          agents.filter((a: any) => a.status === 'busy').length,
+        onBreak:       agents.filter((a: any) => a.status === 'break' || a.status === 'away').length,
+        waiting:       live?.summary?.totalWaiting ?? 0,
+        queuesAtRisk:  live?.atRisk?.length ?? 0,
+        avgAdherence:  adh?.summary?.avgAdherence ?? null,
+        below85:       adh?.summary?.below85 ?? 0,
+        openViolations: vio?.summary?.open ?? 0,
+        isStale:       live?.isStale ?? true,
+      });
+    } catch { /* strip simply hidden */ }
+  }, []);
+
+  useEffect(() => {
+    loadLiveOps();
+    const t = setInterval(loadLiveOps, 30_000);
+    return () => clearInterval(t);
+  }, [loadLiveOps]);
+
   useEffect(() => {
     const el = document.createElement('style');
     el.id = 'nx-dash'; el.textContent = STYLES;
@@ -411,7 +449,7 @@ export default function Dashboard() {
           </p>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:12, fontSize:12, fontWeight:500, ...card, color:ts, boxShadow:'none' }}>
+          <div style={{ ...card, display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:12, fontSize:12, fontWeight:500, color:ts, boxShadow:'none' }}>
             <Calendar size={13} strokeWidth={2}/>
             {new Date().toLocaleDateString(ar?'ar-KW':'en-US',{month:'short',day:'numeric'})}
             {' – '}
@@ -470,15 +508,60 @@ export default function Dashboard() {
                 trendPct={6.4} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
                 dark={dark} ar={ar} delay={120} />
               <KpiCard icon={Activity}  color="#a78bfa" title="Schedule Adherence"  titleAr="الالتزام بالجدول"
-                value={`${adherePct.toFixed(1)}%`}
-                donut={adherePct}
-                trendPct={4.2} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
-                dark={dark} ar={ar} delay={180} />
+                value={liveOps?.avgAdherence != null ? `${liveOps.avgAdherence}%` : `${adherePct.toFixed(1)}%`}
+                donut={liveOps?.avgAdherence ?? adherePct}
+                trendLabel="live from Sprinklr today" trendLabelAr="مباشر من سبرينكلر اليوم"
+                dark={dark} ar={ar} delay={180} onClick={()=>navigate('/rta')} />
               <KpiCard icon={FileText}  color="#f59e0b" title="Pending Requests"    titleAr="طلبات معلقة"
                 numValue={pendTotal}
                 trendPct={-2.7} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
                 dark={dark} ar={ar} delay={240} onClick={()=>navigate('/requests')} />
             </div>
+
+            {/* ── LIVE OPERATIONS strip (real-time from Sprinklr bridge) ── */}
+            {liveOps && (
+              <div onClick={()=>navigate('/rta')} style={{
+                ...card, padding:'13px 18px', cursor:'pointer',
+                display:'flex', alignItems:'center', gap:0, overflow:'hidden', position:'relative',
+                background: dark
+                  ? 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(6,182,212,0.05))'
+                  : 'linear-gradient(135deg, rgba(99,102,241,0.05), rgba(6,182,212,0.03))',
+              }}>
+                <div style={{ position:'absolute', top:0, insetInlineStart:0, bottom:0, width:3,
+                  background: liveOps.isStale ? '#f59e0b' : 'linear-gradient(180deg,#22c55e,#06b6d4)' }} />
+                <div style={{ display:'flex', alignItems:'center', gap:8, paddingInlineEnd:18, flexShrink:0 }}>
+                  <span style={{ width:8, height:8, borderRadius:'50%',
+                    background: liveOps.isStale ? '#f59e0b' : '#22c55e',
+                    animation: liveOps.isStale ? 'none' : 'nx-pulse 2s ease infinite' }} />
+                  <span style={{ fontSize:12, fontWeight:800, color:tp }}>
+                    {ar ? 'العمليات الآن' : 'Operations Now'}
+                  </span>
+                  {liveOps.isStale && (
+                    <span style={{ fontSize:9, fontWeight:700, color:'#f59e0b', background:'rgba(245,158,11,0.12)',
+                      padding:'2px 7px', borderRadius:20 }}>{ar?'متأخر':'Stale'}</span>
+                  )}
+                </div>
+                {[
+                  { lbl: ar?'متصلين':'Online',        val: liveOps.online,        color:'#22c55e' },
+                  { lbl: ar?'مشغولين':'Busy',          val: liveOps.busy,          color:'#f59e0b' },
+                  { lbl: ar?'استراحة':'On Break',      val: liveOps.onBreak,       color:'#818cf8' },
+                  { lbl: ar?'بالانتظار':'Waiting',     val: liveOps.waiting,       color:'#fb923c' },
+                  { lbl: ar?'طوابير بخطر':'At-Risk Q', val: liveOps.queuesAtRisk,  color: liveOps.queuesAtRisk>0?'#ef4444':'#475569' },
+                  { lbl: ar?'التزام اليوم':'Adherence', val: liveOps.avgAdherence!=null?`${liveOps.avgAdherence}%`:'—',
+                    color: liveOps.avgAdherence==null?'#475569':liveOps.avgAdherence>=85?'#22c55e':'#ef4444' },
+                  { lbl: ar?'مخالفات مفتوحة':'Open Violations', val: liveOps.openViolations,
+                    color: liveOps.openViolations>0?'#ef4444':'#475569' },
+                ].map((k,i) => (
+                  <div key={k.lbl} style={{
+                    flex:1, textAlign:'center', minWidth:0,
+                    borderInlineStart: i===0?'none':`1px solid ${dark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)'}`,
+                  }}>
+                    <div style={{ fontSize:19, fontWeight:900, color:k.color, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{k.val}</div>
+                    <div style={{ fontSize:9, color:ts, marginTop:4, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{k.lbl}</div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* ── Charts row ───────────────────────────────────────────── */}
             <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:16 }}>
