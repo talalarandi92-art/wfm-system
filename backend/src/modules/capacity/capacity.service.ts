@@ -717,6 +717,130 @@ export class CapacityService {
     };
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════════
+   *  HC BY FUNCTION × HOUR — scheduled / actual / required side by side.
+   *  Scheduled: attendance_records per function. Actual: live online agents
+   *  mapped to functions via sprinklr_agent_map. Required: live-plan Erlang-C
+   *  aggregated to hours (channel level — demand is measured per channel).
+   * ═══════════════════════════════════════════════════════════════════════════ */
+  async getFunctionHourly(tenantId: string, date: string) {
+    const [functions, shifts, agentFn, snaps, plan] = await Promise.all([
+      this.ds.query(
+        `SELECT id, name, channel_type FROM functions
+         WHERE tenant_id = $1 AND is_active = true ORDER BY sort_order, name`, [tenantId]),
+      this.ds.query(
+        `SELECT e.function_id, ar.scheduled_start, ar.scheduled_end
+         FROM attendance_records ar
+         JOIN employees e ON e.id = ar.employee_id
+         WHERE ar.tenant_id = $1 AND ar.attendance_date = $2::date
+           AND ar.scheduled_start IS NOT NULL AND ar.scheduled_end IS NOT NULL`,
+        [tenantId, date]),
+      this.ds.query(
+        `SELECT m.sprinklr_agent_id, e.function_id
+         FROM sprinklr_agent_map m JOIN employees e ON e.id = m.employee_id
+         WHERE m.tenant_id = $1 AND m.employee_id IS NOT NULL`, [tenantId]),
+      this.ds.query(
+        `SELECT captured_at, agents_json FROM integration_snapshots
+         WHERE tenant_id = $1 AND source = 'sprinklr'
+           AND captured_at BETWEEN ($2::date::timestamptz - interval '3 hours')
+                               AND ($2::date::timestamptz + interval '21 hours')
+         ORDER BY captured_at ASC`, [tenantId, date]),
+      this.getLivePlan(tenantId, date),
+    ]);
+
+    const fnOfAgent = new Map<string, string>(agentFn.map((r: any) => [r.sprinklr_agent_id, r.function_id]));
+    const dayStart = new Date(`${date}T00:00:00+03:00`).getTime();
+    const parse = (v: any) => (Array.isArray(v) ? v : JSON.parse(v || '[]'));
+    const ONLINE = new Set(['available', 'idle', 'busy']);
+
+    // Actual online per function per hour (avg of snapshot samples)
+    const actualSamples = new Map<string, number[]>(); // `${hour}|${fnId}` → counts
+    for (const s of snaps) {
+      const hour = Math.floor((new Date(s.captured_at).getTime() - dayStart) / 3600e3);
+      if (hour < 0 || hour >= 24) continue;
+      const counts = new Map<string, number>();
+      for (const a of parse(s.agents_json)) {
+        if (!ONLINE.has(a.status)) continue;
+        const fnId = fnOfAgent.get(String(a.agentId)) ?? 'unmapped';
+        counts.set(fnId, (counts.get(fnId) ?? 0) + 1);
+      }
+      for (const [fnId, c] of counts) {
+        const key = `${hour}|${fnId}`;
+        (actualSamples.get(key) ?? actualSamples.set(key, []).get(key)!).push(c);
+      }
+      // record zero-samples for functions absent in this snapshot? skip — avg of present samples
+    }
+    const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+
+    // Scheduled per function per hour (shift overlap, cross-midnight aware)
+    const schedCount = (fnId: string, hour: number) => {
+      const hStart = hour * 60, hEnd = hStart + 60;
+      return shifts.filter((sh: any) => {
+        if (sh.function_id !== fnId) return false;
+        const st = this.parseTimeMin(sh.scheduled_start);
+        let en = this.parseTimeMin(sh.scheduled_end);
+        if (en <= st) en += 24 * 60;
+        return st < hEnd && en > hStart;
+      }).length;
+    };
+
+    // Required per channel per hour from live-plan (max of the two 30-min slots)
+    const requiredByChHour = new Map<string, number>(); // `${hour}|${channel}`
+    const measuredHours = new Set<number>();
+    for (const iv of plan.intervals) {
+      if (!iv.measured) continue;
+      const hour = +iv.interval.slice(0, 2);
+      measuredHours.add(hour);
+      for (const ch of iv.channels) {
+        const key = `${hour}|${ch.channel}`;
+        // channel-level required ≈ its erlang share of the interval requirement
+        const share = iv.totalErlangs > 0 ? ch.erlangs / iv.totalErlangs : 0;
+        const req = Math.ceil((iv.requiredHc ?? 0) * share);
+        requiredByChHour.set(key, Math.max(requiredByChHour.get(key) ?? 0, req));
+      }
+    }
+
+    const hours = Array.from({ length: 24 }, (_, h) => {
+      const fnCells = functions.map((f: any) => {
+        const actualArr = actualSamples.get(`${h}|${f.id}`) ?? [];
+        const act = avg(actualArr);
+        return {
+          functionId: f.id, functionName: f.name, channel: f.channel_type,
+          scheduled: schedCount(f.id, h),
+          actual: act != null ? Math.round(act) : null,
+        };
+      });
+      const unmappedArr = actualSamples.get(`${h}|unmapped`) ?? [];
+      const channels: Record<string, number> = {};
+      for (const [key, req] of requiredByChHour) {
+        const [hh, ch] = key.split('|');
+        if (+hh === h) channels[ch] = req;
+      }
+      const totalSched = fnCells.reduce((s, c) => s + c.scheduled, 0);
+      const totalAct   = fnCells.reduce((s, c) => s + (c.actual ?? 0), 0)
+                       + (avg(unmappedArr) != null ? Math.round(avg(unmappedArr)!) : 0);
+      const totalReq   = Object.values(channels).reduce((s, v) => s + v, 0);
+      return {
+        hour: `${String(h).padStart(2, '0')}:00`,
+        measured: measuredHours.has(h),
+        functions: fnCells,
+        unmappedActual: avg(unmappedArr) != null ? Math.round(avg(unmappedArr)!) : null,
+        requiredByChannel: channels,
+        totals: {
+          scheduled: totalSched,
+          actual: measuredHours.has(h) ? totalAct : null,
+          required: measuredHours.has(h) ? totalReq : null,
+          gap: measuredHours.has(h) ? totalReq - totalSched : null,
+          risk: !measuredHours.has(h) ? 'no-data'
+            : totalReq - totalSched > 3 ? 'critical'
+            : totalReq - totalSched > 0 ? 'warning' : 'ok',
+        },
+      };
+    });
+
+    return { date, functions, hours };
+  }
+
   /* ── Scenario persistence ───────────────────────────────────────────────── */
   async saveScenario(tenantId: string, userId: string, dto: {
     name: string; channel: string; scenarioType?: string;

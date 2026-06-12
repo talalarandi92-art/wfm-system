@@ -90,6 +90,18 @@ export class CapacityController {
     });
   }
 
+  /**
+   * GET /capacity/function-hourly?date=YYYY-MM-DD
+   * HC per function per hour: scheduled / actual (live) / required by channel.
+   */
+  @Get('function-hourly')
+  getFunctionHourly(@CurrentUser() user: any, @Query('date') date?: string) {
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '')
+      ? date!
+      : new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    return this.svc.getFunctionHourly(this.tid(user), d);
+  }
+
   /** Saved scenarios */
   @Get('scenarios')
   listScenarios(@CurrentUser() user: any, @Query('channel') channel?: string) {

@@ -301,6 +301,14 @@ export default function ShiftRotationPage() {
   const [assignToGroupId, setAssignToGroupId]      = useState('');
   const [assignMsg, setAssignMsg] = useState('');
 
+  // Rotation % BEFORE approved swaps (fairness basis) vs AFTER
+  const [swapImpact, setSwapImpact] = useState<any | null>(null);
+  const [swapOpen, setSwapOpen]     = useState(true);
+  useEffect(() => {
+    apiClient.get('/schedule-generator/shift-rate')
+      .then(r => setSwapImpact(r.data)).catch(() => setSwapImpact(null));
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -650,6 +658,90 @@ export default function ShiftRotationPage() {
                 <span className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
                   <CheckCircle2 size={12} /> {assignMsg}
                 </span>
+              )}
+            </div>
+          )}
+
+          {/* ── Swap Impact: rotation % before vs after approved swaps ── */}
+          {swapImpact && (
+            <div className="rounded-2xl overflow-hidden"
+              style={{
+                background: dark ? 'rgba(15,21,39,0.9)' : 'rgba(255,255,255,0.9)',
+                border: '1px solid rgba(168,85,247,0.25)',
+                boxShadow: dark ? '0 4px 24px rgba(0,0,0,0.2)' : '0 4px 24px rgba(15,23,42,0.06)',
+              }}>
+              <button onClick={() => setSwapOpen(o => !o)}
+                className="w-full flex items-center gap-2 px-4 py-3 text-start">
+                <span className="text-base">🔁</span>
+                <span className="text-sm font-bold" style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>
+                  {ar ? 'الروتيشن ٪ — قبل التبديلات vs بعد التبديلات' : 'Rotation % — Before vs After Swaps'}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
+                  style={{ background: 'rgba(168,85,247,0.12)', color: '#c084fc' }}>
+                  {swapImpact.affectedEmployees} {ar ? 'متأثر' : 'affected'}
+                </span>
+                <span className="ms-auto text-xs" style={{ color: '#64748b' }}>{swapOpen ? '▲' : '▼'}</span>
+              </button>
+              {swapOpen && (
+                <div className="px-4 pb-3">
+                  <p className="text-[10px] mb-2 px-2 py-1.5 rounded-lg"
+                    style={{ background: 'rgba(168,85,247,0.07)', color: dark ? '#c4b5fd' : '#7c3aed' }}>
+                    ⚖️ {ar
+                      ? 'العدالة ومولّد الجدول يعتمدان أرقام "قبل التبديلات" — التبديل لا يغيّر نصيبك من الروتيشن.'
+                      : 'Fairness and the generator use the BEFORE numbers — swapping never changes your rotation share.'}
+                  </p>
+                  {swapImpact.affectedEmployees === 0 ? (
+                    <p className="text-xs py-3 text-center" style={{ color: '#64748b' }}>
+                      {ar ? 'لا توجد تبديلات معتمدة مؤثرة هذه السنة' : 'No approved swaps affecting rotation this year'}
+                    </p>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="w-full text-xs" style={{ borderCollapse: 'collapse', minWidth: 700 }}>
+                        <thead>
+                          <tr style={{ borderBottom: dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.07)' }}>
+                            <th className="px-2 py-1.5 text-[10px] font-bold" style={{ color: '#64748b', textAlign: 'start' }}>
+                              {ar ? 'الموظف' : 'Employee'}</th>
+                            {(['morning', 'afternoon', 'evening', 'night', 'midnight'] as const).map(c => (
+                              <th key={c} className="px-2 py-1.5 text-[10px] font-bold text-center" style={{ color: '#64748b' }}>
+                                {ar ? ({ morning: 'صباحي', afternoon: 'ظهيرة', evening: 'مسائي', night: 'ليلي', midnight: 'ميدنايت' }[c]) : c}
+                                <div className="text-[8px] font-normal">{ar ? 'قبل ← بعد' : 'before → after'}</div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {swapImpact.rows.filter((r: any) => r.affectedBySwaps).map((r: any) => (
+                            <tr key={r.employeeId} style={{ borderBottom: dark ? '1px solid rgba(255,255,255,0.04)' : '1px solid rgba(0,0,0,0.04)' }}>
+                              <td className="px-2 py-2">
+                                <div className="font-semibold" style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>{r.name}</div>
+                                <div className="text-[9px]" style={{ color: '#64748b' }}>#{r.employeeNo} · {r.functionName}</div>
+                              </td>
+                              {(['morning', 'afternoon', 'evening', 'night', 'midnight'] as const).map(c => {
+                                const pre = r.preSwap.byCategory[c]?.pct ?? 0;
+                                const post = r.postSwap.byCategory[c]?.pct ?? 0;
+                                const d = r.deltaPct[c] ?? 0;
+                                return (
+                                  <td key={c} className="px-2 py-2 text-center tabular-nums">
+                                    <span style={{ color: dark ? '#94a3b8' : '#475569', fontWeight: 700 }}>{pre}%</span>
+                                    <span style={{ color: '#475569' }}> ← </span>
+                                    <span style={{ color: d > 0 ? '#f87171' : d < 0 ? '#4ade80' : (dark ? '#94a3b8' : '#475569'), fontWeight: 700 }}>
+                                      {post}%
+                                    </span>
+                                    {d !== 0 && (
+                                      <div className="text-[9px] font-bold" style={{ color: d > 0 ? '#f87171' : '#4ade80' }}>
+                                        {d > 0 ? `+${d}` : d}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}

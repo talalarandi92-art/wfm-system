@@ -362,6 +362,15 @@ export default function CapacityPage() {
   const [livePlanLoading, setLivePlanLoading] = useState(false);
   const [lpSaveMsg, setLpSaveMsg] = useState('');
 
+  // HC by Function × Hour
+  const [fnHourly, setFnHourly] = useState<any | null>(null);
+  const [fnHourlyOpen, setFnHourlyOpen] = useState(true);
+
+  useEffect(() => {
+    apiClient.get(`/capacity/function-hourly?date=${date}`)
+      .then(r => setFnHourly(r.data)).catch(() => setFnHourly(null));
+  }, [date]);
+
   const loadLivePlan = useCallback(() => {
     setLivePlanLoading(true);
     apiClient.get(`/capacity/live-plan?date=${date}`)
@@ -662,6 +671,85 @@ export default function CapacityPage() {
               </span>
             </div>
           </>
+        )}
+      </div>
+
+      {/* ── HC BY FUNCTION × HOUR ───────────────────────────────────────────── */}
+      <div className={`rounded-xl border p-4 mb-5 ${dark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}>
+        <button onClick={() => setFnHourlyOpen(o => !o)} className="w-full flex items-center gap-2 text-start">
+          <Users size={16} className="text-sky-400" />
+          <span className={`text-sm font-semibold ${dark ? 'text-slate-200' : 'text-slate-700'}`}>
+            {ar ? 'الهيدكاونت حسب الوظيفة × الساعة' : 'Headcount by Function × Hour'}
+          </span>
+          <span className={`text-[10px] px-2 py-0.5 rounded-full ${dark ? 'bg-sky-500/15 text-sky-300' : 'bg-sky-50 text-sky-600 border border-sky-200'}`}>
+            {ar ? 'مطلوب · مجدول · فعلي · فجوة' : 'Required · Scheduled · Actual · Gap'}
+          </span>
+          <span className={`ms-auto text-xs ${dark ? 'text-slate-500' : 'text-slate-400'}`}>{fnHourlyOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {fnHourlyOpen && fnHourly && (
+          <div className="mt-3 overflow-x-auto" style={{ maxHeight: 420, overflowY: 'auto' }}>
+            <table className="w-full text-xs" style={{ borderCollapse: 'collapse', minWidth: 760 }}>
+              <thead className="sticky top-0 z-10">
+                <tr className={dark ? 'bg-slate-900' : 'bg-slate-100'}>
+                  {[ar ? 'الساعة' : 'Hour', ar ? 'المطلوب' : 'Required', ar ? 'المجدول' : 'Scheduled',
+                    ar ? 'الفعلي الآن' : 'Actual', ar ? 'الفجوة' : 'Gap', ar ? 'الحالة' : 'Status',
+                    ar ? 'أعلى الوظائف (مجدول/فعلي)' : 'Top functions (sched/actual)'].map(hd => (
+                    <th key={hd} className={`px-2 py-1.5 text-[10px] font-bold whitespace-nowrap ${dark ? 'text-slate-400' : 'text-slate-500'}`}
+                      style={{ textAlign: 'start' }}>{hd}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {fnHourly.hours.map((h: any) => {
+                  const t = h.totals;
+                  const riskColor = t.risk === 'critical' ? '#ef4444' : t.risk === 'warning' ? '#f59e0b'
+                    : t.risk === 'ok' ? '#22c55e' : (dark ? '#334155' : '#cbd5e1');
+                  const topFns = h.functions
+                    .filter((f: any) => f.scheduled > 0 || (f.actual ?? 0) > 0)
+                    .sort((a: any, b: any) => (b.scheduled + (b.actual ?? 0)) - (a.scheduled + (a.actual ?? 0)))
+                    .slice(0, 4);
+                  return (
+                    <tr key={h.hour} className={dark ? 'border-b border-slate-700/40' : 'border-b border-slate-100'}
+                      style={{ background: t.risk === 'critical' ? 'rgba(239,68,68,0.05)' : undefined }}>
+                      <td className={`px-2 py-1.5 font-mono font-bold ${dark ? 'text-slate-300' : 'text-slate-600'}`}>{h.hour}</td>
+                      <td className="px-2 py-1.5 font-bold tabular-nums" style={{ color: '#f59e0b' }}>{t.required ?? '—'}</td>
+                      <td className="px-2 py-1.5 font-bold tabular-nums" style={{ color: '#818cf8' }}>{t.scheduled}</td>
+                      <td className="px-2 py-1.5 font-bold tabular-nums" style={{ color: '#34d399' }}>{t.actual ?? '—'}</td>
+                      <td className="px-2 py-1.5 font-black tabular-nums" style={{ color: (t.gap ?? 0) > 0 ? '#ef4444' : '#22c55e' }}>
+                        {t.gap != null ? (t.gap > 0 ? `−${t.gap}` : `+${-t.gap}`) : '—'}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${riskColor}1c`, color: riskColor }}>
+                          {t.risk === 'critical' ? (ar ? 'حرج' : 'Critical') : t.risk === 'warning' ? (ar ? 'تحذير' : 'Warning')
+                            : t.risk === 'ok' ? (ar ? 'آمن' : 'Safe') : (ar ? 'لا قياس' : 'No data')}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <div className="flex gap-1 flex-wrap">
+                          {topFns.map((f: any) => (
+                            <span key={f.functionId} className={`text-[9px] px-1.5 py-0.5 rounded ${dark ? 'bg-slate-700/60 text-slate-300' : 'bg-slate-100 text-slate-600'}`}
+                              title={`${f.functionName} (${f.channel})`}>
+                              {f.functionName}: <b style={{ color: '#818cf8' }}>{f.scheduled}</b>/<b style={{ color: '#34d399' }}>{f.actual ?? '—'}</b>
+                            </span>
+                          ))}
+                          {h.unmappedActual ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.1)', color: '#fbbf24' }}>
+                              {ar ? 'غير مرتبط' : 'unmapped'}: {h.unmappedActual}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className={`text-[10px] mt-2 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+              {ar ? 'ملاحظة: المجدول في ساعات الفجر لا يشمل ذيول شفتات MD من اليوم السابق (قيد التحسين). "غير مرتبط" = متصلون لم يُربطوا بموظف بعد — ادمج التكرارات في Employee Merge.'
+                  : 'Note: night-hour scheduled excludes prior-day MD tails (known). "Unmapped" = online agents not yet linked — merge duplicates in Employee Merge.'}
+            </p>
+          </div>
         )}
       </div>
 
