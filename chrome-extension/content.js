@@ -1,5 +1,5 @@
 'use strict';
-console.log('[WFM Bridge] content.js v16.1 loaded ✓ (metrics diagnostics)');
+console.log('[WFM Bridge] content.js v16.2 loaded ✓ (queries-op metrics)');
 
 const SEND_INTERVAL_MS = 30_000;
 const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
@@ -125,7 +125,9 @@ function extractMeasurements(item) {
       else if (v && typeof v === 'object' && !Array.isArray(v)) scan(v, depth + 1);
     }
   };
-  // Sprinklr puts measurement values in: item itself, item.measurements, item.additional
+  // Sprinklr puts measurement values in: projections (confirmed — M_* keys),
+  // measurements, additional, or the item itself
+  scan(item.projections || {});
   scan(item.measurements || {});
   scan(item.additional || {}, 1);
   scan(item, 1);
@@ -283,8 +285,11 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
     if (opName) {
       sprinklrOps.set(opName, payload.data);
 
-      // Harvest agent names/emails/measurements from every reportingQuery variant
-      if (opName === 'reportingQuery') {
+      // Harvest agent names/emails/measurements from every reportingQuery variant.
+      // CONFIRMED from raw samples: the Supervisor agents TABLE (Case Count /
+      // FRT / Handle Time) flows through the op named 'queries' — same
+      // data.reportingQuery body, measurements live in `projections` as M_* keys.
+      if (opName === 'reportingQuery' || opName === 'queries') {
         try { harvestReportingQuery(payload.data); } catch (e) { /* shape varies */ }
         // Diagnostic: keep the latest raw payload so the backend can inspect the
         // agents-table structure (Case Count / FRT / Handle Time columns) until
