@@ -942,6 +942,8 @@ export class SprinklrService {
       this.logger.warn(`Auto rollup failed: ${e.message}`));
     await this.computeViolations(tenantId, today).catch(e =>
       this.logger.warn(`Violations compute failed: ${e.message}`));
+    await this.computeAdherence(tenantId, today).catch(e =>
+      this.logger.warn(`Adherence compute failed: ${e.message}`));
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1000,9 +1002,17 @@ export class SprinklrService {
     );
     if (!stats.length) return { violations: 0 };
 
-    // 2. Scheduled shifts for the date (from attendance/import data)
+    // 2. Scheduled shifts for the date (TIME columns → timestamptz, cross-midnight aware)
     const schedules: any[] = await this.dataSource.query(
-      `SELECT ar.employee_id, ar.scheduled_start, ar.scheduled_end,
+      `SELECT ar.employee_id,
+              CASE WHEN ar.scheduled_start IS NOT NULL
+                   THEN (ar.attendance_date::text || ' ' || ar.scheduled_start::text || '+03')::timestamptz
+              END AS scheduled_start,
+              CASE WHEN ar.scheduled_end IS NULL THEN NULL
+                   WHEN ar.scheduled_end <= ar.scheduled_start
+                   THEN ((ar.attendance_date + 1)::text || ' ' || ar.scheduled_end::text || '+03')::timestamptz
+                   ELSE (ar.attendance_date::text  || ' ' || ar.scheduled_end::text || '+03')::timestamptz
+              END AS scheduled_end,
               sc.code AS shift_code, sc.is_working_shift, sc.is_leave_code
        FROM attendance_records ar
        LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
@@ -1167,6 +1177,243 @@ export class SprinklrService {
 
     this.logger.log(`[${tenantId}] Violations computed for ${date}: ${count}`);
     return { violations: count };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  SCHEDULE ADHERENCE ENGINE — scheduled shift vs actual Sprinklr activity
+  // ═══════════════════════════════════════════════════════════════════════════
+  async computeAdherence(tenantId: string, date: string): Promise<{ employees: number }> {
+    // 1. Scheduled working shifts for the date.
+    // scheduled_start/end are TIME columns — combine with the date (Kuwait +03)
+    // and roll cross-midnight shift ends to the next day.
+    const schedules: any[] = await this.dataSource.query(
+      `SELECT ar.employee_id,
+              (ar.attendance_date::text || ' ' || ar.scheduled_start::text || '+03')::timestamptz AS scheduled_start,
+              CASE WHEN ar.scheduled_end <= ar.scheduled_start
+                   THEN ((ar.attendance_date + 1)::text || ' ' || ar.scheduled_end::text || '+03')::timestamptz
+                   ELSE (ar.attendance_date::text  || ' ' || ar.scheduled_end::text || '+03')::timestamptz
+              END AS scheduled_end,
+              sc.code AS shift_code,
+              TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name
+       FROM attendance_records ar
+       JOIN employees e ON e.id = ar.employee_id
+       LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
+       WHERE ar.tenant_id = $1 AND ar.attendance_date = $2::date
+         AND ar.scheduled_start IS NOT NULL AND ar.scheduled_end IS NOT NULL`,
+      [tenantId, date],
+    );
+    if (!schedules.length) return { employees: 0 };
+
+    // 2. Employee → Sprinklr agent mapping
+    const maps: any[] = await this.dataSource.query(
+      `SELECT employee_id, sprinklr_agent_id, agent_name FROM sprinklr_agent_map
+       WHERE tenant_id = $1 AND employee_id IS NOT NULL`,
+      [tenantId],
+    );
+    const agentByEmp = new Map(maps.map(m => [m.employee_id, m]));
+
+    // 3. Snapshots covering the operational day ±6h (cross-midnight shifts)
+    const snapshots: { captured_at: string; agents_json: any }[] =
+      await this.dataSource.query(
+        `SELECT captured_at, agents_json FROM integration_snapshots
+         WHERE tenant_id = $1 AND source = 'sprinklr'
+           AND captured_at BETWEEN ($2::date::timestamptz - interval '9 hours')
+                               AND ($2::date::timestamptz + interval '33 hours')
+         ORDER BY captured_at ASC`,
+        [tenantId, date],
+      );
+
+    // Build per-agent status timeline segments [(fromMs, toMs, state)]
+    const ONLINE = new Set(['available', 'idle', 'busy']);
+    const BREAKS = new Set(['break', 'away']);
+    type Seg = { from: number; to: number; state: 'online' | 'break' | 'offline' };
+    const timeline = new Map<string, Seg[]>();
+
+    for (let i = 1; i < snapshots.length; i++) {
+      const prev = snapshots[i - 1];
+      const curr = snapshots[i];
+      const fromMs = new Date(prev.captured_at).getTime();
+      const toMs   = new Date(curr.captured_at).getTime();
+      if (toMs - fromMs > 5 * 60_000) continue;   // gap → untracked, skip
+
+      const agents: any[] = Array.isArray(curr.agents_json)
+        ? curr.agents_json : JSON.parse(curr.agents_json || '[]');
+      for (const a of agents) {
+        if (!a.agentId || isSyntheticAgent(a)) continue;
+        const st = ONLINE.has(a.status) ? 'online' : BREAKS.has(a.status) ? 'break' : 'offline';
+        const segs = timeline.get(a.agentId) || [];
+        const last = segs[segs.length - 1];
+        if (last && last.state === st && last.to === fromMs) last.to = toMs;  // extend
+        else segs.push({ from: fromMs, to: toMs, state: st as Seg['state'] });
+        timeline.set(a.agentId, segs);
+      }
+    }
+
+    let saved = 0;
+    for (const sch of schedules) {
+      const map = agentByEmp.get(sch.employee_id);
+      const shiftStart = new Date(sch.scheduled_start).getTime();
+      const shiftEnd   = new Date(sch.scheduled_end).getTime();
+      const scheduledMin = Math.round((shiftEnd - shiftStart) / 60000);
+      if (scheduledMin <= 0) continue;
+
+      let inAdh = 0, brk = 0, off = 0, tracked = 0, workedTotal = 0;
+      const deviations: { from: string; to: string; state: string }[] = [];
+
+      const segs = map ? (timeline.get(map.sprinklr_agent_id) || []) : [];
+      for (const s of segs) {
+        // total online of the day (conformance)
+        if (s.state === 'online') workedTotal += (s.to - s.from) / 60000;
+
+        // overlap with the scheduled shift (adherence)
+        const oFrom = Math.max(s.from, shiftStart);
+        const oTo   = Math.min(s.to, shiftEnd);
+        if (oTo <= oFrom) continue;
+        const mins = (oTo - oFrom) / 60000;
+        tracked += mins;
+        if (s.state === 'online')      inAdh += mins;
+        else if (s.state === 'break')  brk   += mins;
+        else                           off   += mins;
+        if (s.state !== 'online' && mins >= 5) {
+          deviations.push({
+            from: new Date(oFrom).toISOString(),
+            to:   new Date(oTo).toISOString(),
+            state: s.state,
+          });
+        }
+      }
+
+      const adherencePct  = tracked > 0 ? +((inAdh / tracked) * 100).toFixed(1) : null;
+      const conformancePct = +(Math.min(150, (workedTotal / scheduledMin) * 100)).toFixed(1);
+
+      await this.dataSource.query(
+        `INSERT INTO adherence_daily
+           (tenant_id, stat_date, employee_id, sprinklr_agent_id, agent_name, shift_code,
+            scheduled_start, scheduled_end,
+            scheduled_minutes, tracked_minutes, in_adherence_minutes,
+            break_in_shift_minutes, offline_in_shift_minutes, worked_total_minutes,
+            adherence_pct, conformance_pct, deviations, computed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,NOW())
+         ON CONFLICT (tenant_id, stat_date, employee_id) DO UPDATE SET
+           sprinklr_agent_id        = EXCLUDED.sprinklr_agent_id,
+           agent_name               = EXCLUDED.agent_name,
+           shift_code               = EXCLUDED.shift_code,
+           scheduled_start          = EXCLUDED.scheduled_start,
+           scheduled_end            = EXCLUDED.scheduled_end,
+           scheduled_minutes        = EXCLUDED.scheduled_minutes,
+           tracked_minutes          = EXCLUDED.tracked_minutes,
+           in_adherence_minutes     = EXCLUDED.in_adherence_minutes,
+           break_in_shift_minutes   = EXCLUDED.break_in_shift_minutes,
+           offline_in_shift_minutes = EXCLUDED.offline_in_shift_minutes,
+           worked_total_minutes     = EXCLUDED.worked_total_minutes,
+           adherence_pct            = EXCLUDED.adherence_pct,
+           conformance_pct          = EXCLUDED.conformance_pct,
+           deviations               = EXCLUDED.deviations,
+           computed_at              = NOW()`,
+        [
+          tenantId, date, sch.employee_id,
+          map?.sprinklr_agent_id ?? null, map?.agent_name ?? sch.employee_name, sch.shift_code,
+          sch.scheduled_start, sch.scheduled_end,
+          scheduledMin, Math.round(tracked), Math.round(inAdh),
+          Math.round(brk), Math.round(off), Math.round(workedTotal),
+          adherencePct, conformancePct, JSON.stringify(deviations.slice(0, 50)),
+        ],
+      );
+      saved++;
+    }
+
+    this.logger.log(`[${tenantId}] Adherence computed for ${date}: ${saved} employees`);
+    return { employees: saved };
+  }
+
+  async getAdherenceReport(tenantId: string, from: string, to: string, refresh = false) {
+    if (refresh) {
+      const start = new Date(from); const end = new Date(to);
+      for (let d = new Date(start), i = 0; d <= end && i < 31; d.setDate(d.getDate() + 1), i++) {
+        await this.computeAdherence(tenantId, d.toISOString().slice(0, 10));
+      }
+    }
+
+    const rows = await this.dataSource.query(
+      `SELECT a.*, e.employee_no,
+              TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name
+       FROM adherence_daily a
+       JOIN employees e ON e.id = a.employee_id
+       WHERE a.tenant_id = $1 AND a.stat_date BETWEEN $2::date AND $3::date
+       ORDER BY a.stat_date DESC, a.adherence_pct ASC NULLS LAST`,
+      [tenantId, from, to],
+    );
+
+    const measured = rows.filter((r: any) => r.adherence_pct != null);
+    const avg = (k: string) => measured.length
+      ? +(measured.reduce((s: number, r: any) => s + +r[k], 0) / measured.length).toFixed(1) : null;
+
+    return {
+      from, to,
+      summary: {
+        employees:       rows.length,
+        measured:        measured.length,        // had Sprinklr tracking during shift
+        unmatched:       rows.filter((r: any) => !r.sprinklr_agent_id).length,
+        avgAdherence:    avg('adherence_pct'),
+        avgConformance:  avg('conformance_pct'),
+        below85:         measured.filter((r: any) => +r.adherence_pct < 85).length,
+      },
+      rows,
+    };
+  }
+
+  // Intraday: scheduled HC vs actual online HC per 30-min interval
+  async getAdherenceIntraday(tenantId: string, date: string) {
+    const schedules: any[] = await this.dataSource.query(
+      `SELECT (attendance_date::text || ' ' || scheduled_start::text || '+03')::timestamptz AS scheduled_start,
+              CASE WHEN scheduled_end <= scheduled_start
+                   THEN ((attendance_date + 1)::text || ' ' || scheduled_end::text || '+03')::timestamptz
+                   ELSE (attendance_date::text  || ' ' || scheduled_end::text || '+03')::timestamptz
+              END AS scheduled_end
+       FROM attendance_records
+       WHERE tenant_id = $1 AND attendance_date = $2::date
+         AND scheduled_start IS NOT NULL AND scheduled_end IS NOT NULL`,
+      [tenantId, date],
+    );
+
+    const snapshots: any[] = await this.dataSource.query(
+      `SELECT captured_at, agents_json FROM integration_snapshots
+       WHERE tenant_id = $1 AND source = 'sprinklr'
+         AND captured_at BETWEEN $2::date::timestamptz AND ($2::date::timestamptz + interval '24 hours')
+       ORDER BY captured_at ASC`,
+      [tenantId, date],
+    );
+
+    const ONLINE = new Set(['available', 'idle', 'busy']);
+    const dayStart = new Date(`${date}T00:00:00+03:00`).getTime();
+    const intervals = Array.from({ length: 48 }, (_, i) => {
+      const from = dayStart + i * 30 * 60000;
+      const to   = from + 30 * 60000;
+      const scheduled = schedules.filter(s =>
+        new Date(s.scheduled_start).getTime() < to &&
+        new Date(s.scheduled_end).getTime()   > from,
+      ).length;
+
+      // actual = average distinct online agents across snapshots in the interval
+      const snaps = snapshots.filter(s => {
+        const t = new Date(s.captured_at).getTime();
+        return t >= from && t < to;
+      });
+      let actual: number | null = null;
+      if (snaps.length) {
+        const counts = snaps.map(s => {
+          const agents: any[] = Array.isArray(s.agents_json) ? s.agents_json : JSON.parse(s.agents_json || '[]');
+          return agents.filter(a => !isSyntheticAgent(a) && ONLINE.has(a.status)).length;
+        });
+        actual = Math.round(counts.reduce((x, y) => x + y, 0) / counts.length);
+      }
+
+      const hh = String(Math.floor(i / 2)).padStart(2, '0');
+      const mm = i % 2 === 0 ? '00' : '30';
+      return { interval: `${hh}:${mm}`, scheduled, actual, gap: actual != null ? actual - scheduled : null };
+    });
+
+    return { date, intervals };
   }
 
   // ── Violations report ───────────────────────────────────────────────────────

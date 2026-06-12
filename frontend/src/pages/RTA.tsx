@@ -1746,6 +1746,203 @@ function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRefresh, 
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
+/*  ADHERENCE PANEL — scheduled vs actual                                      */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+interface AdherenceRow {
+  stat_date: string; employee_id: string; sprinklr_agent_id: string | null;
+  employee_name: string; employee_no: string; agent_name: string; shift_code: string | null;
+  scheduled_start: string | null; scheduled_end: string | null;
+  scheduled_minutes: number; tracked_minutes: number;
+  in_adherence_minutes: number; break_in_shift_minutes: number;
+  offline_in_shift_minutes: number; worked_total_minutes: number;
+  adherence_pct: string | null; conformance_pct: string | null;
+  deviations: { from: string; to: string; state: string }[];
+}
+interface AdherenceReport {
+  from: string; to: string;
+  summary: { employees: number; measured: number; unmatched: number;
+             avgAdherence: number | null; avgConformance: number | null; below85: number };
+  rows: AdherenceRow[];
+}
+interface IntradayData {
+  date: string;
+  intervals: { interval: string; scheduled: number; actual: number | null; gap: number | null }[];
+}
+
+const adhColor = (p: number | null) =>
+  p == null ? '#475569' : p >= 90 ? '#22c55e' : p >= 80 ? '#a3e635' : p >= 65 ? '#f59e0b' : '#ef4444';
+
+function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefresh, refreshing }: {
+  report: AdherenceReport | null; intraday: IntradayData | null; ar: boolean;
+  from: string; to: string;
+  onRange: (f: string, t: string) => void;
+  onRefresh: () => void; refreshing: boolean;
+}) {
+  const s = report?.summary;
+  const activeIntervals = (intraday?.intervals ?? []).filter(i => i.scheduled > 0 || (i.actual ?? 0) > 0);
+  const maxHc = Math.max(1, ...activeIntervals.map(i => Math.max(i.scheduled, i.actual ?? 0)));
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Controls */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Activity size={14} style={{ color: '#34d399' }} />
+        <span className="text-[11px] font-bold" style={{ color: '#e2e8f0' }}>
+          {ar ? 'الالتزام بالجدول' : 'Schedule Adherence'}
+        </span>
+        <input type="date" value={from} onChange={e => onRange(e.target.value, to)}
+          className="rounded-lg text-[11px] px-2 py-1 outline-none"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
+        <span style={{ color: '#475569' }}>→</span>
+        <input type="date" value={to} onChange={e => onRange(from, e.target.value)}
+          className="rounded-lg text-[11px] px-2 py-1 outline-none"
+          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
+        <button onClick={onRefresh} disabled={refreshing}
+          className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-semibold"
+          style={{ background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', opacity: refreshing ? .6 : 1 }}>
+          {refreshing ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+          {ar ? 'إعادة احتساب' : 'Recompute'}
+        </button>
+        <button onClick={() => downloadCsv(
+            `/integrations/sprinklr/adherence?from=${from}&to=${to}&format=csv`,
+            `adherence_${from}_${to}.csv`)}
+          className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-semibold"
+          style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.28)' }}>
+          ⬇ {ar ? 'تصدير Excel' : 'Export Excel'}
+        </button>
+      </div>
+
+      {/* KPI strip */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+        {[
+          { lbl: ar ? 'متوسط الالتزام' : 'Avg Adherence',   val: s?.avgAdherence != null ? `${s.avgAdherence}%` : '—', color: adhColor(s?.avgAdherence ?? null) },
+          { lbl: ar ? 'متوسط الإنجاز'  : 'Avg Conformance', val: s?.avgConformance != null ? `${s.avgConformance}%` : '—', color: '#818cf8' },
+          { lbl: ar ? 'مجدولين'        : 'Scheduled',       val: s?.employees ?? '—', color: '#94a3b8' },
+          { lbl: ar ? 'مُتتبَّعين'      : 'Measured',        val: s?.measured ?? '—', color: '#06b6d4' },
+          { lbl: ar ? 'تحت 85%'        : 'Below 85%',       val: s?.below85 ?? '—', color: (s?.below85 ?? 0) > 0 ? '#ef4444' : '#22c55e' },
+        ].map(k => (
+          <div key={k.lbl} className="rounded-2xl p-3 text-center"
+            style={{ background: `${k.color}0a`, border: `1px solid ${k.color}26` }}>
+            <div className="text-xl font-black tabular-nums leading-none" style={{ color: k.color }}>{k.val}</div>
+            <div className="text-[9px] mt-1.5 font-semibold" style={{ color: '#64748b' }}>{k.lbl}</div>
+          </div>
+        ))}
+      </div>
+
+      {(s?.unmatched ?? 0) > 0 && (
+        <div className="text-[10px] px-3 py-1.5 rounded-xl" style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)', color: '#fbbf24' }}>
+          ⚠ {s!.unmatched} {ar ? 'موظف مجدول غير مرتبط بسبرينكلر بعد — ادمج التكرارات في صفحة Employee Merge أو انتظر تجميع الإيميلات'
+                              : 'scheduled employees not yet linked to Sprinklr — merge duplicates in Employee Merge or wait for email harvest'}
+        </div>
+      )}
+
+      {/* Intraday: scheduled vs actual HC */}
+      {activeIntervals.length > 0 && (
+        <div className="rounded-2xl p-3.5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: '#e2e8f0' }}>
+              <BarChart3 size={13} style={{ color: '#818cf8' }} />
+              {ar ? 'اليوم لحظة بلحظة — مجدول vs فعلي (كل ٣٠ دقيقة)' : 'Intraday — Scheduled vs Actual HC (30-min)'}
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[9px] flex items-center gap-1" style={{ color: '#64748b' }}>
+                <span className="w-2 h-2 rounded-sm inline-block" style={{ background: 'rgba(129,140,248,0.45)' }} />{ar ? 'مجدول' : 'Scheduled'}
+              </span>
+              <span className="text-[9px] flex items-center gap-1" style={{ color: '#64748b' }}>
+                <span className="w-2 h-2 rounded-sm inline-block" style={{ background: 'rgba(52,211,153,0.6)' }} />{ar ? 'فعلي' : 'Actual'}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-end gap-0.5" style={{ height: 90, overflowX: 'auto' }}>
+            {activeIntervals.map(iv => (
+              <div key={iv.interval} className="flex flex-col items-center gap-0.5" style={{ minWidth: 26 }}
+                title={`${iv.interval} — ${ar ? 'مجدول' : 'sched'} ${iv.scheduled} / ${ar ? 'فعلي' : 'actual'} ${iv.actual ?? '—'}`}>
+                <div className="flex items-end gap-px" style={{ height: 64 }}>
+                  <div className="rounded-t" style={{ width: 9, height: Math.max(2, (iv.scheduled / maxHc) * 64), background: 'rgba(129,140,248,0.45)' }} />
+                  <div className="rounded-t" style={{
+                    width: 9, height: Math.max(2, ((iv.actual ?? 0) / maxHc) * 64),
+                    background: iv.actual == null ? 'rgba(71,85,105,0.3)'
+                      : (iv.gap ?? 0) < 0 ? 'rgba(239,68,68,0.65)' : 'rgba(52,211,153,0.6)',
+                  }} />
+                </div>
+                <span className="text-[7.5px] tabular-nums" style={{ color: '#475569' }}>{iv.interval}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Per-agent table */}
+      {!(report?.rows.length) ? (
+        <div className="flex flex-col items-center justify-center py-12">
+          <Activity size={30} className="mb-2" style={{ color: '#334155' }} />
+          <p className="text-xs font-semibold" style={{ color: '#64748b' }}>
+            {ar ? 'لا توجد بيانات التزام لهذه الفترة' : 'No adherence data for this range'}
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 880 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}>
+                  {[ar ? 'التاريخ' : 'Date', ar ? 'الموظف' : 'Employee', ar ? 'الشفت' : 'Shift',
+                    ar ? 'الالتزام' : 'Adherence', ar ? 'الإنجاز' : 'Conformance',
+                    ar ? 'داخل الشفت' : 'In-Shift', ar ? 'بريك بالشفت' : 'Break',
+                    ar ? 'أوفلاين بالشفت' : 'Offline', ar ? 'متتبَّع/مجدول' : 'Tracked/Sched'].map((h, i) => (
+                    <th key={i} className="text-[9px] font-bold px-3 py-2 whitespace-nowrap" style={{ color: '#64748b', textAlign: 'start' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {report.rows.map(r => {
+                  const pct = r.adherence_pct != null ? +r.adherence_pct : null;
+                  const c = adhColor(pct);
+                  return (
+                    <tr key={`${r.stat_date}_${r.employee_id}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      <td className="px-3 py-2 text-[10px] tabular-nums whitespace-nowrap" style={{ color: '#94a3b8' }}>{String(r.stat_date).slice(0, 10)}</td>
+                      <td className="px-3 py-2">
+                        <div className="text-[11px] font-semibold" style={{ color: '#e2e8f0' }}>{r.employee_name}</div>
+                        <div className="text-[9px]" style={{ color: r.sprinklr_agent_id ? '#4ade80' : '#f59e0b' }}>
+                          #{r.employee_no} {r.sprinklr_agent_id ? '✓' : (ar ? '· غير مرتبط' : '· unlinked')}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ color: '#94a3b8' }}>
+                        {r.shift_code ?? '—'}
+                        <div className="text-[8.5px] font-normal" style={{ color: '#475569' }}>
+                          {fmtTime(r.scheduled_start)}–{fmtTime(r.scheduled_end)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2" style={{ minWidth: 120 }}>
+                        {pct == null ? <span className="text-[10px]" style={{ color: '#475569' }}>{ar ? 'لا تتبع' : 'no tracking'}</span> : (
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)', minWidth: 60 }}>
+                              <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct)}%`, background: c, transition: 'width .5s' }} />
+                            </div>
+                            <span className="text-[11px] font-black tabular-nums" style={{ color: c }}>{pct}%</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-[11px] font-bold tabular-nums" style={{ color: '#818cf8' }}>
+                        {r.conformance_pct != null ? `${r.conformance_pct}%` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: '#34d399' }}>{fmtMin(r.in_adherence_minutes)}</td>
+                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: '#818cf8' }}>{fmtMin(r.break_in_shift_minutes)}</td>
+                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: r.offline_in_shift_minutes > 30 ? '#f87171' : '#94a3b8' }}>{fmtMin(r.offline_in_shift_minutes)}</td>
+                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: '#64748b' }}>{fmtMin(r.tracked_minutes)} / {fmtMin(r.scheduled_minutes)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
 /*  COMPLIANCE / VIOLATIONS PANEL                                              */
 /* ═══════════════════════════════════════════════════════════════════════════ */
 interface ViolationRow {
@@ -2052,8 +2249,11 @@ export default function RTAPage() {
   const [coverage, setCoverage]   = useState<Coverage | null>(null);
   const [queueDetail, setQueueDetail] = useState<QueueDetail | null>(null);
   const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
-  const [tab, setTab]   = useState<'queues' | 'breaks' | 'permissions' | 'coverage' | 'agents' | 'daily' | 'compliance'>('queues');
+  const [tab, setTab]   = useState<'queues' | 'breaks' | 'permissions' | 'coverage' | 'agents' | 'daily' | 'compliance' | 'adherence'>('queues');
   const [violations, setViolations] = useState<ViolationsReport | null>(null);
+  const [adherence, setAdherence]   = useState<AdherenceReport | null>(null);
+  const [intraday, setIntraday]     = useState<IntradayData | null>(null);
+  const [adhRefreshing, setAdhRefreshing] = useState(false);
   const todayStr = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
   const [daily, setDaily]           = useState<DailyReport | null>(null);
   const [fc, setFc]                 = useState<ContactForecast | null>(null);
@@ -2142,6 +2342,23 @@ export default function RTAPage() {
   useEffect(() => {
     if (tab === 'compliance') loadViolations();
   }, [tab, loadViolations]);
+
+  const loadAdherence = useCallback(async (refresh = false) => {
+    if (refresh) setAdhRefreshing(true);
+    try {
+      const [rep, intra] = await Promise.all([
+        apiClient.get<AdherenceReport>(`/integrations/sprinklr/adherence?from=${dailyFrom}&to=${dailyTo}${refresh ? '&refresh=1' : ''}`),
+        apiClient.get<IntradayData>(`/integrations/sprinklr/adherence-intraday?date=${dailyTo}`),
+      ]);
+      setAdherence(rep.data);
+      setIntraday(intra.data);
+    } catch { /* non-fatal */ }
+    setAdhRefreshing(false);
+  }, [dailyFrom, dailyTo]);
+
+  useEffect(() => {
+    if (tab === 'adherence') loadAdherence(false);
+  }, [tab, loadAdherence]);
 
   const reviewViolation = useCallback(async (id: string, status: string) => {
     try {
@@ -2319,6 +2536,7 @@ export default function RTAPage() {
           { key: 'agents',      label: ar ? 'ساعات العمل' : 'Work Hours',  alert: 0 },
           { key: 'daily',       label: ar ? 'التقرير اليومي' : 'Daily Report', alert: 0 },
           { key: 'compliance',  label: ar ? 'المخالفات' : 'Compliance', alert: violations?.summary.open ?? 0 },
+          { key: 'adherence',   label: ar ? 'الالتزام' : 'Adherence', alert: adherence?.summary.below85 ?? 0 },
         ] as const).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
@@ -2421,6 +2639,14 @@ export default function RTAPage() {
               from={dailyFrom} to={dailyTo}
               onRange={(f, t) => { setDailyFrom(f); setDailyTo(t); }}
               onReview={reviewViolation} />
+          </div>
+        )}
+        {tab === 'adherence' && (
+          <div className="flex-1 overflow-y-auto px-4 py-2 pb-6" style={{ scrollbarWidth: 'thin' }}>
+            <AdherencePanel report={adherence} intraday={intraday} ar={ar}
+              from={dailyFrom} to={dailyTo}
+              onRange={(f, t) => { setDailyFrom(f); setDailyTo(t); }}
+              onRefresh={() => loadAdherence(true)} refreshing={adhRefreshing} />
           </div>
         )}
       </div>

@@ -244,6 +244,58 @@ export class SprinklrController {
   }
 
   /**
+   * GET /integrations/sprinklr/adherence?from&to&refresh=1
+   * Schedule adherence: scheduled shift vs actual Sprinklr activity per agent per day.
+   */
+  @Get('adherence')
+  @ApiOperation({ summary: 'Schedule adherence report (scheduled vs actual, per agent per day)' })
+  async getAdherence(
+    @Request() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('refresh') refresh?: string,
+    @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    const f = /^\d{4}-\d{2}-\d{2}$/.test(from ?? '') ? from! : today;
+    const t = /^\d{4}-\d{2}-\d{2}$/.test(to   ?? '') ? to!   : today;
+    const report = await this.sprinklr.getAdherenceReport(req.user.tenantId, f, t, refresh === '1');
+
+    if (format === 'csv') {
+      const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+      const tm  = (v: any) => (v ? new Date(v).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kuwait', hour: '2-digit', minute: '2-digit' }) : '');
+      const headers = ['Date', 'Employee', 'Employee No', 'Shift', 'Shift Start', 'Shift End',
+        'Scheduled Min', 'Tracked Min', 'In-Adherence Min', 'Break In Shift', 'Offline In Shift',
+        'Worked Total Min', 'Adherence %', 'Conformance %'];
+      const lines = report.rows.map((r: any) => [
+        String(r.stat_date).slice(0, 10), esc(r.employee_name), esc(r.employee_no), esc(r.shift_code),
+        tm(r.scheduled_start), tm(r.scheduled_end),
+        r.scheduled_minutes, r.tracked_minutes, r.in_adherence_minutes,
+        r.break_in_shift_minutes, r.offline_in_shift_minutes, r.worked_total_minutes,
+        r.adherence_pct ?? '', r.conformance_pct ?? '',
+      ].join(','));
+      const csv = [headers.join(','), ...lines].join('\n');
+      res!.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res!.setHeader('Content-Disposition', `attachment; filename="adherence_${f}_${t}.csv"`);
+      return res!.send('﻿' + csv); // BOM for Excel Arabic
+    }
+    return report;
+  }
+
+  /**
+   * GET /integrations/sprinklr/adherence-intraday?date=YYYY-MM-DD
+   * Per 30-min interval: scheduled HC vs actual online HC.
+   */
+  @Get('adherence-intraday')
+  @ApiOperation({ summary: 'Intraday scheduled vs actual HC per 30-min interval' })
+  getAdherenceIntraday(@Request() req: any, @Query('date') date?: string) {
+    const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? date! : today;
+    return this.sprinklr.getAdherenceIntraday(req.user.tenantId, d);
+  }
+
+  /**
    * GET /integrations/sprinklr/compliance-config
    * Current violation thresholds (break limit, grace periods…).
    */
