@@ -15,6 +15,66 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 export class SkillsController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
+  /* ── Expiring / expired skill certifications ──────────────────────────── */
+  @Get('expiring')
+  @ApiOperation({ summary: 'Employee skills expiring soon or already expired' })
+  async expiring(@CurrentUser() user: any, @Query('days') daysQ?: string) {
+    const days = parseInt(daysQ ?? '30', 10);
+    const rows = await this.ds.query(
+      `SELECT e.employee_no, e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS name,
+              f.name AS function_name, s.name AS skill_name, s.code AS skill_code,
+              es.proficiency, es.expires_at,
+              (es.expires_at::date - CURRENT_DATE) AS days_left
+       FROM employee_skills es
+       JOIN employees e ON e.id = es.employee_id
+       JOIN skills s ON s.id = es.skill_id
+       LEFT JOIN functions f ON f.id = e.function_id
+       WHERE es.tenant_id = $1 AND es.status = 'active' AND e.status = 'active'
+         AND es.expires_at IS NOT NULL
+         AND es.expires_at::date <= CURRENT_DATE + ($2 || ' days')::interval
+       ORDER BY es.expires_at ASC`,
+      [user.tenantId, days],
+    );
+    const mapped = rows.map((r: any) => ({
+      employeeNo: r.employee_no, name: r.name?.trim(), functionName: r.function_name,
+      skillName: r.skill_name, skillCode: r.skill_code, proficiency: r.proficiency,
+      expiresAt: r.expires_at, daysLeft: parseInt(r.days_left, 10),
+      status: parseInt(r.days_left, 10) < 0 ? 'expired' : 'expiring',
+    }));
+    return {
+      windowDays: days,
+      expired: mapped.filter(m => m.status === 'expired').length,
+      expiring: mapped.filter(m => m.status === 'expiring').length,
+      data: mapped,
+    };
+  }
+
+  /* ── Notify managers about expiring/expired skills ────────────────────── */
+  @Post('expiring/notify')
+  @ApiOperation({ summary: 'Notify WFM/RTA about skills expiring within N days' })
+  async notifyExpiring(@CurrentUser() user: any, @Query('days') daysQ?: string) {
+    const days = parseInt(daysQ ?? '30', 10);
+    const r = await this.expiring(user, String(days));
+    if (!r.data.length) return { notified: 0, expiring: 0, expired: 0 };
+    const mgrs = await this.ds.query(
+      `SELECT DISTINCT u.id FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id
+       WHERE u.tenant_id=$1 AND r.code IN ('wfm_analyst','rta','platform_admin','team_leader')`,
+      [user.tenantId],
+    ).catch(() => []);
+    let notified = 0;
+    for (const m of mgrs) {
+      await this.ds.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
+         VALUES ($1,$2,'skill.expiry', $3, $4, 'skill', NULL)`,
+        [user.tenantId, m.id,
+         `🎓 مهارات تحتاج تجديد: ${r.expired} منتهية، ${r.expiring} قاربت`,
+         `${r.data.length} شهادة مهارة تنتهي خلال ${days} يوم أو منتهية. راجع مصفوفة المهارات.`],
+      ).catch(() => {});
+      notified++;
+    }
+    return { notified, expiring: r.expiring, expired: r.expired };
+  }
+
   /* ── List all skills ─────────────────────────────────────────────────── */
   @Get()
   async listSkills(@CurrentUser() user: any) {
@@ -129,55 +189,90 @@ export class SkillsController {
     const skillFilter  = skillCode  ? `AND s.code = $${params.push(skillCode) && params.length}`  : '';
     const fnFilter     = targetFn   ? `AND f.name != $${params.push(targetFn) && params.length}`  : '';
 
+    const theDate = date ?? new Date().toISOString().slice(0, 10);
+    const dateParam = params.push(theDate) && params.length;
+    // Gap window hours (for "is the agent's shift covering this period?")
+    const fH = fromHour ? parseInt(fromHour, 10) : null;
+    const tH = toHour ? parseInt(toHour, 10) : null;
+
+    // Real availability comes from attendance_records: agent must be PRESENT that day and
+    // their scheduled shift window must cover the gap hours (cross-midnight aware).
     const candidates = await this.ds.query(
       `SELECT e.id, e.employee_no,
               e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS name,
               e.gender, f.name AS current_function,
               s.name AS skill_name, s.code AS skill_code, s.name_ar AS skill_name_ar,
               es.proficiency,
-              -- Check if already scheduled on this date
-              (SELECT se.shift_code_display FROM schedule_entries se
-               WHERE se.employee_id = e.id AND se.entry_date = $${params.push(date ?? new Date().toISOString().slice(0,10)) && params.length}
-               LIMIT 1) AS scheduled_shift
+              ar.attendance_marker,
+              to_char(ar.scheduled_start,'HH24:MI') AS shift_start,
+              to_char(ar.scheduled_end,'HH24:MI')   AS shift_end,
+              EXTRACT(HOUR FROM ar.scheduled_start)::int AS sh,
+              EXTRACT(HOUR FROM ar.scheduled_end)::int   AS eh
        FROM employee_skills es
        JOIN employees e ON e.id = es.employee_id
        LEFT JOIN functions f ON f.id = e.function_id
        JOIN skills s ON s.id = es.skill_id
-       WHERE es.tenant_id = $1
-         AND es.status = 'active'
-         AND e.status = 'active'
-         ${skillFilter}
-         ${fnFilter}
+       LEFT JOIN attendance_records ar ON ar.employee_id = e.id AND ar.tenant_id = $1 AND ar.attendance_date = $${dateParam}::date
+       WHERE es.tenant_id = $1 AND es.status = 'active' AND e.status = 'active'
+         ${skillFilter} ${fnFilter}
        ORDER BY
-         CASE es.proficiency
-           WHEN 'expert'       THEN 1
-           WHEN 'advanced'     THEN 2
-           WHEN 'intermediate' THEN 3
-           ELSE 4
-         END,
+         CASE es.proficiency WHEN 'expert' THEN 1 WHEN 'advanced' THEN 2 WHEN 'intermediate' THEN 3 ELSE 4 END,
          e.first_name_en`,
       params,
     );
 
+    const coversWindow = (sh: number | null, eh: number | null): boolean => {
+      if (sh === null || eh === null) return false;
+      if (fH === null || tH === null) return true;            // no window asked → any present shift counts
+      if (sh < eh) return fH >= sh && tH <= eh;               // normal shift
+      return fH >= sh || tH <= eh;                            // cross-midnight shift
+    };
+
+    // Recent cross-skill load (last 30 days) per candidate — for fair "least-dispatched" suggestion
+    const ids = candidates.map((r: any) => r.id);
+    const loadMap: Record<string, number> = {};
+    if (ids.length) {
+      const loads = await this.ds.query(
+        `SELECT employee_id, COUNT(*) AS c FROM cross_skill_moves
+         WHERE tenant_id=$1 AND employee_id = ANY($2::uuid[]) AND start_at >= NOW() - INTERVAL '30 days'
+         GROUP BY employee_id`, [tid, ids],
+      ).catch(() => []);
+      for (const l of loads) loadMap[l.employee_id] = parseInt(l.c, 10);
+    }
+    const profRank: Record<string, number> = { expert: 1, advanced: 2, intermediate: 3, beginner: 4 };
+
+    const mapped = candidates.map((r: any) => {
+      const present = r.attendance_marker === 'present';
+      const covers  = coversWindow(r.sh, r.eh);
+      return {
+        employeeId: r.id, employeeNo: r.employee_no, name: r.name?.trim(), gender: r.gender,
+        currentFunction: r.current_function, skillName: r.skill_name, skillNameAr: r.skill_name_ar,
+        skillCode: r.skill_code, proficiency: r.proficiency,
+        marker: r.attendance_marker ?? null,
+        shiftWindow: r.shift_start ? `${r.shift_start}–${r.shift_end}` : null,
+        present, coversWindow: covers,
+        eligible: present && covers,                          // has skill + present + shift covers the gap
+        recentMoves: loadMap[r.id] ?? 0,                      // cross-skill load last 30d (lower = fairer pick)
+        bestMatch: false,
+      };
+    });
+    // Eligible first; among eligible rank by proficiency, then fewest recent moves (fairness)
+    mapped.sort((a, b) => {
+      if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+      const p = (profRank[a.proficiency] ?? 5) - (profRank[b.proficiency] ?? 5);
+      if (p !== 0) return p;
+      return a.recentMoves - b.recentMoves;
+    });
+    // Auto-suggest: the top eligible candidate is the best match
+    const top = mapped.find(m => m.eligible);
+    if (top) top.bestMatch = true;
+
     return {
-      targetFunction: targetFn,
-      skillCode,
-      date: date ?? new Date().toISOString().slice(0, 10),
-      fromHour: fromHour ?? null,
-      toHour:   toHour   ?? null,
-      candidates: candidates.map((r: any) => ({
-        employeeId:      r.id,
-        employeeNo:      r.employee_no,
-        name:            r.name?.trim(),
-        gender:          r.gender,
-        currentFunction: r.current_function,
-        skillName:       r.skill_name,
-        skillNameAr:     r.skill_name_ar,
-        skillCode:       r.skill_code,
-        proficiency:     r.proficiency,
-        scheduledShift:  r.scheduled_shift ?? null,
-        available:       !r.scheduled_shift || !['OFF','L','H','SL','A'].includes(r.scheduled_shift ?? ''),
-      })),
+      targetFunction: targetFn, skillCode, date: theDate,
+      fromHour: fromHour ?? null, toHour: toHour ?? null,
+      eligibleCount: mapped.filter(m => m.eligible).length,
+      bestMatch: top ? { employeeId: top.employeeId, name: top.name } : null,
+      candidates: mapped,
     };
   }
 
@@ -207,7 +302,7 @@ export class SkillsController {
         `Cross-skill: ${body.fromFunction} → ${body.toFunction}`,
         body.startAt, body.endAt,
         body.reason ?? `Coverage support for ${body.toFunction}`,
-        user.sub,
+        user.id,
       ],
     );
 
@@ -216,7 +311,7 @@ export class SkillsController {
       `INSERT INTO cross_skill_moves
          (tenant_id, employee_id, from_function, to_function, start_at, end_at, reason, status, requested_by, calendar_event_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,'approved',$8,$9)`,
-      [tid, body.employeeId, body.fromFunction, body.toFunction, body.startAt, body.endAt, body.reason ?? null, user.sub, event.id],
+      [tid, body.employeeId, body.fromFunction, body.toFunction, body.startAt, body.endAt, body.reason ?? null, user.id, event.id],
     );
 
     // Add employee as attendee
@@ -225,45 +320,41 @@ export class SkillsController {
       [body.employeeId],
     );
 
+    const startTime = new Date(body.startAt).toLocaleTimeString('ar-KW', { hour: '2-digit', minute: '2-digit' });
+    const endTime   = new Date(body.endAt).toLocaleTimeString('ar-KW', { hour: '2-digit', minute: '2-digit' });
+
+    // Add the agent as a calendar attendee + notify them (only if they have a user account)
     if (emp?.user_id) {
       await this.ds.query(
         `INSERT INTO calendar_event_attendees (event_id, user_id, employee_id, role, status)
          VALUES ($1,$2,$3,'attendee','pending')`,
         [event.id, emp.user_id, body.employeeId],
-      );
-
-      // Notify employee
-      const startTime = new Date(body.startAt).toLocaleTimeString('ar-KW', { hour: '2-digit', minute: '2-digit' });
-      const endTime   = new Date(body.endAt).toLocaleTimeString('ar-KW', { hour: '2-digit', minute: '2-digit' });
+      ).catch(() => {});
       await this.ds.query(
         `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
-         VALUES ($1,$2,'cross_skill.dispatch',
-                 'تغيير مؤقت للفنكشن',
-                 $3, 'cross_skill_move', $4)`,
+         VALUES ($1,$2,'cross_skill.dispatch', 'غطِّ ' || $5 || ' هذه الفترة', $3, 'cross_skill_move', $4)`,
         [
           tid, emp.user_id,
-          `تم تحويلك من ${body.fromFunction} إلى ${body.toFunction} من ${startTime} حتى ${endTime}`,
-          event.id,
+          `تم تحويلك من ${body.fromFunction} إلى ${body.toFunction} من ${startTime} حتى ${endTime} لتغطية النقص`,
+          event.id, body.toFunction,
         ],
       ).catch(() => {});
+    }
 
-      // Notify RTA users
-      const rtaUsers = await this.ds.query(
-        `SELECT u.id FROM users u
-         JOIN user_roles ur ON ur.user_id = u.id
-         JOIN roles r ON r.id = ur.role_id
-         WHERE u.tenant_id=$1 AND r.name IN ('rta','wfm_supervisor','wfm_analyst')`,
-        [tid],
-      );
-      for (const rta of rtaUsers) {
-        await this.ds.query(
-          `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
-           VALUES ($1,$2,'cross_skill.dispatch',
-                   'Cross-skill dispatch confirmed',
-                   $3, 'cross_skill_move', $4)`,
-          [tid, rta.id, `Employee dispatched: ${body.fromFunction} → ${body.toFunction} (${startTime}–${endTime})`, event.id],
-        ).catch(() => {});
-      }
+    // Always notify RTA / WFM so they see who is covering (role match is by CODE).
+    const rtaUsers = await this.ds.query(
+      `SELECT DISTINCT u.id FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN roles r ON r.id = ur.role_id
+       WHERE u.tenant_id=$1 AND r.code IN ('rta','wfm_analyst','platform_admin')`,
+      [tid],
+    ).catch(() => []);
+    for (const rta of rtaUsers) {
+      await this.ds.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
+         VALUES ($1,$2,'cross_skill.dispatch', 'تغطية cross-skill', $3, 'cross_skill_move', $4)`,
+        [tid, rta.id, `تم تحويل موظف: ${body.fromFunction} → ${body.toFunction} (${startTime}–${endTime})`, event.id],
+      ).catch(() => {});
     }
 
     return { success: true, eventId: event.id };

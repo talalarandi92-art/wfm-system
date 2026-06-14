@@ -41,6 +41,26 @@ export function fmtDateFull(d?: string | null, ar?: boolean): string {
   });
 }
 
+/**
+ * Format a Date as a LOCAL "YYYY-MM-DD" key.
+ * Never use toISOString() for date-only values — it converts to UTC and shifts
+ * the day for positive-offset timezones (e.g. UTC+3 turns a Saturday week-start
+ * into the Friday before).
+ */
+export function fmtLocalDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * The Saturday that starts the workforce week (Sat→Fri) containing `d`.
+ * JS getDay(): 0=Sun … 6=Sat → days to subtract = (getDay() + 1) % 7.
+ */
+export function weekStartSat(d: Date = new Date()): string {
+  const x = new Date(d);
+  x.setDate(x.getDate() - ((x.getDay() + 1) % 7));
+  return fmtLocalDate(x);
+}
+
 // ── Time ─────────────────────────────────────────────────────────────────────
 
 /**

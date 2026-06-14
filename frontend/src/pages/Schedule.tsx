@@ -10,6 +10,7 @@ import {
   Building2, BadgeCheck, Lock, Send, RotateCcw,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
+import { fmtLocalDate, weekStartSat } from '@/utils/format';
 import { useUiStore } from '@/store/ui.store';
 import { useInjectDsStyles } from '@/components/ds';
 
@@ -120,14 +121,9 @@ function fmtDate(iso: string, lang: 'ar' | 'en') {
 function shiftPeriod(weekStart: string, direction: -1 | 1, weeks: number): string {
   const d = new Date(weekStart + 'T00:00:00');
   d.setDate(d.getDate() + direction * weeks * 7);
-  return d.toISOString().split('T')[0];
+  return fmtLocalDate(d);
 }
-function currentWeekSat(): string {
-  const d = new Date();
-  const diff = (d.getDay() - 6 + 7) % 7;
-  d.setDate(d.getDate() - diff);
-  return d.toISOString().split('T')[0];
-}
+const currentWeekSat = (): string => weekStartSat();
 
 // ─── SaveResult (returned by PATCH /schedule/cell) ───────────────────────────
 interface SaveResult {

@@ -17,7 +17,9 @@ const DEFAULT_OPTIONS: GeneratorOptions = {
   minRestHours: 10,
   offDaysPerWeek: 1,
   internProductivity: 0.70,
-  allowFemaleN: true,
+  // Females end by C (21:00) by default; late shifts (E/N) only when a supervisor
+  // explicitly enables the exception. Midnight (N2/MD) always blocked.
+  allowFemaleN: false,
   weeks: 1,
 };
 
@@ -47,6 +49,7 @@ export class GeneratorService {
   ) {
     const options = { ...DEFAULT_OPTIONS, ...(optionsIn ?? {}) };
     const demandScale = Math.min(3, Math.max(0.3, optionsIn?.demandScale ?? 1));
+    weekStart = this.snapToSaturday(weekStart);   // workforce week always Sat→Fri
     const dates = buildWeekDates(weekStart);
 
     // ── 1. Requirement curves from live-plan history ──────────────────────────
@@ -293,6 +296,23 @@ export class GeneratorService {
     return this.fmtDate(d);
   }
 
+  /**
+   * Snap any date to the Saturday that starts its workforce week (Sat→Fri).
+   * The generator engine treats dates[0] as Saturday and assigns exactly
+   * `offDaysPerWeek` OFFs inside each 7-day block. If weekStart is NOT a
+   * Saturday, every block straddles a true Sat→Fri boundary and OFF days pile
+   * up (e.g. 3 in one calendar week) while day names get mislabeled. Snapping
+   * here guarantees each generated week == one true calendar week.
+   * JS getDay(): 0=Sun … 6=Sat → days to subtract = (getDay() + 1) % 7.
+   */
+  private snapToSaturday(dateStr: string): string {
+    const d = new Date(dateStr + (dateStr.length === 10 ? 'T00:00:00' : ''));
+    if (isNaN(d.getTime())) return dateStr;
+    const back = (d.getDay() + 1) % 7;
+    d.setDate(d.getDate() - back);
+    return this.fmtDate(d);
+  }
+
   // ── Derive shift from start/end times ────────────────────────────────────────
   private deriveShiftFromStart(startTime: string | null, endTime?: string | null): ShiftDef {
     if (!startTime) return SHIFTS.OFF;
@@ -361,10 +381,11 @@ export class GeneratorService {
     return 'MD';
   }
 
-  // Helper: is a date a weekend day (Fri=5 or Sat=6 in JS getDay())
+  // Helper: is a date a weekend day. Business rule — weekend = Thu/Fri/Sat.
+  // JS getDay(): Sun=0 … Thu=4, Fri=5, Sat=6 → weekend is getDay() >= 4.
   private isWeekend(dateStr: string): boolean {
     const d = new Date(dateStr + 'T00:00:00');
-    return d.getDay() === 5 || d.getDay() === 6;
+    return d.getDay() >= 4; // Thu, Fri, Sat
   }
 
   // ── Load YTD shift distribution ─────────────────────────────────────────────
@@ -573,6 +594,7 @@ export class GeneratorService {
     rawOptions?: Partial<GeneratorOptions>,
   ): Promise<GeneratorResult> {
     const options: GeneratorOptions = { ...DEFAULT_OPTIONS, ...rawOptions };
+    weekStart = this.snapToSaturday(weekStart);   // workforce week always Sat→Fri
 
     // Load data
     const employeesByFunction = await this.loadEmployees(tenantId, functionIds);
@@ -682,9 +704,13 @@ export class GeneratorService {
           const dist: ShiftDistribution = updatedDist.get(emp.employee.id) ??
             { morning: 0, afternoon: 0, evening: 0, night: 0, midnight: 0, off: 0, leave: 0, total: 0, byCodes: {}, weekendOff: 0, weekendWork: 0, maxConsecutive: 0 };
           for (const day of emp.assignments) {
-            if (day.shift.code === 'OFF') { dist.off++; dist.total++; }
-            else {
+            const wknd = this.isWeekend(day.date);
+            if (day.shift.code === 'OFF') {
+              dist.off++; dist.total++;
+              if (wknd) dist.weekendOff = (dist.weekendOff ?? 0) + 1;
+            } else {
               dist.total++;
+              if (wknd) dist.weekendWork = (dist.weekendWork ?? 0) + 1;
               if (day.shift.category === 'morning')        dist.morning++;
               else if (day.shift.category === 'afternoon') dist.afternoon++;
               else if (day.shift.category === 'evening')   dist.evening++;

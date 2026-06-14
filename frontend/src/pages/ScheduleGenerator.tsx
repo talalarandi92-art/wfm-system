@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { fmtLocalDate, weekStartSat } from '@/utils/format';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ShiftDef { code: string; label: string; color: string; category: string; }
@@ -52,14 +53,9 @@ function fmtRange(from: string, to: string, arMode: boolean) {
 function addDays(iso: string, n: number) {
   const d = new Date(iso + 'T00:00:00');
   d.setDate(d.getDate() + n);
-  return d.toISOString().split('T')[0];
+  return fmtLocalDate(d);
 }
-function currentSat() {
-  const d = new Date();
-  const diff = (d.getDay() - 6 + 7) % 7;
-  d.setDate(d.getDate() - diff);
-  return d.toISOString().split('T')[0];
-}
+const currentSat = () => weekStartSat();
 
 // ─── Shift Cell ───────────────────────────────────────────────────────────────
 function GenShiftCell({ day }: { day: DayAssignment }) {
@@ -354,7 +350,8 @@ export default function ScheduleGeneratorPage() {
   const [functions, setFunctions]   = useState<{ id: string; name: string; employee_count: string }[]>([]);
   const [selectedWeek, setSelectedWeek] = useState(currentSat());
   const [selectedFns, setSelectedFns]   = useState<string[]>([]);
-  const [options, setOptions]   = useState({ minRestHours: 10, offDaysPerWeek: 1, allowFemaleN: true });
+  const [femaleLateFns, setFemaleLateFns] = useState<string[]>([]);  // per-function female-N exception
+  const [options, setOptions]   = useState({ minRestHours: 10, offDaysPerWeek: 1, allowFemaleN: false });
   const [showOptions, setShowOptions]   = useState(false);
   const [result, setResult]     = useState<GeneratorResult | null>(null);
   const [loading, setLoading]   = useState(false);
@@ -392,7 +389,7 @@ export default function ScheduleGeneratorPage() {
     try {
       const body: any = {
         weekStart: selectedWeek,
-        options: { ...options, weeks },
+        options: { ...options, weeks, femaleLateFunctionIds: femaleLateFns },
       };
       if (selectedFns.length > 0) body.functionIds = selectedFns;
       const res = await apiClient.post('/schedule-generator/generate', body);
@@ -412,7 +409,7 @@ export default function ScheduleGeneratorPage() {
     try {
       const body: any = {
         weekStart: selectedWeek,
-        options: { ...options, weeks },
+        options: { ...options, weeks, femaleLateFunctionIds: femaleLateFns },
         label: arNow
           ? `مسودة — ${fmtRangeAr(selectedWeek, weekEnd)}`
           : `Draft — ${fmtRange(selectedWeek, weekEnd, false)}`,
@@ -611,25 +608,37 @@ export default function ScheduleGeneratorPage() {
               <p className="text-[9px] text-slate-600 mt-1">{ar ? 'يُغيَّر من الأزرار أعلاه' : 'Changed from buttons above'}</p>
             </div>
 
-            {/* Female N rule */}
+            {/* Female late-shift exception — per function */}
             <div>
               <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2 block">
-                {ar ? 'قاعدة الجنس' : 'Gender Rule'}
+                {ar ? 'استثناء: إناث يشتغلوا N — اختر الأقسام' : 'Exception: females may work N — pick functions'}
               </label>
-              <button
-                onClick={() => setOptions(o => ({ ...o, allowFemaleN: !o.allowFemaleN }))}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all text-start"
-                style={{
-                  background: options.allowFemaleN ? 'rgba(251,191,36,0.08)' : 'var(--chip-bg)',
-                  border: options.allowFemaleN ? '1px solid rgba(251,191,36,0.25)' : '1px solid var(--border)',
-                }}>
-                <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border ${options.allowFemaleN ? 'bg-amber-500 border-amber-500' : 'border-slate-400 dark:border-slate-600'}`}>
-                  {options.allowFemaleN && <span className="text-white text-[9px]">✓</span>}
-                </div>
-                <span className={options.allowFemaleN ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'}>
-                  {ar ? 'السماح بوردية N للإناث (تحذير)' : 'Allow N shift for females (warning)'}
-                </span>
-              </button>
+              <div className="flex flex-wrap gap-1.5">
+                {activeFns.length === 0 && (
+                  <span className="text-[11px] text-slate-500">{ar ? 'حمّل الأقسام أولاً' : 'Load functions first'}</span>
+                )}
+                {activeFns.map(fn => {
+                  const on = femaleLateFns.includes(fn.id);
+                  return (
+                    <button key={fn.id}
+                      onClick={() => setFemaleLateFns(s => on ? s.filter(x => x !== fn.id) : [...s, fn.id])}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1"
+                      style={{
+                        background: on ? 'rgba(251,191,36,0.12)' : 'var(--chip-bg)',
+                        border: `1px solid ${on ? 'rgba(251,191,36,0.35)' : 'var(--border)'}`,
+                        color: on ? '#d97706' : 'var(--text-secondary)',
+                      }}>
+                      {on && <span className="text-[9px]">✓</span>}
+                      {fn.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                {ar
+                  ? 'الإناث ينتهوا 20:00 (C) افتراضياً. الأقسام المحددة هنا: إناثها يشتغلوا N (حتى 22:00). منتصف الليل ممنوع دائماً.'
+                  : 'Females end by 20:00 (C) by default. Picked functions: their females may work N (to 22:00). Midnight always blocked.'}
+              </p>
             </div>
           </div>
         )}

@@ -4,11 +4,13 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { OdooService, OdooConfig } from './odoo.service';
 
 @ApiTags('Integrations — Odoo')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('settings.edit')   // integration config + syncs are admin-only
 @Controller('integrations/odoo')
 export class OdooController {
   constructor(private readonly odoo: OdooService) {}

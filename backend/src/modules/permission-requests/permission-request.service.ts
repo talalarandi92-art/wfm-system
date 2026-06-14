@@ -190,6 +190,40 @@ export class PermissionRequestService implements OnModuleInit {
     };
   }
 
+  // ── Campaign window helpers ──────────────────────────────────────────────
+  // During campaigns, permissions are EXCEPTIONAL — never blocked, but flagged
+  // and surfaced to WFM/RTA (Ops rule: permissions during campaigns are rare).
+  // Any active campaign covering the date triggers it (independent of the
+  // campaign's restricted_types list).
+  private async activeCampaignName(tenantId: string, dateStr: string): Promise<string | null> {
+    if (!dateStr) return null;
+    const rows = await this.ds.query(
+      `SELECT name FROM campaigns
+        WHERE tenant_id = $1 AND is_active = TRUE
+          AND $2::date BETWEEN start_date AND end_date
+        ORDER BY start_date LIMIT 1`,
+      [tenantId, String(dateStr).slice(0, 10)],
+    ).catch(() => []);
+    return rows[0]?.name ?? null;
+  }
+
+  private async notifyCampaignReviewers(tenantId: string, requestId: string, body: string): Promise<void> {
+    const reviewers = await this.ds.query(
+      `SELECT DISTINCT u.id FROM users u
+         JOIN user_roles ur ON ur.user_id = u.id
+         JOIN roles r ON r.id = ur.role_id
+        WHERE u.tenant_id = $1 AND r.code IN ('rta','wfm_analyst','wfm_supervisor','platform_admin')`,
+      [tenantId],
+    ).catch(() => []);
+    for (const rv of reviewers) {
+      await this.ds.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
+         VALUES ($1, $2, 'request.campaign_exception', $3, $4, 'request', $5)`,
+        [tenantId, rv.id, 'استئذان استثنائي خلال حملة', body, requestId],
+      ).catch(() => {});
+    }
+  }
+
   // ── Create request ─────────────────────────────────────────────────────────
 
   async createRequest(tenantId: string, dto: CreatePermissionRequestDto): Promise<{ id: string }> {
@@ -301,13 +335,21 @@ export class PermissionRequestService implements OnModuleInit {
       requesterId = adminUser[0].id;
     }
 
+    // Campaign window → mark this permission as an EXCEPTIONAL case (warn-only):
+    // flag the notes, force urgent so it surfaces, and notify WFM/RTA.
+    const campaign = await this.activeCampaignName(tenantId, dto.permissionDate);
+    const notesFinal = campaign
+      ? `${dto.notes ? dto.notes + ' | ' : ''}⚠ استئذان استثنائي خلال حملة «${campaign}»`
+      : (dto.notes ?? null);
+    const isUrgentFinal = campaign ? true : (dto.isUrgent ?? false);
+
     const requestRows = await this.ds.query(
       `INSERT INTO requests
          (tenant_id, request_type_id, requester_id, employee_id, status, is_urgent, notes, hc_impact, sla_due_at, submitted_at, created_at, updated_at)
        VALUES ($1,$2,$3,$4,'pending'::request_status_enum,$5,$6,$7,$8,NOW(),NOW(),NOW())
        RETURNING id`,
-      [tenantId, requestTypeId, requesterId, dto.employeeId, dto.isUrgent ?? false,
-       dto.notes ?? null, JSON.stringify(impact), sla],
+      [tenantId, requestTypeId, requesterId, dto.employeeId, isUrgentFinal,
+       notesFinal, JSON.stringify(impact), sla],
     );
     const requestId = requestRows[0].id;
 
@@ -320,7 +362,14 @@ export class PermissionRequestService implements OnModuleInit {
        durationMinutes, dto.permissionType, dto.reason, functionId],
     );
 
-    return { id: requestId };
+    if (campaign) {
+      await this.notifyCampaignReviewers(
+        tenantId, requestId,
+        `استئذان (${dto.permissionDate} ${dto.startTime}-${dto.endTime}) خلال حملة «${campaign}» — حالة استثنائية، راجع التغطية`,
+      );
+    }
+
+    return { id: requestId, campaignWarning: campaign ?? null } as any;
   }
 
   // ── Approve / Reject ───────────────────────────────────────────────────────

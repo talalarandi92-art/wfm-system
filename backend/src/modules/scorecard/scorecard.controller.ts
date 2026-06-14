@@ -233,7 +233,7 @@ export class ScorecardController {
       file.buffer,
       file.originalname,
       user.tenantId,
-      user.sub,
+      user.id,
       { notes },
     );
     return { success: true, ...result };

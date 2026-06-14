@@ -107,6 +107,7 @@ export class SprinklrService {
         atRisk: [],
         queues: [],
         agents: [],
+        stationSummary: null,
       };
     }
 
@@ -163,6 +164,9 @@ export class SprinklrService {
       atRisk,
       queues,
       agents:  snap.agents,
+      // Faithful mirror of the Sprinklr station right-rail (Queue Summary +
+      // Agent Status + Agent State) scraped by the extension.
+      stationSummary: (snap as any).stationSummary ?? null,
     };
   }
 
@@ -303,7 +307,7 @@ export class SprinklrService {
          SET live_hc = $1, live_updated_at = NOW()
          WHERE tenant_id = $2
            AND snapshot_date = CURRENT_DATE
-           AND interval_start = $3::time`,
+           AND interval_start::time = $3::time`,
         [liveHc, tenantId, intervalStart],
       );
     } catch {

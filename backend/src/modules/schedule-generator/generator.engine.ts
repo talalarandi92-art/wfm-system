@@ -14,6 +14,8 @@ import {
   FairnessReport,
   GeneratorOptions,
   GeneratorResult,
+  allowedShiftCodes,
+  functionAllowsFemaleLate,
 } from './generator.types';
 
 // ─── Date Helpers ─────────────────────────────────────────────────────────────
@@ -98,11 +100,22 @@ export function validateShift(
 // ─── Available Shifts for Employee ────────────────────────────────────────────
 
 function getWorkingShifts(emp: EmployeeInfo, options: GeneratorOptions): ShiftDef[] {
+  // Per-function operating hours: a function may only use its allowed shift codes.
+  const allowed = allowedShiftCodes(emp.functionName);
+  // Some functions (e.g. all-female Outbound ending 22:00) let females work their
+  // late ('warn') shift; midnight/E/EE ('blocked') stay off-limits regardless.
+  // Female late ('warn') shift allowed when: the function permanently allows it
+  // (config, e.g. OMT), OR it was picked for this generation, OR the global override.
+  const femaleLateOk =
+    functionAllowsFemaleLate(emp.functionName) ||
+    !!options.femaleLateFunctionIds?.includes(emp.functionId) ||
+    options.allowFemaleN;
   return Object.values(SHIFTS).filter((s) => {
     if (s.code === 'OFF') return false;
+    if (allowed && !allowed.has(s.code)) return false;   // function shift policy
     if (emp.gender === 'female') {
-      if (s.femaleRule === 'blocked') return false;
-      if (s.femaleRule === 'warn' && !options.allowFemaleN) return false;
+      if (s.femaleRule === 'blocked') return false;       // E/EE/MD/MN always off-limits
+      if (s.femaleRule === 'warn' && !femaleLateOk) return false;
     }
     return true;
   });
@@ -225,24 +238,80 @@ export function pickBestShift(
 
 // ─── OFF Day Distribution ─────────────────────────────────────────────────────
 
+// Weekend = Thursday, Friday, Saturday (business rule confirmed by WFM).
+// In a Saturday-start 7-day week:
+//   dates[0]=Sat, [1]=Sun, [2]=Mon, [3]=Tue, [4]=Wed, [5]=Thu, [6]=Fri
+// So the weekend day indices are Thu=5, Fri=6, Sat=0.
+const WEEKEND_DAY_INDICES = [5, 6, 0];
+const WEEKDAY_INDICES     = [1, 2, 3, 4]; // Sun, Mon, Tue, Wed
+
+// Week index (whole weeks since epoch) — used only to rotate which days absorb
+// the leftover OFF slots, so the pattern is not byte-identical every week even
+// before any YTD history exists.
+function weekIndexOf(dateStr: string): number {
+  const ms = new Date(dateStr + 'T00:00:00').getTime();
+  return Number.isFinite(ms) ? Math.floor(ms / (7 * 86_400_000)) : 0;
+}
+
+// Rotate an array left by `by` positions (used to vary tie-breaking per week so
+// the same low-index day isn't always chosen first → no static pattern).
+function rotate<T>(arr: T[], by: number): T[] {
+  const n = arr.length;
+  if (n === 0) return arr;
+  const k = ((by % n) + n) % n;
+  return arr.slice(k).concat(arr.slice(0, k));
+}
+
+// Pick the candidate day with the most remaining OFF capacity that the employee
+// has not already taken. Candidate order matters only for ties — callers pass a
+// week-rotated order so ties spread across days. Returns -1 when no candidate
+// has spare capacity.
+function pickDayWithCapacity(
+  candidates: number[],
+  capacity: number[],
+  used: number[],
+  taken: Set<string>,
+  dates: string[],
+): number {
+  let best = -1;
+  let bestRemain = 0;
+  for (const idx of candidates) {
+    if (taken.has(dates[idx])) continue;
+    const remain = capacity[idx] - used[idx];
+    if (remain > bestRemain) { bestRemain = remain; best = idx; }
+  }
+  return best;
+}
+
+// Build per-day capacity for a set of day indices: `count` OFFs spread as evenly
+// as possible across `days`, with the leftover rotated by week so it isn't static.
+function spreadCapacity(
+  capacity: number[],
+  days: number[],
+  count: number,
+  wk: number,
+): void {
+  if (!days.length || count <= 0) return;
+  const base = Math.floor(count / days.length);
+  const rem  = count % days.length;
+  days.forEach(idx => { capacity[idx] += base; });
+  for (let r = 0; r < rem; r++) capacity[days[(r + wk) % days.length]]++;
+}
+
 /**
- * Determine which date(s) to assign as OFF for each employee in the week.
- * Spreads OFF across all 7 days (round-robin by employee position),
- * ensuring that no employee ends up with MORE than 6 consecutive working days
- * given their `priorConsecutiveDays` coming into this week.
+ * Assign OFF days for the week with FAIR weekend distribution.
  *
- * Weekend days (Thu/Fri = indices 5/6 in a Sat-start week) are spread fairly:
- *   - employees whose priorConsecutiveDays is highest get priority for the
- *     closest upcoming day as OFF.
- */
-/**
- * Assign OFF days for the week.
+ * Structure (business rule — confirmed by WFM):
+ *   • With 2 OFF days/week: each employee gets ONE weekend OFF (Thu/Fri/Sat) and
+ *     ONE mid-week OFF (Sun/Mon/Tue/Wed). The weekend OFF is rationed fairly —
+ *     employees with the FEWEST year-to-date weekend OFFs pick first — and both
+ *     OFFs rotate week to week so the pattern is never static.
+ *   • With 1 OFF day/week: the single OFF is spread evenly across all 7 days,
+ *     so every employee cycles through weekend OFFs over time.
  *
- * Rules:
- * 1. Spread OFF across all 7 days (different slot per employee).
- * 2. Weekend OFF priority: employees with fewer YTD weekend-offs get the
- *    Fri/Sat slot preference (dates[5]=Thu, dates[6]=Fri in Sat-start week).
- * 3. Forced early OFF if employee comes in with >= 5 consecutive days.
+ * The 6-consecutive-day guideline is intentionally NOT enforced rigidly here —
+ * one OFF mid-week + one at the weekend naturally keeps runs short, and a run of
+ * 5–7 days now and then is acceptable (it must never inflate the OFF count).
  */
 function assignOffDays(
   employees: EmployeeInfo[],
@@ -250,58 +319,99 @@ function assignOffDays(
   offDaysPerWeek: number,
   priorConsecutiveDays?: Map<string, number>,
   ytdDist?: Map<string, ShiftDistribution>,
+  weekStart?: string,
 ): Map<string, Set<string>> {
-  // Weekend indices in a Sat-start 7-day week:
-  //   dates[0]=Sat, [1]=Sun, [2]=Mon, [3]=Tue, [4]=Wed, [5]=Thu, [6]=Fri
-  // Fri (idx 6) is typically a preferred OFF day culturally.
-  const PREFERRED_WEEKEND_SLOTS = [6, 5]; // Fri first, Thu second
+  const offMap = new Map<string, Set<string>>();
+  const n = employees.length;
+  if (!n) return offMap;
 
-  // Sort employees by YTD weekend-off ratio (ascending) so the lowest get weekend OFF priority
+  const perWeek = Math.max(offDaysPerWeek, 1);
+  const wk = weekIndexOf(weekStart ?? dates[0]);
+
+  // Guarantee a high-carryover employee gets an OFF early enough that the engine
+  // never has to inject an EXTRA forced OFF (which would push them to 3/week).
+  // The earliest OFF must land on or before index (MAX_CONSECUTIVE - prior).
+  const MAXCON = 9;
+  const enforceEarlyOff = (taken: Set<string>, prior: number, used: number[]) => {
+    if (prior <= 0) return;
+    const maxFirst = Math.max(0, MAXCON - prior);
+    const idxs = [...taken].map(ds => dates.indexOf(ds)).filter(i => i >= 0).sort((a, b) => a - b);
+    if (!idxs.length || idxs[0] <= maxFirst) return;          // already has an early OFF
+    let early = -1;
+    for (let i = 0; i <= maxFirst; i++) if (!taken.has(dates[i])) { early = i; break; }
+    if (early < 0) return;
+    const latest = idxs[idxs.length - 1];                     // move the latest OFF earlier
+    taken.delete(dates[latest]); used[latest]--;
+    taken.add(dates[early]);     used[early]++;
+  };
+
+  // ── Weekend-fairness order — fewest YTD weekend-OFFs picks first ──
   const sorted = [...employees].sort((a, b) => {
-    const distA = ytdDist?.get(a.id);
-    const distB = ytdDist?.get(b.id);
-    const wkndA = (distA?.weekendOff ?? 0) / Math.max((distA?.weekendOff ?? 0) + (distA?.weekendWork ?? 0), 1);
-    const wkndB = (distB?.weekendOff ?? 0) / Math.max((distB?.weekendOff ?? 0) + (distB?.weekendWork ?? 0), 1);
-    return wkndA - wkndB; // lowest weekendOffPct gets priority
+    const da = ytdDist?.get(a.id);
+    const db = ytdDist?.get(b.id);
+    const offA = da?.weekendOff ?? 0;
+    const offB = db?.weekendOff ?? 0;
+    if (offA !== offB) return offA - offB;            // fewer weekend OFFs → first
+    return (db?.weekendWork ?? 0) - (da?.weekendWork ?? 0); // worked more weekends → first
   });
 
-  const offMap = new Map<string, Set<string>>();
-  // Track which weekend slots are taken this week (max 1 employee per slot)
-  const weekendSlotUsed = new Set<number>();
+  const used = new Array(7).fill(0);
+  const weekendOrder = rotate(WEEKEND_DAY_INDICES, wk);
+  const weekdayOrder = rotate(WEEKDAY_INDICES, wk);
+  const anyOrder     = rotate([0, 1, 2, 3, 4, 5, 6], wk);
 
-  sorted.forEach((e, i) => {
-    const offDates = new Set<string>();
-    const prior = priorConsecutiveDays?.get(e.id) ?? 0;
+  if (perWeek === 1) {
+    // ── 1 OFF/week: spread evenly across ALL 7 days (weekend rotates over time) ──
+    const capacity = new Array(7).fill(0);
+    spreadCapacity(capacity, [0, 1, 2, 3, 4, 5, 6], n, wk);
 
-    // Forced early off if consecutive days ≥ 5
-    const forcedEarlyOff = prior >= 5 ? Math.max(0, 6 - prior - 1) : -1;
+    sorted.forEach((e) => {
+      const taken = new Set<string>();
+      // Weekend-deficit employees get first crack at a weekend day, then any day.
+      let idx = pickDayWithCapacity(weekendOrder, capacity, used, taken, dates);
+      if (idx < 0) idx = pickDayWithCapacity(anyOrder, capacity, used, taken, dates);
+      if (idx < 0) idx = anyOrder.find(x => !taken.has(dates[x])) ?? 0;
+      taken.add(dates[idx]);
+      used[idx]++;
+      enforceEarlyOff(taken, priorConsecutiveDays?.get(e.id) ?? 0, used);
+      offMap.set(e.id, taken);
+    });
+    return offMap;
+  }
 
-    for (let d = 0; d < offDaysPerWeek; d++) {
-      if (forcedEarlyOff >= 0 && d === 0) {
-        offDates.add(dates[forcedEarlyOff]);
-        continue;
-      }
+  // ── 2+ OFF/week: ONE weekend OFF + (perWeek-1) mid-week OFFs per employee ──
+  const capacity = new Array(7).fill(0);
+  spreadCapacity(capacity, WEEKEND_DAY_INDICES, n, wk);                 // 1 weekend OFF each
+  spreadCapacity(capacity, WEEKDAY_INDICES, n * (perWeek - 1), wk);     // mid-week OFFs
 
-      // Try to give weekend OFF to employees with low weekend-off ratio (first half of sorted list)
-      const wantsWeekend = i < Math.ceil(sorted.length / 2);
-      if (wantsWeekend) {
-        for (const slot of PREFERRED_WEEKEND_SLOTS) {
-          if (!weekendSlotUsed.has(slot) && dates[slot] && !offDates.has(dates[slot])) {
-            offDates.add(dates[slot]);
-            weekendSlotUsed.add(slot);
-            break;
-          }
-        }
-        if (offDates.size > (d > 0 ? d : 0)) continue; // got a weekend slot
-      }
+  sorted.forEach((e) => {
+    const taken = new Set<string>();
 
-      // Default: spread by position across all days
-      const spread = Math.ceil(employees.length / Math.max(offDaysPerWeek, 1));
-      const dayIdx = (i * offDaysPerWeek + d * spread) % 7;
-      offDates.add(dates[dayIdx]);
+    // 1) Weekend OFF (Thu/Fri/Sat) — fairness order already prioritises deficit.
+    let widx = pickDayWithCapacity(weekendOrder, capacity, used, taken, dates);
+    if (widx < 0) widx = weekendOrder.find(x => !taken.has(dates[x])) ?? WEEKEND_DAY_INDICES[0];
+    taken.add(dates[widx]);
+    used[widx]++;
+
+    // 2) Mid-week OFF(s) — Sun/Mon/Tue/Wed, balanced by capacity, and NOT
+    //    calendar-adjacent to an already-taken OFF (prevents 2 OFFs back-to-back
+    //    within the week → caps cross-week runs at 2, never 3+).
+    for (let d = 1; d < perWeek; d++) {
+      const takenIdx = [...taken].map(ds => dates.indexOf(ds));
+      const notAdjacent = (i: number) => !takenIdx.some(ti => ti >= 0 && Math.abs(ti - i) === 1);
+      const wPref = weekdayOrder.filter(notAdjacent);
+      const aPref = anyOrder.filter(notAdjacent);
+      let didx = pickDayWithCapacity(wPref, capacity, used, taken, dates);     // weekday, non-adjacent
+      if (didx < 0) didx = pickDayWithCapacity(aPref, capacity, used, taken, dates); // any, non-adjacent
+      if (didx < 0) didx = pickDayWithCapacity(weekdayOrder, capacity, used, taken, dates); // relax adjacency
+      if (didx < 0) didx = pickDayWithCapacity(anyOrder, capacity, used, taken, dates);
+      if (didx < 0) didx = (aPref.find(x => !taken.has(dates[x])) ?? anyOrder.find(x => !taken.has(dates[x])) ?? 0);
+      taken.add(dates[didx]);
+      used[didx]++;
     }
 
-    offMap.set(e.id, offDates);
+    enforceEarlyOff(taken, priorConsecutiveDays?.get(e.id) ?? 0, used);
+    offMap.set(e.id, taken);
   });
 
   return offMap;
@@ -466,7 +576,16 @@ export function generateWeeklySchedule(
     if (!employees.length) continue;
 
     // Assign OFF days with consecutive-day awareness + weekend fairness
-    const offMap = assignOffDays(employees, dates, options.offDaysPerWeek, priorConsecutiveDays, ytdDistMap);
+    const offMap = assignOffDays(employees, dates, options.offDaysPerWeek, priorConsecutiveDays, ytdDistMap, weekStart);
+
+    // Restricted-function rotation: the categories this function may actually use.
+    // Null = unrestricted (24/7). For a 2-shift function (OMT = B+N) this makes
+    // employees rotate across BOTH shifts instead of collapsing to the first one.
+    const fnCodes = allowedShiftCodes(fn.name);
+    const fnCats = fnCodes
+      ? [...new Set(Object.values(SHIFTS).filter(s => s.code !== 'OFF' && fnCodes.has(s.code)).map(s => s.category))]
+      : null;
+    const fnWk = weekIndexOf(weekStart);
 
     // Sort: employees who have worked the most consecutive days get OFF earlier
     const sorted = [...employees].sort((a, b) => {
@@ -488,7 +607,11 @@ export function generateWeeklySchedule(
       // If no history → spread evenly across team by position.
       const lastShift = lastShiftMap.get(emp.id) ?? null;
       let targetCategory: string;
-      if (lastShift && lastShift.code !== 'OFF') {
+      if (fnCats && fnCats.length) {
+        // Restricted function → round-robin across its allowed categories,
+        // rotated weekly so each employee cycles through them over time.
+        targetCategory = fnCats[(empIdx + fnWk) % fnCats.length];
+      } else if (lastShift && lastShift.code !== 'OFF') {
         targetCategory = ROTATION_NEXT[lastShift.category] ?? 'morning';
       } else if (dist.total === 0) {
         // Fresh employee: spread across 4 bands by position
@@ -508,8 +631,13 @@ export function generateWeeklySchedule(
       }
 
       // ── Consecutive days tracking ─────────────────────────────────────────
+      // Soft guideline is ~6 consecutive days, but the OFF structure (one
+      // mid-week + one weekend OFF) already keeps runs short, and the business
+      // rule is NOT to enforce 6 rigidly (a 5–7 run is fine). MAX here is only a
+      // safety ceiling so we never inject an extra OFF under normal planning —
+      // it fires solely for pathological long runs.
       let consecutiveDays = priorConsecutiveDays?.get(emp.id) ?? 0;
-      const MAX_CONSECUTIVE = 6;
+      const MAX_CONSECUTIVE = 9;
 
       const assignments: DayAssignment[] = [];
       let prevShift: ShiftDef | null = lastShift;

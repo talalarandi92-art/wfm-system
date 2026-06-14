@@ -106,7 +106,7 @@ export class CalendarController {
         body.startAt, body.endAt, body.allDay ?? false,
         body.location ?? null, body.description ?? null,
         body.color ?? colorMap[body.eventType ?? 'general'] ?? '#60a5fa',
-        user.sub,
+        user.id,
       ],
     );
 
@@ -133,16 +133,36 @@ export class CalendarController {
         [
           tid,
           body.coachingData.employeeId,
-          body.coachingData.coachId ?? user.sub,
+          body.coachingData.coachId ?? user.id,
           event.id,
           body.coachingData.scorecardBatchId ?? null,
           body.startAt,
           body.coachingData.durationMinutes ?? 30,
           body.coachingData.focusAreas ?? [],
           body.coachingData.notes ?? null,
-          user.sub,
+          user.id,
         ],
       );
+    }
+
+    // Coaching / meeting → notify RTA & WFM so they review coverage impact before it stands.
+    if (body.eventType === 'coaching' || body.eventType === 'meeting') {
+      const when = new Date(body.startAt).toLocaleString('ar-KW', { dateStyle: 'short', timeStyle: 'short' });
+      const reviewers = await this.ds.query(
+        `SELECT DISTINCT u.id FROM users u
+         JOIN user_roles ur ON ur.user_id = u.id
+         JOIN roles r ON r.id = ur.role_id
+         WHERE u.tenant_id=$1 AND r.code IN ('rta','wfm_analyst','platform_admin')`,
+        [tid],
+      ).catch(() => []);
+      const label = body.eventType === 'coaching' ? 'كوتشينج' : 'اجتماع';
+      for (const rv of reviewers) {
+        await this.ds.query(
+          `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
+           VALUES ($1,$2,'calendar.review', $3, $4, 'calendar_event', $5)`,
+          [tid, rv.id, `راجع تغطية: ${label} مطلوب`, `${body.title} — ${when}. تأكد أن التغطية غير متأثرة.`, event.id],
+        ).catch(() => {});
+      }
     }
 
     // If cross_skill move, create cross_skill_moves record
@@ -158,7 +178,7 @@ export class CalendarController {
           body.crossSkillData.toFunction,
           body.startAt, body.endAt,
           body.crossSkillData.reason ?? null,
-          user.sub, event.id,
+          user.id, event.id,
         ],
       );
     }
@@ -214,7 +234,7 @@ export class CalendarController {
          AND e.status != 'cancelled'
          AND (e.created_by = $2 OR ea.id IS NOT NULL)
        ORDER BY e.start_at`,
-      [tid, user.sub, today],
+      [tid, user.id, today],
     );
     return rows.map((r: any) => ({
       id: r.id, title: r.title, eventType: r.event_type,

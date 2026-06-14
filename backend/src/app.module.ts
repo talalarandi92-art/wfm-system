@@ -31,6 +31,31 @@ import { IntegrationsModule }     from '@modules/integrations/integrations.modul
 import { CalendarModule }         from '@modules/calendar/calendar.module';
 import { SkillsModule }           from '@modules/skills/skills.module';
 import { NotificationsModule }    from '@modules/notifications/notifications.module';
+import { ChatModule }             from '@modules/chat/chat.module';
+import { OpsAnalyticsModule }     from '@modules/operations-analytics/ops.module';
+import { KnowledgeBaseModule }    from '@modules/knowledge-base/kb.module';
+import { AgentSelfModule }        from '@modules/agent-self/me.module';
+import { WorkforceAnalyticsModule } from '@modules/workforce-analytics/analytics.module';
+import { CampaignsModule }         from '@modules/campaigns/campaigns.module';
+import { AttendanceCorrectionsModule } from '@modules/attendance-corrections/attendance-corrections.module';
+import { ScheduleChangesModule }    from '@modules/schedule-changes/schedule-changes.module';
+import { SlaEscalationModule }       from '@modules/sla-escalation/sla-escalation.module';
+import { CoachingModule }            from '@modules/coaching/coaching.module';
+import { ControlDashboardModule }    from '@modules/control-dashboard/control-dashboard.module';
+import { CoverageModule }            from '@modules/coverage/coverage.module';
+import { HealthGuardModule }         from '@modules/health-guard/health-guard.module';
+import { AnalystModule }             from '@modules/analyst/analyst.module';
+import { ReporterModule }            from '@modules/reporter/reporter.module';
+import { LlmModule }                 from '@modules/llm/llm.module';
+import { AdvisorModule }             from '@modules/advisor/advisor.module';
+import { SecurityGuardModule }       from '@modules/security-guard/security-guard.module';
+import { ExpertModule }              from '@modules/expert/expert.module';
+import { ScorecardGuardModule }      from '@modules/scorecard-guard/scorecard-guard.module';
+import { ResearcherModule }          from '@modules/researcher/researcher.module';
+import { KnowledgeLedgerModule }     from '@modules/knowledge-ledger/knowledge-ledger.module';
+import { AutoModeModule }            from '@modules/automode/automode.module';
+import { ChiefModule }               from '@modules/chief/chief.module';
+import { BotsModule }                from '@modules/bots/bots.module';
 import { TenantMiddleware } from '@common/middleware/tenant.middleware';
 
 @Module({
@@ -52,11 +77,16 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
         database: config.get<string>('POSTGRES_DB', 'wfm_db'),
         username: config.get<string>('POSTGRES_USER', 'wfm_user'),
         password: config.get<string>('POSTGRES_PASSWORD'),
-        entities:     [__dirname + '/database/entities/**/*.entity{.ts,.js}'],
+        entities:     [
+          __dirname + '/database/entities/**/*.entity{.ts,.js}',
+          __dirname + '/modules/**/*.entity{.ts,.js}',
+        ],
         migrations:   [__dirname + '/database/migrations/**/*{.ts,.js}'],
         synchronize:  false,   // NEVER true — schema managed by SQL migrations
         logging:      config.get('NODE_ENV') === 'development' ? ['error', 'warn'] : ['error'],
-        ssl:          config.get('NODE_ENV') === 'production' ? { rejectUnauthorized: false } : false,
+        // SSL only when explicitly enabled (managed DB / external host). A containerized
+        // Postgres on the same Docker network does not use SSL — POSTGRES_SSL stays false.
+        ssl:          config.get('POSTGRES_SSL') === 'true' ? { rejectUnauthorized: false } : false,
         extra: {
           max: 20,             // Connection pool max
           idleTimeoutMillis: 30000,
@@ -101,6 +131,31 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     CalendarModule,
     SkillsModule,
     NotificationsModule,
+    ChatModule,
+    OpsAnalyticsModule,
+    KnowledgeBaseModule,
+    AgentSelfModule,
+    WorkforceAnalyticsModule,
+    CampaignsModule,
+    AttendanceCorrectionsModule,
+    ScheduleChangesModule,
+    SlaEscalationModule,
+    CoachingModule,
+    ControlDashboardModule,
+    CoverageModule,
+    HealthGuardModule,
+    AnalystModule,
+    ReporterModule,
+    LlmModule,
+    AdvisorModule,
+    SecurityGuardModule,
+    ExpertModule,
+    ScorecardGuardModule,
+    ResearcherModule,
+    KnowledgeLedgerModule,
+    AutoModeModule,
+    ChiefModule,
+    BotsModule,
   ],
   providers: [
     // Guard execution order: Throttler → JWT → Permissions

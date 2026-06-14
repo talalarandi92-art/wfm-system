@@ -1,0 +1,389 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  CalendarClock, Clock, TrendingUp, Home, Building2, FileText,
+  Bell, Award, MessageCircle, ChevronLeft, CheckCircle2, XCircle,
+  AlertCircle, Hourglass, CalendarDays, Plane, Activity, Repeat,
+} from 'lucide-react';
+import { apiClient } from '../api/client';
+import { useUiStore } from '@/store/ui.store';
+import { useAuthStore } from '@/store/auth.store';
+
+/* ─── Types ─────────────────────────────────────────────────────────────── */
+interface AttSummary {
+  present_days: number; absent_days: number; sick_days: number; leave_days: number;
+  holiday_days: number; off_days: number; wfh_days: number; office_days: number;
+  late_punch_count: number; total_late_punch_min: number;
+  total_ot_min: number; ot_days: number; missing_punch: number; missing_system: number;
+}
+interface RecentDay {
+  attendance_date: string; attendance_marker: string; is_wfh: boolean;
+  punch_late_minutes: number; ot_minutes: number; is_missing_punch: boolean; shift_code: string | null;
+}
+interface MyRequest { id: string; type: string; status: string; submitted_at: string; notes?: string }
+interface MyNotif { id: string; type: string; title: string; body: string; isRead: boolean; createdAt: string }
+interface ShiftRate {
+  working: number; morning: number; evening: number; night: number; midnight: number;
+  morningPct: number; eveningPct: number; nightPct: number; midnightPct: number;
+  offDays: number; leaveDays: number;
+}
+interface Adherence { days: number; avgAdherence: number | null; avgConformance: number | null; recent: any[] }
+interface Score { periodName: string; netPoints: number | null; functionRank: number | null; functionName: string; qualityPct: number | null; fcrPct: number | null }
+interface Overview { linked: boolean; shiftRate: ShiftRate | null; adherence: Adherence | null; score: Score | null; schedule: any[] }
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const fmtD = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+const fmtDT = (d: string) => new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+
+const MARKER_AR: Record<string, string> = {
+  present: 'حاضر', absent: 'غياب', sick: 'مرضي', leave: 'إجازة',
+  holiday: 'عطلة', off: 'راحة', wfh: 'عن بُعد',
+};
+const MARKER_COLOR: Record<string, string> = {
+  present: '#22c55e', absent: '#ef4444', sick: '#f59e0b', leave: '#6366f1',
+  holiday: '#06b6d4', off: '#64748b', wfh: '#a855f7',
+};
+const STATUS_META: Record<string, { ar: string; en: string; color: string; icon: any }> = {
+  pending:      { ar: 'قيد الموافقة', en: 'Pending',  color: '#f59e0b', icon: Hourglass },
+  peer_pending: { ar: 'بانتظار الزميل', en: 'Peer',   color: '#a855f7', icon: Hourglass },
+  approved:     { ar: 'موافق عليه', en: 'Approved',    color: '#22c55e', icon: CheckCircle2 },
+  rejected:     { ar: 'مرفوض', en: 'Rejected',        color: '#ef4444', icon: XCircle },
+  cancelled:    { ar: 'ملغي', en: 'Cancelled',        color: '#64748b', icon: XCircle },
+};
+const REQ_TYPE_AR: Record<string, string> = {
+  permission: 'استئذان', annual_leave: 'إجازة سنوية', sick_leave: 'إجازة مرضية',
+  shift_swap: 'تبديل وردية', off_swap: 'تبديل راحة', overtime: 'وقت إضافي',
+  death_leave: 'إجازة وفاة', comp_off: 'يوم تعويضي', wfh: 'عمل عن بُعد', break_request: 'بريك',
+};
+
+/* ─── Stat tile ─────────────────────────────────────────────────────────── */
+function Stat({ icon: Icon, label, value, sub, color = '#6366f1' }: {
+  icon: any; label: string; value: string | number; sub?: string; color?: string;
+}) {
+  return (
+    <div className="p-3.5 rounded-2xl" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      <div className="flex items-center gap-2 mb-1.5">
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${color}22`, color }}>
+          <Icon size={14} />
+        </div>
+        <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide truncate">{label}</span>
+      </div>
+      <p className="text-2xl font-bold text-white leading-none">{value}</p>
+      {sub && <p className="text-[10px] text-slate-500 mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+/* ─── Main ──────────────────────────────────────────────────────────────── */
+export default function AgentHome() {
+  const { lang } = useUiStore();
+  const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const ar = lang === 'ar';
+
+  const employeeId = user?.employeeId ?? null;
+  const displayName = user?.employee?.fullName || `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || user?.email || '';
+  const firstName = displayName.split(' ')[0];
+
+  const [summary, setSummary]     = useState<AttSummary | null>(null);
+  const [recent, setRecent]       = useState<RecentDay[]>([]);
+  const [requests, setRequests]   = useState<MyRequest[]>([]);
+  const [notifs, setNotifs]       = useState<MyNotif[]>([]);
+  const [overview, setOverview]   = useState<Overview | null>(null);
+  const [loading, setLoading]     = useState(true);
+
+  useEffect(() => {
+    const calls: Promise<any>[] = [
+      employeeId ? apiClient.get(`/attendance/agent/${employeeId}?period=month`) : Promise.resolve({ data: null }),
+      employeeId ? apiClient.get(`/requests?employeeId=${employeeId}`) : Promise.resolve({ data: [] }),
+      apiClient.get('/notifications').catch(() => ({ data: [] })),
+      apiClient.get('/me/overview').catch(() => ({ data: null })),
+    ];
+    Promise.all(calls).then(([att, reqs, nts, ov]: any[]) => {
+      if (att?.data) { setSummary(att.data.summary); setRecent(att.data.recentDays ?? []); }
+      setRequests(Array.isArray(reqs?.data) ? reqs.data.slice(0, 5) : (reqs?.data?.data ?? []).slice(0, 5));
+      setNotifs((Array.isArray(nts?.data) ? nts.data : []).slice(0, 5));
+      setOverview(ov?.data ?? null);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [employeeId]);
+
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (ar) return h < 12 ? 'صباح الخير' : h < 18 ? 'مساء الخير' : 'مساء الخير';
+    return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  })();
+
+  const todayRow = recent.find(r => r.attendance_date === todayISO());
+  const lateHrs = summary ? Math.floor(summary.total_late_punch_min / 60) : 0;
+  const lateMins = summary ? summary.total_late_punch_min % 60 : 0;
+  const otHrs = summary ? (summary.total_ot_min / 60).toFixed(1) : '0';
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <div className="w-7 h-7 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  const noLink = !employeeId;
+
+  return (
+    <div className="space-y-4 max-w-5xl">
+      {/* ── Greeting header ── */}
+      <div className="p-5 rounded-2xl flex items-center justify-between flex-wrap gap-3"
+        style={{ background: 'linear-gradient(135deg, rgba(67,56,202,0.25), rgba(99,102,241,0.1))', border: '1px solid rgba(99,102,241,0.2)' }}>
+        <div>
+          <p className="text-sm text-indigo-300">{greeting} 👋</p>
+          <h1 className="text-2xl font-bold text-white mt-0.5">{firstName || (ar ? 'مرحباً' : 'Welcome')}</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            {user?.employee?.functionName && <span>{user.employee.functionName} · </span>}
+            {user?.employee?.employeeNo && <span>#{user.employee.employeeNo} · </span>}
+            {new Date().toLocaleDateString(ar ? 'ar-KW' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </p>
+        </div>
+        {/* Today's shift */}
+        <div className="px-4 py-3 rounded-xl text-center min-w-[140px]"
+          style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <p className="text-[10px] text-slate-500 uppercase font-semibold mb-1">{ar ? 'ورديتي اليوم' : "Today's shift"}</p>
+          {todayRow ? (
+            <>
+              <p className="text-xl font-bold" style={{ color: MARKER_COLOR[todayRow.attendance_marker] ?? '#fff' }}>
+                {todayRow.shift_code || (ar ? (MARKER_AR[todayRow.attendance_marker] ?? todayRow.attendance_marker) : todayRow.attendance_marker)}
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">{ar ? (MARKER_AR[todayRow.attendance_marker] ?? '') : todayRow.attendance_marker}</p>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500 mt-1">{ar ? 'لا توجد بيانات' : 'No data'}</p>
+          )}
+        </div>
+      </div>
+
+      {noLink && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-xl text-xs text-amber-300"
+          style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)' }}>
+          <AlertCircle size={14} /> {ar ? 'حسابك غير مرتبط بسجل موظف — تواصل مع المشرف لعرض بيانات الحضور.' : 'Your account is not linked to an employee record — contact your supervisor.'}
+        </div>
+      )}
+
+      {/* ── This-month metrics ── */}
+      {summary && (
+        <div>
+          <h2 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+            <Activity size={15} className="text-indigo-400" /> {ar ? 'ملخص هذا الشهر' : 'This Month'}
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Stat icon={CheckCircle2} label={ar ? 'أيام الحضور' : 'Present'} value={summary.present_days} color="#22c55e" />
+            <Stat icon={Clock} label={ar ? 'تأخيرات' : 'Late'} value={summary.late_punch_count}
+              sub={summary.total_late_punch_min > 0 ? (ar ? `${lateHrs}س ${lateMins}د إجمالي` : `${lateHrs}h ${lateMins}m total`) : undefined} color="#f59e0b" />
+            <Stat icon={TrendingUp} label={ar ? 'وقت إضافي' : 'Overtime'} value={`${otHrs}${ar ? 'س' : 'h'}`} sub={`${summary.ot_days} ${ar ? 'يوم' : 'days'}`} color="#06b6d4" />
+            <Stat icon={Home} label={ar ? 'عن بُعد / مكتب' : 'WFH / Office'} value={`${summary.wfh_days}/${summary.office_days}`} color="#a855f7" />
+            <Stat icon={Plane} label={ar ? 'إجازات' : 'Leave'} value={summary.leave_days} color="#6366f1" />
+            <Stat icon={AlertCircle} label={ar ? 'غياب' : 'Absent'} value={summary.absent_days} color="#ef4444" />
+            <Stat icon={CalendarDays} label={ar ? 'مرضي' : 'Sick'} value={summary.sick_days} color="#f59e0b" />
+            <Stat icon={Building2} label={ar ? 'بصمة ناقصة' : 'Missing Punch'} value={summary.missing_punch} color="#ef4444" />
+          </div>
+        </div>
+      )}
+
+      {/* ── My shift distribution + adherence + score ── */}
+      {overview?.linked && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Shift distribution (my rotation) */}
+          <div className="lg:col-span-1 p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+              <Activity size={15} className="text-purple-400" /> {ar ? 'توزيع ورديّاتي (السنة)' : 'My Shift Mix (YTD)'}
+            </h2>
+            {overview.shiftRate && overview.shiftRate.working > 0 ? (
+              <div className="space-y-2">
+                {[
+                  { label: ar ? 'صباحي' : 'Morning', v: overview.shiftRate.morning, p: overview.shiftRate.morningPct, c: '#f59e0b' },
+                  { label: ar ? 'مسائي' : 'Evening', v: overview.shiftRate.evening, p: overview.shiftRate.eveningPct, c: '#6366f1' },
+                  { label: ar ? 'ليلي' : 'Night', v: overview.shiftRate.night, p: overview.shiftRate.nightPct, c: '#8b5cf6' },
+                  { label: ar ? 'منتصف الليل' : 'Midnight', v: overview.shiftRate.midnight, p: overview.shiftRate.midnightPct, c: '#ec4899' },
+                ].map(s => (
+                  <div key={s.label} className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 w-20 flex-shrink-0">{s.label}</span>
+                    <div className="flex-1 h-4 rounded-md overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                      <div className="h-full rounded-md" style={{ width: `${Math.max(s.p, 2)}%`, background: s.c }} />
+                    </div>
+                    <span className="text-[10px] font-bold text-white w-14 text-end">{s.v} · {s.p}%</span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-3 pt-1 text-[10px] text-slate-500">
+                  <span>{ar ? 'أيام عمل:' : 'Worked:'} <b className="text-white">{overview.shiftRate.working}</b></span>
+                  <span>{ar ? 'راحات:' : 'Off:'} <b className="text-white">{overview.shiftRate.offDays}</b></span>
+                  <span>{ar ? 'إجازات:' : 'Leave:'} <b className="text-white">{overview.shiftRate.leaveDays}</b></span>
+                </div>
+              </div>
+            ) : <p className="text-xs text-slate-600 text-center py-4">{ar ? 'لا بيانات' : 'No data'}</p>}
+          </div>
+
+          {/* Adherence (التزام) */}
+          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+              <CheckCircle2 size={15} className="text-emerald-400" /> {ar ? 'التزامي (30 يوم)' : 'My Adherence (30d)'}
+            </h2>
+            {overview.adherence && overview.adherence.days > 0 ? (
+              <div className="space-y-2">
+                <div className="flex items-end gap-4">
+                  <div>
+                    <p className="text-3xl font-bold" style={{ color: (overview.adherence.avgAdherence ?? 0) >= 90 ? '#22c55e' : (overview.adherence.avgAdherence ?? 0) >= 75 ? '#f59e0b' : '#ef4444' }}>
+                      {overview.adherence.avgAdherence ?? '—'}<span className="text-base">%</span>
+                    </p>
+                    <p className="text-[10px] text-slate-500">{ar ? 'الالتزام' : 'Adherence'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xl font-bold text-slate-300">{overview.adherence.avgConformance ?? '—'}<span className="text-sm">%</span></p>
+                    <p className="text-[10px] text-slate-500">{ar ? 'المطابقة' : 'Conformance'}</p>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-600">{ar ? `على مدى ${overview.adherence.days} يوم` : `over ${overview.adherence.days} days`}</p>
+              </div>
+            ) : <p className="text-xs text-slate-600 text-center py-4">{ar ? 'لا توجد بيانات التزام بعد' : 'No adherence data yet'}</p>}
+          </div>
+
+          {/* Score (سكور) */}
+          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <Award size={15} className="text-amber-400" /> {ar ? 'تقييمي' : 'My Score'}
+              </h2>
+              <button onClick={() => navigate('/scorecard')} className="text-[10px] text-indigo-400 hover:underline">{ar ? 'التفاصيل' : 'Details'}</button>
+            </div>
+            {overview.score ? (
+              <div className="space-y-1.5">
+                <div className="flex items-end gap-3">
+                  <p className="text-3xl font-bold text-white">{overview.score.netPoints ?? '—'}</p>
+                  <p className="text-[10px] text-slate-500 mb-1.5">{ar ? 'نقطة' : 'pts'}</p>
+                  {overview.score.functionRank && (
+                    <span className="ms-auto text-[11px] font-bold text-amber-300 px-2 py-1 rounded-lg" style={{ background: 'rgba(245,158,11,0.15)' }}>
+                      #{overview.score.functionRank} {ar ? 'في' : 'in'} {overview.score.functionName}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 text-[10px] text-slate-500">
+                  {overview.score.qualityPct !== null && <span>{ar ? 'جودة' : 'Quality'}: <b className="text-white">{overview.score.qualityPct}%</b></span>}
+                  {overview.score.fcrPct !== null && <span>FCR: <b className="text-white">{overview.score.fcrPct}%</b></span>}
+                </div>
+                <p className="text-[10px] text-slate-600">{overview.score.periodName}</p>
+              </div>
+            ) : <p className="text-xs text-slate-600 text-center py-4">{ar ? 'لا يوجد تقييم منشور بعد' : 'No published score yet'}</p>}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* ── Recent attendance ── */}
+        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <CalendarClock size={15} className="text-indigo-400" /> {ar ? 'جدولي' : 'My Schedule'}
+            </h2>
+            <button onClick={() => navigate('/attendance')} className="text-[10px] text-indigo-400 hover:underline flex items-center gap-0.5">
+              {ar ? 'الكل' : 'All'} <ChevronLeft size={11} className={ar ? '' : 'rotate-180'} />
+            </button>
+          </div>
+          <div className="space-y-1">
+            {recent.slice(0, 8).map((r, i) => (
+              <div key={i} className="flex items-center justify-between px-2.5 py-2 rounded-lg group/row" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-[11px] text-slate-500 w-12">{fmtD(r.attendance_date)}</span>
+                  <span className="text-xs font-bold text-white w-12">{r.shift_code || '—'}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${MARKER_COLOR[r.attendance_marker] ?? '#64748b'}22`, color: MARKER_COLOR[r.attendance_marker] ?? '#94a3b8' }}>
+                    {ar ? (MARKER_AR[r.attendance_marker] ?? r.attendance_marker) : r.attendance_marker}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {r.punch_late_minutes > 0 && <span className="text-[9px] text-amber-400">+{r.punch_late_minutes}{ar ? 'د' : 'm'}</span>}
+                  {r.ot_minutes > 0 && <span className="text-[9px] text-cyan-400">OT {Math.round(r.ot_minutes / 60 * 10) / 10}h</span>}
+                  {r.is_wfh && <Home size={10} className="text-purple-400" />}
+                  {/* Request a change for this day — opens the request form pre-dated. Agents never edit directly. */}
+                  <button
+                    onClick={() => navigate(`/requests?tab=submit&date=${r.attendance_date}`)}
+                    title={ar ? 'اطلب تغيير لهذا اليوم' : 'Request a change for this day'}
+                    className="opacity-0 group-hover/row:opacity-100 transition-all flex items-center gap-1 text-[9px] font-semibold text-indigo-300 px-1.5 py-0.5 rounded-md"
+                    style={{ background: 'rgba(99,102,241,0.15)' }}>
+                    <Repeat size={9} /> {ar ? 'تغيير' : 'Change'}
+                  </button>
+                </div>
+              </div>
+            ))}
+            {recent.length === 0 && <p className="text-xs text-slate-600 text-center py-6">{ar ? 'لا توجد بيانات حضور' : 'No attendance data'}</p>}
+          </div>
+        </div>
+
+        {/* ── My requests ── */}
+        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <FileText size={15} className="text-indigo-400" /> {ar ? 'طلباتي' : 'My Requests'}
+            </h2>
+            <button onClick={() => navigate('/requests')}
+              className="text-[10px] font-bold text-white px-2.5 py-1 rounded-lg" style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)' }}>
+              + {ar ? 'طلب جديد' : 'New'}
+            </button>
+          </div>
+          <div className="space-y-1">
+            {requests.map(r => {
+              const st = STATUS_META[r.status] ?? STATUS_META.pending;
+              return (
+                <div key={r.id} className="flex items-center justify-between px-2.5 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <div className="min-w-0">
+                    <p className="text-xs text-white truncate">{ar ? (REQ_TYPE_AR[r.type] ?? r.type) : r.type}</p>
+                    <p className="text-[9px] text-slate-600">{r.submitted_at ? fmtD(r.submitted_at) : ''}</p>
+                  </div>
+                  <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg flex-shrink-0" style={{ background: `${st.color}22`, color: st.color }}>
+                    <st.icon size={10} /> {ar ? st.ar : st.en}
+                  </span>
+                </div>
+              );
+            })}
+            {requests.length === 0 && <p className="text-xs text-slate-600 text-center py-6">{ar ? 'لا توجد طلبات' : 'No requests yet'}</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Quick actions ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { icon: FileText, label: ar ? 'طلب جديد' : 'New Request', to: '/requests', color: '#6366f1' },
+          { icon: CalendarClock, label: ar ? 'جدولي' : 'My Schedule', to: '/schedule', color: '#06b6d4' },
+          { icon: Award, label: ar ? 'تقييمي' : 'My Scorecard', to: '/scorecard', color: '#f59e0b' },
+          { icon: MessageCircle, label: ar ? 'الشات' : 'Chat', to: '/chat', color: '#22c55e' },
+        ].map(a => (
+          <button key={a.to} onClick={() => navigate(a.to)}
+            className="flex items-center gap-2.5 p-3.5 rounded-2xl transition-all hover:bg-white/[0.06]"
+            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${a.color}22`, color: a.color }}>
+              <a.icon size={17} />
+            </div>
+            <span className="text-xs font-semibold text-slate-200">{a.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Notifications ── */}
+      {notifs.length > 0 && (
+        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+            <Bell size={15} className="text-indigo-400" /> {ar ? 'الإشعارات' : 'Notifications'}
+          </h2>
+          <div className="space-y-1">
+            {notifs.map(n => (
+              <div key={n.id} className="flex items-start gap-2.5 px-2.5 py-2 rounded-lg"
+                style={{ background: n.isRead ? 'rgba(255,255,255,0.02)' : 'rgba(99,102,241,0.08)' }}>
+                {!n.isRead && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />}
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-white truncate">{n.title}</p>
+                  {n.body && <p className="text-[10px] text-slate-500 truncate">{n.body}</p>}
+                </div>
+                <span className="text-[9px] text-slate-600 flex-shrink-0">{fmtDT(n.createdAt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

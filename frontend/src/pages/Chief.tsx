@@ -1,0 +1,233 @@
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Crown, Loader2, RefreshCw, Target, Activity, ShieldAlert, Server, GraduationCap, Brain,
+  Zap, CheckCircle2, XCircle, Undo2, ShieldCheck, FileBarChart, Sparkles, Bot, Power, Award, Telescope, ScrollText,
+} from 'lucide-react';
+import { useUiStore } from '@/store/ui.store';
+import { apiClient } from '@/api/client';
+import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+
+type Sev = 'risk' | 'caution' | 'ok' | 'info';
+interface Domain { key: string; labelAr: string; sev: Sev; line: string }
+interface Priority { sev: Sev; domain: string; title: string; action: string }
+interface Briefing {
+  date: string; posture: Sev; directive: string; llm: boolean; executiveBrief: string;
+  domains: Domain[]; priorities: Priority[];
+  learning: { learnedSamples: number; decisionsLogged: number };
+  autoMode: { enabled: boolean; autoApprove: boolean; autoReject: boolean; allowedTypes: string[]; approved: number; rejected: number; last24: number } | null;
+  selfTest: { passed: number; total: number; probes: { name: string; ok: boolean }[] } | null;
+  lastReport: any;
+}
+interface AutoDecision { id: string; request_type: string; decision: string; reason: string; function_name: string; scope_date: string; reverted: boolean; decided_at: string }
+
+const TEAM = [
+  { route: '/system-health', icon: ShieldCheck, ar: 'السلامة', color: '#22c55e' },
+  { route: '/analyst', icon: Brain, ar: 'المحلّل', color: '#a855f7' },
+  { route: '/reports-bot', icon: FileBarChart, ar: 'الناشر', color: '#0ea5e9' },
+  { route: '/security-guard', icon: ShieldAlert, ar: 'الأمني', color: '#ef4444' },
+  { route: '/scorecard-guard', icon: Award, ar: 'السكور كارد', color: '#f59e0b' },
+  { route: '/researcher', icon: Telescope, ar: 'الباحث', color: '#818cf8' },
+  { route: '/expert', icon: GraduationCap, ar: 'الخبير', color: '#10b981' },
+  { route: '/knowledge-ledger', icon: ScrollText, ar: 'سجلّ المعرفة', color: '#14b8a6' },
+  { route: '/advisor', icon: Sparkles, ar: 'المستشار', color: '#ec4899' },
+  { route: '/bots', icon: Bot, ar: 'المركز', color: '#818cf8' },
+];
+
+const SEV: Record<Sev, { color: string; ar: string }> = {
+  risk: { color: '#ef4444', ar: 'خطر' }, caution: { color: '#f59e0b', ar: 'انتباه' },
+  ok: { color: '#22c55e', ar: 'مستقرّ' }, info: { color: '#64748b', ar: 'معلومة' },
+};
+const DICON: Record<string, any> = { operations: Activity, security: ShieldAlert, system: Server };
+
+export default function ChiefPage() {
+  const { lang, dark } = useUiStore();
+  const ar = lang === 'ar';
+  const nav = useNavigate();
+  useInjectDsStyles();
+
+  const [data, setData] = useState<Briefing | null>(null);
+  const [loading, setL] = useState(true);
+  const [decisions, setDecisions] = useState<AutoDecision[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setL(true);
+    try {
+      const [{ data }, dec] = await Promise.all([
+        apiClient.get<Briefing>('/chief/briefing'),
+        apiClient.get<AutoDecision[]>('/automode/decisions').catch(() => ({ data: [] })),
+      ]);
+      setData(data); setDecisions((dec as any).data || []);
+    } catch { setData(null); }
+    setL(false);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const saveAuto = async (patch: Record<string, any>) => {
+    if (!data?.autoMode) return;
+    setBusy(true);
+    try {
+      await apiClient.post('/automode/settings', {
+        enabled: data.autoMode.enabled, autoApprove: data.autoMode.autoApprove, autoReject: data.autoMode.autoReject,
+        allowedTypes: data.autoMode.allowedTypes, ...patch,
+      });
+      await load();
+    } catch { /* noop */ }
+    setBusy(false);
+  };
+  const revert = async (id: string) => { setBusy(true); try { await apiClient.post(`/automode/decisions/${id}/revert`); await load(); } catch { /* noop */ } setBusy(false); };
+
+  const posture = data ? SEV[data.posture] : SEV.info;
+
+  return (
+    <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.25)' }}>
+            <Crown size={18} style={{ color: '#eab308' }} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold" style={{ color: tp(dark) }}>{ar ? 'الرئيس — القيادة التنفيذية' : 'The Chief — Executive Command'}</h1>
+            <p className="text-xs" style={{ color: tsColor(dark) }}>{ar ? 'يتعلّم من كل الحرّاس ويعطيك صورة واحدة وأهم قرار الآن' : 'Learns from every guard and gives you one picture + the single top decision'}</p>
+          </div>
+        </div>
+        <button onClick={load} disabled={loading} className="flex items-center gap-2 text-xs font-semibold rounded-xl px-3 py-2" style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.25)', color: '#fde047' }}>
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}{ar ? 'تحديث' : 'Refresh'}
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20"><Loader2 size={24} className="animate-spin" style={{ color: '#475569' }} /></div>
+      ) : !data ? (
+        <div className="text-center py-20" style={{ color: '#475569' }}><Crown size={32} className="mx-auto mb-3" style={{ color: '#334155' }} /><p className="text-sm">{ar ? 'تعذّر تحميل الموجز' : 'Could not load briefing'}</p></div>
+      ) : (
+        <div className="space-y-4">
+          {/* Posture + directive banner */}
+          <div className="rounded-2xl p-5" style={{ background: `linear-gradient(135deg, ${posture.color}1a, rgba(255,255,255,0.02))`, border: `1px solid ${posture.color}40` }}>
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ background: posture.color, color: '#0b0f1c' }}>{ar ? 'الوضع العام' : 'Posture'}: {posture.ar}</span>
+              <span className="text-[11px]" style={{ color: '#64748b' }}>{data.date}{data.llm ? '' : ` · ${ar ? 'موجز قواعدي' : 'rule-based'}`}</span>
+            </div>
+            <p className="text-sm whitespace-pre-line leading-relaxed" style={{ color: '#e2e8f0' }}>{data.executiveBrief}</p>
+            <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-xl" style={{ background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.25)' }}>
+              <Target size={15} style={{ color: '#eab308', flexShrink: 0 }} />
+              <p className="text-xs font-bold" style={{ color: '#fde047' }}>{data.directive}</p>
+            </div>
+          </div>
+
+          {/* Domains */}
+          <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
+            {data.domains.map(d => {
+              const s = SEV[d.sev]; const Ic = DICON[d.key] ?? Activity;
+              return (
+                <div key={d.key} className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${s.color}2e` }}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2"><Ic size={15} style={{ color: s.color }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{d.labelAr}</span></div>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${s.color}1a`, color: s.color }}>{s.ar}</span>
+                  </div>
+                  <p className="text-[11px]" style={{ color: '#94a3b8' }}>{d.line}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Prioritized directives */}
+          <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}><Target size={14} style={{ color: '#eab308' }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'أولويات القيادة' : 'Command priorities'}</span></div>
+            {data.priorities.length === 0 ? (
+              <p className="text-xs py-6 text-center" style={{ color: '#22c55e' }}>{ar ? 'لا مخاطر بارزة عبر الفريق' : 'No notable risks across the team'}</p>
+            ) : (
+              <div>
+                {data.priorities.map((p, i) => {
+                  const s = SEV[p.sev];
+                  return (
+                    <div key={i} className="flex items-start gap-3 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                      <span className="text-xs font-bold tabular-nums mt-0.5" style={{ color: s.color, minWidth: 18 }}>{i + 1}</span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded mt-0.5" style={{ background: `${s.color}1a`, color: s.color }}>{p.domain}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold" style={{ color: tp(dark) }}>{p.title}</p>
+                        <p className="text-[11px]" style={{ color: '#94a3b8' }}>{p.action}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Auto Mode — the deputy */}
+          {data.autoMode && (
+            <div className="rounded-2xl p-4" style={{ background: data.autoMode.enabled ? 'rgba(234,179,8,0.06)' : 'rgba(255,255,255,0.02)', border: `1px solid ${data.autoMode.enabled ? 'rgba(234,179,8,0.3)' : 'rgba(255,255,255,0.06)'}` }}>
+              <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                <div className="flex items-center gap-2">
+                  <Zap size={15} style={{ color: data.autoMode.enabled ? '#eab308' : '#64748b' }} />
+                  <span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'الوضع التلقائي — ينوب عنك بالطلبات' : 'Auto Mode — deputy on requests'}</span>
+                </div>
+                <button onClick={() => saveAuto({ enabled: !data.autoMode!.enabled })} disabled={busy}
+                  className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg"
+                  style={{ background: data.autoMode.enabled ? 'rgba(34,197,94,0.18)' : 'rgba(100,116,139,0.15)', color: data.autoMode.enabled ? '#22c55e' : '#94a3b8' }}>
+                  <Power size={13} /> {data.autoMode.enabled ? (ar ? 'مُفعّل' : 'ON') : (ar ? 'متوقّف' : 'OFF')}
+                </button>
+              </div>
+              <p className="text-[11px] mb-3" style={{ color: '#94a3b8' }}>{ar ? 'يوافق على الطلبات تلقائياً عند وجود فائض تغطية آمن، ويترك الباقي لك. الرفض التلقائي اختياري (حساس). كل قرار مُسجّل وقابل للتراجع.' : 'Auto-approves when coverage surplus is safe; holds the rest. Auto-reject is opt-in (sensitive). Every action is logged and reversible.'}</p>
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <Toggle on={data.autoMode.autoApprove} label={ar ? 'موافقة تلقائية' : 'auto-approve'} onClick={() => saveAuto({ autoApprove: !data.autoMode!.autoApprove })} busy={busy} color="#22c55e" />
+                <Toggle on={data.autoMode.autoReject} label={ar ? 'رفض تلقائي (حساس)' : 'auto-reject (sensitive)'} onClick={() => saveAuto({ autoReject: !data.autoMode!.autoReject })} busy={busy} color="#ef4444" />
+                <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)', color: '#64748b' }}>{ar ? 'الأنواع' : 'types'}: {data.autoMode.allowedTypes.join(', ')}</span>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap text-[11px] mb-2" style={{ color: '#94a3b8' }}>
+                <span className="flex items-center gap-1"><CheckCircle2 size={12} style={{ color: '#22c55e' }} /> {data.autoMode.approved} {ar ? 'موافقة' : 'approved'}</span>
+                <span className="flex items-center gap-1"><XCircle size={12} style={{ color: '#f87171' }} /> {data.autoMode.rejected} {ar ? 'رفض' : 'rejected'}</span>
+                <span style={{ color: '#64748b' }}>· {data.autoMode.last24} {ar ? 'آخر 24 ساعة' : 'last 24h'}</span>
+              </div>
+              {decisions.length > 0 && (
+                <div className="space-y-1 mt-2">
+                  {decisions.filter(d => d.decision !== 'hold').slice(0, 6).map(d => (
+                    <div key={d.id} className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                      <span className="font-bold px-1.5 py-0.5 rounded" style={{ background: d.decision === 'approve' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', color: d.decision === 'approve' ? '#22c55e' : '#f87171' }}>{d.decision === 'approve' ? (ar ? 'وافق' : 'approved') : (ar ? 'رفض' : 'rejected')}</span>
+                      <span className="flex-1 min-w-0 truncate" style={{ color: '#cbd5e1' }}>{d.request_type} · {d.function_name} — {d.reason}</span>
+                      {d.reverted ? <span className="text-[10px]" style={{ color: '#64748b' }}>{ar ? 'متراجَع' : 'reverted'}</span>
+                        : <button onClick={() => revert(d.id)} disabled={busy} className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24' }}><Undo2 size={10} />{ar ? 'تراجع' : 'undo'}</button>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Self-test + learning + the hidden team */}
+          <div className="flex items-center gap-2 flex-wrap text-[11px]" style={{ color: '#64748b' }}>
+            {data.selfTest && (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: data.selfTest.passed === data.selfTest.total ? 'rgba(34,197,94,0.1)' : 'rgba(245,158,11,0.1)', color: data.selfTest.passed === data.selfTest.total ? '#4ade80' : '#fbbf24' }}>
+                <ShieldCheck size={12} /> {ar ? 'اختبار ذاتي' : 'self-test'} {data.selfTest.passed}/{data.selfTest.total}
+              </span>
+            )}
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(168,85,247,0.1)', color: '#c4b5fd' }}><Brain size={12} /> {ar ? 'تعلّم' : 'learned'} {data.learning.learnedSamples} · {data.learning.decisionsLogged} {ar ? 'قرار' : 'decisions'}</span>
+          </div>
+
+          {/* The team behind the scenes */}
+          <div className="rounded-2xl p-3" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <p className="text-[10px] font-bold mb-2" style={{ color: '#64748b' }}>{ar ? 'الفريق خلف الكواليس' : 'The team behind the scenes'}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {TEAM.map(g => (
+                <button key={g.route} onClick={() => nav(g.route)} className="flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg" style={{ background: `${g.color}12`, color: g.color }}>
+                  <g.icon size={13} /> {g.ar}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Toggle({ on, label, onClick, busy, color }: { on: boolean; label: string; onClick: () => void; busy: boolean; color: string }) {
+  return (
+    <button onClick={onClick} disabled={busy} className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+      style={{ background: on ? `${color}1a` : 'rgba(255,255,255,0.03)', color: on ? color : '#64748b', border: `1px solid ${on ? `${color}40` : 'transparent'}` }}>
+      <span className="w-3 h-3 rounded-full" style={{ background: on ? color : '#475569' }} /> {label}
+    </button>
+  );
+}

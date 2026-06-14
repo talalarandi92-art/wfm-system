@@ -1,17 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   FileText, Plus, CheckCircle2, XCircle, Clock, AlertTriangle,
   Users, Calendar, ChevronDown, ChevronUp, Search, RefreshCw,
   ArrowLeftRight, Plane, Stethoscope, Heart, Gift, Home, UserCheck,
-  X, Check, AlertCircle, Send, Loader2, Shield, Timer, TrendingUp,
+  X, Check, AlertCircle, Send, Loader2, Shield, Timer, TrendingUp, BookOpen,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
 import { apiClient } from '@/api/client';
 import type { LinkedEmployee } from '@/types/auth.types';
 import { useInjectDsStyles } from '@/components/ds';
-import { fmtDate, fmtDateShort, fmtTime, fmtDuration, fixEncoding } from '@/utils/format';
+import { fmtDate, fmtDateShort, fmtTime, fmtDuration, fixEncoding, fmtLocalDate } from '@/utils/format';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface Stats {
@@ -107,9 +108,11 @@ const REQUEST_TYPES: Array<{
   { code: 'off_swap',     labelAr: 'تبادل أوف',      labelEn: 'Day Off Swap',  icon: ArrowLeftRight, color: '#8b5cf6', descAr: 'تبادل يوم إجازة مع زميل',         descEn: 'Swap a day off with a colleague',     peer: true },
   { code: 'annual_leave', labelAr: 'إجازة سنوية',   labelEn: 'Annual Leave',  icon: Plane,          color: '#0ea5e9', descAr: 'إجازة سنوية مدفوعة الأجر',       descEn: 'Paid annual leave',                              },
   { code: 'sick_leave',   labelAr: 'إجازة مرضية',   labelEn: 'Sick Leave',    icon: Stethoscope,    color: '#f59e0b', descAr: 'إجازة مرضية مع تقرير طبي',       descEn: 'Sick leave with medical certificate',            },
+  { code: 'emergency_leave', labelAr: 'إجازة طارئة', labelEn: 'Emergency Leave', icon: AlertTriangle, color: '#ef4444', descAr: 'إجازة طارئة عاجلة',              descEn: 'Urgent emergency leave',                         },
   { code: 'death_leave',  labelAr: 'إجازة وفاة',    labelEn: 'Bereavement',   icon: Heart,          color: '#64748b', descAr: 'إجازة الوفاة (3 أيام)',           descEn: 'Bereavement leave (3 days)',                     },
   { code: 'comp_off',     labelAr: 'يوم تعويضي',    labelEn: 'Comp Day',      icon: Gift,           color: '#10b981', descAr: 'استخدام يوم تعويضي',             descEn: 'Use a compensatory day off',                     },
   { code: 'wfh',          labelAr: 'عمل من المنزل', labelEn: 'Work From Home', icon: Home,          color: '#06b6d4', descAr: 'طلب العمل من المنزل',            descEn: 'Request to work from home',                      },
+  { code: 'university_exam', labelAr: 'جامعة / امتحان', labelEn: 'University / Exam', icon: BookOpen, color: '#a855f7', descAr: 'طلب وقت لامتحان جامعي',          descEn: 'Time off for a university exam',                 },
   { code: 'permission',   labelAr: 'استئذان',        labelEn: 'Permission',    icon: UserCheck,      color: '#ec4899', descAr: 'استئذان مبكر أو متأخر',           descEn: 'Early leave or late arrival',                    },
   { code: 'overtime',     labelAr: 'أوفر تايم',      labelEn: 'Overtime',      icon: Timer,          color: '#f97316', descAr: 'طلب ساعات إضافية',               descEn: 'Request overtime hours',                         },
 ];
@@ -701,7 +704,7 @@ function RequestCard({
 }
 
 /* ─── Submit Form ─────────────────────────────────────────────────────────── */
-function SubmitForm({ dark, onSuccess }: { dark: boolean; onSuccess: () => void }) {
+function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess: () => void; initialDate?: string }) {
   const { lang } = useUiStore();
   const ar = lang === 'ar';
   // Account linked to an employee record → that employee, always (no picking)
@@ -726,7 +729,10 @@ function SubmitForm({ dark, onSuccess }: { dark: boolean; onSuccess: () => void 
     setEmpSearch('');
     localStorage.setItem('wfm_my_employee', JSON.stringify(emp));
   };
-  const [form, setForm] = useState<Record<string, string>>({});
+  // Prefill date fields when deep-linked from the agent's schedule (?date=YYYY-MM-DD).
+  const [form, setForm] = useState<Record<string, string>>(
+    initialDate ? { requesterDate: initialDate, startDate: initialDate, endDate: initialDate, permissionDate: initialDate } : {},
+  );
   const [swapCandidates, setSwapCandidates] = useState<SwapCandidate[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<SwapCandidate | null>(null);
   const [targetDate, setTargetDate] = useState('');
@@ -748,12 +754,12 @@ function SubmitForm({ dark, onSuccess }: { dark: boolean; onSuccess: () => void 
 
   const selectedTypeCfg = REQUEST_TYPES.find(t => t.code === selectedType);
   const isSwapType = selectedType === 'shift_swap' || selectedType === 'off_swap';
-  const isLeaveType = ['annual_leave','sick_leave','death_leave','comp_off','wfh'].includes(selectedType ?? '');
+  const isLeaveType = ['annual_leave','sick_leave','emergency_leave','death_leave','comp_off','wfh','university_exam'].includes(selectedType ?? '');
 
   // Load weekly permission quota when employee or permission date changes
   useEffect(() => {
     if (selectedType !== 'permission' || !selectedEmp) { setWeeklyUsage(null); return; }
-    const date = form.permissionDate || new Date().toISOString().slice(0, 10);
+    const date = form.permissionDate || fmtLocalDate(new Date());
     apiClient.get('/permission-requests/weekly-usage', {
       params: { employeeId: selectedEmp.id, date },
     }).then(r => setWeeklyUsage(r.data))
@@ -1596,7 +1602,12 @@ export default function RequestsPage() {
   const { dark, lang } = useUiStore();
   const ar = lang === 'ar';
   useInjectDsStyles();
-  const [activeTab, setActiveTab] = useState<'approvals' | 'submit' | 'mine'>('approvals');
+  // Deep-link support: ?tab=submit&date=YYYY-MM-DD (used by the agent's "request change" shortcut)
+  const [searchParams] = useSearchParams();
+  const deepLinkDate = searchParams.get('date') ?? undefined;
+  const [activeTab, setActiveTab] = useState<'approvals' | 'submit' | 'mine'>(
+    searchParams.get('tab') === 'submit' ? 'submit' : 'approvals',
+  );
   const [requests, setRequests] = useState<UnifiedRequest[]>([]);
   const [stats, setStats] = useState<Stats>({ pending: 0, peer_pending: 0, approved_week: 0, rejected_week: 0, overdue: 0 });
   const [total, setTotal] = useState(0);
@@ -1793,7 +1804,7 @@ export default function RequestsPage() {
 
           {/* Submit tab */}
           {activeTab === 'submit' && (
-            <SubmitForm dark={dark} onSuccess={() => { setActiveTab('approvals'); fetchRequests(); fetchStats(); }} />
+            <SubmitForm dark={dark} initialDate={deepLinkDate} onSuccess={() => { setActiveTab('approvals'); fetchRequests(); fetchStats(); }} />
           )}
 
           {/* My requests tab */}

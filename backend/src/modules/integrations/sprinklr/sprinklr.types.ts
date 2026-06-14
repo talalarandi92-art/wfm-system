@@ -31,12 +31,30 @@ export interface SprinklrAgent {
   metrics?:       Record<string, number>;     // daily Sprinklr measurements (AHT, FRT, case counts…)
 }
 
+// ── Station summary: faithful mirror of the Sprinklr Supervisor right-rail ──
+// Three panels exactly as the supervisor sees them on the live station.
+export interface SprinklrStationSummary {
+  // "Queue Summary" panel
+  queueSummary?: {
+    customersWaiting:  number;
+    casesInProgress:   number;
+    avgWaitSeconds:    number;
+    oldestWaitSeconds: number;
+  } | null;
+  // "Agent Status" panel — the presence each agent CHOSE (Available, Unavailable, Manual Outbound…)
+  agentStatus?: { label: string; count: number }[];
+  // "Agent State" panel — what each agent is actually DOING (Logged Out, Idle, Working on a Case) + %
+  agentState?:  { label: string; count: number; pct: number }[];
+  capturedAt?:  string;
+}
+
 export interface SprinklrSnapshot {
-  source:      'sprinklr' | 'extension' | 'api';
-  capturedAt:  string;  // ISO
-  queues:      SprinklrQueue[];
-  agents:      SprinklrAgent[];
-  rawUrls?:    string[];
+  source:          'sprinklr' | 'extension' | 'api';
+  capturedAt:      string;  // ISO
+  queues:          SprinklrQueue[];
+  agents:          SprinklrAgent[];
+  stationSummary?: SprinklrStationSummary | null;
+  rawUrls?:        string[];
 }
 
 // ── Sprinklr direct API config (stored per tenant in settings) ───────────────

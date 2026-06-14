@@ -9,6 +9,7 @@ import * as express from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AppModule } from './app.module';
+import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -32,7 +33,9 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Slug'],
   });
 
-  // Request body limits
+  // Request body limits — 50 MB for file uploads / Sprinklr payloads
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
   app.use(compression());
   app.use(cookieParser());
 
@@ -71,6 +74,11 @@ async function bootstrap() {
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
   app.use('/uploads', express.static(uploadsDir));
 
+  // Chat WebSocket — Redis adapter (falls back to in-memory if Redis is down)
+  const redisIoAdapter = new RedisIoAdapter(app);
+  await redisIoAdapter.connectToRedis();
+  app.useWebSocketAdapter(redisIoAdapter);
+
   // Graceful shutdown
   app.enableShutdownHooks();
 
@@ -80,3 +88,4 @@ async function bootstrap() {
 }
 
 bootstrap();
+

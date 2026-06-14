@@ -12,7 +12,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
-import { fmtDuration, fmtDateTimeTime } from '@/utils/format';
+import { fmtDuration, fmtDateTimeTime, fmtDurationSec } from '@/utils/format';
 
 /* ── Types ─────────────────────────────────────────────────────────────────── */
 interface SpQueue {
@@ -27,10 +27,20 @@ interface SpAgent {
   status: 'available' | 'idle' | 'busy' | 'break' | 'away' | 'offline' | 'unknown';
   currentChannel: string; queueId: string; loginTime: string;
 }
+interface StationSummary {
+  queueSummary?: {
+    customersWaiting: number; casesInProgress: number;
+    avgWaitSeconds: number; oldestWaitSeconds: number;
+  } | null;
+  agentStatus?: { label: string; count: number }[];
+  agentState?:  { label: string; count: number; pct: number }[];
+  capturedAt?: string;
+}
 interface SpLive {
   capturedAt: string; staleSec: number; isStale: boolean;
   summary: { totalWaiting: number; totalInProgress: number; totalAvailable: number; totalBusy: number; avgSla: number };
   atRisk: SpQueue[]; queues: SpQueue[]; agents: SpAgent[];
+  stationSummary?: StationSummary | null;
 }
 interface BreakAgent {
   agentId: string; agentName: string;
@@ -366,6 +376,118 @@ function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose }: {
           {ar ? 'لا توجد بيانات إيجنت لهذا الطابور' : 'No agent data for this queue'}
         </p>
       )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/*  STATION PANEL — faithful mirror of the Sprinklr Supervisor right-rail       */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+// Color per known station label (status + state). Falls back to slate.
+function stationLabelColor(label: string): string {
+  const l = label.toLowerCase();
+  if (l.includes('working') || l.includes('on a case'))   return '#22c55e'; // working on a case
+  if (l.includes('available') && !l.includes('un'))       return '#22c55e';
+  if (l.includes('idle'))                                 return '#06b6d4';
+  if (l.includes('manual') || l.includes('outbound'))     return '#a78bfa';
+  if (l.includes('unavailable'))                          return '#f59e0b';
+  if (l.includes('logged out') || l.includes('offline'))  return '#475569';
+  if (l.includes('break') || l.includes('lunch') || l.includes('prayer') || l.includes('bio')) return '#818cf8';
+  if (l.includes('meeting') || l.includes('training') || l.includes('coach')) return '#f472b6';
+  return '#64748b';
+}
+
+function StationPanel({ station, ar }: { station: StationSummary; ar: boolean }) {
+  const qs    = station.queueSummary;
+  const status = station.agentStatus ?? [];
+  const state  = station.agentState ?? [];
+  if (!qs && !status.length && !state.length) return null;
+
+  const stateTotal = state.reduce((s, x) => s + x.count, 0) || 1;
+
+  return (
+    <div className="flex-shrink-0 mx-4 mb-2 rounded-2xl overflow-hidden"
+      style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="px-3 py-1.5 flex items-center gap-2"
+        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <Radio size={12} style={{ color: '#06b6d4' }} />
+        <span className="text-[11px] font-bold" style={{ color: '#94a3b8' }}>
+          {ar ? 'محطة سبرينكلر المباشرة' : 'Live Sprinklr Station'}
+        </span>
+      </div>
+
+      <div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', background: 'rgba(255,255,255,0.04)' }}>
+
+        {/* ── Queue Summary ── */}
+        <div className="p-2.5" style={{ background: 'rgba(15,23,42,0.4)' }}>
+          <div className="text-[9px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#475569' }}>
+            {ar ? 'ملخص الطابور' : 'Queue Summary'}
+          </div>
+          {qs ? (
+            <div className="space-y-1">
+              {[
+                { l: ar ? 'عملاء بالانتظار' : 'Customers Waiting', v: qs.customersWaiting, c: qs.customersWaiting > 0 ? '#fbbf24' : '#64748b' },
+                { l: ar ? 'حالات قيد المعالجة' : 'Cases in Progress', v: qs.casesInProgress, c: '#818cf8' },
+                { l: ar ? 'متوسط الانتظار' : 'Avg Wait', v: fmtDurationSec(qs.avgWaitSeconds, ar), c: '#94a3b8' },
+                { l: ar ? 'أقدم انتظار' : 'Oldest Wait', v: fmtDurationSec(qs.oldestWaitSeconds, ar), c: qs.oldestWaitSeconds > 120 ? '#f87171' : '#94a3b8' },
+              ].map(r => (
+                <div key={r.l} className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] truncate" style={{ color: '#475569' }}>{r.l}</span>
+                  <span className="text-[11px] font-bold tabular-nums flex-shrink-0" style={{ color: r.c }}>{r.v}</span>
+                </div>
+              ))}
+            </div>
+          ) : <div className="text-[10px]" style={{ color: '#334155' }}>—</div>}
+        </div>
+
+        {/* ── Agent Status (chosen presence) ── */}
+        <div className="p-2.5" style={{ background: 'rgba(15,23,42,0.4)' }}>
+          <div className="text-[9px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#475569' }}>
+            {ar ? 'حالة الموظف' : 'Agent Status'}
+          </div>
+          {status.length ? (
+            <div className="space-y-1">
+              {status.map(r => (
+                <div key={r.label} className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: stationLabelColor(r.label) }} />
+                    <span className="text-[10px] truncate" style={{ color: '#64748b' }}>{r.label}</span>
+                  </span>
+                  <span className="text-[11px] font-bold tabular-nums flex-shrink-0" style={{ color: stationLabelColor(r.label) }}>{r.count}</span>
+                </div>
+              ))}
+            </div>
+          ) : <div className="text-[10px]" style={{ color: '#334155' }}>—</div>}
+        </div>
+
+        {/* ── Agent State (actual activity) + % bars ── */}
+        <div className="p-2.5" style={{ background: 'rgba(15,23,42,0.4)' }}>
+          <div className="text-[9px] font-bold uppercase tracking-wide mb-1.5" style={{ color: '#475569' }}>
+            {ar ? 'وضع الموظف' : 'Agent State'}
+          </div>
+          {state.length ? (
+            <div className="space-y-1.5">
+              {state.map(r => {
+                const pct = r.pct || (r.count / stateTotal) * 100;
+                const c = stationLabelColor(r.label);
+                return (
+                  <div key={r.label}>
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <span className="text-[10px] truncate" style={{ color: '#64748b' }}>{r.label}</span>
+                      <span className="text-[10px] font-bold tabular-nums flex-shrink-0" style={{ color: c }}>
+                        {r.count} <span style={{ color: '#475569' }}>({pct.toFixed(0)}%)</span>
+                      </span>
+                    </div>
+                    <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct)}%`, background: c }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : <div className="text-[10px]" style={{ color: '#334155' }}>—</div>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2600,6 +2722,11 @@ export default function RTAPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* ── LIVE STATION MIRROR (Sprinklr right-rail) ──────────────────────── */}
+      {live?.stationSummary && (
+        <StationPanel station={live.stationSummary} ar={ar} />
       )}
 
       {/* ── UNAUTHORIZED BREAK ALERT ───────────────────────────────────────── */}

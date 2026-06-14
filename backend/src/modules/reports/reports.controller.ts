@@ -6,6 +6,18 @@ import { Response } from 'express';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
+import { ReportsService } from './reports.service';
+
+// Build a CSV string from an array of objects using its keys as headers.
+function rowsToCsv(rows: any[]): string {
+  if (!rows.length) return '';
+  const headers = Object.keys(rows[0]);
+  const esc = (v: any) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [headers.join(','), ...rows.map(r => headers.map(h => esc(r[h])).join(','))].join('\n');
+}
 
 @ApiTags('Reports')
 @ApiBearerAuth()
@@ -13,7 +25,120 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 @RequirePermissions('reports.view')
 @Controller({ path: 'reports', version: '1' })
 export class ReportsController {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly svc: ReportsService,
+  ) {}
+
+  // Send `rows` as csv | xlsx | json depending on `format`.
+  private deliver(res: Response, rows: any[], format: string | undefined, baseName: string, sheet = 'Report') {
+    if (format === 'xlsx') {
+      const buf = this.svc.sheetToXlsx(rows, sheet);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.xlsx"`);
+      return res.send(buf);
+    }
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${baseName}.csv"`);
+      return res.send('﻿' + rowsToCsv(rows));
+    }
+    return rows;
+  }
+
+  /* ── Detailed requests (full approval chain + SLA + rejection) ── */
+  @Get('requests-detailed')
+  @ApiOperation({ summary: 'Detailed requests: approval chain, SLA, reasons' })
+  async requestsDetailed(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('type') type?: string, @Query('status') status?: string,
+    @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const rows = await this.svc.requestsDetailed(user.tenantId, fromDate, toDate, type, status);
+    if (format) return this.deliver(res!, rows, format, `requests_detailed_${fromDate}_${toDate}`, 'Requests');
+    return { period: { from: fromDate, to: toDate }, total: rows.length, data: rows };
+  }
+
+  /* ── Permissions (استئذان): hours, type, intervals early/late ── */
+  @Get('permissions')
+  @ApiOperation({ summary: 'Permissions report: hours, types, interval breakdown' })
+  async permissions(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('view') view?: string, @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const r = await this.svc.permissionsDetailed(user.tenantId, fromDate, toDate);
+    const rows = view === 'intervals' ? r.intervals : view === 'summary' ? r.summary : r.detail;
+    if (format) return this.deliver(res!, rows, format, `permissions_${view ?? 'detail'}_${fromDate}_${toDate}`, 'Permissions');
+    return { period: { from: fromDate, to: toDate }, ...r };
+  }
+
+  /* ── Breaks: count, duration, shift, approver ── */
+  @Get('breaks')
+  @ApiOperation({ summary: 'Breaks report: duration, shift, approver' })
+  async breaks(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('view') view?: string, @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const r = await this.svc.breaksDetailed(user.tenantId, fromDate, toDate);
+    const rows = view === 'summary' ? r.summary : r.detail;
+    if (format) return this.deliver(res!, rows, format, `breaks_${view ?? 'detail'}_${fromDate}_${toDate}`, 'Breaks');
+    return { period: { from: fromDate, to: toDate }, ...r };
+  }
+
+  /* ── Audit: who changed what, when, why ── */
+  @Get('audit')
+  @ApiOperation({ summary: 'Audit trail: who/what/when/why' })
+  async audit(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('module') module?: string, @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const r = await this.svc.auditDetailed(user.tenantId, fromDate, toDate, module);
+    if (format) return this.deliver(res!, r.detail, format, `audit_${fromDate}_${toDate}`, 'Audit');
+    return { period: { from: fromDate, to: toDate }, ...r };
+  }
+
+  /* ── Overtime detailed: before/after shift + % of work ── */
+  @Get('overtime-detailed')
+  @ApiOperation({ summary: 'Overtime: before/after shift split + % of work hours' })
+  async overtimeDetailed(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('view') view?: string, @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const r = await this.svc.overtimeDetailed(user.tenantId, fromDate, toDate);
+    const rows = view === 'daily' ? r.detail : r.ranking;
+    if (format) return this.deliver(res!, rows, format, `overtime_${view ?? 'ranking'}_${fromDate}_${toDate}`, 'Overtime');
+    return { period: { from: fromDate, to: toDate }, ...r };
+  }
+
+  /* ── Master workbook: every report bundled in one multi-sheet .xlsx ── */
+  @Get('workbook')
+  @ApiOperation({ summary: 'Download ALL reports as one multi-sheet Excel workbook' })
+  async workbook(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const buf = await this.svc.buildWorkbook(user.tenantId, fromDate, toDate);
+    res!.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res!.setHeader('Content-Disposition', `attachment; filename="WFM_full_report_${fromDate}_${toDate}.xlsx"`);
+    return res!.send(buf);
+  }
 
   /** Attendance report — JSON preview + CSV export */
   @Get('attendance')
@@ -242,6 +367,143 @@ export class ReportsController {
       return res!.send('﻿' + csv);
     }
     return { period: { from: fromDate, to: toDate }, data: mapped };
+  }
+
+  /** Requests & approvals report — JSON preview + CSV export */
+  @Get('requests')
+  @ApiOperation({ summary: 'Requests & approvals report' })
+  async requests(
+    @CurrentUser() user: any,
+    @Query('from')   from?: string,
+    @Query('to')     to?: string,
+    @Query('status') status?: string,
+    @Query('type')   type?: string,
+    @Query('format') format?: string,
+    @Query('limit')  limitQ?: string,
+    @Query('offset') offsetQ?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const tid    = user.tenantId;
+    const limit  = format === 'csv' ? 5000 : parseInt(limitQ ?? '100', 10);
+    const offset = parseInt(offsetQ ?? '0', 10);
+    const toDate   = to   ?? new Date().toISOString().slice(0, 10);
+    const fromDate = from ?? toDate.slice(0, 7) + '-01';
+
+    const params: any[] = [tid, fromDate, toDate];
+    const conds: string[] = [];
+    if (status) { params.push(status); conds.push(`r.status = $${params.length}`); }
+    if (type)   { params.push(type);   conds.push(`rt.code = $${params.length}`); }
+    const extra = conds.length ? 'AND ' + conds.join(' AND ') : '';
+
+    // Status breakdown (for summary chips)
+    const breakdown = await this.ds.query(
+      `SELECT r.status, COUNT(*) AS cnt FROM requests r
+       WHERE r.tenant_id=$1 AND r.submitted_at::date BETWEEN $2 AND $3
+       GROUP BY r.status`, [tid, fromDate, toDate],
+    );
+
+    const [{ total }] = await this.ds.query(
+      `SELECT COUNT(*) AS total FROM requests r
+       JOIN request_types rt ON rt.id = r.request_type_id
+       WHERE r.tenant_id=$1 AND r.submitted_at::date BETWEEN $2 AND $3 ${extra}`, params,
+    );
+
+    params.push(limit, offset);
+    const rows = await this.ds.query(
+      `SELECT r.submitted_at, r.status, r.is_urgent, r.sla_due_at, r.rejection_reason,
+              rt.code AS type_code, rt.name AS type_name,
+              e.employee_no, e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS employee_name,
+              f.name AS function_name
+       FROM requests r
+       JOIN request_types rt ON rt.id = r.request_type_id
+       LEFT JOIN employees e ON e.id = r.employee_id
+       LEFT JOIN functions f ON f.id = e.function_id
+       WHERE r.tenant_id=$1 AND r.submitted_at::date BETWEEN $2 AND $3 ${extra}
+       ORDER BY r.submitted_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`, params,
+    );
+
+    const mapped = rows.map((r: any) => ({
+      submittedAt:  r.submitted_at,
+      employeeNo:   r.employee_no,
+      employeeName: r.employee_name?.trim(),
+      function:     r.function_name,
+      type:         r.type_name,
+      typeCode:     r.type_code,
+      status:       r.status,
+      urgent:       r.is_urgent,
+      slaDue:       r.sla_due_at,
+      reason:       r.rejection_reason,
+    }));
+
+    if (format === 'csv') {
+      const headers = ['Submitted','Emp#','Name','Function','Type','Status','Urgent','SLA Due','Reason'];
+      const csvRows = mapped.map(r => [
+        r.submittedAt ? new Date(r.submittedAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        r.employeeNo ?? '', `"${r.employeeName ?? ''}"`, `"${r.function ?? ''}"`,
+        `"${r.type ?? ''}"`, r.status, r.urgent ? 'Yes' : 'No',
+        r.slaDue ? new Date(r.slaDue).toISOString().slice(0, 16).replace('T', ' ') : '',
+        `"${(r.reason ?? '').replace(/"/g, '""')}"`,
+      ].join(','));
+      const csv = [headers.join(','), ...csvRows].join('\n');
+      res!.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res!.setHeader('Content-Disposition', `attachment; filename="requests_${fromDate}_${toDate}.csv"`);
+      return res!.send('﻿' + csv);
+    }
+
+    const statusBreakdown: Record<string, number> = {};
+    for (const b of breakdown) statusBreakdown[b.status] = parseInt(b.cnt, 10);
+    return { total: parseInt(total, 10), period: { from: fromDate, to: toDate }, limit, offset, statusBreakdown, data: mapped };
+  }
+
+  /** Cross-skill coverage moves report — who covered which function/gap, when */
+  @Get('cross-skill')
+  @ApiOperation({ summary: 'Cross-skill coverage dispatch report' })
+  async crossSkill(
+    @CurrentUser() user: any,
+    @Query('from') from?: string,
+    @Query('to')   to?: string,
+    @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const tid = user.tenantId;
+    const toDate   = to   ?? new Date().toISOString().slice(0, 10);
+    const fromDate = from ?? toDate.slice(0, 7) + '-01';
+
+    const rows = await this.ds.query(
+      `SELECT m.start_at, m.end_at, m.from_function, m.to_function, m.status, m.reason,
+              e.employee_no, e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS employee_name,
+              ru.username AS requested_by, au.username AS approved_by
+       FROM cross_skill_moves m
+       LEFT JOIN employees e ON e.id = m.employee_id
+       LEFT JOIN users ru ON ru.id = m.requested_by
+       LEFT JOIN users au ON au.id = m.approved_by
+       WHERE m.tenant_id = $1 AND m.start_at::date BETWEEN $2 AND $3
+       ORDER BY m.start_at DESC`,
+      [tid, fromDate, toDate],
+    ).catch(() => []);
+
+    const mapped = rows.map((r: any) => ({
+      startAt: r.start_at, endAt: r.end_at,
+      employeeNo: r.employee_no, employeeName: r.employee_name?.trim(),
+      fromFunction: r.from_function, toFunction: r.to_function,
+      status: r.status, reason: r.reason, requestedBy: r.requested_by, approvedBy: r.approved_by,
+    }));
+
+    if (format === 'csv') {
+      const headers = ['Start', 'End', 'Emp#', 'Name', 'From', 'To', 'Status', 'Requested By', 'Approved By', 'Reason'];
+      const csvRows = mapped.map(r => [
+        r.startAt ? new Date(r.startAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        r.endAt ? new Date(r.endAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        r.employeeNo ?? '', `"${r.employeeName ?? ''}"`, `"${r.fromFunction ?? ''}"`, `"${r.toFunction ?? ''}"`,
+        r.status, `"${r.requestedBy ?? ''}"`, `"${r.approvedBy ?? ''}"`, `"${(r.reason ?? '').replace(/"/g, '""')}"`,
+      ].join(','));
+      const csv = [headers.join(','), ...csvRows].join('\n');
+      res!.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res!.setHeader('Content-Disposition', `attachment; filename="cross_skill_${fromDate}_${toDate}.csv"`);
+      return res!.send('﻿' + csv);
+    }
+    return { total: mapped.length, period: { from: fromDate, to: toDate }, data: mapped };
   }
 
   /** Summary counts for the reports home */

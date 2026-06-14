@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import { JwtAuthGuard }  from '@common/guards/jwt-auth.guard';
 import { CurrentUser }   from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
+import { MailerService } from '@common/mailer/mailer.service';
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,21 @@ const storage = diskStorage({
 @RequirePermissions('outages.view')
 @Controller({ path: 'outages', version: '1' })
 export class OutagesController {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly mailer: MailerService,
+  ) {}
+
+  /** Recipients for outage emails = RTA/WFM/admin users with an email on file. */
+  private async outageRecipients(tenantId: string): Promise<string[]> {
+    const rows = await this.ds.query(
+      `SELECT DISTINCT u.email FROM users u
+       JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id
+       WHERE u.tenant_id=$1 AND u.email IS NOT NULL AND r.code IN ('rta','wfm_analyst','platform_admin')`,
+      [tenantId],
+    ).catch(() => []);
+    return rows.map((r: any) => r.email);
+  }
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
 
@@ -390,6 +405,18 @@ export class OutagesController {
       VALUES (gen_random_uuid(),$1,$2,$3,'outage.create','outages','outage',$4,$5::jsonb,NOW())`,
       [actor.tenantId, actor.userId ?? actor.id, actor.email, row.id, JSON.stringify(dto)]);
 
+    // Email RTA/WFM/admin that an outage was opened (no-ops if SMTP unconfigured)
+    this.outageRecipients(actor.tenantId).then(to => this.mailer.send(
+      to,
+      `🚨 Outage opened: ${dto.title} (${dto.severity ?? 'medium'})`,
+      `<h2>Outage Reported</h2>
+       <p><b>Title:</b> ${dto.title}</p>
+       <p><b>Severity:</b> ${dto.severity ?? 'medium'}</p>
+       <p><b>Impact:</b> ${dto.impactDescription ?? '—'}</p>
+       <p><b>SLA due:</b> ${slaDueAt}</p>
+       <p><b>Reported by:</b> ${actor.email ?? '—'}</p>`,
+    )).catch(() => undefined);
+
     return { id: row.id, slaTargetMinutes: slaMin, slaDueAt };
   }
 
@@ -434,6 +461,20 @@ export class OutagesController {
     await this.ds.query(
       `UPDATE outages SET ${sets.join(', ')} WHERE id = $${params.length - 1} AND tenant_id = $${params.length}`,
       params);
+
+    // Email RTA/WFM/admin when an outage is resolved
+    if (dto.status === 'resolved') {
+      const [o] = await this.ds.query(`SELECT title, severity FROM outages WHERE id=$1`, [id]).catch(() => [null]);
+      this.outageRecipients(actor.tenantId).then(to => this.mailer.send(
+        to,
+        `✅ Outage resolved: ${o?.title ?? id}`,
+        `<h2>Outage Resolved</h2>
+         <p><b>Title:</b> ${o?.title ?? '—'}</p>
+         <p><b>Resolution:</b> ${dto.resolution ?? '—'}</p>
+         <p><b>Root cause:</b> ${dto.rootCause ?? '—'}</p>
+         <p><b>Resolved by:</b> ${actor.email ?? '—'}</p>`,
+      )).catch(() => undefined);
+    }
 
     return { success: true };
   }

@@ -12,7 +12,10 @@ interface UiState {
 }
 
 const savedLang = (localStorage.getItem('lang') as Lang) ?? 'ar';
-const savedDark = localStorage.getItem('dark') === 'true';
+// Default to dark; only switch to light if user explicitly saved 'false'
+const savedDark = localStorage.getItem('dark') !== 'false';
+// Apply initial dark/light class to DOM immediately on module load
+document.documentElement.classList.toggle('dark', savedDark);
 
 export const useUiStore = create<UiState>((set, get) => ({
   lang: savedLang,

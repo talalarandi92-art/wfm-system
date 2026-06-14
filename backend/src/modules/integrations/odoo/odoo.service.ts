@@ -207,21 +207,22 @@ export class OdooService {
           continue;
         }
 
-        // Map leave type to WFM shift code
-        const shiftCode = mapLeaveType(leave.leaveType);
+        // Map Odoo leave type → WFM attendance marker (consumed by attendance
+        // dashboard, agent view, and scorecard).
+        const marker = mapLeaveMarker(leave.leaveType);
 
-        // Create/update schedule record for each leave day
+        // Mark each leave day in attendance_records
         const start = new Date(leave.dateFrom);
         const end   = new Date(leave.dateTo);
         for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
           const dateStr = d.toISOString().slice(0, 10);
           await this.dataSource.query(
-            `INSERT INTO schedule_records
-               (tenant_id, employee_id, schedule_date, shift_code, source, created_at, updated_at)
-             VALUES ($1,$2,$3::date,$4,'odoo_sync',NOW(),NOW())
-             ON CONFLICT (tenant_id, employee_id, schedule_date)
-             DO UPDATE SET shift_code=$4, source='odoo_sync', updated_at=NOW()`,
-            [tenantId, emp.id, dateStr, shiftCode],
+            `INSERT INTO attendance_records
+               (id, tenant_id, employee_id, attendance_date, attendance_marker, absence_reason, notes, created_at, updated_at)
+             VALUES (gen_random_uuid(), $1, $2, $3::date, $4, $5, 'Synced from Odoo', NOW(), NOW())
+             ON CONFLICT (tenant_id, employee_id, attendance_date)
+             DO UPDATE SET attendance_marker = $4, absence_reason = $5, updated_at = NOW()`,
+            [tenantId, emp.id, dateStr, marker, leave.leaveType || null],
           );
           applied++;
         }
@@ -251,22 +252,24 @@ export class OdooService {
     }
   }
 
-  // ── Config ────────────────────────────────────────────────────────────────
+  // ── Config (stored in tenant_settings as jsonb) ─────────────────────────────
   async getConfig(tenantId: string): Promise<OdooConfig | null> {
     try {
       const [row] = await this.dataSource.query(
-        `SELECT value FROM settings WHERE tenant_id = $1 AND key = 'odoo_config'`,
+        `SELECT setting_value FROM tenant_settings WHERE tenant_id = $1 AND setting_key = 'odoo_config'`,
         [tenantId],
       );
-      return row ? JSON.parse(row.value) : null;
+      if (!row) return null;
+      // pg returns jsonb as a parsed object; tolerate a stringified value too
+      return typeof row.setting_value === 'string' ? JSON.parse(row.setting_value) : row.setting_value;
     } catch { return null; }
   }
 
   async saveConfig(tenantId: string, config: OdooConfig): Promise<void> {
     await this.dataSource.query(
-      `INSERT INTO settings (tenant_id, key, value, updated_at)
-       VALUES ($1,'odoo_config',$2::jsonb,NOW())
-       ON CONFLICT (tenant_id, key) DO UPDATE SET value=$2::jsonb, updated_at=NOW()`,
+      `INSERT INTO tenant_settings (id, tenant_id, setting_key, setting_value, setting_group, updated_at)
+       VALUES (gen_random_uuid(), $1, 'odoo_config', $2::jsonb, 'integrations', NOW())
+       ON CONFLICT (tenant_id, setting_key) DO UPDATE SET setting_value = $2::jsonb, updated_at = NOW()`,
       [tenantId, JSON.stringify(config)],
     );
   }
@@ -305,12 +308,15 @@ export class OdooService {
   }
 }
 
-function mapLeaveType(odooType: string): string {
+/**
+ * Map an Odoo leave/time-off type to a WFM attendance_marker.
+ * Valid markers used across the app: present | absent | sick | leave | holiday | off | wfh.
+ * Sick maps to 'sick'; everything else (annual/death/comp/unpaid) maps to 'leave',
+ * with the original Odoo type preserved in absence_reason for detail.
+ */
+function mapLeaveMarker(odooType: string): string {
   const t = (odooType || '').toLowerCase();
-  if (t.includes('annual') || t.includes('vacation') || t.includes('سنوية')) return 'L';
-  if (t.includes('sick')   || t.includes('مرض'))                              return 'SL';
-  if (t.includes('death')  || t.includes('وفاة'))                             return 'DL';
-  if (t.includes('comp')   || t.includes('تعويض'))                            return 'COMP';
-  if (t.includes('unpaid') || t.includes('بدون'))                             return 'UPL';
-  return 'L'; // default to annual leave
+  if (t.includes('sick') || t.includes('مرض'))     return 'sick';
+  if (t.includes('holiday') || t.includes('عطلة')) return 'holiday';
+  return 'leave';
 }

@@ -13,6 +13,9 @@
 *.p12
 *.pfx
 
+# TLS certificates + ACME state (Let's Encrypt private keys live here)
+certbot/
+
 # --- Node.js ---
 node_modules/
 .pnp/

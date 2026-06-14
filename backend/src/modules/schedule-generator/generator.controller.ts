@@ -16,6 +16,7 @@ class GeneratorOptionsDto {
   @IsOptional() @IsBoolean()                  allowFemaleN?: boolean;
   @IsOptional() @IsNumber() @Min(1) @Max(4)   weeks?: number;
   @IsOptional() @IsArray()                    functionIds?: string[];
+  @IsOptional() @IsArray()                    femaleLateFunctionIds?: string[];
 }
 
 class GenerateDto {

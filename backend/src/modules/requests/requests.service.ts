@@ -437,6 +437,51 @@ export class RequestsService {
    *  CREATE SHIFT SWAP
    * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
+  /**
+   * Campaign blackout check — does an active campaign restrict this request type
+   * on this date? Warn-only (per Ops decision): never blocks, just flags + notifies.
+   */
+  private async campaignBlackout(
+    tenantId: string, dateStr: string, candidateCodes: string[],
+  ): Promise<{ name: string; type: string } | null> {
+    if (!dateStr) return null;
+    const rows = await this.ds.query(
+      `SELECT name, campaign_type, restricted_types FROM campaigns
+        WHERE tenant_id = $1 AND is_active = TRUE AND restrict_requests = TRUE
+          AND $2::date BETWEEN start_date AND end_date`,
+      [tenantId, String(dateStr).slice(0, 10)],
+    ).catch(() => []);
+    if (!rows.length) return null;
+    const norm = (s: string) => String(s).toLowerCase().replace(/_leave$/, '').replace(/_/g, '');
+    const cands = candidateCodes.map(norm);
+    for (const r of rows) {
+      const types = (typeof r.restricted_types === 'string' ? JSON.parse(r.restricted_types) : (r.restricted_types ?? []))
+        .map(norm);
+      if (types.length === 0 || types.some((t: string) => cands.includes(t))) {
+        return { name: r.name, type: r.campaign_type };
+      }
+    }
+    return null;
+  }
+
+  /** Notify WFM/RTA reviewers a request was filed during a campaign window. */
+  private async notifyCampaignReviewers(tenantId: string, requestId: string, body: string) {
+    const reviewers = await this.ds.query(
+      `SELECT DISTINCT u.id FROM users u
+         JOIN user_roles ur ON ur.user_id = u.id
+         JOIN roles r ON r.id = ur.role_id
+        WHERE u.tenant_id = $1 AND r.code IN ('rta','wfm_analyst','wfm_supervisor','platform_admin')`,
+      [tenantId],
+    ).catch(() => []);
+    for (const rv of reviewers) {
+      await this.ds.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
+         VALUES ($1, $2, 'request.campaign_blackout', $3, $4, 'request', $5)`,
+        [tenantId, rv.id, 'طلب خلال فترة حملة', body, requestId],
+      ).catch(() => {});
+    }
+  }
+
   async createShiftSwap(tenantId: string, dto: CreateShiftSwapDto) {
     const requesterId = await this.resolveRequesterId(tenantId, dto.requesterEmployeeId);
 
@@ -464,6 +509,14 @@ export class RequestsService {
 
     const requestId = uuid();
 
+    // Campaign blackout (warn-only): swaps inside a restricted campaign window
+    // get flagged + WFM/RTA notified.
+    const blackout = await this.campaignBlackout(tenantId, dto.requesterDate, [typeCode, 'shift_swap', 'off_swap'])
+      ?? await this.campaignBlackout(tenantId, dto.targetDate, [typeCode, 'shift_swap', 'off_swap']);
+    const notesFinal = blackout
+      ? `${dto.notes ? dto.notes + ' | ' : ''}⚠ حملة (${blackout.name}) — تحتاج مراجعة WFM`
+      : (dto.notes ?? null);
+
     await this.ds.query(
       `INSERT INTO requests
          (id, tenant_id, request_type_id, requester_id, employee_id,
@@ -472,7 +525,7 @@ export class RequestsService {
                NOW() + ($7 || ' hours')::interval,
                NOW(), NOW(), NOW())`,
       [requestId, tenantId, rtRow[0].id, requesterId, dto.requesterEmployeeId,
-       dto.notes ?? null, rtRow[0].sla_hours],
+       notesFinal, rtRow[0].sla_hours],
     );
 
     await this.ds.query(
@@ -488,9 +541,17 @@ export class RequestsService {
       ],
     );
 
+    if (blackout) {
+      await this.notifyCampaignReviewers(
+        tenantId, requestId,
+        `طلب تبديل (${dto.requesterDate} ↔ ${dto.targetDate}) خلال حملة «${blackout.name}» — راجع التغطية`,
+      );
+    }
+
     return {
       id: requestId,
       status: 'peer_pending',
+      campaignWarning: blackout?.name ?? null,
       validation,
       requesterShift: {
         date: dto.requesterDate,
@@ -721,6 +782,13 @@ export class RequestsService {
 
     const requestId = uuid();
 
+    // Campaign blackout (warn-only): flag the request + notify WFM/RTA if it
+    // falls in a restricted campaign window for this leave type.
+    const blackout = await this.campaignBlackout(tenantId, dto.startDate, [dto.leaveType]);
+    const notesFinal = blackout
+      ? `${dto.notes ? dto.notes + ' | ' : ''}⚠ حملة (${blackout.name}) — تحتاج مراجعة WFM`
+      : (dto.notes ?? null);
+
     await this.ds.query(
       `INSERT INTO requests
          (id, tenant_id, request_type_id, requester_id, employee_id,
@@ -729,7 +797,7 @@ export class RequestsService {
                NOW() + ($7 || ' hours')::interval,
                NOW(), NOW(), NOW())`,
       [requestId, tenantId, rtRow[0].id, requesterId, dto.employeeId,
-       dto.notes ?? null, rtRow[0].sla_hours],
+       notesFinal, rtRow[0].sla_hours],
     );
 
     await this.ds.query(
@@ -744,6 +812,13 @@ export class RequestsService {
       ],
     );
 
+    if (blackout) {
+      await this.notifyCampaignReviewers(
+        tenantId, requestId,
+        `طلب ${dto.leaveType} (${dto.startDate} → ${dto.endDate}) خلال حملة «${blackout.name}» — راجع التغطية`,
+      );
+    }
+
     const arabicNames: Record<string, string> = {
       annual_leave: 'Ø§Ù„Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„Ø³Ù†ÙˆÙŠØ©', sick_leave: 'Ø§Ù„Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„Ù…Ø±Ø¶ÙŠØ©',
       death_leave: 'Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„ÙˆÙØ§Ø©', comp_off: 'Ø§Ù„ÙŠÙˆÙ… Ø§Ù„ØªØ¹ÙˆÙŠØ¶ÙŠ', wfh: 'Ø§Ù„Ø¹Ù…Ù„ Ù…Ù† Ø§Ù„Ù…Ù†Ø²Ù„',
@@ -751,6 +826,7 @@ export class RequestsService {
 
     return {
       id: requestId, status: 'pending', durationDays,
+      campaignWarning: blackout?.name ?? null,
       message: `ØªÙ… ØªÙ‚Ø¯ÙŠÙ… Ø·Ù„Ø¨ ${arabicNames[dto.leaveType] ?? dto.leaveType} Ø¨Ù†Ø¬Ø§Ø­`,
     };
   }

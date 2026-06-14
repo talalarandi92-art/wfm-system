@@ -179,6 +179,52 @@ function VolumeGrid({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+ *  INTERVAL CHART — Required (with shrinkage) vs Scheduled, gaps highlighted
+ * ────────────────────────────────────────────────────────────────────────────*/
+function IntervalChart({ result, dark }: { result: CapacityResult; dark: boolean }) {
+  const rows = result.intervals.filter(i => i.volume > 0 || i.scheduledHc > 0);
+  if (!rows.length) return null;
+  const max = Math.max(1, ...rows.map(r => Math.max(r.requiredHcWithShrinkage, r.scheduledHc)));
+  const H = 150;
+
+  return (
+    <div className={`rounded-xl border p-4 mb-4 ${dark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-xs font-bold flex items-center gap-1.5"><BarChart3 size={13} className="text-indigo-400" /> Required vs Scheduled by Interval</span>
+        <div className="flex items-center gap-3 text-[10px]">
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#6366f1' }} /> Required</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: dark ? '#475569' : '#cbd5e1' }} /> Scheduled</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-500" /> Gap</span>
+        </div>
+      </div>
+      <div className="overflow-x-auto" dir="ltr">
+        <div className="flex items-end gap-1" style={{ height: H + 24, minWidth: rows.length * 26 }}>
+          {rows.map((r, i) => {
+            const reqH = Math.round((r.requiredHcWithShrinkage / max) * H);
+            const schH = Math.round((r.scheduledHc / max) * H);
+            const understaffed = r.gap > 0;
+            return (
+              <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 group relative" style={{ minWidth: 22 }}>
+                {/* tooltip */}
+                <div className="absolute -top-1 hidden group-hover:block z-10 px-2 py-1 rounded-lg text-[9px] whitespace-nowrap"
+                  style={{ background: dark ? '#0f1527' : '#1e293b', color: '#fff', bottom: H + 4 }}>
+                  {r.intervalStart} · req {r.requiredHcWithShrinkage} · sched {r.scheduledHc}{understaffed ? ` · gap ${r.gap}` : ''}
+                </div>
+                <div className="flex items-end gap-0.5" style={{ height: H }}>
+                  <div className="w-2 rounded-t" style={{ height: Math.max(2, reqH), background: understaffed ? '#ef4444' : '#6366f1' }} />
+                  <div className="w-2 rounded-t" style={{ height: Math.max(2, schH), background: dark ? '#475569' : '#cbd5e1' }} />
+                </div>
+                <span className={`text-[8px] ${dark ? 'text-slate-600' : 'text-slate-400'} rotate-0`}>{r.intervalStart.slice(0, 5)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
  *  RESULTS TABLE
  * ────────────────────────────────────────────────────────────────────────────*/
 function ResultsTable({ result, dark }: { result: CapacityResult; dark: boolean }) {
@@ -193,26 +239,24 @@ function ResultsTable({ result, dark }: { result: CapacityResult; dark: boolean 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         {[
-          { label: 'Total Required', value: result.totalRequired, icon: Target, color: 'blue' },
-          { label: 'Scheduled', value: result.totalScheduled, icon: Users, color: 'slate' },
-          { label: 'Gap', value: result.totalGap, icon: result.totalGap > 0 ? TrendingDown : TrendingUp, color: result.totalGap > 0 ? 'red' : 'emerald' },
-          { label: 'Avg Occupancy', value: `${(result.avgOccupancy * 100).toFixed(0)}%`, icon: Activity, color: result.avgOccupancy > 0.9 ? 'red' : 'emerald' },
+          { label: 'Total Required', value: result.totalRequired, sub: 'with shrinkage', icon: Target, accent: '#6366f1' },
+          { label: 'Scheduled', value: result.totalScheduled, sub: 'agents on shift', icon: Users, accent: dark ? '#64748b' : '#94a3b8' },
+          { label: result.totalGap > 0 ? 'Understaffed' : 'Surplus', value: Math.abs(result.totalGap), sub: result.totalGap > 0 ? 'add staff / OT' : 'balanced', icon: result.totalGap > 0 ? TrendingDown : TrendingUp, accent: result.totalGap > 0 ? '#ef4444' : '#22c55e' },
+          { label: 'Avg Occupancy', value: `${(result.avgOccupancy * 100).toFixed(0)}%`, sub: result.avgOccupancy > 0.9 ? 'overloaded' : 'healthy', icon: Activity, accent: result.avgOccupancy > 0.9 ? '#ef4444' : result.avgOccupancy > 0.8 ? '#f59e0b' : '#22c55e' },
         ].map(card => {
           const Icon = card.icon;
           return (
-            <div key={card.label} className={`rounded-xl border p-3 ${dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-              <div className="flex items-center justify-between mb-1">
-                <span className={`text-xs ${dark ? 'text-slate-400' : 'text-slate-500'}`}>{card.label}</span>
-                <Icon size={14} className={dark ? 'text-slate-500' : 'text-slate-400'} />
+            <div key={card.label} className="relative rounded-2xl border p-3.5 overflow-hidden"
+              style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: dark ? 'rgba(255,255,255,0.08)' : '#e2e8f0' }}>
+              <div className="absolute top-0 left-0 h-full w-1" style={{ background: card.accent }} />
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${card.accent}22`, color: card.accent }}>
+                  <Icon size={14} />
+                </div>
+                <span className={`text-[10px] font-semibold uppercase tracking-wide ${dark ? 'text-slate-400' : 'text-slate-500'}`}>{card.label}</span>
               </div>
-              <div className={`text-xl font-bold ${
-                card.color === 'red' ? 'text-red-400' :
-                card.color === 'emerald' ? 'text-emerald-400' :
-                card.color === 'blue' ? (dark ? 'text-blue-300' : 'text-blue-600') :
-                (dark ? 'text-white' : 'text-slate-800')
-              }`}>
-                {typeof card.value === 'number' && card.color === 'red' && card.value > 0 ? `-${card.value}` : card.value}
-              </div>
+              <div className="text-2xl font-bold leading-none" style={{ color: card.accent }}>{card.value}</div>
+              <div className={`text-[10px] mt-1 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>{card.sub}</div>
             </div>
           );
         })}
@@ -248,6 +292,9 @@ function ResultsTable({ result, dark }: { result: CapacityResult; dark: boolean 
           ))}
         </div>
       </div>
+
+      {/* Visual chart — required vs scheduled per interval */}
+      <IntervalChart result={result} dark={dark} />
 
       {/* Interval table */}
       <div className={`rounded-xl border overflow-hidden ${dark ? 'border-slate-700' : 'border-slate-200'}`}>

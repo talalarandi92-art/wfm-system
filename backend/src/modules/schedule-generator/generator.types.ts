@@ -14,6 +14,7 @@ export interface ShiftDef {
 
 // ─── Canonical Shift Catalog ─────────────────────────────────────────────────
 export const SHIFTS: Record<string, ShiftDef> = {
+  // ── Real shift times from the Timing sheet (shift_codes). Do not invent times. ──
   M: {
     code: 'M', label: 'صباحي', labelEn: 'Morning',
     start: '07:00', end: '16:00', hours: 9,
@@ -22,39 +23,48 @@ export const SHIFTS: Record<string, ShiftDef> = {
   },
   B: {
     code: 'B', label: 'ضحى', labelEn: 'Mid-Morning',
-    start: '10:00', end: '19:00', hours: 9,
+    start: '09:00', end: '18:00', hours: 9,
     category: 'morning', crossMidnight: false,
     femaleRule: 'allowed', color: '#38bdf8',
   },
   C: {
     code: 'C', label: 'ظهيرة', labelEn: 'Afternoon',
-    start: '12:00', end: '21:00', hours: 9,
+    start: '11:00', end: '20:00', hours: 9,
     category: 'afternoon', crossMidnight: false,
+    // C ends 20:00 — the normal female boundary.
     femaleRule: 'allowed', color: '#f59e0b',
-  },
-  E: {
-    code: 'E', label: 'عصري', labelEn: 'Evening',
-    start: '14:00', end: '23:00', hours: 9,
-    category: 'evening', crossMidnight: false,
-    femaleRule: 'allowed', color: '#f97316',
   },
   N: {
     code: 'N', label: 'مسائي', labelEn: 'Late Evening',
-    start: '17:00', end: '02:00', hours: 9,
-    category: 'night', crossMidnight: true,
+    start: '13:00', end: '22:00', hours: 9,
+    category: 'night', crossMidnight: false,
+    // Ends 22:00 — females only by exception (allowFemaleN).
     femaleRule: 'warn', color: '#8b5cf6',
   },
+  E: {
+    code: 'E', label: 'عصري', labelEn: 'Evening',
+    start: '16:00', end: '01:00', hours: 9,
+    category: 'evening', crossMidnight: true,
+    // Ends 01:00 — blocked for females.
+    femaleRule: 'blocked', color: '#f97316',
+  },
   N2: {
-    code: 'N2', label: 'ليلي', labelEn: 'Night',
-    start: '20:00', end: '05:00', hours: 9,
-    category: 'night', crossMidnight: true,
+    code: 'EE', label: 'ليلي', labelEn: 'Night',
+    start: '18:00', end: '02:00', hours: 8,
+    category: 'evening', crossMidnight: true,
     femaleRule: 'blocked', color: '#6d28d9',
   },
   MD: {
     code: 'MD', label: 'منتصف الليل', labelEn: 'Midnight',
-    start: '23:00', end: '08:00', hours: 9,
+    start: '22:00', end: '07:00', hours: 9,
     category: 'midnight', crossMidnight: true,
     femaleRule: 'blocked', color: '#1e1b4b',
+  },
+  MN: {
+    code: 'MN', label: 'آخر الليل', labelEn: 'Late Night',
+    start: '23:00', end: '08:00', hours: 9,
+    category: 'midnight', crossMidnight: true,
+    femaleRule: 'blocked', color: '#312e81',
   },
   OFF: {
     code: 'OFF', label: 'إجازة أسبوعية', labelEn: 'Day Off',
@@ -63,6 +73,35 @@ export const SHIFTS: Record<string, ShiftDef> = {
     femaleRule: 'allowed', color: '#475569',
   },
 };
+
+/**
+ * Per-function operating hours — which shift codes each function may use.
+ * Matched by substring on the function name (covers internship variants, e.g.
+ * "Internship OMT"). Functions NOT listed allow ALL shifts (24/7 coverage).
+ */
+export const FUNCTION_SHIFT_POLICY: { match: RegExp; codes: string[]; femaleAllowLate?: boolean }[] = [
+  // Outbound is an all-female team whose operating window ends at 22:00 (N), so
+  // females here may work their late shift (N) — femaleAllowLate relaxes the
+  // 'warn' tier for this function only (E/EE/midnight stay blocked).
+  { match: /outbound|\bomt\b/i, codes: ['B', 'N'], femaleAllowLate: true },
+  { match: /refund/i,           codes: ['M', 'B', 'C', 'N', 'E', 'EE'] },  // no midnight (MD/MN)
+];
+
+function findFunctionPolicy(functionName?: string) {
+  if (!functionName) return undefined;
+  return FUNCTION_SHIFT_POLICY.find(x => x.match.test(functionName));
+}
+
+/** Allowed shift codes for a function, or null when all shifts are allowed. */
+export function allowedShiftCodes(functionName?: string): Set<string> | null {
+  const p = findFunctionPolicy(functionName);
+  return p ? new Set(p.codes) : null;
+}
+
+/** True when females in this function may work its late ('warn') shift (e.g. N). */
+export function functionAllowsFemaleLate(functionName?: string): boolean {
+  return !!findFunctionPolicy(functionName)?.femaleAllowLate;
+}
 
 // ─── Employee Info ────────────────────────────────────────────────────────────
 export interface EmployeeInfo {
@@ -89,8 +128,8 @@ export interface ShiftDistribution {
   // Individual shift-code counts (M, B, C, N, E, EE, MD, MN…)
   byCodes: Record<string, number>;
   // Weekend fairness
-  weekendOff: number;    // OFF days that fall on Fri/Sat (0-indexed: 5=Fri, 6=Sat)
-  weekendWork: number;   // Working days on Fri/Sat
+  weekendOff: number;    // OFF days that fall on Thu/Fri/Sat (getDay 4=Thu, 5=Fri, 6=Sat)
+  weekendWork: number;   // Working days on Thu/Fri/Sat
   // Consecutive tracking
   maxConsecutive: number;  // historical max consecutive working days
 }
@@ -175,9 +214,13 @@ export interface GeneratorOptions {
   minRestHours: number;         // default 10
   offDaysPerWeek: number;       // default 1
   internProductivity: number;   // default 0.70
-  allowFemaleN: boolean;        // default true (warn only)
+  allowFemaleN: boolean;        // global override — females may work N across ALL functions
   weeks: number;                // 1-4 weeks to generate (default 1)
   functionIds?: string[];
+  // Per-generation exception: function IDs whose females may work the late (N)
+  // shift for THIS run (chosen at generate time). Beyond the permanent
+  // per-function `femaleAllowLate` config (e.g. OMT).
+  femaleLateFunctionIds?: string[];
 }
 
 // ─── Generator Result ─────────────────────────────────────────────────────────

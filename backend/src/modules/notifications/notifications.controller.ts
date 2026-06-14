@@ -29,7 +29,7 @@ export class NotificationsController {
          ${unreadOnly ? 'AND is_read=FALSE' : ''}
        ORDER BY created_at DESC
        LIMIT $3`,
-      [user.tenantId, user.sub, limit],
+      [user.tenantId, user.id, limit],
     );
     return rows.map((r: any) => ({
       id:               r.id,
@@ -48,7 +48,7 @@ export class NotificationsController {
   async unreadCount(@CurrentUser() user: any) {
     const [row] = await this.ds.query(
       `SELECT COUNT(*) AS cnt FROM notifications WHERE tenant_id=$1 AND recipient_id=$2 AND is_read=FALSE`,
-      [user.tenantId, user.sub],
+      [user.tenantId, user.id],
     );
     return { count: parseInt(row.cnt, 10) };
   }
@@ -58,7 +58,7 @@ export class NotificationsController {
   async markRead(@Param('id') id: string, @CurrentUser() user: any) {
     await this.ds.query(
       `UPDATE notifications SET is_read=TRUE WHERE id=$1 AND recipient_id=$2`,
-      [id, user.sub],
+      [id, user.id],
     );
     return { success: true };
   }
@@ -68,7 +68,7 @@ export class NotificationsController {
   async markAllRead(@CurrentUser() user: any) {
     await this.ds.query(
       `UPDATE notifications SET is_read=TRUE WHERE tenant_id=$1 AND recipient_id=$2 AND is_read=FALSE`,
-      [user.tenantId, user.sub],
+      [user.tenantId, user.id],
     );
     return { success: true };
   }

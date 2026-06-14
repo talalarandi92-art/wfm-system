@@ -28,12 +28,36 @@ interface OtRow {
   otCount?: number; otDays?: number; totalOtMin: number; totalOtMinutes?: number; totalOtHours?: number;
 }
 
-type Report = 'home' | 'attendance' | 'late' | 'overtime';
+type Report = 'home' | 'attendance' | 'late' | 'overtime' | 'requests' | 'crossSkill'
+  | 'requestsDetailed' | 'permissions' | 'breaks' | 'audit' | 'overtimeDetailed';
+
+// Detailed reports rendered with a generic, schema-agnostic table.
+// endpoint + optional `view` query + which response field holds the rows.
+const GENERIC: Record<string, { endpoint: string; view?: string; field: string; sheet: string }> = {
+  requestsDetailed: { endpoint: '/reports/requests-detailed', field: 'data',     sheet: 'Requests' },
+  permissions:      { endpoint: '/reports/permissions',       field: 'detail',   sheet: 'Permissions' },
+  breaks:           { endpoint: '/reports/breaks',            field: 'detail',   sheet: 'Breaks' },
+  audit:            { endpoint: '/reports/audit',             field: 'detail',   sheet: 'Audit' },
+  overtimeDetailed: { endpoint: '/reports/overtime-detailed', view: 'ranking', field: 'ranking', sheet: 'Overtime' },
+};
+
+interface ReqRow {
+  submittedAt: string; employeeNo: string; employeeName: string; function: string;
+  type: string; typeCode: string; status: string; urgent: boolean; slaDue: string; reason: string;
+}
+interface CrossSkillRow {
+  startAt: string; endAt: string; employeeNo: string; employeeName: string;
+  fromFunction: string; toFunction: string; status: string; requestedBy: string; approvedBy: string; reason: string;
+}
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
-const downloadCSV = async (url: string, params: any, filename: string) => {
-  const res = await apiClient.get(url, { params: { ...params, format: 'csv' }, responseType: 'blob' });
-  const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+// Download any report endpoint as a file (csv or xlsx) honouring the blob type.
+const downloadFile = async (url: string, params: any, filename: string, format: 'csv' | 'xlsx') => {
+  const res = await apiClient.get(url, { params: { ...params, format }, responseType: 'blob' });
+  const type = format === 'xlsx'
+    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    : 'text/csv;charset=utf-8;';
+  const blob = new Blob([res.data], { type });
   const href = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = href; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -57,7 +81,12 @@ export default function ReportsPage() {
   const [attData, setAtt] = useState<AttRow[]>([]);
   const [lateData, setLate] = useState<LateRow[]>([]);
   const [otData, setOt]   = useState<OtRow[]>([]);
+  const [reqData, setReq] = useState<ReqRow[]>([]);
+  const [reqBreakdown, setReqBreakdown] = useState<Record<string, number>>({});
+  const [csData, setCs] = useState<CrossSkillRow[]>([]);
+  const [genRows, setGenRows] = useState<any[]>([]);   // generic detailed-report rows
   const [total, setTotal] = useState(0);
+  const [wbLoading, setWb] = useState(false);
 
   const limit = 30;
 
@@ -84,6 +113,21 @@ export default function ReportsPage() {
         const { data } = await apiClient.get('/reports/overtime', { params });
         const rows = data.data ?? data.items ?? data;
         setOt(Array.isArray(rows) ? rows : []); setTotal(Array.isArray(rows) ? rows.length : 0);
+      } else if (active === 'requests') {
+        const { data } = await apiClient.get('/reports/requests', { params });
+        setReq(Array.isArray(data.data) ? data.data : []);
+        setReqBreakdown(data.statusBreakdown ?? {});
+        setTotal(data.total ?? 0);
+      } else if (active === 'crossSkill') {
+        const { data } = await apiClient.get('/reports/cross-skill', { params });
+        setCs(Array.isArray(data.data) ? data.data : []);
+        setTotal(data.total ?? 0);
+      } else if (GENERIC[active]) {
+        const g = GENERIC[active];
+        const { data } = await apiClient.get(g.endpoint, { params: { ...params, ...(g.view ? { view: g.view } : {}) } });
+        const rows = data[g.field] ?? data.data ?? [];
+        setGenRows(Array.isArray(rows) ? rows : []);
+        setTotal(Array.isArray(rows) ? rows.length : 0);
       }
     } catch {}
     setLoading(false);
@@ -91,15 +135,31 @@ export default function ReportsPage() {
 
   useEffect(() => { if (active !== 'home') run(); }, [run]);
 
-  const handleDownload = async () => {
+  const handleDownload = async (format: 'csv' | 'xlsx' = 'xlsx') => {
     setDl(true);
     const params: any = {};
     if (from) params.from = from;
     if (to)   params.to   = to;
-    const endpointMap: Record<string, string> = { attendance: '/reports/attendance', late: '/reports/late', overtime: '/reports/overtime' };
-    const nameMap: Record<string, string> = { attendance: 'attendance_report.csv', late: 'late_report.csv', overtime: 'overtime_report.csv' };
-    try { await downloadCSV(endpointMap[active], params, nameMap[active]); } catch {}
+    const endpointMap: Record<string, string> = {
+      attendance: '/reports/attendance', late: '/reports/late', overtime: '/reports/overtime',
+      requests: '/reports/requests', crossSkill: '/reports/cross-skill',
+    };
+    let endpoint = endpointMap[active];
+    let extra: any = {};
+    if (GENERIC[active]) { endpoint = GENERIC[active].endpoint; if (GENERIC[active].view) extra.view = GENERIC[active].view; }
+    const filename = `${active}_report.${format}`;
+    try { await downloadFile(endpoint, { ...params, ...extra }, filename, format); } catch {}
     setDl(false);
+  };
+
+  // Bundle EVERY report into one multi-sheet Excel workbook.
+  const handleWorkbook = async () => {
+    setWb(true);
+    const params: any = {};
+    if (from) params.from = from;
+    if (to)   params.to   = to;
+    try { await downloadFile('/reports/workbook', params, 'WFM_full_report.xlsx', 'xlsx'); } catch {}
+    setWb(false);
   };
 
   const rateColor = (r: number) => r >= 90 ? '#34d399' : r >= 75 ? '#fbbf24' : '#f87171';
@@ -108,7 +168,22 @@ export default function ReportsPage() {
     { id: 'attendance', labelAr: 'تقرير الحضور',    labelEn: 'Attendance Report',  icon: Users,     color: '#34d399', descAr: 'حضور وغياب وتأخر لكل موظف', descEn: 'Per-employee presence, absence & late' },
     { id: 'late',       labelAr: 'ترتيب التأخر',    labelEn: 'Late Ranking',        icon: Clock,     color: '#fb923c', descAr: 'أكثر الموظفين تأخراً', descEn: 'Most-frequent late arrivals' },
     { id: 'overtime',   labelAr: 'ترتيب الإضافي',   labelEn: 'Overtime Ranking',    icon: Zap,       color: '#22d3ee', descAr: 'إجمالي ساعات الإضافي', descEn: 'Total overtime hours per employee' },
+    { id: 'requests',   labelAr: 'تقرير الطلبات',   labelEn: 'Requests Report',     icon: FileText,  color: '#a78bfa', descAr: 'الطلبات والموافقات حسب النوع والحالة', descEn: 'Requests & approvals by type and status' },
+    { id: 'requestsDetailed', labelAr: 'الطلبات — تفصيلي', labelEn: 'Requests — Detailed', icon: FileText, color: '#c084fc', descAr: 'سلسلة الموافقة الكاملة: مين وافق/رفض ومتى + SLA + السبب', descEn: 'Full approval chain: who approved/rejected, when, SLA & reason' },
+    { id: 'permissions', labelAr: 'تقرير الاستئذان', labelEn: 'Permissions Report', icon: Clock, color: '#38bdf8', descAr: 'الساعات والأنواع (تأخير/خروج مبكر) والانترفلز', descEn: 'Hours, types (late-in/early-out) & interval breakdown' },
+    { id: 'breaks',     labelAr: 'تقرير البريكات',  labelEn: 'Breaks Report',       icon: Clock,     color: '#2dd4bf', descAr: 'كم مرة والمدة والشفت ومين وافق', descEn: 'Count, duration, shift window & approver' },
+    { id: 'overtimeDetailed', labelAr: 'الإضافي — تفصيلي', labelEn: 'Overtime — Detailed', icon: Zap, color: '#22d3ee', descAr: 'قبل/بعد الشفت + النسبة من ساعات الدوام', descEn: 'Before/after shift + % of working hours' },
+    { id: 'audit',      labelAr: 'سجل التدقيق',     labelEn: 'Audit Trail',         icon: BarChart2, color: '#f472b6', descAr: 'مين عدّل، متى، وليش — لكل عملية', descEn: 'Who changed what, when & why' },
+    { id: 'crossSkill', labelAr: 'تقرير Cross-Skill', labelEn: 'Cross-Skill Report', icon: Zap,       color: '#fb923c', descAr: 'تغطية الفجوات: من غطّى أي قناة ومتى', descEn: 'Coverage dispatch: who covered which channel & when' },
   ];
+
+  const REQ_STATUS_META: Record<string, { ar: string; en: string; color: string }> = {
+    pending:      { ar: 'قيد الموافقة', en: 'Pending',  color: '#fbbf24' },
+    peer_pending: { ar: 'بانتظار الزميل', en: 'Peer',    color: '#a78bfa' },
+    approved:     { ar: 'موافق', en: 'Approved',         color: '#34d399' },
+    rejected:     { ar: 'مرفوض', en: 'Rejected',         color: '#f87171' },
+    cancelled:    { ar: 'ملغي', en: 'Cancelled',         color: '#64748b' },
+  };
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
@@ -141,14 +216,29 @@ export default function ReportsPage() {
             <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }}
               className="text-xs rounded-xl px-3 py-1.5 outline-none"
               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
-            <button onClick={handleDownload} disabled={dlLoading}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium disabled:opacity-60 transition-opacity hover:opacity-80"
-              style={{ background: 'rgba(52,211,153,0.15)', border: '1px solid rgba(52,211,153,0.3)', color: '#34d399' }}>
+            <button onClick={() => handleDownload('xlsx')} disabled={dlLoading}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-60 transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.35)', color: '#22c55e' }}>
               {dlLoading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              Excel
+            </button>
+            <button onClick={() => handleDownload('csv')} disabled={dlLoading}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium disabled:opacity-60 transition-opacity hover:opacity-80"
+              style={{ background: 'rgba(148,163,184,0.12)', border: '1px solid rgba(148,163,184,0.25)', color: '#94a3b8' }}>
               CSV
             </button>
           </div>
         )}
+      </div>
+
+      {/* Full workbook download — always visible */}
+      <div className="mb-5">
+        <button onClick={handleWorkbook} disabled={wbLoading}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold disabled:opacity-60 transition-all hover:opacity-90"
+          style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(6,182,212,0.12))', border: '1px solid rgba(34,197,94,0.35)', color: '#22c55e' }}>
+          {wbLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {ar ? 'تحميل تقرير Excel شامل (كل التقارير في ملف واحد)' : 'Download Full Excel Workbook (all reports in one file)'}
+        </button>
       </div>
 
       {/* Breadcrumb */}
@@ -272,6 +362,106 @@ export default function ReportsPage() {
             </tr>
           ))}
         </TableShell>
+      )}
+
+      {/* ── Requests table ──────────────────────────────────────────── */}
+      {active === 'requests' && !loading && (
+        <div>
+          {/* status breakdown chips */}
+          {Object.keys(reqBreakdown).length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {Object.entries(reqBreakdown).map(([st, cnt]) => {
+                const m = REQ_STATUS_META[st] ?? { ar: st, en: st, color: '#64748b' };
+                return (
+                  <span key={st} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold"
+                    style={{ background: `${m.color}22`, color: m.color }}>
+                    {ar ? m.ar : m.en}: {cnt}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          <TableShell head={[ar ? 'التاريخ' : 'Submitted', ar ? 'الموظف' : 'Employee', ar ? 'الوظيفة' : 'Function', ar ? 'النوع' : 'Type', ar ? 'الحالة' : 'Status']}>
+            {reqData.map((e, i) => {
+              const m = REQ_STATUS_META[e.status] ?? { ar: e.status, en: e.status, color: '#64748b' };
+              return (
+                <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                  <Td><span className="text-[11px]" style={{ color: '#94a3b8' }}>{e.submittedAt ? new Date(e.submittedAt).toLocaleDateString(ar ? 'ar-KW' : 'en-GB', { day: '2-digit', month: 'short' }) : '—'}</span>{e.urgent && <span className="ms-1 text-[9px] text-red-400">●</span>}</Td>
+                  <Td>
+                    <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{e.employeeName || '—'}</div>
+                    {e.employeeNo && <div className="text-[10px]" style={{ color: '#475569' }}>#{e.employeeNo}</div>}
+                  </Td>
+                  <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.function || '—'}</span></Td>
+                  <Td><span className="text-[11px]" style={{ color: '#cbd5e1' }}>{e.type}</span></Td>
+                  <Td><span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: `${m.color}22`, color: m.color }}>{ar ? m.ar : m.en}</span></Td>
+                </tr>
+              );
+            })}
+          </TableShell>
+        </div>
+      )}
+
+      {/* ── Cross-skill table ───────────────────────────────────────── */}
+      {active === 'crossSkill' && !loading && (
+        <TableShell head={[ar ? 'الوقت' : 'When', ar ? 'الموظف' : 'Employee', ar ? 'من' : 'From', ar ? 'إلى' : 'To', ar ? 'الحالة' : 'Status', ar ? 'طلب من' : 'Requested by']}>
+          {csData.map((e, i) => (
+            <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+              <Td><span className="text-[11px]" style={{ color: '#94a3b8' }}>{e.startAt ? new Date(e.startAt).toLocaleString(ar ? 'ar-KW' : 'en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—'}</span></Td>
+              <Td><div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{e.employeeName || '—'}</div>{e.employeeNo && <div className="text-[10px]" style={{ color: '#475569' }}>#{e.employeeNo}</div>}</Td>
+              <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.fromFunction || '—'}</span></Td>
+              <Td><span className="text-[11px] font-semibold" style={{ color: '#fb923c' }}>{e.toFunction || '—'}</span></Td>
+              <Td><span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: e.status === 'approved' ? 'rgba(52,211,153,0.15)' : 'rgba(148,163,184,0.15)', color: e.status === 'approved' ? '#34d399' : '#94a3b8' }}>{e.status}</span></Td>
+              <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.requestedBy || '—'}</span></Td>
+            </tr>
+          ))}
+          {csData.length === 0 && <tr><td colSpan={6} className="text-center py-10" style={{ color: '#475569' }}>{ar ? 'لا توجد تغطيات cross-skill بعد' : 'No cross-skill coverage yet'}</td></tr>}
+        </TableShell>
+      )}
+
+      {/* ── Generic detailed-report table (requests/permissions/breaks/audit/OT) ── */}
+      {GENERIC[active] && !loading && (
+        genRows.length === 0 ? (
+          <div className="text-center py-16 rounded-2xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#475569' }}>
+            {ar ? 'لا توجد بيانات في هذه الفترة' : 'No data in this period'}
+          </div>
+        ) : (
+          <div className="rounded-2xl overflow-x-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <table className="w-full border-collapse">
+              <thead>
+                <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  {Object.keys(genRows[0]).map(h => (
+                    <th key={h} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2.5"
+                      style={{ color: '#475569', whiteSpace: 'nowrap' }}>
+                      {h.replace(/([A-Z])/g, ' $1').trim()}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {genRows.slice((page - 1) * limit, page * limit).map((row, i) => (
+                  <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    {Object.keys(genRows[0]).map(h => {
+                      const v = row[h];
+                      const isStatus = h === 'status' || h === 'slaStatus';
+                      const col = isStatus
+                        ? (String(v).toLowerCase().includes('approv') || v === 'Met' ? '#34d399'
+                          : String(v).toLowerCase().includes('reject') || String(v).includes('Breach') ? '#f87171'
+                          : '#94a3b8')
+                        : '#94a3b8';
+                      return (
+                        <td key={h} className="px-3 py-2 text-[11px] tabular-nums align-middle"
+                          style={{ color: col, whiteSpace: 'nowrap', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                          title={v == null ? '' : String(v)}>
+                          {v == null || v === '' ? '—' : String(v)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
 
       {/* Pagination */}

@@ -492,7 +492,7 @@ export default function Dashboard() {
       )}
 
       {data && !loading && (
-        <div style={{ display:'flex', gap:16 }}>
+        <div className="flex flex-col xl:flex-row gap-4">
 
           {/* ══ MAIN ══════════════════════════════════════════════════════ */}
           <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:18 }}>
@@ -666,7 +666,7 @@ export default function Dashboard() {
           </div>
 
           {/* ══ RIGHT PANEL ════════════════════════════════════════════════ */}
-          <div style={{ width:260, flexShrink:0, display:'flex', flexDirection:'column', gap:16 }}>
+          <div className="w-full xl:w-[260px] shrink-0" style={{ display:'flex', flexDirection:'column', gap:16 }}>
 
             {/* Alerts */}
             <div style={{ ...card, padding:'16px 18px' }}>

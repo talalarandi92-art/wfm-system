@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Calendar, ClockIcon, FileText, BarChart3,
   Radio, AlertTriangle, Users, Settings, UserCog, Award,
   Upload, ChevronLeft, ChevronRight, Activity, Zap, Shuffle,
-  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit,
+  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit, MessageCircle, BookOpen, UserCircle, Plug, Megaphone, ClipboardCheck, CalendarCog, GraduationCap, ShieldCheck, Bot, FileBarChart, Sparkles, ShieldAlert, Crown,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
@@ -14,40 +14,53 @@ const NAV_SECTIONS = [
   {
     label: null,
     items: [
-      { key: 'dashboard', icon: LayoutDashboard, path: '/dashboard', permission: null },
+      { key: 'myWorkspace', icon: UserCircle,      path: '/my',        permission: null },
+      // Ops overview — management + RTA only; agents use My Workspace instead.
+      { key: 'dashboard',   icon: LayoutDashboard, path: '/dashboard', permission: null, agentHidden: true },
+      { key: 'controlDashboards', icon: LayoutDashboard, path: '/control-dashboards', permission: 'reports.view', agentHidden: true },
+      // The Chief is the single visible face — the rest of the team runs behind it
+      // (reachable from the Chief / Bots Hub, not shown individually in the nav).
+      { key: 'chief', icon: Crown, path: '/chief', permission: 'hc.view', agentHidden: true },
     ],
   },
   {
     label: { ar: 'التشغيل', en: 'Operations' },
     items: [
-      { key: 'schedule',   icon: Calendar,      path: '/schedule',   permission: 'schedule.view' },
-      { key: 'generator',  icon: Zap,           path: '/generator',  permission: 'schedule.view' },
-      { key: 'rotation',   icon: Shuffle,       path: '/rotation',   permission: 'schedule.view' },
-      { key: 'attendance', icon: ClockIcon,      path: '/attendance', permission: 'attendance.view_own' },
+      // Scheduling hub (schedule grid + generator + rotation + campaigns) — visible
+      // to management + RTA (schedule.view); agent sees own shifts in My Workspace.
+      { key: 'schedulingHub', icon: Calendar,   path: '/schedule',   permission: 'schedule.view', agentHidden: true },
+      // Attendance hub (dashboard + corrections + breaks) — per-tab gating: agents
+      // reach only Corrections, management/RTA see all. Not agent-hidden so agents keep it.
+      { key: 'attendanceHub', icon: ClockIcon,   path: '/attendance', permission: 'attendance.view_own' },
       { key: 'requests',   icon: FileText,       path: '/requests',   permission: 'requests.view_own' },
-      { key: 'breaks',     icon: Coffee,         path: '/breaks',     permission: 'requests.view_own' },
+      { key: 'scheduleChanges', icon: CalendarCog, path: '/schedule-changes', permission: 'schedule.view', agentHidden: true },
       { key: 'calendar',   icon: CalendarDays,   path: '/calendar',   permission: null },
       { key: 'skills',     icon: BrainCircuit,   path: '/skills',     permission: 'employees.view' },
-      { key: 'rta',              icon: Radio,          path: '/rta',              permission: 'rta.view' },
-      { key: 'outages',         icon: AlertTriangle,  path: '/outages',         permission: 'outages.view' },
-      { key: 'technicalIssues', icon: Wrench,         path: '/technical-issues', permission: 'requests.view_own' },
+      // Workspace hub (chat + knowledge base)
+      { key: 'workspace',  icon: MessageCircle,  path: '/chat',       permission: null },
+      // Live Ops hub (RTA + outages + technical issues) — per-tab gating: agents
+      // reach only Technical Issues, management/RTA see all.
+      { key: 'liveOps',          icon: Radio,          path: '/rta',              permission: 'requests.view_own' },
     ],
   },
   {
     label: { ar: 'التخطيط', en: 'Planning' },
     items: [
       { key: 'capacity',  icon: BarChart3, path: '/capacity',  permission: 'hc.view' },
-      { key: 'scorecard', icon: Award,     path: '/scorecard', permission: 'scorecard.view_own' },
+      { key: 'hourlyCoverage', icon: Activity, path: '/hourly-coverage', permission: 'hc.view', agentHidden: true },
+      // Team scorecard / rankings — agent sees own score in My Workspace.
+      { key: 'scorecard', icon: Award,     path: '/scorecard', permission: 'scorecard.view_own', agentHidden: true },
+      { key: 'coaching',  icon: GraduationCap, path: '/coaching', permission: 'scorecard.view', agentHidden: true },
+      { key: 'analyticsHub', icon: Activity, path: '/analytics', permission: 'reports.view' },
     ],
   },
   {
     label: { ar: 'الإدارة', en: 'Management' },
     items: [
       { key: 'employees', icon: Users,    path: '/employees', permission: 'employees.view' },
-      { key: 'employeeMerge', icon: GitMerge, path: '/employee-merge', permission: 'employees.view' },
       { key: 'users',     icon: UserCog,  path: '/users',     permission: 'users.view' },
       { key: 'import',    icon: Upload,   path: '/import',    permission: 'settings.view' },
-      { key: 'reports',   icon: Activity, path: '/reports',   permission: 'reports.view' },
+      { key: 'odoo',      icon: Plug,     path: '/integrations/odoo', permission: 'settings.edit' },
       { key: 'settings',  icon: Settings, path: '/settings',  permission: 'settings.view' },
     ],
   },
@@ -59,6 +72,13 @@ export default function Sidebar() {
   const { lang, sidebarOpen, toggleSidebar } = useUiStore();
   const location = useLocation();
   const ar = lang === 'ar';
+
+  // An "agent" has none of the staff/management capabilities. Management AND RTA
+  // all hold at least one of these — so items flagged `agentHidden` stay visible
+  // to them and are hidden only from agents (who get their personal workspace).
+  const isAgent = !['reports.view', 'rta.view', 'users.view', 'attendance.view_team',
+    'attendance.view_all', 'hc.view', 'schedule.view_draft', 'settings.view']
+    .some(p => hasPermission(p));
 
   return (
     <aside
@@ -109,9 +129,10 @@ export default function Sidebar() {
       {/* ── Navigation ────────────────────────────────────────────────────── */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden py-3 px-2 space-y-0.5">
         {NAV_SECTIONS.map((section, si) => {
-          const visibleItems = section.items.filter(
-            item => !item.permission || hasPermission(item.permission)
-          );
+          const visibleItems = section.items.filter(item => {
+            if ((item as any).agentHidden && isAgent) return false;
+            return !item.permission || hasPermission(item.permission);
+          });
           if (!visibleItems.length) return null;
 
           return (

@@ -1,10 +1,39 @@
-import { Outlet, useLocation } from 'react-router-dom';
-import { Bell, Moon, Sun, Globe, LogOut, ChevronDown, Search } from 'lucide-react';
-import { useState } from 'react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Bell, Moon, Sun, Globe, LogOut, ChevronDown, Search, X, CheckCheck } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
+import { apiClient } from '@/api/client';
 import { t } from '@/i18n';
+
+/* ── Pages reachable from the Quick Search palette (filtered by permission) ── */
+const SEARCH_PAGES: { path: string; ar: string; en: string; perm: string | null }[] = [
+  { path: '/my',            ar: 'صفحتي',            en: 'My Workspace',     perm: null },
+  { path: '/dashboard',     ar: 'لوحة التحكم',       en: 'Dashboard',        perm: 'reports.view' },
+  { path: '/schedule',      ar: 'الجدول الزمني',     en: 'Schedule',         perm: 'schedule.view' },
+  { path: '/generator',     ar: 'مولّد الجدول',      en: 'Auto Generator',   perm: 'schedule.generate' },
+  { path: '/rotation',      ar: 'دوران الورديات',    en: 'Shift Rotation',   perm: 'schedule.edit' },
+  { path: '/attendance',    ar: 'الحضور والانصراف',  en: 'Attendance',       perm: 'attendance.view_own' },
+  { path: '/requests',      ar: 'الطلبات والموافقات', en: 'Requests',        perm: 'requests.view_own' },
+  { path: '/breaks',        ar: 'إدارة البريكات',    en: 'Breaks',           perm: 'requests.view_own' },
+  { path: '/calendar',      ar: 'التقويم',           en: 'Calendar',         perm: null },
+  { path: '/skills',        ar: 'المهارات',          en: 'Skills',           perm: 'employees.view' },
+  { path: '/chat',          ar: 'الشات',             en: 'Chat',             perm: null },
+  { path: '/knowledge-base', ar: 'قاعدة المعرفة',    en: 'Knowledge Base',   perm: 'kb.view' },
+  { path: '/rta',           ar: 'المراقبة المباشرة', en: 'Live Monitoring',  perm: 'rta.view' },
+  { path: '/outages',       ar: 'الأعطال',           en: 'Outages',          perm: 'outages.view' },
+  { path: '/technical-issues', ar: 'المشاكل التقنية', en: 'Technical Issues', perm: 'requests.view_own' },
+  { path: '/capacity',      ar: 'تخطيط السعة',       en: 'Capacity',         perm: 'hc.view' },
+  { path: '/scorecard',     ar: 'بطاقة الأداء',      en: 'Scorecard',        perm: 'scorecard.view_own' },
+  { path: '/ops-analytics', ar: 'تحليلات العمليات',  en: 'Operations Analytics', perm: 'reports.view' },
+  { path: '/employees',     ar: 'الموظفون',          en: 'Employees',        perm: 'employees.view' },
+  { path: '/users',         ar: 'المستخدمون',        en: 'Users',            perm: 'users.view' },
+  { path: '/import',        ar: 'استيراد البيانات',  en: 'Data Import',      perm: 'settings.view' },
+  { path: '/reports',       ar: 'التقارير',          en: 'Reports',          perm: 'reports.view' },
+  { path: '/integrations/odoo', ar: 'تكامل Odoo',    en: 'Odoo Integration', perm: 'settings.edit' },
+  { path: '/settings',      ar: 'الإعدادات',         en: 'Settings',         perm: 'settings.view' },
+];
 
 /* ── Breadcrumb map ───────────────────────────────────────────────────────── */
 const PAGE_TITLES: Record<string, { ar: string; en: string }> = {
@@ -40,11 +69,60 @@ function avatarGradient(name: string) {
 
 /* ── Component ────────────────────────────────────────────────────────────── */
 export default function AppLayout() {
-  const { user, logout }   = useAuthStore();
+  const { user, logout, hasPermission }   = useAuthStore();
   const { lang, dark, sidebarOpen, toggleLang, toggleDark } = useUiStore();
   const location           = useLocation();
+  const navigate           = useNavigate();
   const ar                 = lang === 'ar';
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // ── Notifications ──────────────────────────────────────────────────────────
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifs, setNotifs]       = useState<any[]>([]);
+  const [unread, setUnread]       = useState(0);
+
+  const loadUnread = useCallback(() => {
+    apiClient.get('/notifications/unread-count').then((r: any) => setUnread(r.data?.count ?? 0)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    loadUnread();
+    const iv = setInterval(loadUnread, 60000);   // refresh every minute
+    return () => clearInterval(iv);
+  }, [loadUnread]);
+
+  const openNotifs = () => {
+    setNotifOpen(o => !o);
+    if (!notifOpen) {
+      apiClient.get('/notifications?limit=15').then((r: any) => setNotifs(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+    }
+  };
+  const markAllRead = () => {
+    apiClient.patch('/notifications/read-all', {}).then(() => { setUnread(0); setNotifs(n => n.map(x => ({ ...x, isRead: true }))); }).catch(() => {});
+  };
+  const openNotif = (n: any) => {
+    apiClient.patch(`/notifications/${n.id}/read`, {}).catch(() => {});
+    setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, isRead: true } : x));
+    setUnread(u => Math.max(0, u - (n.isRead ? 0 : 1)));
+    setNotifOpen(false);
+  };
+
+  // ── Quick search (⌘K) ────────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery]           = useState('');
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); }
+      if (e.key === 'Escape') { setSearchOpen(false); setNotifOpen(false); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const searchResults = SEARCH_PAGES.filter(p =>
+    (!p.perm || hasPermission(p.perm)) &&
+    (query.trim() === '' || p.ar.includes(query) || p.en.toLowerCase().includes(query.toLowerCase())),
+  );
+  const goTo = (path: string) => { setSearchOpen(false); setQuery(''); navigate(path); };
+  const fmtNotifTime = (d: string) => new Date(d).toLocaleString(ar ? 'ar-KW' : 'en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' });
 
   const userName   = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.email || '—';
   const initials   = userName.slice(0, 2).toUpperCase();
@@ -90,6 +168,7 @@ export default function AppLayout() {
           <div className="flex items-center gap-1">
             {/* Search pill */}
             <button
+              onClick={() => setSearchOpen(true)}
               className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs
                          text-slate-400 hover:text-slate-600 dark:hover:text-slate-300
                          border border-slate-200 dark:border-slate-800/80
@@ -125,13 +204,52 @@ export default function AppLayout() {
             </button>
 
             {/* Notifications */}
-            <button className="btn-ghost relative p-2" aria-label="Notifications">
-              <Bell size={16} />
-              <span
-                className="absolute top-1.5 end-1.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-[#07090f]"
-                style={{ boxShadow: '0 0 6px rgba(239,68,68,.7)' }}
-              />
-            </button>
+            <div className="relative">
+              <button onClick={openNotifs} className="btn-ghost relative p-2" aria-label="Notifications">
+                <Bell size={16} />
+                {unread > 0 && (
+                  <span
+                    className="absolute -top-0.5 -end-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white dark:ring-[#07090f]"
+                    style={{ boxShadow: '0 0 6px rgba(239,68,68,.7)' }}
+                  >
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setNotifOpen(false)} />
+                  <div className={`absolute top-full mt-2 z-50 w-[340px] rounded-2xl overflow-hidden anim-scaleIn ${ar ? 'left-0' : 'right-0'}`}
+                    style={{ background: dark ? 'rgba(15,20,35,0.97)' : 'rgba(255,255,255,0.98)', backdropFilter: 'blur(20px)', border: dark ? '1px solid rgba(255,255,255,.08)' : '1px solid rgba(0,0,0,.08)', boxShadow: '0 20px 48px rgba(0,0,0,.3)' }}>
+                    <div className="px-4 py-3 flex items-center justify-between border-b border-slate-100 dark:border-slate-800/60">
+                      <span className="text-sm font-bold text-slate-800 dark:text-white">{ar ? 'الإشعارات' : 'Notifications'}{unread > 0 ? ` (${unread})` : ''}</span>
+                      {unread > 0 && (
+                        <button onClick={markAllRead} className="flex items-center gap-1 text-[11px] text-indigo-500 hover:text-indigo-400">
+                          <CheckCheck size={12} /> {ar ? 'تعليم الكل' : 'Mark all'}
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-[380px] overflow-y-auto">
+                      {notifs.length === 0 ? (
+                        <p className="text-xs text-slate-500 text-center py-8">{ar ? 'لا توجد إشعارات' : 'No notifications'}</p>
+                      ) : notifs.map(n => (
+                        <button key={n.id} onClick={() => openNotif(n)}
+                          className="w-full text-start px-4 py-2.5 flex items-start gap-2.5 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors border-b border-slate-50 dark:border-slate-800/30"
+                          style={{ background: n.isRead ? 'transparent' : (dark ? 'rgba(99,102,241,0.08)' : 'rgba(99,102,241,0.05)') }}>
+                          {!n.isRead && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 flex-shrink-0" />}
+                          <div className={`min-w-0 flex-1 ${n.isRead ? 'ps-3.5' : ''}`}>
+                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">{n.title}</p>
+                            {n.body && <p className="text-[11px] text-slate-500 line-clamp-2">{n.body}</p>}
+                            <p className="text-[9px] text-slate-400 mt-0.5">{fmtNotifTime(n.createdAt)}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* Divider */}
             <div className="w-px h-5 bg-slate-200 dark:bg-slate-800 mx-1" />
@@ -235,6 +353,37 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
+
+      {/* ── Quick search palette (⌘K) ──────────────────────────────────────── */}
+      {searchOpen && (
+        <div className="fixed inset-0 z-[200] flex items-start justify-center pt-[12vh] px-4"
+          style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }}
+          onClick={() => { setSearchOpen(false); setQuery(''); }}>
+          <div className="w-full max-w-lg rounded-2xl overflow-hidden anim-scaleIn"
+            style={{ background: dark ? 'rgba(15,20,35,0.98)' : '#fff', border: dark ? '1px solid rgba(255,255,255,.1)' : '1px solid rgba(0,0,0,.08)', boxShadow: '0 24px 64px rgba(0,0,0,.4)' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5 px-4 py-3 border-b border-slate-100 dark:border-slate-800/60">
+              <Search size={16} className="text-slate-400 flex-shrink-0" />
+              <input autoFocus value={query} onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && searchResults[0]) goTo(searchResults[0].path); }}
+                placeholder={ar ? 'انتقل إلى صفحة...' : 'Jump to a page...'}
+                className="flex-1 bg-transparent text-sm text-slate-800 dark:text-white outline-none placeholder-slate-400" />
+              <button onClick={() => { setSearchOpen(false); setQuery(''); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={15} /></button>
+            </div>
+            <div className="max-h-[50vh] overflow-y-auto py-2">
+              {searchResults.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-6">{ar ? 'لا توجد نتائج' : 'No results'}</p>
+              ) : searchResults.map(p => (
+                <button key={p.path} onClick={() => goTo(p.path)}
+                  className="w-full text-start px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-500/15 transition-colors flex items-center justify-between">
+                  <span>{ar ? p.ar : p.en}</span>
+                  <span className="text-[10px] text-slate-400">{p.path}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

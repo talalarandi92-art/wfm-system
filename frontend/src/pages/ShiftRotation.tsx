@@ -824,19 +824,19 @@ export default function ShiftRotationPage() {
                       <th className="text-start py-3 px-3 text-slate-400 font-medium">{ar ? 'الموظف' : 'Employee'}</th>
                       <th className="text-start py-3 px-3 text-slate-400 font-medium">{ar ? 'الوظيفة' : 'Function'}</th>
                       <th className="text-start py-3 px-3 text-slate-400 font-medium">{ar ? 'المجموعة' : 'Group'}</th>
-                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title="صباحي (M+B)">
+                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'صباحي (M+B)' : 'Morning (M+B)'}>
                         <span style={{ color: '#0ea5e9' }}>{ar ? 'صباحي' : 'Morn'}</span>
                       </th>
-                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title="ظهيرة (C)">
+                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'ظهيرة (C)' : 'Midday (C)'}>
                         <span style={{ color: '#f59e0b' }}>{ar ? 'ظهيرة' : 'Mid'}</span>
                       </th>
-                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title="عصري (E)">
+                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'عصري (E)' : 'Evening (E)'}>
                         <span style={{ color: '#f97316' }}>{ar ? 'عصري' : 'Eve'}</span>
                       </th>
-                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title="مسائي (N/N2)">
+                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'مسائي (N/N2)' : 'Night (N/N2)'}>
                         <span style={{ color: '#8b5cf6' }}>{ar ? 'ليلي' : 'Night'}</span>
                       </th>
-                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title="منتصف الليل (MD/MN)">
+                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'منتصف الليل (MD/MN)' : 'Midnight (MD/MN)'}>
                         <span style={{ color: '#6366f1' }}>{ar ? 'منتصف' : 'Mid-N'}</span>
                       </th>
                       <th className="text-start py-3 px-3 text-slate-400 font-medium min-w-[120px]">

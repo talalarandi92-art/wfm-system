@@ -1,0 +1,12 @@
+node_modules
+dist
+uploads
+*.log
+.env
+.env.*
+*.pid
+server.out
+server.err
+*.json.bak
+dbg_*.json
+*_sample.json

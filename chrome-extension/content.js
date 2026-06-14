@@ -1,5 +1,5 @@
 'use strict';
-console.log('[WFM Bridge] content.js v16.4 loaded ✓ (content-sniffing harvest)');
+console.log('[WFM Bridge] content.js v17.0 loaded ✓ (station summary: queue + agent status + agent state)');
 
 const SEND_INTERVAL_MS = 30_000;
 const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
@@ -645,6 +645,123 @@ function parseRunningCalls() {
   return Array.isArray(raw) ? raw.length : (coerce(raw?.count || raw?.total) || 0);
 }
 
+// ── Station summary scraper ───────────────────────────────────────────────────
+// Mirrors the Sprinklr Supervisor station EXACTLY as the user sees it:
+//   • Queue Summary  → Customers Waiting / Cases in Progress / Avg + Oldest wait
+//   • Agent Status   → the presence each agent CHOSE   (Available / Unavailable / Manual Outbound …)
+//   • Agent State    → what each agent is actually DOING (Logged Out / Idle / Working on a Case) + %
+// These three panels live in the right-hand rail and are pure DOM text, so we
+// parse them straight from document.innerText, sliced header-to-header.
+
+// "1h 2m 3s" / "2m 30s" / "45s" / "0s" / "00:02:30" / bare seconds → seconds
+function parseDurationToSec(str = '') {
+  str = String(str).trim();
+  if (!str) return 0;
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(str)) {
+    const p = str.split(':').map(Number);
+    return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1];
+  }
+  let sec = 0;
+  const h = str.match(/(\d+)\s*h/i); if (h) sec += +h[1] * 3600;
+  const m = str.match(/(\d+)\s*m(?!s)/i); if (m) sec += +m[1] * 60;   // m but not "ms"
+  const s = str.match(/(\d+)\s*s/i); if (s) sec += +s[1];
+  if (!sec && /^\d+$/.test(str)) sec = +str;
+  return sec;
+}
+
+// Sprinklr truncates long status labels with a CSS ellipsis ("Manual Ou…").
+// innerText usually returns the full string, but map the common truncations
+// just in case the DOM clips it.
+function expandStationLabel(label = '') {
+  const l = label.replace(/[.…]+$/, '').trim();   // strip trailing dots / …
+  const map = {
+    'Manual Ou':       'Manual Outbound',
+    'Manual Out':      'Manual Outbound',
+    'Working on a Cas': 'Working on a Case',
+    'Working on a':    'Working on a Case',
+    'Logged Ou':       'Logged Out',
+    'Unavailabl':      'Unavailable',
+  };
+  return map[l] || l;
+}
+
+function scrapeStationSummary() {
+  const bodyText = document.body?.innerText || '';
+  if (!bodyText) return null;
+
+  const headerDefs = [
+    { key: 'queueSummary', re: /Queue\s+Summary/i },
+    { key: 'agentStatus',  re: /Agent\s+Status/i },
+    { key: 'agentState',   re: /Agent\s+State/i },
+  ];
+  const found = [];
+  for (const h of headerDefs) {
+    const m = h.re.exec(bodyText);
+    if (m) found.push({ key: h.key, start: m.index, headerLen: m[0].length });
+  }
+  if (!found.length) return null;
+  found.sort((a, b) => a.start - b.start);
+
+  const blockOf = (entry) => {
+    const next = found.find(f => f.start > entry.start);
+    const end  = next ? next.start : Math.min(bodyText.length, entry.start + 600);
+    return bodyText.substring(entry.start + entry.headerLen, end);
+  };
+
+  const result = {
+    queueSummary: null,
+    agentStatus:  [],
+    agentState:   [],
+    capturedAt:   new Date().toISOString(),
+  };
+
+  for (const entry of found) {
+    const block = blockOf(entry);
+
+    if (entry.key === 'queueSummary') {
+      const waiting    = block.match(/Customers?\s+Waiting\s+([\d,]+)/i);
+      const cip        = block.match(/Cases?\s+in\s+Progress\s+([\d,]+)/i);
+      const avgWait    = block.match(/Average\s+Wait\s+Time\s+([\d][\dhms:\s]*)/i);
+      const oldestWait = block.match(/Oldest\s+Customer\s+Waiting\s+Time\s+([\d][\dhms:\s]*)/i);
+      result.queueSummary = {
+        customersWaiting:  waiting ? coerce(waiting[1]) : 0,
+        casesInProgress:   cip ? coerce(cip[1]) : 0,
+        avgWaitSeconds:    avgWait ? parseDurationToSec(avgWait[1]) : 0,
+        oldestWaitSeconds: oldestWait ? parseDurationToSec(oldestWait[1]) : 0,
+      };
+
+    } else if (entry.key === 'agentStatus') {
+      // "Available (2)" / "Unavailable (17)" / "Manual Outbound (1)"
+      const re = /([A-Za-z][A-Za-z.…\s]{1,28}?)\s*\(\s*(\d+)\s*\)/g;
+      let m;
+      while ((m = re.exec(block)) !== null) {
+        const label = expandStationLabel(m[1].trim());
+        if (!label || /^agent\s+status$/i.test(label)) continue;
+        result.agentStatus.push({ label, count: parseInt(m[2], 10) });
+      }
+
+    } else if (entry.key === 'agentState') {
+      // "Logged Out 14 (70.00%)" / "Idle 4 (20.00%)" / "Working on a Case 2 (10.00%)"
+      // Parens optional — innerText sometimes drops them. The % is the anchor that
+      // distinguishes a state row from an Agent Status "Label (count)" row.
+      const re = /([A-Za-z][A-Za-z\s]{1,28}?)\s+(\d+)\s*\(?\s*([\d.]+)\s*%\s*\)?/g;
+      let m;
+      while ((m = re.exec(block)) !== null) {
+        const label = expandStationLabel(m[1].trim());
+        if (!label || /^agent\s+state$/i.test(label)) continue;
+        result.agentState.push({ label, count: parseInt(m[2], 10), pct: parseFloat(m[3]) });
+      }
+    }
+  }
+
+  if (!result.queueSummary && !result.agentStatus.length && !result.agentState.length) return null;
+  console.log('[WFM Bridge] 🏢 station summary:',
+    `QS=${result.queueSummary ? 'yes' : 'no'}`,
+    `status=${result.agentStatus.length}`,
+    `state=${result.agentState.length}`);
+  return result;
+}
+
 // ── DOM scraper ───────────────────────────────────────────────────────────────
 function scrapeDOM() {
   const queues = [];
@@ -936,11 +1053,14 @@ function buildSnapshot() {
     if (!a.email && m?.email) a.email = m.email;
   });
 
+  const stationSummary = scrapeStationSummary();
+
   return {
     source:        'sprinklr',
     capturedAt:    new Date().toISOString(),
     queues,
     agents,
+    stationSummary,
     summary:       { totalWaiting, totalAvailable: totalAvail, runningCalls },
     captureMethod: apiQueues.length ? (sprinklrOps.has('entityFeedStats') ? 'api/entityFeed' : 'api')
                   : (queues.length ? 'cache' : (domQ.length ? 'dom' : 'empty')),
@@ -1046,4 +1166,4 @@ function extractFirstArray(obj, depth = 0) {
   return null;
 }
 
-console.log('[WFM Bridge] content.js v16 — broad live statuses (state mappings) + raw queue counters');
+console.log('[WFM Bridge] content.js v17 — station summary (queue + agent status + agent state) + live statuses + queue counters');
