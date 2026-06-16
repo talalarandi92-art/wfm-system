@@ -116,6 +116,7 @@ export interface VoiceInputs {
   shrinkage: number;          // 0.25 = 25%
   occupancyTarget: number;    // 0.85 = 85%
   internFactor: number;       // 0.70 = 70% intern productivity
+  surgeMultiplier?: number;   // P99/P90 demand ratio for the surge plan (default 1.30)
   intervals: IntervalInput[];
 }
 
@@ -169,8 +170,10 @@ export interface CapacityResult {
   intervals: HcIntervalResult[];
   scenarios: {
     base: { required: number; gap: number };
-    withOT: { required: number; gap: number };
     lean: { required: number; gap: number };
+    withOT?: { required: number; gap: number };
+    // Voice: accurate P99 surge (Erlang recomputed at ×multiplier volume).
+    surge?: { required: number; gap: number; multiplier: number; extraVsBase: number };
   };
 }
 
@@ -325,6 +328,21 @@ export class CapacityService {
     const avgOcc = slotCount > 0 ? occupancySum / slotCount : 0;
     const totalGap = totalReq - totalSched;
 
+    // ── P99 SURGE: re-run Erlang at surge volume (NOT scale HC — Erlang is
+    // non-linear: +30% volume needs far less than +30% agents). This is the
+    // accurate "what do we need on the worst day" sizing (Hopp & Spearman).
+    const surgeM = inputs.surgeMultiplier && inputs.surgeMultiplier > 1 ? inputs.surgeMultiplier : 1.30;
+    let surgeReq = 0;
+    const intervalSec = inputs.intervalMinutes * 60;
+    for (const inp of inputs.intervals) {
+      if (inp.volume <= 0) continue;
+      const aht = inp.aht ?? inputs.defaultAht;
+      const intensity = ((inp.volume * surgeM) / intervalSec) * aht;
+      const pure = findMinAgents(intensity, inputs.targetSL, inputs.targetAnswerSec, aht, inputs.occupancyTarget);
+      const net = Math.ceil(pure / inputs.internFactor);
+      surgeReq += Math.ceil(net / (1 - inputs.shrinkage));
+    }
+
     return {
       functionId, functionName: funcInfo?.name ?? '—',
       channelType: 'voice', date,
@@ -333,9 +351,10 @@ export class CapacityService {
       slaAtRisk: intervalResults.some(i => i.serviceLevel !== undefined && i.serviceLevel < inputs.targetSL),
       intervals: intervalResults,
       scenarios: {
-        base:   { required: totalReq,                      gap: totalGap },
-        withOT: { required: Math.ceil(totalReq * 0.9),     gap: Math.ceil(totalReq * 0.9) - totalSched },
-        lean:   { required: Math.ceil(totalReq * 1.15),    gap: Math.ceil(totalReq * 1.15) - totalSched },
+        base:    { required: totalReq,                  gap: totalGap },
+        lean:    { required: Math.ceil(totalReq * 1.15), gap: Math.ceil(totalReq * 1.15) - totalSched },
+        // Accurate surge: Erlang recomputed at ×surgeM volume (default P99 ≈ ×1.30)
+        surge:   { required: surgeReq, gap: surgeReq - totalSched, multiplier: surgeM, extraVsBase: surgeReq - totalReq },
       },
     };
   }

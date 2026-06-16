@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "WFM Bridge — Ameyo Connector",
+  "version": "0.2.0",
+  "description": "Reads Ameyo Live-Monitoring data (agents + KPIs) and syncs it to the WFM Platform in real-time.",
+
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs",
+    "notifications"
+  ],
+
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://wfm.boutiqaat.com/*",
+    "https://ameyo.boutiqaat.com/*",
+    "https://ameyo.boutiqaat.com:8443/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://ameyo.boutiqaat.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["https://ameyo.boutiqaat.com/*"]
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "WFM Ameyo Bridge"
+  }
+}

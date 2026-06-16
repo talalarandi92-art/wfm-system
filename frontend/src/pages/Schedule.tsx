@@ -7,7 +7,7 @@ import {
   X, Info, TrendingUp, Loader2,
   Pencil, Save, History, ChevronDown, BarChart2,
   ArrowRight, ShieldAlert, ShieldCheck, GitBranch,
-  Building2, BadgeCheck, Lock, Send, RotateCcw,
+  Building2, BadgeCheck, Lock, Unlock, Send, RotateCcw,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { fmtLocalDate, weekStartSat } from '@/utils/format';
@@ -1530,7 +1530,7 @@ export default function SchedulePage() {
 
   useEffect(() => { loadWeekStatus(); }, [loadWeekStatus]);
 
-  const handleWeekAction = async (action: 'publish' | 'lock' | 'revert_to_draft') => {
+  const handleWeekAction = async (action: 'publish' | 'lock' | 'unlock' | 'revert_to_draft') => {
     setWeekStatusLoading(true);
     try {
       const r = await apiClient.patch('/schedule/week-status', { weekStart, action });
@@ -1853,6 +1853,18 @@ export default function SchedulePage() {
                 {ar ? 'رجوع لمسودة' : 'Revert'}
               </button>
             </>
+          )}
+
+          {weekStatus?.status === 'locked' && (
+            <button
+              onClick={() => handleWeekAction('unlock')}
+              disabled={weekStatusLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)' }}
+            >
+              <Unlock size={12} />
+              {ar ? 'فكّ القفل' : 'Unlock'}
+            </button>
           )}
         </div>
       </div>

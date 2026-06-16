@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Calendar, ClockIcon, FileText, BarChart3,
   Radio, AlertTriangle, Users, Settings, UserCog, Award,
   Upload, ChevronLeft, ChevronRight, Activity, Zap, Shuffle,
-  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit, MessageCircle, BookOpen, UserCircle, Plug, Megaphone, ClipboardCheck, CalendarCog, GraduationCap, ShieldCheck, Bot, FileBarChart, Sparkles, ShieldAlert, Crown,
+  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit, MessageCircle, BookOpen, UserCircle, Plug, Megaphone, ClipboardCheck, CalendarCog, GraduationCap, ShieldCheck, Bot, FileBarChart, Sparkles, ShieldAlert, Crown, Gauge,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
@@ -32,8 +32,8 @@ const NAV_SECTIONS = [
       // Attendance hub (dashboard + corrections + breaks) — per-tab gating: agents
       // reach only Corrections, management/RTA see all. Not agent-hidden so agents keep it.
       { key: 'attendanceHub', icon: ClockIcon,   path: '/attendance', permission: 'attendance.view_own' },
+      { key: 'roster',     icon: Users,          path: '/roster',     permission: 'attendance.view_team', agentHidden: true },
       { key: 'requests',   icon: FileText,       path: '/requests',   permission: 'requests.view_own' },
-      { key: 'scheduleChanges', icon: CalendarCog, path: '/schedule-changes', permission: 'schedule.view', agentHidden: true },
       { key: 'calendar',   icon: CalendarDays,   path: '/calendar',   permission: null },
       { key: 'skills',     icon: BrainCircuit,   path: '/skills',     permission: 'employees.view' },
       // Workspace hub (chat + knowledge base)
@@ -52,6 +52,7 @@ const NAV_SECTIONS = [
       { key: 'scorecard', icon: Award,     path: '/scorecard', permission: 'scorecard.view_own', agentHidden: true },
       { key: 'coaching',  icon: GraduationCap, path: '/coaching', permission: 'scorecard.view', agentHidden: true },
       { key: 'analyticsHub', icon: Activity, path: '/analytics', permission: 'reports.view' },
+      { key: 'productivity', icon: Gauge, path: '/productivity', permission: 'reports.view', agentHidden: true },
     ],
   },
   {

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    /* ── Design tokens ─────────────────────────────────────────────────────── */
+    :root {
+      --bg:        #0a0e1a;
+      --panel:     rgba(255,255,255,0.03);
+      --panel-2:   rgba(255,255,255,0.05);
+      --stroke:    rgba(255,255,255,0.08);
+      --txt:       #e8edf7;
+      --muted:     #7c8aa5;
+      --indigo:    #6366f1;
+      --violet:    #8b5cf6;
+      --green:     #22c55e;
+      --red:       #ef4444;
+      --amber:     #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      width: 360px;
+      font-family: -apple-system, system-ui, 'Segoe UI', Tahoma, sans-serif;
+      color: var(--txt);
+      background:
+        radial-gradient(120% 90% at 100% 0%, rgba(99,102,241,0.16), transparent 55%),
+        radial-gradient(120% 90% at 0% 100%, rgba(139,92,246,0.12), transparent 55%),
+        var(--bg);
+      overflow: hidden;
+    }
+    .wrap { padding: 16px; }
+
+    /* ── Header ────────────────────────────────────────────────────────────── */
+    .head { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+    .logo {
+      width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, var(--indigo), var(--violet));
+      box-shadow: 0 6px 18px rgba(99,102,241,0.45), inset 0 0 0 1px rgba(255,255,255,0.15);
+    }
+    .logo svg { width: 20px; height: 20px; }
+    .head h1 { font-size: 14.5px; font-weight: 700; margin: 0; letter-spacing: -0.2px; }
+    .head p  { font-size: 11px; color: var(--muted); margin: 2px 0 0; }
+
+    /* ── Status pill ───────────────────────────────────────────────────────── */
+    .pill {
+      display: flex; align-items: center; gap: 9px;
+      padding: 11px 13px; border-radius: 13px;
+      background: var(--panel); border: 1px solid var(--stroke);
+      margin-bottom: 13px;
+    }
+    .beat { position: relative; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .beat::after {
+      content: ''; position: absolute; inset: -4px; border-radius: 50%;
+      animation: pulse 1.8s ease-out infinite;
+    }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 currentColor; opacity: .55; } 100% { box-shadow: 0 0 0 9px currentColor; opacity: 0; } }
+    .pill .lbl { font-size: 12.5px; font-weight: 600; }
+    .pill .sub { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+    .pill .spacer { flex: 1; }
+    .pill .when { font-size: 10px; color: var(--muted); text-align: end; line-height: 1.5; }
+    .s-ok    { color: var(--green); } .s-ok    .lbl { color: var(--green); }
+    .s-off   { color: var(--muted); } .s-off   .lbl { color: var(--muted); }
+    .s-err   { color: var(--red);   } .s-err   .lbl { color: var(--red); }
+
+    /* ── Live stat cards ───────────────────────────────────────────────────── */
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+    .stat {
+      background: var(--panel); border: 1px solid var(--stroke);
+      border-radius: 12px; padding: 10px 8px; text-align: center;
+      transition: transform .15s ease, border-color .15s ease;
+    }
+    .stat:hover { transform: translateY(-1px); border-color: rgba(99,102,241,0.4); }
+    .stat .n { font-size: 19px; font-weight: 700; line-height: 1; }
+    .stat .k { font-size: 9.5px; color: var(--muted); margin-top: 5px; }
+    .stat.a .n { color: #818cf8; }
+    .stat.b .n { color: #34d399; }
+    .stat.c .n { color: #fbbf24; }
+
+    /* ── Form ──────────────────────────────────────────────────────────────── */
+    .field { margin-bottom: 9px; }
+    .field label { display: block; font-size: 10.5px; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
+    .inp {
+      position: relative; display: flex; align-items: center;
+      background: var(--panel-2); border: 1px solid var(--stroke);
+      border-radius: 10px; transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .inp:focus-within { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(99,102,241,0.18); }
+    .inp svg { width: 15px; height: 15px; color: var(--muted); margin-inline-start: 11px; flex-shrink: 0; }
+    .inp input {
+      flex: 1; width: 100%; background: transparent; border: 0; outline: none;
+      color: var(--txt); font-size: 12.5px; padding: 9px 11px; font-family: inherit;
+    }
+    .inp input::placeholder { color: #4b566e; }
+
+    /* ── Toggle ────────────────────────────────────────────────────────────── */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; border-radius: 10px; background: var(--panel);
+      border: 1px solid var(--stroke); margin: 11px 0 13px;
+    }
+    .toggle-row span { font-size: 12px; font-weight: 600; }
+    .sw { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+    .sw input { opacity: 0; width: 0; height: 0; }
+    .track {
+      position: absolute; inset: 0; cursor: pointer; border-radius: 22px;
+      background: #2a3348; transition: background .2s ease;
+    }
+    .track::before {
+      content: ''; position: absolute; width: 16px; height: 16px; border-radius: 50%;
+      top: 3px; inset-inline-start: 3px; background: #fff; transition: transform .2s ease;
+    }
+    .sw input:checked + .track { background: linear-gradient(135deg, var(--indigo), var(--violet)); }
+    html[dir="rtl"] .sw input:checked + .track::before { transform: translateX(-18px); }
+    html[dir="ltr"] .sw input:checked + .track::before { transform: translateX(18px); }
+
+    /* ── Buttons ───────────────────────────────────────────────────────────── */
+    .btn {
+      width: 100%; border: 0; border-radius: 11px; padding: 11px;
+      font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit;
+      display: flex; align-items: center; justify-content: center; gap: 7px;
+      transition: transform .12s ease, filter .15s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn svg { width: 15px; height: 15px; }
+    .btn-primary {
+      color: #fff; background: linear-gradient(135deg, var(--indigo), var(--violet));
+      box-shadow: 0 6px 16px rgba(99,102,241,0.4);
+    }
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-ghost {
+      color: var(--txt); background: var(--panel-2); border: 1px solid var(--stroke); margin-top: 8px;
+    }
+    .btn-ghost:hover { border-color: rgba(99,102,241,0.4); }
+
+    /* ── Toast / hint line ─────────────────────────────────────────────────── */
+    .hint {
+      margin-top: 11px; font-size: 10.5px; color: var(--muted);
+      text-align: center; line-height: 1.6; min-height: 14px;
+    }
+    .hint b { color: var(--txt); }
+    .src { margin-top: 9px; font-size: 9.5px; color: #4b566e; text-align: center; word-break: break-all; }
+
+    /* ── Language toggle ───────────────────────────────────────────────────── */
+    .head { position: relative; }
+    #langBtn {
+      margin-inline-start: auto; align-self: flex-start;
+      background: var(--panel-2); border: 1px solid var(--stroke);
+      color: var(--muted); font-size: 10px; font-weight: 700; font-family: inherit;
+      padding: 4px 9px; border-radius: 8px; cursor: pointer; letter-spacing: .04em;
+      transition: color .15s, border-color .15s;
+    }
+    #langBtn:hover { color: var(--txt); border-color: rgba(99,102,241,0.5); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- Header -->
+    <div class="head">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.95.36 1.88.7 2.77a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.31-1.31a2 2 0 0 1 2.11-.45c.89.34 1.82.57 2.77.7A2 2 0 0 1 22 16.92z"/>
+        </svg>
+      </div>
+      <div>
+        <h1>WFM × Ameyo Bridge</h1>
+        <p data-i18n="tagline">جسر المراقبة المباشرة للمكالمات</p>
+      </div>
+      <button id="langBtn" title="AR / EN">EN</button>
+    </div>
+
+    <!-- Status pill -->
+    <div class="pill s-off" id="pill">
+      <span class="beat" style="background: currentColor;"></span>
+      <div>
+        <div class="lbl" id="pillLbl">غير مُهيّأ</div>
+        <div class="sub" id="pillSub">سجّل الدخول لبدء المزامنة</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="when" id="pillWhen"></div>
+    </div>
+
+    <!-- Live stats -->
+    <div class="stats">
+      <div class="stat a"><div class="n" id="stAgents">—</div><div class="k" data-i18n="agents">وكلاء</div></div>
+      <div class="stat b"><div class="n" id="stKpis">—</div><div class="k" data-i18n="metrics">مؤشرات</div></div>
+      <div class="stat c"><div class="n" id="stNet">—</div><div class="k" data-i18n="netSamples">عيّنات شبكة</div></div>
+    </div>
+
+    <!-- Form -->
+    <div class="field">
+      <label data-i18n="apiUrl">رابط الـ WFM API</label>
+      <div class="inp">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <input id="apiUrl" placeholder="http://localhost:3000/api/v1" />
+      </div>
+    </div>
+    <div class="field">
+      <label data-i18n="email">البريد الإلكتروني</label>
+      <div class="inp">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg>
+        <input id="email" type="email" placeholder="demo.rta@boutiqaat.wfm" />
+      </div>
+    </div>
+    <div class="field">
+      <label data-i18n="password">كلمة المرور <span style="color:#4b566e">(تُستخدم مرة واحدة)</span></label>
+      <div class="inp">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <input id="password" type="password" placeholder="••••••••" />
+      </div>
+    </div>
+
+    <!-- Toggle -->
+    <div class="toggle-row">
+      <span data-i18n="autoSync">تفعيل المزامنة التلقائية</span>
+      <label class="sw"><input type="checkbox" id="enabled" /><span class="track"></span></label>
+    </div>
+
+    <!-- Actions -->
+    <button class="btn btn-primary" id="save">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+      <span data-i18n="saveLogin">حفظ وتسجيل الدخول</span>
+    </button>
+    <button class="btn btn-ghost" id="copy">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span data-i18n="copySamples">نسخ عيّنات البيانات</span>
+    </button>
+
+    <div class="hint" id="hint"></div>
+    <div class="src" id="src"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

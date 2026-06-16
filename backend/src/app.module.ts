@@ -36,6 +36,8 @@ import { OpsAnalyticsModule }     from '@modules/operations-analytics/ops.module
 import { KnowledgeBaseModule }    from '@modules/knowledge-base/kb.module';
 import { AgentSelfModule }        from '@modules/agent-self/me.module';
 import { WorkforceAnalyticsModule } from '@modules/workforce-analytics/analytics.module';
+import { ProductivityModule }       from '@modules/productivity/productivity.module';
+import { ReconModule }              from '@modules/attendance-recon/recon.module';
 import { CampaignsModule }         from '@modules/campaigns/campaigns.module';
 import { AttendanceCorrectionsModule } from '@modules/attendance-corrections/attendance-corrections.module';
 import { ScheduleChangesModule }    from '@modules/schedule-changes/schedule-changes.module';
@@ -53,6 +55,10 @@ import { ExpertModule }              from '@modules/expert/expert.module';
 import { ScorecardGuardModule }      from '@modules/scorecard-guard/scorecard-guard.module';
 import { ResearcherModule }          from '@modules/researcher/researcher.module';
 import { KnowledgeLedgerModule }     from '@modules/knowledge-ledger/knowledge-ledger.module';
+import { TeamLearningModule }        from '@modules/team-learning/team-learning.module';
+import { SmokeTestModule }           from '@modules/smoke-test/smoke-test.module';
+import { DiagnosticsModule }         from '@modules/diagnostics/diagnostics.module';
+import { AttritionModule }           from '@modules/attrition/attrition.module';
 import { AutoModeModule }            from '@modules/automode/automode.module';
 import { ChiefModule }               from '@modules/chief/chief.module';
 import { BotsModule }                from '@modules/bots/bots.module';
@@ -136,6 +142,8 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     KnowledgeBaseModule,
     AgentSelfModule,
     WorkforceAnalyticsModule,
+    ProductivityModule,
+    ReconModule,
     CampaignsModule,
     AttendanceCorrectionsModule,
     ScheduleChangesModule,
@@ -153,6 +161,10 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     ScorecardGuardModule,
     ResearcherModule,
     KnowledgeLedgerModule,
+    TeamLearningModule,
+    SmokeTestModule,
+    DiagnosticsModule,
+    AttritionModule,
     AutoModeModule,
     ChiefModule,
     BotsModule,

@@ -1104,10 +1104,26 @@ export class ScheduleService {
     tenantId: string,
     weekStart: string,
     userId: string,
-    action: 'publish' | 'lock' | 'revert_to_draft',
+    action: 'publish' | 'lock' | 'unlock' | 'revert_to_draft',
     notes?: string,
   ) {
     const current = await this.getWeekStatus(tenantId, weekStart);
+
+    if (action === 'unlock') {
+      // The only way out of a locked week: back to 'published' (then it can be
+      // edited / reverted / re-published as normal). Clears the lock stamp.
+      if (current.status !== 'locked') {
+        throw new BadRequestException('الجدول غير مقفل');
+      }
+      await this.ds.query(
+        `UPDATE schedule_week_status
+            SET status = 'published', locked_at = NULL, locked_by = NULL,
+                notes = COALESCE($3, notes), updated_at = NOW()
+          WHERE tenant_id = $1 AND week_start = $2::date`,
+        [tenantId, weekStart, notes ?? null],
+      );
+      return this.getWeekStatus(tenantId, weekStart);
+    }
 
     if (action === 'publish') {
       if (current.status === 'locked') {

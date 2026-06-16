@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Crown, Loader2, RefreshCw, Target, Activity, ShieldAlert, Server, GraduationCap, Brain,
-  Zap, CheckCircle2, XCircle, Undo2, ShieldCheck, FileBarChart, Sparkles, Bot, Power, Award, Telescope, ScrollText,
+  Zap, CheckCircle2, XCircle, Undo2, ShieldCheck, FileBarChart, Sparkles, Bot, Power, Award, Telescope, ScrollText, Network,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
@@ -30,6 +30,8 @@ const TEAM = [
   { route: '/researcher', icon: Telescope, ar: 'الباحث', color: '#818cf8' },
   { route: '/expert', icon: GraduationCap, ar: 'الخبير', color: '#10b981' },
   { route: '/knowledge-ledger', icon: ScrollText, ar: 'سجلّ المعرفة', color: '#14b8a6' },
+  { route: '/team-learning', icon: Network, ar: 'تعلّم الفريق', color: '#a855f7' },
+  { route: '/diagnostics', icon: Activity, ar: 'تقرير المشاكل', color: '#ef4444' },
   { route: '/advisor', icon: Sparkles, ar: 'المستشار', color: '#ec4899' },
   { route: '/bots', icon: Bot, ar: 'المركز', color: '#818cf8' },
 ];
@@ -50,6 +52,14 @@ export default function ChiefPage() {
   const [loading, setL] = useState(true);
   const [decisions, setDecisions] = useState<AutoDecision[]>([]);
   const [busy, setBusy] = useState(false);
+  const [smoke, setSmoke] = useState<{ passed: number; total: number; probes: { name: string; labelAr: string; ok: boolean; error?: string }[] } | null>(null);
+  const [smokeBusy, setSmokeBusy] = useState(false);
+
+  const runSmoke = async () => {
+    setSmokeBusy(true);
+    try { const { data } = await apiClient.get('/smoke-test'); setSmoke(data); } catch { setSmoke(null); }
+    setSmokeBusy(false);
+  };
 
   const load = useCallback(async () => {
     setL(true);
@@ -204,7 +214,25 @@ export default function ChiefPage() {
               </span>
             )}
             <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(168,85,247,0.1)', color: '#c4b5fd' }}><Brain size={12} /> {ar ? 'تعلّم' : 'learned'} {data.learning.learnedSamples} · {data.learning.decisionsLogged} {ar ? 'قرار' : 'decisions'}</span>
+            <button onClick={runSmoke} disabled={smokeBusy} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-semibold" style={{ background: 'rgba(34,211,238,0.1)', color: '#67e8f9', border: '1px solid rgba(34,211,238,0.2)' }}>
+              {smokeBusy ? <Loader2 size={12} className="animate-spin" /> : <Activity size={12} />} {ar ? 'اختبار وظيفي للنظام' : 'System smoke test'}
+              {smoke && <b style={{ color: smoke.passed === smoke.total ? '#4ade80' : '#f87171' }}>{smoke.passed}/{smoke.total}</b>}
+            </button>
           </div>
+
+          {/* Smoke test probe results */}
+          {smoke && (
+            <div className="rounded-2xl p-3" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${smoke.passed === smoke.total ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.25)'}` }}>
+              <p className="text-[10px] font-bold mb-2" style={{ color: '#64748b' }}>{ar ? 'اختبار وظيفي — يجرّب مسارات الكتابة الحقيقية (حفظ/نشر/طلبات) ويكشف الأعطال' : 'Functional smoke test — exercises real write paths (save/publish/requests) to catch bugs'}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {smoke.probes.map(p => (
+                  <span key={p.name} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg" style={{ background: p.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.12)', color: p.ok ? '#4ade80' : '#f87171' }} title={p.error || ''}>
+                    {p.ok ? <CheckCircle2 size={10} /> : <XCircle size={10} />} {p.labelAr}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* The team behind the scenes */}
           <div className="rounded-2xl p-3" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>

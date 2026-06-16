@@ -831,7 +831,7 @@ export class GeneratorService {
         `INSERT INTO schedule_entries
            (id, schedule_version_id, tenant_id, employee_id, entry_date,
             shift_code_display, attendance_marker, validation_flags, created_at, updated_at)
-         SELECT gen_random_uuid(), vals.vid, vals.tid, vals.eid, vals.dt,
+         SELECT gen_random_uuid(), vals.vid::uuid, vals.tid::uuid, vals.eid::uuid, vals.dt::date,
                 vals.scd, vals.am::attendance_marker_enum, vals.vf::jsonb, NOW(), NOW()
          FROM (VALUES ${values}) AS vals(vid, tid, eid, dt, scd, am, vf)`,
         params,
@@ -889,7 +889,39 @@ export class GeneratorService {
        WHERE id = $1 AND tenant_id = $2 AND status IN ('draft','generated','reviewed')`,
       [versionId, tenantId, userId],
     );
-    return { success: true, versionId };
+
+    // Apply the published version to the live, agent-facing schedule. Each entry's
+    // shift code is resolved to its scheduled times and upserted into
+    // attendance_records (tenant, employee, date) — so once published, every agent
+    // sees their new shifts. Only the SCHEDULED fields are touched; any actual
+    // punch/login data on a row is preserved.
+    const [applied] = await this.ds.query(
+      `WITH ins AS (
+         INSERT INTO attendance_records
+           (id, tenant_id, employee_id, attendance_date, scheduled_shift_code_id,
+            scheduled_start, scheduled_end, scheduled_start_2, scheduled_end_2,
+            attendance_marker, created_at, updated_at)
+         SELECT gen_random_uuid(), se.tenant_id, se.employee_id, se.entry_date, sc.id,
+                sc.start_time, sc.end_time, sc.start_time_2, sc.end_time_2,
+                se.attendance_marker::attendance_marker_enum, NOW(), NOW()
+           FROM schedule_entries se
+           LEFT JOIN shift_codes sc ON sc.tenant_id = se.tenant_id AND sc.code = se.shift_code_display
+          WHERE se.schedule_version_id = $1 AND se.tenant_id = $2
+         ON CONFLICT (tenant_id, employee_id, attendance_date) DO UPDATE SET
+            scheduled_shift_code_id = EXCLUDED.scheduled_shift_code_id,
+            scheduled_start   = EXCLUDED.scheduled_start,
+            scheduled_end     = EXCLUDED.scheduled_end,
+            scheduled_start_2 = EXCLUDED.scheduled_start_2,
+            scheduled_end_2   = EXCLUDED.scheduled_end_2,
+            attendance_marker = EXCLUDED.attendance_marker,
+            updated_at = NOW()
+         RETURNING 1
+       )
+       SELECT COUNT(*)::int AS n FROM ins`,
+      [versionId, tenantId],
+    );
+
+    return { success: true, versionId, appliedToAgents: applied?.n ?? 0 };
   }
 
   // ── Available Weeks ───────────────────────────────────────────────────────────

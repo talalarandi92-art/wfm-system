@@ -258,10 +258,11 @@ export class SprinklrService {
   }
 
   private mapAgentStatus(raw: string): SprinklrSnapshot['agents'][0]['status'] {
-    const s = (raw || '').toLowerCase();
+    const s = (raw || '').toLowerCase().trim();
+    // Break wins first — anything ending in "break" or a known break word.
+    if (/break\s*$/.test(s) || s.includes('break') || /\bbio\b/.test(s) || /\blunch\b/.test(s) || /\bprayer\b/.test(s) || /\bnamaz\b/.test(s) || /\btea\b/.test(s) || /\brest\b/.test(s)) return 'break';
     if (s.includes('available') || s.includes('online') || s.includes('idle') || s.includes('ready') || s.includes('logged in') || s.includes('loggedin')) return 'available';
     if (s.includes('busy') || s.includes('engaged') || s.includes('handling') || s.includes('active')) return 'busy';
-    if (s.includes('break') || s.includes('bio') || s.includes('lunch') || s.includes('prayer') || s.includes('tea')) return 'break';
     if (s.includes('away') || s.includes('wrap') || s.includes('acw')) return 'away';
     if (s.includes('offline') || s.includes('logged out') || s.includes('loggedout')) return 'offline';
     return 'unknown';
@@ -283,6 +284,18 @@ export class SprinklrService {
           snapshot.agents.length,
         ],
       );
+      // Raw snapshots are only needed live + for short-term rollups; the durable
+      // stats are already extracted into daily tables. With the bridge now near-live
+      // (~5s) the table would grow unbounded, so prune snapshots older than 48h.
+      // Run occasionally (not every insert) to keep ingest cheap.
+      if (Math.random() < 0.05) {
+        await this.dataSource.query(
+          `DELETE FROM integration_snapshots
+            WHERE tenant_id = $1 AND source = 'sprinklr'
+              AND captured_at < NOW() - INTERVAL '48 hours'`,
+          [tenantId],
+        ).catch(() => {});
+      }
     } catch {
       // Table may not exist yet — non-fatal
     }

@@ -1,8 +1,11 @@
 'use strict';
-console.log('[WFM Bridge] content.js v17.0 loaded ✓ (station summary: queue + agent status + agent state)');
+console.log('[WFM Bridge] content.js v17.2 loaded ✓ (open-queue merge + near-live + any-*-break→break)');
 
-const SEND_INTERVAL_MS = 30_000;
-const MIN_SEND_GAP_MS  = 20_000;  // hard floor — KEY_OPS bursts must not flood the backend
+const SEND_INTERVAL_MS = 8_000;   // periodic poll fallback (near-live)
+const MIN_SEND_GAP_MS  = 5_000;   // hard floor between sends. The trySend() hash-dedup
+                                  // means we only actually send when queue/agent data
+                                  // CHANGES, so event-driven updates land within ~5s
+                                  // without flooding the backend with identical rows.
 const CACHE_STALE_MS   = 15 * 60_000; // cached agent status older than this → 'unknown'
 
 // ── Inject page-context script ────────────────────────────────────────────────
@@ -792,9 +795,12 @@ function scrapeDOM() {
     }
     qName = qName || 'Active Queue';
 
-    seenQ.add(qName);
+    // Do NOT add qName to seenQ here: the currently-open queue also has a card in
+    // the left panel (Block 2) carrying its real agent count. Let Block 2 read it,
+    // then mergeByName() below combines the main-panel waiting/inProgress with the
+    // card's agents. Use a name-based id (not 'dom_main') so the two entries merge.
     queues.push({
-      queueId:         'dom_main',
+      queueId:         `dom_${qName.replace(/\W+/g, '_').toLowerCase()}`,
       queueName:       qName,
       channel:         detectChannel(qName),
       waiting:         w, inProgress: p, backlog: w + p,
@@ -964,8 +970,29 @@ function scrapeDOM() {
     });
   });
 
-  console.log('[WFM Bridge] DOM:', queues.length, 'queues,', agents.length, 'agents');
-  return { queues, agents };
+  // Merge same-name queues: the open queue appears twice (main panel = accurate
+  // waiting/inProgress but 0 agents; left-panel card = real agent count). Combine
+  // so the open queue (e.g. "Whatsapp Queue - Sale") finally loads its agents.
+  const mergedQ = new Map();
+  for (const q of queues) {
+    const ex = mergedQ.get(q.queueName);
+    if (!ex) { mergedQ.set(q.queueName, q); continue; }
+    mergedQ.set(q.queueName, {
+      ...ex,
+      queueId:         ex.queueId || q.queueId,
+      waiting:         Math.max(ex.waiting || 0, q.waiting || 0),
+      inProgress:      Math.max(ex.inProgress || 0, q.inProgress || 0),
+      backlog:         Math.max(ex.backlog || 0, q.backlog || 0),
+      agentsAvailable: Math.max(ex.agentsAvailable || 0, q.agentsAvailable || 0),
+      agentsBusy:      Math.max(ex.agentsBusy || 0, q.agentsBusy || 0),
+      agentsBreak:     Math.max(ex.agentsBreak || 0, q.agentsBreak || 0),
+      slaPct:          Math.min(ex.slaPct ?? 100, q.slaPct ?? 100),
+    });
+  }
+  const mergedQueues = [...mergedQ.values()];
+
+  console.log('[WFM Bridge] DOM:', mergedQueues.length, 'queues,', agents.length, 'agents');
+  return { queues: mergedQueues, agents };
 }
 
 // ── Build final snapshot ──────────────────────────────────────────────────────
@@ -1143,13 +1170,17 @@ function detectChannel(raw = '') {
 }
 
 function normalizeStatus(raw = '') {
-  const s = raw.toLowerCase();
+  const s = raw.toLowerCase().trim();
+  // Break wins first: ANY label ending in "break" (Tea Break, Lunch Break, Short
+  // Break, Coffee Break, any custom type) or a known break word → 'break'.
+  // Word boundaries on tea/bio so "team"/"biology" don't false-match.
+  if (/break\s*$/.test(s) || s.includes('break')
+      || /\blunch\b/.test(s) || /\bprayer\b/.test(s) || /\bnamaz\b/.test(s)
+      || /\bbio\b/.test(s)   || /\btea\b/.test(s)    || /\brest\b/.test(s))   return 'break';
   if (s.includes('idle'))                                                       return 'idle';
   if (s.includes('available') && !s.includes('un'))                            return 'available';
   if (s.includes('manual') || s.includes('outbound') || s.includes('dial'))   return 'busy';
   if (s.includes('busy') || s.includes('engaged') || s.includes('on call'))   return 'busy';
-  if (s.includes('break') || s.includes('lunch') || s.includes('prayer')
-      || s.includes('bio') || s.includes('tea'))                               return 'break';
   if (s.includes('meeting') || s.includes('training') || s.includes('coach')
       || s.includes('away') || s.includes('wrap'))                             return 'away';
   if (s.includes('unavailable') || s.includes('offline'))                      return 'offline';

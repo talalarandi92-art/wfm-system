@@ -3,8 +3,10 @@ import {
   Activity, Loader2, AlertTriangle, Clock, Zap, Stethoscope, UserX, LogOut,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
+import { useFilterStore } from '@/store/filter.store';
+import { FunctionFilter } from '@/components/FunctionFilter';
 import { apiClient } from '@/api/client';
-import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { tp, ts as tsColor, useInjectDsStyles, gapColor } from '@/components/ds';
 
 interface HourRow {
   hour: number; required: number; scheduled: number; available: number;
@@ -16,7 +18,6 @@ interface FnCoverage {
 }
 interface Resp { date: string; basis: string; functions: FnCoverage[] }
 
-const gapColor = (g: number) => g >= 0 ? '#22c55e' : g >= -2 ? '#f59e0b' : '#ef4444';
 const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
 
 export default function HourlyCoveragePage() {
@@ -24,9 +25,8 @@ export default function HourlyCoveragePage() {
   const ar = lang === 'ar';
   useInjectDsStyles();
 
+  const fnId = useFilterStore(s => s.functionId);  // shared global function filter
   const [date, setDate] = useState('');
-  const [fnId, setFnId] = useState('');            // '' = all functions
-  const [funcs, setFuncs] = useState<{ id: string; name: string }[]>([]);
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setL] = useState(true);
 
@@ -44,13 +44,6 @@ export default function HourlyCoveragePage() {
   }, [date, fnId]);
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [fnId]);
-  useEffect(() => {
-    apiClient.get('/schedule-generator/functions')
-      .then(r => setFuncs((Array.isArray(r.data) ? r.data : [])
-        .filter((f: any) => parseInt(f.employee_count ?? '0', 10) > 0)
-        .map((f: any) => ({ id: f.id, name: f.name }))))
-      .catch(() => setFuncs([]));
-  }, []);
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
@@ -66,12 +59,7 @@ export default function HourlyCoveragePage() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <select value={fnId} onChange={e => setFnId(e.target.value)}
-            className="text-xs rounded-xl px-3 py-1.5 outline-none"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }}>
-            <option value="" style={{ background: '#0f172a' }}>{ar ? 'كل الأقسام' : 'All functions'}</option>
-            {funcs.map(f => <option key={f.id} value={f.id} style={{ background: '#0f172a' }}>{f.name}</option>)}
-          </select>
+          <FunctionFilter />
           <input type="date" value={date} onChange={e => setDate(e.target.value)} onBlur={load}
             className="text-xs rounded-xl px-3 py-1.5 outline-none"
             style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }} />
@@ -143,13 +131,13 @@ export default function HourlyCoveragePage() {
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-1.5 text-xs font-bold tabular-nums" style={{ color: gapColor(h.gap) }}>{h.gap >= 0 ? `+${h.gap}` : h.gap}</td>
+                          <td className="px-3 py-1.5 text-xs font-bold tabular-nums" style={{ color: gapColor(h.gap, -1) }}>{h.gap >= 0 ? `+${h.gap}` : h.gap}</td>
                           <td className="px-3 py-1.5" style={{ minWidth: 160 }}>
                             <div className="relative h-3 rounded" style={{ background: 'rgba(255,255,255,0.04)' }}>
                               {/* required marker */}
                               <div className="absolute top-0 bottom-0" style={{ left: `${(h.required / maxVal) * 100}%`, width: 2, background: '#818cf8' }} />
                               {/* available bar */}
-                              <div className="h-full rounded" style={{ width: `${(h.available / maxVal) * 100}%`, background: gapColor(h.gap), opacity: 0.7 }} />
+                              <div className="h-full rounded" style={{ width: `${(h.available / maxVal) * 100}%`, background: gapColor(h.gap, -1), opacity: 0.7 }} />
                             </div>
                           </td>
                         </tr>

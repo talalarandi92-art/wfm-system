@@ -228,7 +228,7 @@ export class ScheduleController {
   @RequirePermissions('schedule.publish')
   setWeekStatus(
     @CurrentUser() user: any,
-    @Body() body: { weekStart: string; action: 'publish' | 'lock' | 'revert_to_draft'; notes?: string },
+    @Body() body: { weekStart: string; action: 'publish' | 'lock' | 'unlock' | 'revert_to_draft'; notes?: string },
   ) {
     return this.svc.setWeekStatus(user.tenantId, body.weekStart, user.userId, body.action, body.notes);
   }

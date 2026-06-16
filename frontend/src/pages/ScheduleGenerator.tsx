@@ -3,7 +3,7 @@ import {
   Zap, CheckCircle2, AlertTriangle, XCircle,
   RefreshCw, CloudUpload, ChevronDown, ChevronUp,
   Users, Clock, ShieldCheck, SlidersHorizontal,
-  Calendar, ChevronLeft, ChevronRight, Info,
+  Calendar, ChevronLeft, ChevronRight, Info, Send,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -358,6 +358,10 @@ export default function ScheduleGeneratorPage() {
   const [saving, setSaving]     = useState(false);
   const [saveMsg, setSaveMsg]   = useState('');
   const [saveOk, setSaveOk]     = useState(false);
+  const [savedVersionId, setSavedVersionId] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [publishMsg, setPublishMsg] = useState('');
+  const [publishOk, setPublishOk]   = useState(false);
   const [error, setError]       = useState('');
 
   // Non-empty functions
@@ -417,9 +421,11 @@ export default function ScheduleGeneratorPage() {
       if (selectedFns.length > 0) body.functionIds = selectedFns;
       const res = await apiClient.post('/schedule-generator/save', body);
       setSaveOk(true);
+      setSavedVersionId(res.data?.versionId ?? null);
+      setPublishMsg(''); setPublishOk(false);
       setSaveMsg(arNow
-        ? `تم الحفظ — ${res.data?.versionId?.substring(0, 8)}…`
-        : `Saved — ${res.data?.versionId?.substring(0, 8)}…`);
+        ? `تم الحفظ كمسودة — ${res.data?.versionId?.substring(0, 8)}…`
+        : `Saved as draft — ${res.data?.versionId?.substring(0, 8)}…`);
       if (result) setResult({ ...result, versionId: res.data?.versionId });
     } catch (e: any) {
       setSaveOk(false);
@@ -428,6 +434,30 @@ export default function ScheduleGeneratorPage() {
         : 'Save failed: ' + (e?.response?.data?.message ?? 'Unknown error'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Publish the saved draft → applies the schedule to attendance_records so every
+  // agent sees their new shifts. Requires a Save first (needs the version id).
+  const handlePublish = async () => {
+    if (!savedVersionId) return;
+    const arNow = useUiStore.getState().lang === 'ar';
+    if (!window.confirm(arNow
+      ? 'سيتم نشر الجدول وإرساله لجميع الموظفين (يظهر بجدولهم). متابعة؟'
+      : 'This publishes the schedule to all agents (it appears in their schedule). Continue?')) return;
+    setPublishing(true); setPublishMsg(''); setPublishOk(false);
+    try {
+      const res = await apiClient.post(`/schedule-generator/versions/${savedVersionId}/publish`);
+      setPublishOk(true);
+      const n = res.data?.appliedToAgents ?? 0;
+      setPublishMsg(arNow ? `تم النشر — وصل ${n} موظف/يوم لجداول الموظفين ✓` : `Published — ${n} shifts pushed to agents ✓`);
+    } catch (e: any) {
+      setPublishOk(false);
+      setPublishMsg(arNow
+        ? 'فشل النشر: ' + (e?.response?.data?.message ?? 'خطأ غير معروف')
+        : 'Publish failed: ' + (e?.response?.data?.message ?? 'Unknown error'));
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -730,6 +760,15 @@ export default function ScheduleGeneratorPage() {
                 {saving ? (ar ? 'جاري الحفظ…' : 'Saving…') : (ar ? 'حفظ كمسودة' : 'Save as Draft')}
               </button>
 
+              {savedVersionId && (
+                <button onClick={handlePublish} disabled={publishing}
+                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
+                  style={{ background: 'linear-gradient(135deg,#4f46e5,#6366f1)', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
+                  {publishing ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
+                  {publishing ? (ar ? 'جاري النشر…' : 'Publishing…') : (ar ? 'نشر وإرسال للموظفين' : 'Publish to agents')}
+                </button>
+              )}
+
               <button onClick={handleGenerate} disabled={loading}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all
                            text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-white disabled:opacity-40"
@@ -752,6 +791,14 @@ export default function ScheduleGeneratorPage() {
                   style={{ background: saveOk ? 'rgba(52,211,153,0.08)' : 'rgba(239,68,68,0.08)' }}>
                   {saveOk ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
                   {saveMsg}
+                </div>
+              )}
+              {publishMsg && (
+                <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${
+                  publishOk ? 'text-indigo-700 dark:text-indigo-300' : 'text-red-700 dark:text-red-400'}`}
+                  style={{ background: publishOk ? 'rgba(99,102,241,0.1)' : 'rgba(239,68,68,0.08)' }}>
+                  {publishOk ? <Send size={14} /> : <XCircle size={14} />}
+                  {publishMsg}
                 </div>
               )}
             </div>

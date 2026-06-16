@@ -27,6 +27,8 @@ interface BreakSlot {
   duration_minutes: number;
   planned_start: string;
   planned_end: string;
+  shift_start?: string | null;
+  shift_end?: string | null;
   actual_start?: string;
   actual_end?: string;
   status: 'scheduled' | 'active' | 'completed' | 'missed' | 'swapped' | 'cancelled';
@@ -87,7 +89,9 @@ type Tab = 'timeline' | 'coverage' | 'requests' | 'fairness' | 'mybreaks';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const SHIFT_START_H = 6;
+// Full 24h day — the centre runs 24/7 (midnight MD/MN shifts), so breaks happen
+// at any hour (e.g. 00:41, 03:45). A 06:00 start clipped those to the left edge.
+const SHIFT_START_H = 0;
 const SHIFT_END_H   = 24;
 const TOTAL_HOURS   = SHIFT_END_H - SHIFT_START_H;
 
@@ -436,23 +440,46 @@ export default function BreaksPage() {
                         <div key={empId} style={{ display: 'flex', alignItems: 'stretch', borderBottom: `1px solid ${divider}`, minHeight: 52 }}
                           onMouseEnter={e => (e.currentTarget.style.background = rowHover)}
                           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                          <div style={{ width: 200, flexShrink: 0, padding: '8px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', borderInlineEnd: `1px solid ${divider}` }}>
+                          <div style={{ width: 290, flexShrink: 0, padding: '8px 16px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3, borderInlineEnd: `1px solid ${divider}` }}>
                             <p style={{ fontSize: 12, fontWeight: 600, color: tp(dark), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.employee_name}</p>
-                            <p style={{ fontSize: 10, color: ts(dark), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{emp.function_name} · {emp.employee_no}</p>
+                            <p style={{ fontSize: 10, color: ts(dark), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {emp.function_name} · {emp.employee_no}
+                              {emp.shift_start && <span style={{ color: '#818cf8' }}> · {ar ? 'شفت' : 'shift'} {emp.shift_start}–{emp.shift_end}</span>}
+                            </p>
+                            {/* Explicit break times — when-to-when, readable */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 1 }}>
+                              {empSlots.map(s => (
+                                <span key={s.id} title={`${s.break_type_ar} · ${s.duration_minutes}${ar ? 'د' : 'm'}`}
+                                  style={{ fontSize: 9.5, fontWeight: 600, padding: '1px 5px', borderRadius: 5, background: s.color + '22', color: s.color, whiteSpace: 'nowrap' }}>
+                                  {s.icon} {s.planned_start?.slice(0, 5)}–{s.planned_end?.slice(0, 5)}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                           <div style={{ flex: 1, position: 'relative', padding: '8px 4px' }}>
                             {hours.map(h => (
                               <div key={h} style={{ position: 'absolute', top: 0, bottom: 0, left: `${((h - SHIFT_START_H) / TOTAL_HOURS) * 100}%`, width: 1, background: `${divider}` }} />
                             ))}
+                            {/* Shift bar(s) behind the breaks — so you see breaks sit inside the shift.
+                                Cross-midnight (end ≤ start) draws two segments. */}
+                            {emp.shift_start && emp.shift_end && (() => {
+                              const a = timeToPercent(emp.shift_start), b = timeToPercent(emp.shift_end);
+                              const cross = emp.shift_end <= emp.shift_start;
+                              const segs = cross ? [[a, 100], [0, b]] : [[a, b]];
+                              return segs.map(([l, r], i) => (
+                                <div key={'sh' + i} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', height: 30, left: `${l}%`, width: `${Math.max(r - l, 0.5)}%`, background: 'rgba(99,102,241,0.10)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 6 }}
+                                  title={`${ar ? 'الشفت' : 'Shift'} ${emp.shift_start}–${emp.shift_end}`} />
+                              ));
+                            })()}
                             {empSlots.map(slot => {
                               const left  = timeToPercent(slot.planned_start);
                               const width = durationToPercent(slot.duration_minutes);
                               return (
                                 <div key={slot.id}
                                   style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', padding: '0 6px', gap: 4, overflow: 'hidden', cursor: 'pointer', left: `${left}%`, width: `${Math.max(width, 2)}%`, background: slot.color + (slot.status === 'missed' ? '35' : '25'), border: `1px solid ${slot.color}50` }}
-                                  title={`${slot.break_type_ar} · ${slot.planned_start}–${slot.planned_end}`}>
+                                  title={`${slot.break_type_ar} · ${slot.planned_start?.slice(0, 5)}–${slot.planned_end?.slice(0, 5)}`}>
                                   <span style={{ fontSize: 11, flexShrink: 0 }}>{slot.icon}</span>
-                                  <span style={{ fontSize: 9, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: slot.color }}>{slot.planned_start}</span>
+                                  <span style={{ fontSize: 9, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: slot.color }}>{slot.planned_start?.slice(0, 5)}</span>
                                   {slot.status === 'missed' && <AlertTriangle size={9} style={{ color: '#f87171', flexShrink: 0 }} />}
                                 </div>
                               );

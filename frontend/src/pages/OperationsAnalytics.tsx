@@ -97,6 +97,7 @@ export default function OperationsAnalyticsPage() {
 
   const [summary, setSummary]   = useState<Summary | null>(null);
   const [agents, setAgents]     = useState<AgentRow[]>([]);
+  const [agentQ, setAgentQ]     = useState('');
   const [reasons, setReasons]   = useState<ReasonRow[]>([]);
   const [payments, setPayments] = useState<PaymentRow[]>([]);
   const [trends, setTrends]     = useState<TrendRow[]>([]);
@@ -385,6 +386,13 @@ export default function OperationsAnalyticsPage() {
           {tab === 'agents' && (
             <div className="rounded-2xl overflow-hidden"
               style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <input value={agentQ} onChange={e => setAgentQ(e.target.value)}
+                  placeholder={ar ? 'بحث عن موظف...' : 'Search agent...'}
+                  className="flex-1 rounded-xl text-xs py-1.5 px-3 outline-none"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
+                <span className="text-[10px]" style={{ color: '#475569' }}>{agents.filter(a => !agentQ || (a.agent || '').toLowerCase().includes(agentQ.toLowerCase())).length} {ar ? 'موظف' : 'agents'}</span>
+              </div>
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-slate-500 text-[10px] uppercase" style={{ background: 'rgba(255,255,255,0.03)' }}>
@@ -400,7 +408,7 @@ export default function OperationsAnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {agents.map(a => (
+                  {agents.filter(a => !agentQ || (a.agent || '').toLowerCase().includes(agentQ.toLowerCase())).map(a => (
                     <tr key={a.rank} className="border-t border-white/[0.04] hover:bg-white/[0.03] transition-all">
                       <td className="px-4 py-2.5">
                         <span className={`inline-flex w-6 h-6 rounded-lg items-center justify-center text-[10px] font-bold

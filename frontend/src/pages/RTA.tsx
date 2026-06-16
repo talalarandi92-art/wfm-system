@@ -25,6 +25,7 @@ interface SpQueue {
 interface SpAgent {
   agentId: string; agentName: string;
   status: 'available' | 'idle' | 'busy' | 'break' | 'away' | 'offline' | 'unknown';
+  statusRaw?: string;
   currentChannel: string; queueId: string; loginTime: string;
 }
 interface StationSummary {
@@ -280,6 +281,131 @@ function EmptyState({ icon, title, sub }: { icon: React.ReactNode; title: string
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  QUEUE DETAIL PANEL                                                         */
 /* ═══════════════════════════════════════════════════════════════════════════ */
+/* Full agent-state breakdown — counts + names per state, expandable. Sprinklr
+   reports agent status station-wide (agents are not tagged to a single queue), so
+   this is the live station picture, enriched with break type/duration. */
+const STATE_DEFS: { key: string; ar: string; en: string; color: string; match: (a: SpAgent) => boolean }[] = [
+  { key: 'available', ar: 'متاح',          en: 'Available', color: '#22c55e', match: a => a.status === 'available' },
+  { key: 'busy',      ar: 'مشغول / على كيس', en: 'Busy',     color: '#818cf8', match: a => a.status === 'busy' },
+  { key: 'idle',      ar: 'خامل (Idle)',   en: 'Idle',      color: '#f59e0b', match: a => a.status === 'idle' },
+  { key: 'break',     ar: 'بريك',          en: 'On Break',  color: '#fb923c', match: a => a.status === 'break' || a.status === 'away' },
+  { key: 'offline',   ar: 'غير متاح',       en: 'Offline',   color: '#64748b', match: a => a.status === 'offline' || a.status === 'unknown' },
+];
+
+function AgentStateBreakdown({ agents, breakData, ar }: { agents: SpAgent[]; breakData: BreakTracker | null; ar: boolean }) {
+  const [open, setOpen] = useState<string | null>('available');
+  const groups = STATE_DEFS.map(s => ({ ...s, list: agents.filter(s.match) })).filter(g => g.list.length > 0);
+  if (!agents.length) return null;
+  const breakInfo = (id: string) => breakData?.onBreakNow.find(b => b.agentId === id) ?? null;
+
+  return (
+    <div className="rounded-2xl overflow-hidden mb-3" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="px-3 py-2 flex items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <Users size={11} style={{ color: '#64748b' }} />
+        <span className="text-xs font-semibold" style={{ color: '#64748b' }}>{ar ? 'حالة الإيجنتات الآن — مين بكل حالة' : 'Agent states now — who is where'}</span>
+        <span className="text-[9px] ms-auto" style={{ color: '#334155' }}>{ar ? 'على مستوى المحطة' : 'station-wide'}</span>
+      </div>
+      {/* Count chips */}
+      <div className="p-2 flex flex-wrap gap-1.5">
+        {groups.map(g => (
+          <button key={g.key} onClick={() => setOpen(open === g.key ? null : g.key)}
+            className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-xl transition-colors"
+            style={{ background: open === g.key ? `${g.color}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${open === g.key ? g.color + '55' : 'rgba(255,255,255,0.06)'}`, color: g.color }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: g.color }} />
+            {ar ? g.ar : g.en} <b className="tabular-nums">{g.list.length}</b>
+          </button>
+        ))}
+      </div>
+      {/* Names for the open state */}
+      {open && groups.find(g => g.key === open) && (
+        <div className="px-2 pb-2 flex flex-wrap gap-1.5">
+          {groups.find(g => g.key === open)!.list.map(a => {
+            const bi = open === 'break' ? breakInfo(a.agentId) : null;
+            const color = groups.find(g => g.key === open)!.color;
+            return (
+              <span key={a.agentId} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg"
+                style={{ background: `${color}10`, border: `1px solid ${color}22`, color: '#cbd5e1' }}>
+                {a.agentName}
+                {bi?.statusRaw && <span className="text-[9px]" style={{ color }}>· {bi.statusRaw}{bi.minutesSoFar != null ? ` ${bi.minutesSoFar}د` : ''}{bi.isAuthorized === false ? ' ⚠' : ''}</span>}
+                {!bi && a.statusRaw && a.statusRaw !== a.status && <span className="text-[9px]" style={{ color: '#475569' }}>· {a.statusRaw}</span>}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Dedicated live AGENTS monitor — the Sprinklr station mirror (Agent Status +
+   Agent State) + who-is-where breakdown + a searchable/filterable agent table. */
+const AG_FILTERS: { key: string; ar: string; en: string; color: string; match: (a: SpAgent) => boolean }[] = [
+  { key: 'all',       ar: 'الكل',  en: 'All',       color: '#94a3b8', match: () => true },
+  { key: 'available', ar: 'متاح',  en: 'Available', color: '#22c55e', match: a => a.status === 'available' },
+  { key: 'busy',      ar: 'مشغول', en: 'Busy',      color: '#818cf8', match: a => a.status === 'busy' },
+  { key: 'idle',      ar: 'خامل',  en: 'Idle',      color: '#f59e0b', match: a => a.status === 'idle' },
+  { key: 'break',     ar: 'بريك',  en: 'Break',     color: '#fb923c', match: a => a.status === 'break' || a.status === 'away' },
+  { key: 'offline',   ar: 'غير متاح', en: 'Offline', color: '#64748b', match: a => a.status === 'offline' || a.status === 'unknown' },
+];
+
+function LiveAgentsPanel({ live, breakData, ar }: { live: SpLive | null; breakData: BreakTracker | null; ar: boolean }) {
+  const [q, setQ] = useState('');
+  const [filter, setFilter] = useState('all');
+  const agents = live?.agents ?? [];
+  const counts: Record<string, number> = {};
+  for (const f of AG_FILTERS) counts[f.key] = agents.filter(f.match).length;
+  const def = AG_FILTERS.find(f => f.key === filter)!;
+  const list = agents.filter(a => def.match(a) && (!q || a.agentName.toLowerCase().includes(q.toLowerCase())));
+
+  return (
+    <div>
+      {live?.stationSummary && <StationPanel station={live.stationSummary} ar={ar} />}
+      <AgentStateBreakdown agents={agents} breakData={breakData} ar={ar} />
+
+      {/* Search + status filter chips */}
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'بحث عن إيجنت...' : 'Search agent...'}
+          className="rounded-xl text-xs py-1.5 px-3 outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0', minWidth: 160 }} />
+        {AG_FILTERS.map(f => (
+          <button key={f.key} onClick={() => setFilter(f.key)}
+            className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-xl"
+            style={{ background: filter === f.key ? `${f.color}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${filter === f.key ? f.color + '55' : 'rgba(255,255,255,0.06)'}`, color: f.color }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: f.color }} />{ar ? f.ar : f.en} <b className="tabular-nums">{counts[f.key]}</b>
+          </button>
+        ))}
+      </div>
+
+      {/* Agent table */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="grid items-center gap-2 px-3 py-2 text-[9px] font-bold uppercase tracking-wide"
+          style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr', background: 'rgba(255,255,255,0.03)', color: '#475569', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <span>{ar ? 'الإيجنت' : 'Agent'}</span><span>{ar ? 'الحالة' : 'Status'}</span><span>{ar ? 'الدخول' : 'Login'}</span><span>{ar ? 'التفاصيل' : 'Detail'}</span>
+        </div>
+        <div className="max-h-[calc(100vh-380px)] overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          {list.length === 0 ? (
+            <p className="text-xs text-center py-6" style={{ color: '#334155' }}>{ar ? 'لا إيجنتات' : 'No agents'}</p>
+          ) : list.map(a => {
+            const sd = AG_FILTERS.find(f => f.key !== 'all' && f.match(a)) ?? AG_FILTERS[5];
+            const bi = breakData?.onBreakNow.find(b => b.agentId === a.agentId);
+            const loggedIn = a.status !== 'offline' && a.status !== 'unknown';
+            return (
+              <div key={a.agentId} className="grid items-center gap-2 px-3 py-1.5 text-[11px]"
+                style={{ gridTemplateColumns: '1.6fr 1fr 1fr 1.2fr', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                <span className="truncate" style={{ color: '#cbd5e1' }}>{a.agentName}</span>
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: sd.color }} /><span style={{ color: sd.color }}>{ar ? sd.ar : sd.en}</span></span>
+                <span style={{ color: loggedIn ? '#86efac' : '#475569' }}>{loggedIn ? (ar ? 'داخل' : 'In') : (ar ? 'خارج' : 'Out')}</span>
+                <span className="truncate" style={{ color: '#64748b' }}>
+                  {bi?.statusRaw ? `${bi.statusRaw}${bi.minutesSoFar != null ? ` ${bi.minutesSoFar}د` : ''}${bi.isAuthorized === false ? ' ⚠' : ''}` : (a.statusRaw || '—')}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose }: {
   q: SpQueue; detail: QueueDetail | null; agents: SpAgent[];
   breakData: BreakTracker | null; ar: boolean; onClose: () => void;
@@ -328,6 +454,9 @@ function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose }: {
           </div>
         ))}
       </div>
+
+      {/* Full agent-state breakdown — who is available/busy/idle/break/offline */}
+      <AgentStateBreakdown agents={agents} breakData={breakData} ar={ar} />
 
       {/* HC breakdown */}
       {queueAgents.length > 0 && (
@@ -2461,7 +2590,7 @@ export default function RTAPage() {
   const [coverage, setCoverage]   = useState<Coverage | null>(null);
   const [queueDetail, setQueueDetail] = useState<QueueDetail | null>(null);
   const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
-  const [tab, setTab]   = useState<'queues' | 'breaks' | 'permissions' | 'coverage' | 'agents' | 'daily' | 'compliance' | 'adherence'>('queues');
+  const [tab, setTab]   = useState<'queues' | 'liveagents' | 'breaks' | 'permissions' | 'coverage' | 'agents' | 'daily' | 'compliance' | 'adherence'>('queues');
   const [violations, setViolations] = useState<ViolationsReport | null>(null);
   const [adherence, setAdherence]   = useState<AdherenceReport | null>(null);
   const [intraday, setIntraday]     = useState<IntradayData | null>(null);
@@ -2706,28 +2835,8 @@ export default function RTAPage() {
         </div>
       )}
 
-      {/* ── AGENT STATUS ROW ───────────────────────────────────────────────── */}
-      {live && live.agents.length > 0 && (
-        <div className="flex-shrink-0 grid grid-cols-4 gap-2 px-4 pb-2">
-          {[
-            { l: ar ? 'متاح' : 'Available', v: s?.totalAvailable || agAvail, c: '#22c55e' },
-            { l: ar ? 'مشغول': 'Busy',      v: s?.totalBusy      || agBusy,  c: '#f59e0b' },
-            { l: ar ? 'برك'  : 'Break',     v: agBreak,   c: '#818cf8' },
-            { l: ar ? 'أوف'  : 'Offline',   v: agOffline, c: '#475569' },
-          ].map(item => (
-            <div key={item.l} className="rounded-xl py-1 px-3 flex items-center gap-2"
-              style={{ background: `${item.c}06`, border: `1px solid ${item.c}15` }}>
-              <span className="text-sm font-bold tabular-nums" style={{ color: item.c }}>{item.v}</span>
-              <span className="text-[10px]" style={{ color: '#334155' }}>{item.l}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ── LIVE STATION MIRROR (Sprinklr right-rail) ──────────────────────── */}
-      {live?.stationSummary && (
-        <StationPanel station={live.stationSummary} ar={ar} />
-      )}
+      {/* Agent Status row + Station mirror moved into the dedicated "Agents (live)"
+          tab so the top stays a clean overview and each tab is focused. */}
 
       {/* ── UNAUTHORIZED BREAK ALERT ───────────────────────────────────────── */}
       {(breakData?.onBreakNow ?? []).filter(a => !a.isAuthorized).length > 0 && (
@@ -2744,32 +2853,45 @@ export default function RTAPage() {
           onDispatch={form => { setSkillDispatch(form); setDispatchDone(false); }} />
       )}
 
-      {/* ── TABS ───────────────────────────────────────────────────────────── */}
+      {/* ── TABS (grouped: ● Live  |  ▣ Reports & performance) ───────────────── */}
       <div className="flex-shrink-0 flex items-center gap-1 px-4 pb-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-        {([
-          { key: 'queues',      label: ar ? 'الطوابير'    : 'Queues',      alert: live?.atRisk.length ?? 0 },
-          { key: 'breaks',      label: ar ? 'البريكات'    : 'Breaks',      alert: breakData?.unauthorizedCount ?? 0 },
-          { key: 'permissions', label: ar ? 'الاستئذانات' : 'Permissions', alert: breakData?.activePermissions.length ?? 0 },
-          { key: 'coverage',    label: ar ? 'التغطية'     : 'Coverage',    alert: 0 },
-          { key: 'agents',      label: ar ? 'ساعات العمل' : 'Work Hours',  alert: 0 },
-          { key: 'daily',       label: ar ? 'التقرير اليومي' : 'Daily Report', alert: 0 },
-          { key: 'compliance',  label: ar ? 'المخالفات' : 'Compliance', alert: violations?.summary.open ?? 0 },
-          { key: 'adherence',   label: ar ? 'الالتزام' : 'Adherence', alert: adherence?.summary.below85 ?? 0 },
-        ] as const).map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
-            style={{
-              background: tab === t.key ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-              color: tab === t.key ? '#818cf8' : '#475569',
-              border: tab === t.key ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
-            }}>
-            {t.label}
-            {t.alert > 0 && (
-              <span className="px-1 rounded text-[9px] font-bold"
-                style={{ background: '#ef444428', color: '#f87171' }}>{t.alert}</span>
-            )}
-          </button>
-        ))}
+        {(() => {
+          const groups: { groupAr: string; groupEn: string; dot: string; items: { key: typeof tab; label: string; alert: number }[] }[] = [
+            { groupAr: 'مباشر', groupEn: 'Live', dot: '#22c55e', items: [
+              { key: 'queues',      label: ar ? 'الكيوز'      : 'Queues',      alert: live?.atRisk.length ?? 0 },
+              { key: 'liveagents',  label: ar ? 'الإيجنتات'   : 'Agents',      alert: 0 },
+              { key: 'coverage',    label: ar ? 'التغطية'     : 'Coverage',    alert: 0 },
+              { key: 'breaks',      label: ar ? 'البريكات'    : 'Breaks',      alert: breakData?.unauthorizedCount ?? 0 },
+              { key: 'permissions', label: ar ? 'الاستئذانات' : 'Permissions', alert: breakData?.activePermissions.length ?? 0 },
+            ] },
+            { groupAr: 'تقارير وأداء', groupEn: 'Reports', dot: '#818cf8', items: [
+              { key: 'agents',      label: ar ? 'ساعات العمل'  : 'Work Hours',   alert: 0 },
+              { key: 'daily',       label: ar ? 'التقرير اليومي' : 'Daily Report', alert: 0 },
+              { key: 'adherence',   label: ar ? 'الالتزام'     : 'Adherence',    alert: adherence?.summary.below85 ?? 0 },
+              { key: 'compliance',  label: ar ? 'المخالفات'    : 'Compliance',   alert: violations?.summary.open ?? 0 },
+            ] },
+          ];
+          return groups.map((g, gi) => (
+            <div key={g.groupEn} className="flex items-center gap-1 flex-shrink-0">
+              {gi > 0 && <div className="mx-1.5 self-stretch" style={{ width: 1, background: 'rgba(255,255,255,0.1)' }} />}
+              <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider me-0.5" style={{ color: '#475569' }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: g.dot }} />{ar ? g.groupAr : g.groupEn}
+              </span>
+              {g.items.map(t => (
+                <button key={t.key} onClick={() => setTab(t.key)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
+                  style={{
+                    background: tab === t.key ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+                    color: tab === t.key ? '#818cf8' : '#475569',
+                    border: tab === t.key ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                  {t.label}
+                  {t.alert > 0 && <span className="px-1 rounded text-[9px] font-bold" style={{ background: '#ef444428', color: '#f87171' }}>{t.alert}</span>}
+                </button>
+              ))}
+            </div>
+          ));
+        })()}
       </div>
 
       {/* ── CONTENT ────────────────────────────────────────────────────────── */}
@@ -2821,6 +2943,12 @@ export default function RTAPage() {
               </div>
             )}
           </>
+        )}
+
+        {tab === 'liveagents' && (
+          <div className="flex-1 overflow-y-auto px-4 py-2 pb-6" style={{ scrollbarWidth: 'thin' }}>
+            <LiveAgentsPanel live={live} breakData={breakData} ar={ar} />
+          </div>
         )}
 
         {tab === 'breaks' && (

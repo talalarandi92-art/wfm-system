@@ -201,15 +201,20 @@ export class BreaksService {
         bt.id AS break_type_id,
         bt.name AS break_type, bt.name_ar AS break_type_ar,
         bt.duration_minutes, bt.color, bt.icon,
-        bt.is_mandatory, bt.is_prayer
+        bt.is_mandatory, bt.is_prayer,
+        to_char(ar.scheduled_start,'HH24:MI') AS shift_start,
+        to_char(ar.scheduled_end,'HH24:MI')   AS shift_end
        FROM break_slots bs
        JOIN employees  e  ON e.id  = bs.employee_id
        LEFT JOIN functions f ON f.id = e.function_id
        JOIN break_types bt ON bt.id = bs.break_type_id
+       LEFT JOIN attendance_records ar
+         ON ar.tenant_id = bs.tenant_id AND ar.employee_id = bs.employee_id
+        AND ar.attendance_date = bs.schedule_date
        WHERE bs.tenant_id = $1
          AND bs.schedule_date = $2::date
          ${functionId ? 'AND e.function_id = $3' : ''}
-       ORDER BY bs.planned_start, e.first_name_en`,
+       ORDER BY e.first_name_en, e.last_name_en, bs.planned_start`,
       functionId ? [tenantId, scheduleDate, functionId] : [tenantId, scheduleDate],
     );
 

@@ -1,15 +1,17 @@
 import { useSearchParams } from 'react-router-dom';
-import { Activity, BarChart3, FileText } from 'lucide-react';
+import { Activity, BarChart3, FileText, UserMinus } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import OperationsAnalyticsPage from '@/pages/OperationsAnalytics';
 import WorkforceAnalyticsPage from '@/pages/WorkforceAnalytics';
 import ReportsPage from '@/pages/Reports';
+import AttritionPage from '@/pages/Attrition';
 
-type HubTab = 'ops' | 'workforce' | 'reports';
+type HubTab = 'ops' | 'workforce' | 'attrition' | 'reports';
 
 const TABS: { key: HubTab; icon: typeof Activity; ar: string; en: string }[] = [
   { key: 'workforce', icon: BarChart3, ar: 'تحليلات القوى العاملة', en: 'Workforce Analytics' },
   { key: 'ops',       icon: Activity,  ar: 'تحليلات العمليات',      en: 'Operations Analytics' },
+  { key: 'attrition', icon: UserMinus, ar: 'معدّل التسرّب',          en: 'Attrition' },
   { key: 'reports',   icon: FileText,  ar: 'التقارير',              en: 'Reports' },
 ];
 
@@ -24,7 +26,7 @@ export default function AnalyticsHub() {
   const ar = lang === 'ar';
   const [params, setParams] = useSearchParams();
   const raw = params.get('tab');
-  const tab: HubTab = raw === 'ops' || raw === 'reports' ? raw : 'workforce';
+  const tab: HubTab = raw === 'ops' || raw === 'reports' || raw === 'attrition' ? raw : 'workforce';
 
   return (
     <div className="page-enter">
@@ -51,6 +53,7 @@ export default function AnalyticsHub() {
 
       {tab === 'workforce' && <WorkforceAnalyticsPage />}
       {tab === 'ops'       && <OperationsAnalyticsPage />}
+      {tab === 'attrition' && <AttritionPage />}
       {tab === 'reports'   && <ReportsPage />}
     </div>
   );

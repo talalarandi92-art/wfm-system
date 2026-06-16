@@ -85,6 +85,36 @@ export const KNOWLEDGE: KnowledgeTopic[] = [
     tags: ['rules', 'قواعد', 'female', 'shift', 'policy', 'boutiqaat'],
     body: 'قواعدنا الخاصة (مصدر الحقيقة): الأسبوع يبدأ السبت. أوقات الورديات الثابتة M07-16 · B09-18 · C11-20 · N13-22 · E16-01 · EE18-02 · MD22-07 · MN23-08 (لا أوقات مخترعة). الإناث حتى C (تنتهي 20:00)؛ N عند الضرورة كاستثناء لكل فنكشن؛ ممنوع منتصف الليل (E/EE/MD/MN) نهائياً. سياسة الفنكشن: Outbound/OMT = B وN فقط؛ Refund = M,B,C,N,E,EE بلا منتصف ليل. الراحة ≥10 ساعات. التزامن 4 للرقمي؛ إنتاجية المتدرّب ~70%. SLA الطلبات 30 دقيقة؛ لا موافقة تلقائية؛ نقص HC حرج = تحذير وإشعار مش حظر صارم.',
   },
+  {
+    topic: 'ot_reconciliation', titleAr: 'تسوية الأوفر تايم متعدد المصادر', titleEn: 'Multi-source OT reconciliation',
+    tags: ['overtime', 'ot', 'اوفرتايم', 'reconciliation', 'ameyo', 'sprinklr', 'odoo', 'attendance', 'punch'],
+    body: 'الأوفر تايم يُحسب على الشغل الفعلي بالنظام لا على البصمة. ادمج المصدرين: Ameyo (ready start/end) + Sprinklr (Available + Manual Outbound من تقرير AGENT_OCCUPANCY، لا login/logout لأنها تتسرّب). اتحاد الفترات الزمنية: الوقت المشترك يُحسب مرة، والمنفصل يُجمع (موظف ينهي شفته على Ameyo ثم يكمل ساعتين على Sprinklr = المجموع). يوم شغل عادي: OT = الوقت بعد نهاية الشفت. يوم OFF/عطلة رسمية اشتُغل: كامل اليوم OT ناقص ساعة بريك (9→8). العطل الرسمية (عيد/عرفة) موثوقة من Odoo حتى لو الجدول يبيّن شفت؛ لكن إجازات Odoo الفردية (annual/unpaid/off shift) غير موثوقة لأنها تتقادم. السبورت على الفلور بلا نظام = استخدم البصمة. حارس التسرّب: أي جلسة >16 ساعة منسية تُهمل، وإذا تجاوز Available 14 ساعة استخدم وقت معالجة الكونتاكتس (onCase). الأهم: جدول الـOT اليدوي ليس مرجعاً مطلقاً — المحلّل ينسى ساعات، ومهمة النظام كشف المنسي (شغل فعلي موجود وغير مُسجّل).',
+  },
+  {
+    topic: 'attendance_codes', titleAr: 'أكواد الحضور وتقارير الـHR والرفع', titleEn: 'Attendance codes, HR reports & upload',
+    tags: ['attendance', 'codes', 'اكواد', 'hr', 'wfh', 'sick', 'sl', 'absent', 'matrix', 'upload', 'رفع', 'استئذان', 'permission'],
+    body: 'أكواد الحضور بالجدول تحمل الحالة باللاحقة: NS/MS/ES/MDS = سيك، NA/MA/EA/MDA = غياب، بالإضافة SL (سيك معتمد) وA (غياب). الجدول المصدر غالباً مكوّد مسبقاً — تُستعمل كما هي بلا مضاعفة لاحقة؛ تُشتق MA/NA فقط لو الكود أساسي والموظف غاب. أكواد تقرير HR: بصمة→الكود العادي (M/B/C/N/E/EE20/MD/MN)، سيستم-بدون-بصمة→WFH، سيك معتمد→SL، غياب→A. تقرير HR ماتريكس (.xlsx) = صفوف موظفين × أعمدة تواريخ، تبويبان: Update (الأسبوع الماضي فعلي) + Advance (الأسبوع الجاي مجدول). التوافق (Conformance) يضيف دقائق الاستئذان/الكومبو المعتمد كمغطّاة (الاستئذان المعتمد لا يخفض التوافق). الاستئذان يُعرض بنوعه وحالته (Approved/Refused/Pending) ووقته. صفحة الرفع: ترفع ملفات Odoo/Ameyo/Sprinklr/الجدول → تُخزّن → يُعاد بناء الروستر؛ الملفات الشهرية تتراكم (Ameyo وSprinklr تُقرأ كل الملفات المطابقة). البصمة مرجع المكتب؛ السيستم الناقص (نافذة <15 دقيقة بلا بصمة) يُعلّم incomplete ولا يُحسب خروج مبكر وهمي — منعاً لخصم غلط.',
+  },
+  {
+    topic: 'roster', titleAr: 'الروستر ومصادر الحضور', titleEn: 'Roster & attendance data sources',
+    tags: ['roster', 'روستر', 'attendance', 'حضور', 'login', 'logout', 'لوج ان', 'ameyo', 'sprinklr', 'odoo', 'punch', 'بصمة'],
+    body: 'الروستر يُبنى بدمج: الجدول (Shifts) + Ameyo + Sprinklr + Odoo (بصمة/حالة) + الاستئذانات، مرتكزاً على الرقم الوظيفي. موثوقية المصادر (مهم): الجدول = مرجع الحقيقة للـOFF/الدوام/الإجازة. Ameyo (ready start/end) موثوق للنشاط الفعلي؛ لكن الـLogout الخام يتسرّب (جلسات منسية مفتوحة) فنستعمل ready-end + حارس 16 ساعة + تجميع clusters. Sprinklr: الـlogin/logout الخام يتسرّب بشدة (الموظف يترك الجلسة مفتوحة لليوم التالي) فلا يُعتمد؛ المعتمد هو تقرير AGENT_OCCUPANCY (Available/Manual Outbound = شغل فعلي). Odoo موثوق للعطل الرسمية (عيد/عرفة) والبصمة، لكن إجازاته الفردية (annual/unpaid/off shift) تتقادم فلا تُصدّق. البصمة موجودة للمكتب/الفلور فقط — الـWFH ما إلهم بصمة فنعتمد السيستم. دمج الوقت = اتحاد فترات Ameyo∪Sprinklr (المشترك مرة، المنفصل يُجمع). الروستر الحالي يغطي يناير→يونيو 2026 بعد دمج الأرقام المكررة (انترن→full-time).',
+  },
+  {
+    topic: 'cutoffs', titleAr: 'دورات الـCut-off والاستئذان', titleEn: 'Cut-off cycles & permission balance',
+    tags: ['cutoff', 'cut-off', 'كت اوف', 'استئذان', 'permission', 'balance', 'intern', 'bahrain', 'payroll'],
+    body: 'دورات الـcut-off تحدّد حدود الفترة للأوفر تايم والحضور ورصيد الاستئذان: الـfull-time من 15 الشهر إلى 14 الشهر اللي بعده؛ المتدربون (interns) من 1 إلى آخر الشهر (تقويمي)؛ البحرين من 25 إلى 24 الشهر اللي بعده. رصيد الاستئذان يتجدّد كل دورة عند تاريخ التجديد (15 للـfull-time) — مثلاً يرجع 6 ساعات + 3 استئذانات لكل دورة. عند حساب أرصدة الاستئذان أو الإعفاءات أو الأوفر تايم للفترة، اعمل الـbucket حسب نافذة الـcut-off للفئة (مش الشهر التقويمي العادي): full-time = 15→14، interns = 1→نهاية، البحرين = 25→24. تذكّر أيضاً تغيّر الرقم الوظيفي: المتدرّب يبدأ بـ6xxxx ويصير 1xxxx عند التحويل لـfull-time (اربط القديم بالجديد).',
+  },
+  {
+    topic: 'productivity_build', titleAr: 'بناء الإنتاجية من المصادر', titleEn: 'Productivity build from sources',
+    tags: ['productivity', 'انتاجية', 'break', 'بريك', 'ameyo', 'sprinklr', 'aux', 'status'],
+    body: 'الإنتاجية الأسبوعية/الشهرية تُبنى من: الجدول (أيام العمل WD + الإجازة + الأوف + المرضي) + نشاط Ameyo (عمود Break Reason: ACW, Erroneous, Meeting, Training, Support, Coaching, Other Task, Unavailable, Working in Escalation/Social/Email, Short Break) + ستيتوسات Sprinklr (occupancy). productivity% = (WD×9 − البريك) ÷ (WD×9). البريك = فقط اللي اسمه بريك (Short/Tea/Lunch/Long/Bio) — مش Unavailable ولا ACW ولا Meeting. التقسيم الأسبوعي تقويمي: W1=1-7، W2=8-14، W3=15-21، W4=22→نهاية، والفاينال = تجميع الشهر كامل ثم حساب مرة واحدة (مش متوسط الأسابيع) عشان أسبوع سيّئ ما يأثر بشكل مضخّم. خصم السيك على السكور: يوم −2%، يومين+ −5%. القيم تُقرّب (round) لأن معادلة السكور ما تقبل كسور.',
+  },
+  {
+    topic: 'scorecard', titleAr: 'سكوركارد الأداء والنقاط', titleEn: 'Performance scorecard & points',
+    tags: ['scorecard', 'سكوركارد', 'kpi', 'quality', 'fcr', 'ctr', 'prr', 'quiz', 'productivity', 'incentive', 'points'],
+    body: 'السكور = مجموع نقاط KPIs (Net Points، حد أقصى ~130) لكل موظف أسبوعياً ثم Final. كل مؤشر له قيمة خام وعتبات تعطي نقاط: الجودة (QA) ≥95%→30 · 90-95%→20 · 80-90%→10 · 65-80%→-10 · <65%→-20. الـFCR ≥85%→20 · 80-85%→10 · 75-80%→5 · <75%→-10. الإنتاجية ≥91%→15 · 90%→10 · 89%→5 · ≤86%→-15. الـCTR ≥95%→10 · 90-94%→5 · <90%→-10. الكويز 90-95%→5 · 95-100%→10 · <90%→-10. PRR: إذا response rate ≥10% و positive ≥80% → 5 نقاط. الأخطاء: 15−(عدد×5). زمن الرد ≤1س→15 · ≤2س→10 · ≤4س→5 · غير→-15. الإنتاجية = ساعات العمل ÷ (الإجمالي − البريك)؛ خصم السيك: يوم واحد −2% ويومين+ −5% من السكور. المصادر: feedback ameyo (تذاكر→FCR/CTR)، Productivity Interval (Staffed−Break)، CALL_History (كونتاكتس→CTR)، PRR/QA/QUIZ. الترتيب بالـNet Points → حافز (Reward KD) قابل للتعديل حسب الفنكشن.',
+  },
 ];
 
 export function searchKnowledge(query: string, limit = 4): KnowledgeTopic[] {

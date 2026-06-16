@@ -40,6 +40,22 @@ export const tp = (dark: boolean) => dark ? '#f1f5f9' : '#0f172a';
 export const ts = (dark: boolean) => dark ? '#64748b' : '#94a3b8';
 export const divider = (dark: boolean) => `1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`;
 
+/* ── Unified status palette ───────────────────────────────────────────────────
+   One green/amber/red/gray scale for the whole app so a status reads the same
+   everywhere. Prefer these over ad-hoc inline hexes. */
+export const STATUS = {
+  ok: '#22c55e', good: '#22c55e',
+  warn: '#f59e0b', caution: '#f59e0b',
+  risk: '#ef4444', bad: '#ef4444', fail: '#ef4444',
+  info: '#64748b', neutral: '#64748b', skip: '#64748b',
+} as const;
+export type StatusKey = keyof typeof STATUS;
+export const sevColor = (level: StatusKey) => STATUS[level] ?? STATUS.info;
+/** Color a gap/surplus: ≥ warnAt+1 green, ≥ warnAt amber, else red. */
+export const gapColor = (gap: number, warnAt = 0) => gap >= warnAt + 1 ? STATUS.ok : gap >= warnAt ? STATUS.warn : STATUS.risk;
+/** Color a 0–100 score: ≥90 green, ≥70 amber, else red. */
+export const scoreColor = (s: number) => s >= 90 ? STATUS.ok : s >= 70 ? STATUS.warn : STATUS.risk;
+
 /* ── Animated counter hook ───────────────────────────────────────────────── */
 export function useCountUp(target: number, ms = 800, run = true) {
   const [v, setV] = useState(0);

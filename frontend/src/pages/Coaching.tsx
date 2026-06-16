@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  GraduationCap, RefreshCw, Loader2, Check, X, AlertTriangle, Clock, Fingerprint, CalendarPlus,
+  GraduationCap, RefreshCw, Loader2, Check, X, AlertTriangle, Clock, Fingerprint, CalendarPlus, Award, Search,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
+import { useFilterStore } from '@/store/filter.store';
+import { FunctionFilter } from '@/components/FunctionFilter';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 
@@ -16,6 +18,7 @@ const TRIGGER_META: Record<string, { ar: string; en: string; icon: any }> = {
   repeated_late:      { ar: 'تأخّر متكرر',         en: 'Repeated late',      icon: Clock },
   repeated_early_out: { ar: 'خروج مبكر متكرر',     en: 'Repeated early-out', icon: AlertTriangle },
   missing_punch:      { ar: 'بصمات ناقصة متكررة',  en: 'Missing punches',    icon: Fingerprint },
+  low_scorecard:      { ar: 'أداء تحت الهدف',      en: 'Below-target score', icon: Award },
 };
 const SEV: Record<string, { ar: string; en: string; color: string }> = {
   high:   { ar: 'عالية',   en: 'High',   color: '#ef4444' },
@@ -34,6 +37,9 @@ export default function CoachingPage() {
   const [loading, setL]   = useState(true);
   const [scanning, setSc] = useState(false);
   const [status, setStatus] = useState<'open' | 'all'>('open');
+  const [q, setQ] = useState('');
+  const [trig, setTrig] = useState('all');
+  const functionName = useFilterStore(s => s.functionName);  // shared global function filter
 
   const load = useCallback(async () => {
     setL(true);
@@ -65,6 +71,13 @@ export default function CoachingPage() {
     low:    flags.filter(f => f.severity === 'low'    && f.status === 'open').length,
   };
 
+  // Client-side filter: trigger type + free-text (name / no / function).
+  const trigTypes = Array.from(new Set(flags.map(f => f.triggerType)));
+  const shownFlags = flags.filter(f =>
+    (trig === 'all' || f.triggerType === trig) &&
+    (!functionName || f.function === functionName) &&
+    (!q || `${f.employeeName} ${f.employeeNo} ${f.function ?? ''}`.toLowerCase().includes(q.toLowerCase())));
+
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
       {/* Header */}
@@ -82,6 +95,7 @@ export default function CoachingPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <FunctionFilter />
           <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
             {(['flags', 'sessions'] as const).map(v => (
               <button key={v} onClick={() => setView(v)} className="px-3 py-1.5 text-xs font-medium"
@@ -150,21 +164,43 @@ export default function CoachingPage() {
       ) : (
         /* ── Coaching flags ── */
         <>
-          <div className="flex gap-2 mb-4 flex-wrap">
+          <div className="flex gap-2 mb-3 flex-wrap items-center">
             {(['high', 'medium', 'low'] as const).map(s => (
               <span key={s} className="px-2.5 py-1 rounded-lg text-xs font-semibold" style={{ background: `${SEV[s].color}1a`, color: SEV[s].color }}>
                 {ar ? SEV[s].ar : SEV[s].en}: {counts[s]}
               </span>
             ))}
           </div>
-          {flags.length === 0 ? (
+          {/* Filters: search + trigger type */}
+          <div className="flex gap-2 mb-4 flex-wrap items-center">
+            <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <Search size={13} style={{ color: '#475569' }} />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'بحث: اسم / رقم / قسم' : 'Search: name / no / function'}
+                className="text-xs outline-none bg-transparent" style={{ color: '#e2e8f0', minWidth: 150 }} />
+            </div>
+            <button onClick={() => setTrig('all')} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+              style={{ background: trig === 'all' ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)', color: trig === 'all' ? '#c4b5fd' : '#64748b', border: `1px solid ${trig === 'all' ? 'rgba(168,85,247,0.3)' : 'transparent'}` }}>
+              {ar ? 'كل الأنواع' : 'All types'} {flags.length}
+            </button>
+            {trigTypes.map(t => {
+              const tm = TRIGGER_META[t] ?? { ar: t, en: t };
+              const n = flags.filter(f => f.triggerType === t).length;
+              return (
+                <button key={t} onClick={() => setTrig(t)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
+                  style={{ background: trig === t ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)', color: trig === t ? '#c4b5fd' : '#64748b', border: `1px solid ${trig === t ? 'rgba(168,85,247,0.3)' : 'transparent'}` }}>
+                  {ar ? tm.ar : tm.en} {n}
+                </button>
+              );
+            })}
+          </div>
+          {shownFlags.length === 0 ? (
             <div className="text-center py-20" style={{ color: '#475569' }}>
               <GraduationCap size={32} className="mx-auto mb-3" style={{ color: '#334155' }} />
               <p className="text-sm">{ar ? 'لا توجد حالات كوتشينج' : 'No coaching flags'}</p>
             </div>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {flags.map(f => {
+              {shownFlags.map(f => {
                 const tm = TRIGGER_META[f.triggerType] ?? { ar: f.triggerType, en: f.triggerType, icon: AlertTriangle };
                 const sv = SEV[f.severity] ?? SEV.low;
                 const Icon = tm.icon;

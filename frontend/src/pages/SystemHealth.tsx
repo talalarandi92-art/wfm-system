@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
-import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { tp, ts as tsColor, useInjectDsStyles, scoreColor } from '@/components/ds';
 
 type Status = 'pass' | 'warn' | 'fail' | 'skip';
 interface Check {
@@ -47,7 +47,6 @@ export default function SystemHealthPage() {
     { key: 'calculation', Icon: Calculator, ar: 'سلامة الحسابات والقواعد', en: 'Calculation & rule integrity' },
   ];
 
-  const scoreColor = (s: number) => s >= 90 ? '#22c55e' : s >= 70 ? '#f59e0b' : '#ef4444';
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>

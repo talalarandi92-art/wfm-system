@@ -36,8 +36,9 @@ interface CapacityResult {
   intervals: CalcInterval[];
   scenarios: {
     base: { required: number; gap: number };
-    withOT: { required: number; gap: number };
     lean: { required: number; gap: number };
+    withOT?: { required: number; gap: number };
+    surge?: { required: number; gap: number; multiplier: number; extraVsBase: number };
   };
 }
 
@@ -55,6 +56,10 @@ const CHANNEL_META: Record<string, { icon: React.ElementType; label: string; col
   whatsapp: { icon: MessageSquare, label: 'WhatsApp',          color: 'text-green-400',   bgDark: 'bg-green-500/10 border-green-500/30' },
   email:    { icon: Mail,          label: 'Email Support',     color: 'text-purple-400',  bgDark: 'bg-purple-500/10 border-purple-500/30' },
 };
+
+// Non-frontline roles don't handle a contact queue (no Erlang demand) → excluded
+// from capacity planning: RTA, Customer Care, Team Leader.
+const EXCLUDED_FN = /\b(rta|customer\s*care|team\s*leader)\b/i;
 
 function channelMeta(ct: string) {
   return CHANNEL_META[ct] ?? { icon: Activity, label: ct, color: 'text-slate-400', bgDark: 'bg-slate-500/10 border-slate-500/30' };
@@ -119,12 +124,12 @@ function VolumeGrid({
         <div className="flex gap-2 items-center">
           <input
             type="number" min={0} placeholder="Flat volume"
-            className={`w-24 text-xs px-2 py-1 rounded border ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+            className={`w-24 text-xs px-2 py-1 rounded border ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
             onBlur={e => { if (e.target.value) applyFlat(+e.target.value); }}
           />
           <button
             onClick={() => applyFlat(0)}
-            className={`text-xs px-2 py-1 rounded ${dark ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+            className={`text-xs px-2 py-1 rounded ${dark ? 'bg-white/[0.05] hover:bg-white/[0.08] text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
           >
             Clear
           </button>
@@ -134,7 +139,7 @@ function VolumeGrid({
       <div className={`rounded-lg border overflow-hidden text-xs ${dark ? 'border-slate-700' : 'border-slate-200'}`}>
         <table className="w-full">
           <thead>
-            <tr className={dark ? 'bg-slate-800' : 'bg-slate-50'}>
+            <tr className={dark ? 'bg-white/[0.04]' : 'bg-slate-50'}>
               <th className="px-3 py-2 text-left font-medium">Interval</th>
               <th className="px-3 py-2 text-center font-medium">Volume</th>
               <th className="px-3 py-2 text-center font-medium">AHT (s)</th>
@@ -149,7 +154,7 @@ function VolumeGrid({
                     type="number" min={0} value={row.volume || ''}
                     onChange={e => update(i, 'volume', +e.target.value)}
                     placeholder="0"
-                    className={`w-full text-center rounded border px-1 py-0.5 ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                    className={`w-full text-center rounded border px-1 py-0.5 ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
                   />
                 </td>
                 <td className="px-2 py-1">
@@ -157,7 +162,7 @@ function VolumeGrid({
                     type="number" min={1} value={row.aht || ''}
                     onChange={e => update(i, 'aht', +e.target.value)}
                     placeholder={String(globalAht)}
-                    className={`w-full text-center rounded border px-1 py-0.5 ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                    className={`w-full text-center rounded border px-1 py-0.5 ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
                   />
                 </td>
               </tr>
@@ -169,7 +174,7 @@ function VolumeGrid({
       {rows.length > 8 && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className={`mt-2 w-full text-xs py-1.5 rounded flex items-center justify-center gap-1 ${dark ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+          className={`mt-2 w-full text-xs py-1.5 rounded flex items-center justify-center gap-1 ${dark ? 'bg-white/[0.05] hover:bg-white/[0.08] text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
         >
           {expanded ? <><ChevronUp size={12} /> Show Less</> : <><ChevronDown size={12} /> Show All {rows.length} Intervals</>}
         </button>
@@ -188,7 +193,7 @@ function IntervalChart({ result, dark }: { result: CapacityResult; dark: boolean
   const H = 150;
 
   return (
-    <div className={`rounded-xl border p-4 mb-4 ${dark ? 'bg-slate-800/60 border-slate-700' : 'bg-white border-slate-200'}`}>
+    <div className={`rounded-xl border p-4 mb-4 ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-bold flex items-center gap-1.5"><BarChart3 size={13} className="text-indigo-400" /> Required vs Scheduled by Interval</span>
         <div className="flex items-center gap-3 text-[10px]">
@@ -271,22 +276,25 @@ function ResultsTable({ result, dark }: { result: CapacityResult; dark: boolean 
       )}
 
       {/* Scenarios */}
-      <div className={`rounded-xl border p-3 mb-4 ${dark ? 'bg-slate-800/60 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
+      <div className={`rounded-xl border p-3 mb-4 ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-slate-50 border-slate-200'}`}>
         <div className="text-xs font-semibold mb-3 flex items-center gap-1.5">
           <BarChart3 size={13} />
           Scenario Comparison
         </div>
         <div className="grid grid-cols-3 gap-2 text-xs">
-          {[
-            { key: 'base',   label: 'Base (Current Shrinkage)', sc: result.scenarios.base },
-            { key: 'withOT', label: 'With OT Coverage (-10%)',  sc: result.scenarios.withOT },
-            { key: 'lean',   label: 'Lean Plan (+15%)',         sc: result.scenarios.lean },
-          ].map(({ key, label, sc }) => (
-            <div key={key} className={`rounded-lg p-2 border text-center ${dark ? 'bg-slate-700/50 border-slate-600' : 'bg-white border-slate-200'}`}>
-              <div className={`text-[10px] mb-1.5 font-medium ${dark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</div>
-              <div className={`text-lg font-bold ${dark ? 'text-white' : 'text-slate-800'}`}>{sc.required}</div>
+          {([
+            { key: 'base',   label: 'Base (P90 demand)',                         sc: result.scenarios.base,   accent: false },
+            result.scenarios.surge
+              ? { key: 'surge', label: `P99 Surge (×${(result.scenarios.surge as any).multiplier})`, sc: result.scenarios.surge, accent: true }
+              : { key: 'withOT', label: 'With OT Coverage (-10%)',                sc: result.scenarios.withOT!, accent: false },
+            { key: 'lean',   label: 'Lean Plan (+15%)',                          sc: result.scenarios.lean,   accent: false },
+          ] as { key: string; label: string; sc: { required: number; gap: number }; accent: boolean }[]).map(({ key, label, sc, accent }) => (
+            <div key={key} className={`rounded-lg p-2 border text-center ${accent ? 'bg-amber-500/10 border-amber-500/40' : dark ? 'bg-white/[0.03] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
+              <div className={`text-[10px] mb-1.5 font-medium ${accent ? 'text-amber-400' : dark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</div>
+              <div className={`text-lg font-bold ${accent ? 'text-amber-300' : dark ? 'text-white' : 'text-slate-800'}`}>{sc.required}</div>
               <div className={`text-[10px] mt-0.5 ${sc.gap > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
                 {sc.gap > 0 ? `${sc.gap} understaffed` : sc.gap < 0 ? `${Math.abs(sc.gap)} surplus` : 'Balanced'}
+                {key === 'surge' && (result.scenarios.surge as any).extraVsBase > 0 && ` · +${(result.scenarios.surge as any).extraVsBase} vs base`}
               </div>
             </div>
           ))}
@@ -300,7 +308,7 @@ function ResultsTable({ result, dark }: { result: CapacityResult; dark: boolean 
       <div className={`rounded-xl border overflow-hidden ${dark ? 'border-slate-700' : 'border-slate-200'}`}>
         <table className="w-full text-xs">
           <thead>
-            <tr className={dark ? 'bg-slate-800' : 'bg-slate-50'}>
+            <tr className={dark ? 'bg-white/[0.04]' : 'bg-slate-50'}>
               <th className="px-3 py-2.5 text-left font-semibold">Interval</th>
               <th className="px-3 py-2.5 text-center font-semibold">Volume</th>
               <th className="px-3 py-2.5 text-center font-semibold">Workload</th>
@@ -360,7 +368,7 @@ function ResultsTable({ result, dark }: { result: CapacityResult; dark: boolean 
       {intervals.length > 12 && (
         <button
           onClick={() => setShowAll(!showAll)}
-          className={`mt-2 w-full text-xs py-2 rounded flex items-center justify-center gap-1 ${dark ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
+          className={`mt-2 w-full text-xs py-2 rounded flex items-center justify-center gap-1 ${dark ? 'bg-white/[0.05] hover:bg-white/[0.08] text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'}`}
         >
           {showAll ? <><ChevronUp size={12} /> Show Less</> : <><ChevronDown size={12} /> Show All {intervals.length} Intervals</>}
         </button>
@@ -449,7 +457,7 @@ export default function CapacityPage() {
   /* ── Load functions ────────────────────────────────────────────────────── */
   useEffect(() => {
     apiClient.get('/capacity/functions').then((r: { data: Func[] }) => {
-      setFunctions(r.data ?? []);
+      setFunctions((r.data ?? []).filter(f => !EXCLUDED_FN.test(f.name) && !EXCLUDED_FN.test(f.name_ar ?? '')));
     }).catch(() => {});
   }, []);
 
@@ -457,7 +465,7 @@ export default function CapacityPage() {
   const loadOverview = useCallback(() => {
     setOverviewLoading(true);
     apiClient.get(`/capacity/hc-overview?date=${date}`).then((r: { data: HcOverviewRow[] }) => {
-      setOverview(r.data ?? []);
+      setOverview((r.data ?? []).filter(row => !EXCLUDED_FN.test(row.func_name ?? '')));
     }).catch(() => {}).finally(() => setOverviewLoading(false));
   }, [date]);
 
@@ -575,79 +583,87 @@ export default function CapacityPage() {
    *  RENDER
    * ────────────────────────────────────────────────────────────────────────*/
   return (
-    <div className={`min-h-screen p-4 sm:p-6 ${dark ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-800'}`} dir={ar ? 'rtl' : 'ltr'}>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-        <div>
-          <h1 className={`text-2xl font-bold flex items-center gap-2 ${dark ? 'text-white' : 'text-slate-800'}`}>
-            <Calculator size={24} className="text-blue-400" />
-            {ar ? 'تخطيط الطاقة الاستيعابية' : 'Capacity Planning'}
-          </h1>
-          <p className={`text-sm mt-1 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
-            {ar ? 'احتساب الهيدكاونت المطلوب باستخدام Erlang-C ونماذج التزامن' : 'Erlang-C · Concurrency · Email Backlog Models'}
-          </p>
+    <div className="min-h-screen p-5 sm:p-6" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)', color: dark ? '#e2e8f0' : '#0f172a' }}>
+      {/* Header — modern icon-chip style, consistent with the rest of the app */}
+      <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.22)' }}>
+            <Calculator size={20} style={{ color: '#3b82f6' }} />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
+              {ar ? 'تخطيط الطاقة الاستيعابية' : 'Capacity Planning'}
+            </h1>
+            <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>
+              {ar ? 'Erlang-C · نماذج التزامن · باكلوج الإيميل · سيناريو ذروة P99' : 'Erlang-C · Concurrency · Email Backlog · P99 Surge'}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <input
             type="date"
             value={date}
             onChange={e => setDate(e.target.value)}
-            className={`text-sm px-3 py-2 rounded-lg border ${dark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+            className="text-xs rounded-xl px-3 py-2 outline-none"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: dark ? '#e2e8f0' : '#0f172a' }}
           />
-          <button
-            onClick={loadOverview}
-            className={`p-2 rounded-lg border ${dark ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-white border-slate-300 hover:bg-slate-50'}`}
-          >
-            <RefreshCw size={15} className={overviewLoading ? 'animate-spin text-blue-400' : (dark ? 'text-slate-400' : 'text-slate-500')} />
+          <button onClick={loadOverview}
+            className="flex items-center justify-center w-9 h-9 rounded-xl"
+            style={{ background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.25)' }}>
+            <RefreshCw size={15} className={overviewLoading ? 'animate-spin' : ''} style={{ color: '#60a5fa' }} />
           </button>
         </div>
       </div>
 
-      {/* HC Overview Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+      {/* Function picker */}
+      <p className="text-[10px] font-bold uppercase tracking-wider mb-2" style={{ color: '#64748b' }}>
+        {ar ? 'اختر قسماً للحساب' : 'Pick a function to size'}
+      </p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 mb-6">
         {overview.length === 0 && (
-          <div className={`col-span-full text-center py-4 text-sm ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
-            No scheduled HC data for selected date
+          <div className="col-span-full text-center py-6 text-sm" style={{ color: '#475569' }}>
+            {ar ? 'لا توجد بيانات هيدكاونت لهذا اليوم' : 'No scheduled HC for this date'}
           </div>
         )}
         {overview.map(row => {
           const meta = channelMeta(row.channel_type);
           const Icon = meta.icon;
+          const sel = selectedFunc?.id === row.function_id;
           return (
-            <div
+            <button
               key={row.function_id}
-              onClick={() => {
-                const fn = functions.find(f => f.id === row.function_id);
-                if (fn) selectFunc(fn);
-              }}
-              className={`rounded-xl border p-3 cursor-pointer transition-all ${
-                selectedFunc?.id === row.function_id
-                  ? (dark ? 'border-blue-500 bg-blue-500/10' : 'border-blue-400 bg-blue-50')
-                  : (dark ? `${meta.bgDark} hover:border-slate-500` : 'bg-white border-slate-200 hover:border-slate-300')
-              }`}
-            >
+              onClick={() => { const fn = functions.find(f => f.id === row.function_id); if (fn) selectFunc(fn); }}
+              className="rounded-2xl p-3 text-start transition-all"
+              style={{
+                background: sel ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.02)',
+                border: `1px solid ${sel ? 'rgba(59,130,246,0.45)' : 'rgba(255,255,255,0.07)'}`,
+                boxShadow: sel ? '0 4px 16px rgba(59,130,246,0.15)' : 'none',
+              }}>
               <div className="flex items-center justify-between mb-2">
-                <Icon size={16} className={meta.color} />
-                <span className={`text-xs px-1.5 py-0.5 rounded uppercase font-mono ${dark ? 'bg-slate-700 text-slate-400' : 'bg-slate-100 text-slate-500'}`}>{row.channel_type}</span>
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <Icon size={14} className={meta.color} />
+                </span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded uppercase font-mono" style={{ background: 'rgba(255,255,255,0.05)', color: '#64748b' }}>{row.channel_type}</span>
               </div>
-              <div className={`font-semibold text-sm truncate mb-1 ${dark ? 'text-white' : 'text-slate-800'}`}>{row.func_name}</div>
+              <div className="font-semibold text-sm truncate mb-1.5" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{row.func_name}</div>
               <div className="flex items-end justify-between">
                 <div>
-                  <div className={`text-2xl font-bold ${dark ? 'text-white' : 'text-slate-800'}`}>{row.scheduled_hc}</div>
-                  <div className={`text-[10px] ${dark ? 'text-slate-500' : 'text-slate-400'}`}>scheduled today</div>
+                  <div className="text-2xl font-bold leading-none" style={{ color: sel ? '#60a5fa' : (dark ? '#f1f5f9' : '#0f172a') }}>{row.scheduled_hc}</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>{ar ? 'مجدول اليوم' : 'scheduled'}</div>
                 </div>
-                <div className="text-right">
-                  <div className={`text-xs ${dark ? 'text-slate-400' : 'text-slate-500'}`}>WFH: {row.wfh_hc}</div>
-                  <div className={`text-xs ${dark ? 'text-slate-400' : 'text-slate-500'}`}>Office: {row.office_hc}</div>
+                <div className="text-end text-[10px]" style={{ color: '#64748b' }}>
+                  <div>WFH {row.wfh_hc}</div>
+                  <div>{ar ? 'مكتب' : 'Office'} {row.office_hc}</div>
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
 
       {/* ── LIVE PLAN — Erlang-C on measured Sprinklr workload ─────────────── */}
-      <div className={`rounded-xl border p-4 mb-5 ${dark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className={`rounded-2xl p-4 mb-4 border ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <Activity size={16} className="text-emerald-400" />
           <span className={`text-sm font-semibold ${dark ? 'text-slate-200' : 'text-slate-700'}`}>
@@ -683,7 +699,7 @@ export default function CapacityPage() {
                 { l: ar ? 'متوسط المجدول' : 'Avg Scheduled', v: livePlan.summary.avgScheduledHc, c: 'text-slate-300' },
                 { l: ar ? 'أسوأ عجز' : 'Worst Gap', v: livePlan.summary.worstGap, c: livePlan.summary.worstGap > 0 ? 'text-red-400' : 'text-emerald-400' },
               ].map(k => (
-                <div key={k.l} className={`rounded-lg p-2.5 text-center ${dark ? 'bg-slate-900/60' : 'bg-slate-50'}`}>
+                <div key={k.l} className={`rounded-lg p-2.5 text-center ${dark ? 'bg-white/[0.03]' : 'bg-slate-50'}`}>
                   <div className={`text-xl font-black tabular-nums ${k.c}`}>{k.v}</div>
                   <div className={`text-[10px] mt-0.5 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>{k.l}</div>
                 </div>
@@ -722,7 +738,7 @@ export default function CapacityPage() {
       </div>
 
       {/* ── HC BY FUNCTION × HOUR ───────────────────────────────────────────── */}
-      <div className={`rounded-xl border p-4 mb-5 ${dark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className={`rounded-2xl p-4 mb-4 border ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
         <button onClick={() => setFnHourlyOpen(o => !o)} className="w-full flex items-center gap-2 text-start">
           <Users size={16} className="text-sky-400" />
           <span className={`text-sm font-semibold ${dark ? 'text-slate-200' : 'text-slate-700'}`}>
@@ -738,7 +754,7 @@ export default function CapacityPage() {
           <div className="mt-3 overflow-x-auto" style={{ maxHeight: 420, overflowY: 'auto' }}>
             <table className="w-full text-xs" style={{ borderCollapse: 'collapse', minWidth: 760 }}>
               <thead className="sticky top-0 z-10">
-                <tr className={dark ? 'bg-slate-900' : 'bg-slate-100'}>
+                <tr className={dark ? 'bg-[#0d1120]' : 'bg-slate-100'}>
                   {[ar ? 'الساعة' : 'Hour', ar ? 'المطلوب' : 'Required', ar ? 'المجدول' : 'Scheduled',
                     ar ? 'الفعلي الآن' : 'Actual', ar ? 'الفجوة' : 'Gap', ar ? 'الحالة' : 'Status',
                     ar ? 'أعلى الوظائف (مجدول/فعلي)' : 'Top functions (sched/actual)'].map(hd => (
@@ -801,7 +817,7 @@ export default function CapacityPage() {
       </div>
 
       {/* CPO Forecaster */}
-      <div className={`rounded-xl border p-4 mb-5 ${dark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-200'}`}>
+      <div className={`rounded-2xl p-4 mb-4 border ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex items-center gap-2 shrink-0">
             <ShoppingBag size={16} className="text-amber-400" />
@@ -823,7 +839,7 @@ export default function CapacityPage() {
                 type="number" min={0} value={cpoOrders || ''}
                 onChange={e => { setCpoOrders(+e.target.value); setCpoResult(null); }}
                 placeholder="e.g. 1000"
-                className={`w-28 text-center px-2 py-1.5 rounded-lg border text-sm font-mono ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                className={`w-28 text-center px-2 py-1.5 rounded-lg border text-sm font-mono ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
               />
             </div>
 
@@ -862,7 +878,7 @@ export default function CapacityPage() {
             {/* Result */}
             {cpoResult && (
               <div className="flex items-center gap-3">
-                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono ${dark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border font-mono ${dark ? 'bg-white/[0.04] border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                   <span className={`text-xs ${dark ? 'text-slate-400' : 'text-slate-500'}`}>{cpoOrders.toLocaleString()} orders × {cpoPct}%</span>
                   <ArrowRight size={12} className={dark ? 'text-slate-500' : 'text-slate-400'} />
                   <span className={`text-base font-bold ${dark ? 'text-amber-300' : 'text-amber-600'}`}>
@@ -908,7 +924,7 @@ export default function CapacityPage() {
         <div className="lg:col-span-4 space-y-4">
           {/* Function selector (if not picked from overview) */}
           {functions.length > 0 && (
-            <div className={`rounded-xl border p-4 ${dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`rounded-xl border p-4 ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
               <div className={`text-xs font-semibold mb-3 uppercase tracking-wide ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
                 Select Function
               </div>
@@ -937,7 +953,7 @@ export default function CapacityPage() {
 
           {/* Model parameters */}
           {selectedFunc && (
-            <div className={`rounded-xl border p-4 ${dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`rounded-xl border p-4 ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
               <div className={`text-xs font-semibold mb-3 uppercase tracking-wide flex items-center gap-1.5 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
                 <Zap size={12} />
                 Model Parameters — {selectedFunc.name}
@@ -950,7 +966,7 @@ export default function CapacityPage() {
                   <select
                     value={intervalMinutes}
                     onChange={e => setIntervalMinutes(+e.target.value)}
-                    className={`w-24 px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                    className={`w-24 px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
                   >
                     <option value={15}>15 min</option>
                     <option value={30}>30 min</option>
@@ -967,7 +983,7 @@ export default function CapacityPage() {
                   <input
                     type="number" min={30} max={3600} value={defaultAht}
                     onChange={e => setDefaultAht(+e.target.value)}
-                    className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                    className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
                   />
                 </div>
 
@@ -994,7 +1010,7 @@ export default function CapacityPage() {
                       <input
                         type="number" min={5} max={120} value={targetAnswerSec}
                         onChange={e => setTargetAnswerSec(+e.target.value)}
-                        className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                        className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
                       />
                     </div>
                   </>
@@ -1012,7 +1028,7 @@ export default function CapacityPage() {
                       <input
                         type="number" min={30} max={600} value={targetAnswerSec}
                         onChange={e => setTargetAnswerSec(+e.target.value)}
-                        className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                        className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
                       />
                     </div>
                   </>
@@ -1025,7 +1041,7 @@ export default function CapacityPage() {
                     <input
                       type="number" min={0} value={openingBacklog}
                       onChange={e => setOpeningBacklog(+e.target.value)}
-                      className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300'}`}
+                      className={`w-20 text-center px-2 py-1.5 rounded-lg border text-sm ${dark ? 'bg-white/[0.04] border-white/10 text-white' : 'bg-white border-slate-300'}`}
                     />
                   </div>
                 )}
@@ -1076,7 +1092,7 @@ export default function CapacityPage() {
               </div>
 
               {/* Assumptions info box */}
-              <div className={`mt-3 rounded-lg p-2.5 text-xs border ${dark ? 'bg-slate-700/50 border-slate-600 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+              <div className={`mt-3 rounded-lg p-2.5 text-xs border ${dark ? 'bg-white/[0.03] border-white/[0.08] text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
                 <div className="flex items-center gap-1 mb-1 font-medium"><Info size={10} /> Model assumptions</div>
                 <div>• Shrinkage applied as gross staffing factor</div>
                 <div>• Erlang-C assumes steady-state, random arrivals</div>
@@ -1092,7 +1108,7 @@ export default function CapacityPage() {
         {/* Right panel — volume input + results */}
         <div className="lg:col-span-8 space-y-4">
           {!selectedFunc ? (
-            <div className={`rounded-xl border p-12 flex flex-col items-center justify-center ${dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+            <div className={`rounded-xl border p-12 flex flex-col items-center justify-center ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
               <Calculator size={48} className={`mb-3 ${dark ? 'text-slate-600' : 'text-slate-300'}`} />
               <div className={`text-lg font-semibold mb-1 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
                 Select a function to start
@@ -1104,7 +1120,7 @@ export default function CapacityPage() {
           ) : (
             <>
               {/* Volume input */}
-              <div className={`rounded-xl border p-4 ${dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+              <div className={`rounded-xl border p-4 ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <div className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
                     <Clock size={12} />
@@ -1151,7 +1167,7 @@ export default function CapacityPage() {
 
               {/* Results */}
               {result && (
-                <div className={`rounded-xl border p-4 ${dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
+                <div className={`rounded-xl border p-4 ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
                   <div className="flex items-center justify-between mb-4">
                     <div className={`text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
                       <BarChart3 size={12} />

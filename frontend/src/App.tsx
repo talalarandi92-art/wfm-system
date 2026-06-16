@@ -15,13 +15,15 @@ import UserManagementPage      from '@/pages/UserManagement';
 import LiveOpsHub             from '@/pages/LiveOpsHub';
 import ScorecardPage           from '@/pages/Scorecard';
 import AnalyticsHub            from '@/pages/AnalyticsHub';
+import ProductivityPage        from '@/pages/Productivity';
+import RosterPage              from '@/pages/Roster';
+import RosterDashboardPage     from '@/pages/RosterDashboard';
 import SettingsPage            from '@/pages/Settings';
 import CalendarPage            from '@/pages/Calendar';
 import SkillsPage              from '@/pages/Skills';
 import WorkspaceHub           from '@/pages/WorkspaceHub';
 import AgentHome               from '@/pages/AgentHome';
 import OdooIntegrationPage     from '@/pages/OdooIntegration';
-import ScheduleChangesPage       from '@/pages/ScheduleChanges';
 import CoachingPage              from '@/pages/Coaching';
 import ControlDashboardsPage     from '@/pages/ControlDashboards';
 import HourlyCoveragePage        from '@/pages/HourlyCoverage';
@@ -36,6 +38,8 @@ import ChiefPage                 from '@/pages/Chief';
 import ScorecardGuardPage        from '@/pages/ScorecardGuard';
 import ResearcherPage            from '@/pages/Researcher';
 import KnowledgeLedgerPage       from '@/pages/KnowledgeLedger';
+import TeamLearningPage          from '@/pages/TeamLearning';
+import DiagnosticsPage           from '@/pages/Diagnostics';
 import Placeholder from '@/pages/Placeholder';
 import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -103,9 +107,12 @@ export default function App() {
           <Route path="knowledge-base" element={<Navigate to="/chat?tab=kb" replace />} />
           <Route path="integrations/odoo" element={<OdooIntegrationPage />} />
           <Route path="analytics" element={<AnalyticsHub />} />
+          <Route path="productivity" element={<ProductivityPage />} />
+          <Route path="roster" element={<RosterPage />} />
+          <Route path="roster-dashboard" element={<RosterDashboardPage />} />
           <Route path="campaigns" element={<Navigate to="/schedule?tab=campaigns" replace />} />
           <Route path="attendance-corrections" element={<Navigate to="/attendance?tab=corrections" replace />} />
-          <Route path="schedule-changes" element={<ScheduleChangesPage />} />
+          <Route path="schedule-changes" element={<Navigate to="/schedule?tab=changes" replace />} />
           <Route path="coaching" element={<CoachingPage />} />
           <Route path="control-dashboards" element={<ControlDashboardsPage />} />
           <Route path="hourly-coverage" element={<HourlyCoveragePage />} />
@@ -120,6 +127,8 @@ export default function App() {
           <Route path="scorecard-guard" element={<ScorecardGuardPage />} />
           <Route path="researcher" element={<ResearcherPage />} />
           <Route path="knowledge-ledger" element={<KnowledgeLedgerPage />} />
+          <Route path="team-learning" element={<TeamLearningPage />} />
+          <Route path="diagnostics" element={<DiagnosticsPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
