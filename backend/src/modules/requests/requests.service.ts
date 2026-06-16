@@ -642,6 +642,12 @@ export class RequestsService {
 
     const approverId = await this.resolveUserIdOrNull(tenantId, dto.approverId);
 
+    // Write the swap to the live schedule FIRST. If it throws (e.g. a missing
+    // schedule row), the request stays pending rather than approved-but-unapplied.
+    if (isSwap) {
+      await this.applySwap(tenantId, requestId, approverId);
+    }
+
     await this.ds.query(
       `UPDATE requests
        SET status = 'approved', approved_l1_at = NOW(),
@@ -649,11 +655,6 @@ export class RequestsService {
        WHERE id = $1 AND tenant_id = $3`,
       [requestId, approverId, tenantId],
     );
-
-    // Apply swap to attendance_records
-    if (isSwap) {
-      await this.applySwap(tenantId, requestId);
-    }
 
     return { success: true, message: 'ØªÙ…Øª Ø§Ù„Ù…ÙˆØ§ÙÙ‚Ø© Ø¹Ù„Ù‰ Ø§Ù„Ø·Ù„Ø¨' };
   }
@@ -710,7 +711,17 @@ export class RequestsService {
     return r.length ? userId : null;
   }
 
-  private async applySwap(tenantId: string, requestId: string) {
+  /**
+   * Apply an approved swap to the live schedule — runs ONLY after both gates pass:
+   *   1. peer_accepted_at is set (the colleague accepted), AND
+   *   2. the request reached final 'approved' status (RTA/supervisor approved).
+   * Swaps the two employees' full schedule tuple atomically (marker + times +
+   * split-shift segment + WFH flag), appends a version-history entry into each
+   * cell's notes timeline (read by getCellTimeline), writes audit_logs entries,
+   * marks the swap applied, and notifies both employees.
+   * Fairness stays PRE-swap (loadYtdDistribution reverses swaps).
+   */
+  private async applySwap(tenantId: string, requestId: string, approverUserId: string | null) {
     const swap = await this.ds.query(
       `SELECT rss.*, r.employee_id AS requester_employee_id
        FROM request_shift_swaps rss JOIN requests r ON r.id = rss.request_id
@@ -720,35 +731,158 @@ export class RequestsService {
     if (!swap.length) return;
     const s = swap[0];
 
-    const reqRec = await this.ds.query(
-      `SELECT id, scheduled_start, scheduled_end, scheduled_shift_code_id
-       FROM attendance_records
-       WHERE tenant_id = $1 AND employee_id = $2 AND attendance_date::date = $3::date`,
-      [tenantId, s.requester_employee_id, s.requester_date],
-    );
-    const tgtRec = await this.ds.query(
-      `SELECT id, scheduled_start, scheduled_end, scheduled_shift_code_id
-       FROM attendance_records
-       WHERE tenant_id = $1 AND employee_id = $2 AND attendance_date::date = $3::date`,
-      [tenantId, s.target_employee_id, s.target_date],
-    );
+    // Gate 1 — the colleague must have accepted (peer_accepted_at set, not rejected)
+    if (!s.peer_accepted_at || s.peer_rejected_at) {
+      throw new BadRequestException('لا يمكن تطبيق التبديل قبل قبول الموظف الثاني');
+    }
+    // OFF swaps may legitimately have one side without a target row; shift swaps need both.
+    if (!s.target_employee_id) return;
 
-    if (!reqRec.length || !tgtRec.length) return;
-    const rr = reqRec[0];
-    const tr = tgtRec[0];
+    const swapType = s.swap_type === 'off' ? 'off_swap' : 'shift_swap';
 
-    await this.ds.query(
-      `UPDATE attendance_records
-       SET scheduled_start = $1, scheduled_end = $2, scheduled_shift_code_id = $3, updated_at = NOW()
-       WHERE id = $4`,
-      [tr.scheduled_start, tr.scheduled_end, tr.scheduled_shift_code_id, rr.id],
-    );
-    await this.ds.query(
-      `UPDATE attendance_records
-       SET scheduled_start = $1, scheduled_end = $2, scheduled_shift_code_id = $3, updated_at = NOW()
-       WHERE id = $4`,
-      [rr.scheduled_start, rr.scheduled_end, rr.scheduled_shift_code_id, tr.id],
-    );
+    // Approver attribution for the version-history entries
+    let approverEmail: string | null = null;
+    if (approverUserId) {
+      const ar = await this.ds
+        .query(`SELECT email FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [approverUserId, tenantId])
+        .catch(() => []);
+      approverEmail = ar?.[0]?.email ?? null;
+    }
+
+    await this.ds.transaction(async (trx) => {
+      // Lock both schedule rows for the swap dates. We swap the WHOLE scheduled
+      // tuple — including attendance_marker, the split-shift 2nd segment and the
+      // WFH flag — because the grid derives the displayed cell from the marker +
+      // times (deriveShiftLabel), NOT from shift_code_id. Without the marker an
+      // OFF↔shift swap would never visually apply.
+      const cols = `id, employee_id,
+                attendance_marker, scheduled_start, scheduled_end,
+                scheduled_start_2, scheduled_end_2, scheduled_shift_code_id, is_wfh, notes,
+                (SELECT TRIM(COALESCE(e.first_name_en,'') || ' ' || COALESCE(e.last_name_en,''))
+                   FROM employees e WHERE e.id = attendance_records.employee_id) AS emp_name,
+                (SELECT f.name FROM employees e LEFT JOIN functions f ON f.id = e.function_id
+                   WHERE e.id = attendance_records.employee_id) AS function_name`;
+      const reqRec = await trx.query(
+        `SELECT ${cols} FROM attendance_records
+         WHERE tenant_id = $1 AND employee_id = $2 AND attendance_date::date = $3::date
+         FOR UPDATE`,
+        [tenantId, s.requester_employee_id, s.requester_date],
+      );
+      const tgtRec = await trx.query(
+        `SELECT ${cols} FROM attendance_records
+         WHERE tenant_id = $1 AND employee_id = $2 AND attendance_date::date = $3::date
+         FOR UPDATE`,
+        [tenantId, s.target_employee_id, s.target_date],
+      );
+      if (!reqRec.length || !tgtRec.length) {
+        throw new BadRequestException('سجل الجدول غير موجود لأحد الطرفين في تاريخ التبديل');
+      }
+      const rr = reqRec[0];
+      const tr = tgtRec[0];
+
+      // New shift-code strings (for version-history "to.code" labels)
+      const codeOf = async (id: string | null): Promise<string | null> => {
+        if (!id) return null;
+        const r = await trx
+          .query(`SELECT code FROM shift_codes WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [id, tenantId])
+          .catch(() => []);
+        return r?.[0]?.code ?? null;
+      };
+      const reqNewCode = await codeOf(tr.scheduled_shift_code_id); // requester receives target's shift
+      const tgtNewCode = await codeOf(rr.scheduled_shift_code_id); // target receives requester's shift
+
+      // Append a proper version-history edit into the notes JSON timeline that
+      // the schedule UI reads (getCellTimeline) — never corrupt it with text.
+      const buildNotes = (
+        rec: any,
+        from: { marker: string; start: string | null; end: string | null },
+        to: { marker: string; start: string | null; end: string | null; code: string | null },
+        otherName: string,
+        otherDate: string,
+      ): string => {
+        let audit: { original?: any; edits: any[] } = { edits: [] };
+        if (rec.notes) {
+          try {
+            const p = JSON.parse(rec.notes);
+            if (p && typeof p === 'object' && Array.isArray(p.edits)) audit = p;
+          } catch { /* legacy/plain notes — start a fresh audit */ }
+        }
+        if (!Array.isArray(audit.edits)) audit.edits = [];
+        if (audit.edits.length === 0) audit.original = from;
+        audit.edits.push({
+          seq: audit.edits.length + 1,
+          by: approverEmail ?? 'WFM',
+          byId: approverUserId,
+          at: new Date().toISOString(),
+          from,
+          to,
+          type: swapType,
+          reason: `تبادل ${swapType === 'off_swap' ? 'يوم راحة' : 'شيفت'} مع ${otherName} (${otherDate})`,
+          sourceOfChange: 'shift_swap',
+          validations: [],
+          requiresApproval: false,
+          employeeName: rec.emp_name,
+          functionName: rec.function_name,
+        });
+        return JSON.stringify(audit);
+      };
+
+      const rrFrom = { marker: rr.attendance_marker, start: rr.scheduled_start, end: rr.scheduled_end };
+      const trFrom = { marker: tr.attendance_marker, start: tr.scheduled_start, end: tr.scheduled_end };
+      const rrNotes = buildNotes(rr, rrFrom, { ...trFrom, code: reqNewCode }, tr.emp_name, s.target_date);
+      const trNotes = buildNotes(tr, trFrom, { ...rrFrom, code: tgtNewCode }, rr.emp_name, s.requester_date);
+
+      // Atomic exchange: requester gets target's full shift tuple, and vice-versa
+      const writeShift = async (id: string, src: any, notes: string) =>
+        trx.query(
+          `UPDATE attendance_records
+           SET scheduled_start = $1, scheduled_end = $2,
+               scheduled_start_2 = $3, scheduled_end_2 = $4,
+               scheduled_shift_code_id = $5,
+               attendance_marker = $6::attendance_marker_enum,
+               is_wfh = $7, notes = $8, updated_at = NOW()
+           WHERE id = $9`,
+          [src.scheduled_start, src.scheduled_end, src.scheduled_start_2, src.scheduled_end_2,
+           src.scheduled_shift_code_id, src.attendance_marker, src.is_wfh, notes, id],
+        );
+      await writeShift(rr.id, tr, rrNotes);
+      await writeShift(tr.id, rr, trNotes);
+
+      // Mark the swap applied (migration 033_swap_applied_at adds the column)
+      await trx.query(
+        `UPDATE request_shift_swaps SET applied_at = NOW() WHERE request_id = $1`, [requestId],
+      );
+
+      // Audit both sides (append-only audit_logs)
+      for (const [rec, other] of [[rr, tr], [tr, rr]] as const) {
+        await trx.query(
+          `INSERT INTO audit_logs
+             (tenant_id, actor_id, action, module, entity_type, entity_id, old_value, new_value, notes)
+           VALUES ($1, $2, 'schedule.swap_applied', 'requests', 'attendance_record', $3, $4::jsonb, $5::jsonb, $6)`,
+          [
+            tenantId, approverUserId, rec.id,
+            JSON.stringify({ marker: rec.attendance_marker, scheduled_start: rec.scheduled_start, scheduled_end: rec.scheduled_end, shift_code_id: rec.scheduled_shift_code_id }),
+            JSON.stringify({ marker: other.attendance_marker, scheduled_start: other.scheduled_start, scheduled_end: other.scheduled_end, shift_code_id: other.scheduled_shift_code_id }),
+            `${swapType} applied (request ${requestId})`,
+          ],
+        );
+      }
+    });
+
+    // Notify both employees (their user accounts) — outside the txn
+    const notify = async (employeeId: string, dateStr: string) => {
+      await this.ds.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id, action_url)
+         SELECT $1, u.id, 'request.swap_applied',
+                'Shift swap applied', 'تم تطبيق تبديل الشفت',
+                'Your schedule was updated for ' || $3, 'تم تحديث جدولك بتاريخ ' || $3,
+                'request', $4, '/schedule'
+         FROM users u WHERE u.tenant_id = $1 AND u.employee_id = $2 AND u.status = 'active'`,
+        [tenantId, employeeId, dateStr, requestId],
+      ).catch(() => {});
+    };
+    await notify(s.requester_employee_id, s.requester_date);
+    await notify(s.target_employee_id, s.target_date ?? s.requester_date);
   }
 
   /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
