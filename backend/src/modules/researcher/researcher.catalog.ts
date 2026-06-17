@@ -11,21 +11,36 @@ export interface ResearchItem {
   category: string;          // forecasting, rta, automation, quality, wellbeing, analytics
   titleAr: string;
   summaryAr: string;         // the finding / practice
-  status: 'have' | 'partial' | 'missing';
+  status: 'have' | 'partial' | 'missing';   // BASELINE — overridden live by detect()
   actionAr: string;          // how it applies to us
+  /**
+   * Live detectors: SQL probes proving whether the feature actually exists/runs in
+   * THIS deployment. Each must return a single column `n`. The Researcher runs them
+   * and upgrades the baseline to the real state — so a gap disappears once it's built.
+   */
+  detect?: {
+    haveSql?: string;        // n > 0  → 'have'
+    partialSql?: string;     // n > 0  → at least 'partial'
+  };
 }
 
 export const CATALOG: ResearchItem[] = [
   { id: 'intraday-reforecast', category: 'forecasting', titleAr: 'إعادة التوقّع الإنترا-داي', summaryAr: 'المراكز المتقدّمة تعيد حساب التوقّع خلال اليوم عند انحراف الحجم بدل الانتظار للغد.', status: 'missing', actionAr: 'أضف إعادة فوركاست تلقائية للـRTA عند تجاوز الانحراف عتبة معيّنة.' },
-  { id: 'forecast-accuracy', category: 'forecasting', titleAr: 'قياس دقّة التوقّع (MAPE/WAPE)', summaryAr: 'تتبّع دقّة التوقّع أسبوعياً مؤشّر نضج أساسي — بدونه لا تعرف إن كان تخطيطك يتحسّن.', status: 'missing', actionAr: 'احسب MAPE بين المتوقّع والفعلي واعرض اتجاهه.' },
-  { id: 'live-adherence', category: 'rta', titleAr: 'لوحة الالتزام اللحظية', summaryAr: 'مقارنة المجدول بالفعلي لحظياً لكل وكيل تتيح تدخّلاً قبل خرق الـSLA.', status: 'partial', actionAr: 'عندك التغطية بالساعة؛ أضف أدهيرنس لكل وكيل لحظياً.' },
-  { id: 'auto-approvals', category: 'automation', titleAr: 'موافقة الطلبات الآلية بالتغطية', summaryAr: 'أتمتة قرارات الطلبات منخفضة المخاطر تحرّر الـWFM للقرارات المعقّدة.', status: 'have', actionAr: 'موجود عندك (Auto Mode) — وسّع الأنواع تدريجياً.' },
+  { id: 'forecast-accuracy', category: 'forecasting', titleAr: 'قياس دقّة التوقّع (MAPE/WAPE)', summaryAr: 'تتبّع دقّة التوقّع أسبوعياً مؤشّر نضج أساسي — بدونه لا تعرف إن كان تخطيطك يتحسّن.', status: 'missing', actionAr: 'احسب MAPE بين المتوقّع والفعلي واعرض اتجاهه.',
+    detect: { partialSql: `SELECT COUNT(*) n FROM channel_demand_daily WHERE tenant_id = $1`,
+              haveSql:    `SELECT COUNT(DISTINCT demand_date) n FROM channel_demand_daily WHERE tenant_id = $1 HAVING COUNT(DISTINCT demand_date) >= 7` } },
+  { id: 'live-adherence', category: 'rta', titleAr: 'لوحة الالتزام اللحظية', summaryAr: 'مقارنة المجدول بالفعلي لحظياً لكل وكيل تتيح تدخّلاً قبل خرق الـSLA.', status: 'partial', actionAr: 'عندك التغطية بالساعة؛ أضف أدهيرنس لكل وكيل لحظياً.',
+    detect: { haveSql: `SELECT COUNT(*) n FROM adherence_daily WHERE tenant_id = $1` } },
+  { id: 'auto-approvals', category: 'automation', titleAr: 'موافقة الطلبات الآلية بالتغطية', summaryAr: 'أتمتة قرارات الطلبات منخفضة المخاطر تحرّر الـWFM للقرارات المعقّدة.', status: 'have', actionAr: 'موجود عندك (Auto Mode) — وسّع الأنواع تدريجياً.',
+    detect: { haveSql: `SELECT COUNT(*) n FROM automode_decisions WHERE tenant_id = $1` } },
   { id: 'shrinkage-trend', category: 'analytics', titleAr: 'اتجاه الشرينكج المصنّف', summaryAr: 'تتبّع الشرينكج (مخطّط/غير مخطّط) باتجاه زمني لكل فريق يكشف المشاكل الإدارية مبكراً.', status: 'partial', actionAr: 'عندك تحليلات؛ أضف تفصيل شرينكج لكل TL باتجاه.' },
   { id: 'agent-wellbeing', category: 'wellbeing', titleAr: 'مؤشّر إرهاق الوكيل', summaryAr: 'الإشغال المرتفع المستمر + الورديات الليلية المتكرّرة مؤشّرات احتراق تسبق التسرّب.', status: 'missing', actionAr: 'احسب مؤشّر ضغط من الإشغال + الليالي + الأوفرتايم وأنذر مبكراً.' },
   { id: 'quality-speed', category: 'quality', titleAr: 'توازن الجودة مقابل السرعة', summaryAr: 'مكافأة AHT المنخفض وحده يضرّ الجودة — اربط المؤشرين بالسكور كارد.', status: 'have', actionAr: 'سكور كاردك يوازن المؤشرين — استمرّ.' },
-  { id: 'skill-decay', category: 'analytics', titleAr: 'تراجع المهارة وانتهاؤها', summaryAr: 'المهارات تتقادم؛ تنبيه انتهاء/تراجع المهارة يحافظ على جاهزية التغطية.', status: 'partial', actionAr: 'عندك مهارات؛ أضف تنبيه انتهاء استباقي.' },
+  { id: 'skill-decay', category: 'analytics', titleAr: 'تراجع المهارة وانتهاؤها', summaryAr: 'المهارات تتقادم؛ تنبيه انتهاء/تراجع المهارة يحافظ على جاهزية التغطية.', status: 'partial', actionAr: 'عندك مهارات؛ أضف تنبيه انتهاء استباقي.',
+    detect: { partialSql: `SELECT COUNT(*) n FROM employee_skills WHERE tenant_id = $1` } },
   { id: 'attrition-early', category: 'analytics', titleAr: 'إنذار التسرّب المبكر', summaryAr: 'ارتفاع الغياب + انخفاض الالتزام + تراجع السكور كارد تتنبّأ بالاستقالة قبل حدوثها.', status: 'missing', actionAr: 'ادمج هذه الإشارات بمؤشّر خطر تسرّب لكل موظف.' },
-  { id: 'self-service', category: 'automation', titleAr: 'الخدمة الذاتية للوكلاء', summaryAr: 'تمكين الوكيل من طلب التبديل/الإجازة ورؤية جدوله يقلّل عبء الـTL ويرفع الرضا.', status: 'have', actionAr: 'موجود (صفحة الموظف والطلبات) — استمرّ بالتوسيع.' },
+  { id: 'self-service', category: 'automation', titleAr: 'الخدمة الذاتية للوكلاء', summaryAr: 'تمكين الوكيل من طلب التبديل/الإجازة ورؤية جدوله يقلّل عبء الـTL ويرفع الرضا.', status: 'have', actionAr: 'موجود (صفحة الموظف والطلبات) — استمرّ بالتوسيع.',
+    detect: { haveSql: `SELECT COUNT(*) n FROM requests WHERE tenant_id = $1` } },
 ];
 
 export function gapList(): ResearchItem[] { return CATALOG.filter(i => i.status !== 'have'); }

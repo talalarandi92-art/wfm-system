@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { ResearcherService } from './researcher.service';
@@ -11,13 +11,13 @@ export class ResearcherController {
   constructor(private readonly svc: ResearcherService) {}
 
   @Get('status')
-  status() { return this.svc.status(); }
+  status(@Request() req: any) { return this.svc.status(req.user.tenantId); }
 
   @Get('feed')
-  @ApiOperation({ summary: 'Curated WFM research feed + gaps vs our platform' })
-  feed() { return this.svc.feed(); }
+  @ApiOperation({ summary: 'WFM research feed + gaps, live-detected vs our platform' })
+  feed(@Request() req: any) { return this.svc.feed(req.user.tenantId); }
 
   @Get('digest')
-  @ApiOperation({ summary: 'Top improvement opportunities (LLM-synthesized when keyed)' })
-  digest() { return this.svc.digest(); }
+  @ApiOperation({ summary: 'Top improvement opportunities (live gaps; LLM-synthesized when keyed)' })
+  digest(@Request() req: any) { return this.svc.digest(req.user.tenantId); }
 }

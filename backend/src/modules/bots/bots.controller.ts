@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -37,15 +37,17 @@ export class BotsController {
 
   @Get('team')
   @ApiOperation({ summary: 'Status of all guards + merged activity feed' })
-  async team(@CurrentUser() u: any) {
+  async team(@CurrentUser() u: any, @Query('lang') langQ?: string) {
     const tid = u.tenantId;
+    const lang: 'ar' | 'en' = langQ === 'en' ? 'en' : 'ar';
+    const L = (en: string, ar: string) => (lang === 'en' ? en : ar);
 
     const [health, assess, runs, recipes, sec] = await Promise.all([
       this.health.run(tid).catch(() => null),
-      this.analyst.assess(tid).catch(() => null),
+      this.analyst.assess(tid, undefined, lang).catch(() => null),
       this.reporter.listRuns(tid, 1).catch(() => []),
       this.reporter.listRecipes(tid).catch(() => []),
-      this.security.run(tid).catch(() => null),
+      this.security.run(tid, lang).catch(() => null),
     ]);
 
     const pendingRecs = await this.ds.query(
@@ -61,7 +63,7 @@ export class BotsController {
     const expertStatus = this.expert.status();
     const [scoreSummary, researchStatus] = await Promise.all([
       this.scorecard.summary(tid).catch(() => null),
-      Promise.resolve(this.researcher.status()),
+      this.researcher.status(tid).catch(() => null),
     ]);
 
     const guards = [
@@ -69,54 +71,56 @@ export class BotsController {
         key: 'health', name: 'حارس السلامة والصحّة', nameEn: 'Health & Integrity', route: '/system-health',
         status: health ? health.status : 'skip', enabled: true,
         metrics: health ? { score: health.score, pass: health.counts.pass, warn: health.counts.warn, fail: health.counts.fail } : null,
-        line: health ? `درجة ${health.score}% · ${health.counts.fail} فشل · ${health.counts.warn} تحذير` : 'غير متاح',
+        line: health ? L(`Score ${health.score}% · ${health.counts.fail} fail · ${health.counts.warn} warn`, `درجة ${health.score}% · ${health.counts.fail} فشل · ${health.counts.warn} تحذير`) : L('Unavailable', 'غير متاح'),
       },
       {
         key: 'analyst', name: 'المحلّل الذكي', nameEn: 'WFM/RTA Analyst', route: '/analyst',
         status: assess ? assess.headline : 'skip', enabled: true,
         metrics: assess ? { pendingRecs, learnedSamples, surplusSafe: assess.thresholds.surplusSafe } : null,
-        line: assess ? `الوضع ${sevAr(assess.headline)} · ${pendingRecs} توصية معلّقة · تعلّم ${learnedSamples} مرة` : 'غير متاح',
+        line: assess ? L(`Status ${sev(assess.headline, 'en')} · ${pendingRecs} pending rec(s) · learned ${learnedSamples}×`, `الوضع ${sev(assess.headline, 'ar')} · ${pendingRecs} توصية معلّقة · تعلّم ${learnedSamples} مرة`) : L('Unavailable', 'غير متاح'),
       },
       {
         key: 'reporter', name: 'الناشر', nameEn: 'Reporting Bot', route: '/reports-bot',
         status: (runs as any[]).length ? 'ok' : 'info', enabled: true,
         metrics: { lastRun: (runs as any[])[0] ?? null, recipes: (recipes as any[]).length, scheduled: scheduled.length },
-        line: (runs as any[]).length ? `آخر تقرير: ${(runs as any[])[0].summary}` : 'لا تقارير بعد',
+        line: (runs as any[]).length ? L(`Last report: ${(runs as any[])[0].summary}`, `آخر تقرير: ${(runs as any[])[0].summary}`) : L('No reports yet', 'لا تقارير بعد'),
       },
       {
         key: 'security', name: 'الحارس الأمني', nameEn: 'Security Guard', route: '/security-guard',
         status: sec ? sec.status : 'skip', enabled: true,
         metrics: sec ? { score: sec.score, pass: sec.counts.pass, warn: sec.counts.warn, fail: sec.counts.fail } : null,
-        line: sec ? `درجة ${sec.score}% · ${sec.counts.fail} خطر · ${sec.counts.warn} تنبيه` : 'غير متاح',
+        line: sec ? L(`Score ${sec.score}% · ${sec.counts.fail} risk · ${sec.counts.warn} warning`, `درجة ${sec.score}% · ${sec.counts.fail} خطر · ${sec.counts.warn} تنبيه`) : L('Unavailable', 'غير متاح'),
       },
       {
         key: 'scorecard', name: 'حارس السكور كارد', nameEn: 'Scorecard Guard', route: '/scorecard-guard',
         status: scoreSummary && scoreSummary.belowTarget > 0 ? 'caution' : 'ok', enabled: true,
         metrics: scoreSummary,
-        line: scoreSummary?.week ? `${scoreSummary.week} · متوسّط ${scoreSummary.avg} · ${scoreSummary.belowTarget} تحت الهدف` : 'لا بيانات سكور كارد',
+        line: scoreSummary?.week ? L(`${scoreSummary.week} · avg ${scoreSummary.avg} · ${scoreSummary.belowTarget} below target`, `${scoreSummary.week} · متوسّط ${scoreSummary.avg} · ${scoreSummary.belowTarget} تحت الهدف`) : L('No scorecard data', 'لا بيانات سكور كارد'),
       },
       {
         key: 'researcher', name: 'الباحث', nameEn: 'Researcher', route: '/researcher',
         status: 'info', enabled: true,
         metrics: { items: researchStatus.items, gaps: researchStatus.gaps, llm: researchStatus.configured },
-        line: `${researchStatus.items} بحث · ${researchStatus.gaps} فجوة مقابل الصناعة` + (researchStatus.configured ? '' : ' · بحث منسّق'),
+        line: L(`${researchStatus.items} research · ${researchStatus.gaps} gaps vs industry`, `${researchStatus.items} بحث · ${researchStatus.gaps} فجوة مقابل الصناعة`) + (researchStatus.configured ? '' : L(' · curated research', ' · بحث منسّق')),
       },
       {
         key: 'expert', name: 'المستشار الخبير', nameEn: 'Expert Advisor', route: '/expert',
         status: 'ok', enabled: true,
         metrics: { topics: expertStatus.topics, llm: expertStatus.configured },
-        line: `قاعدة معرفة ${expertStatus.topics} موضوع` + (expertStatus.configured ? ` · ${expertStatus.model}` : ' · وضع معرفي'),
+        line: L(`Knowledge base · ${expertStatus.topics} topics`, `قاعدة معرفة ${expertStatus.topics} موضوع`) + (expertStatus.configured ? ` · ${expertStatus.model}` : L(' · knowledge mode', ' · وضع معرفي')),
       },
       {
         key: 'advisor', name: 'المستشار', nameEn: 'LLM Advisor', route: '/advisor',
         status: advisorEnabled ? 'ok' : 'skip', enabled: advisorEnabled,
         metrics: { needsKey: !advisorEnabled, model: advisorStatus.model },
-        line: advisorEnabled ? `جاهز · ${advisorStatus.model}` : 'يحتاج مفتاح LLM — يعمل بوضع مبسّط',
+        line: advisorEnabled ? L(`Ready · ${advisorStatus.model}`, `جاهز · ${advisorStatus.model}`) : L('Needs an LLM key — running in simple mode', 'يحتاج مفتاح LLM — يعمل بوضع مبسّط'),
       },
     ];
 
     const feed = await this.ds.query(
-      `SELECT notification_type AS type, COALESCE(title_ar, title) AS title, COALESCE(body_ar, body) AS body,
+      `SELECT notification_type AS type,
+              COALESCE(${lang === 'en' ? 'title, title_ar' : 'title_ar, title'}) AS title,
+              COALESCE(${lang === 'en' ? 'body, body_ar' : 'body_ar, body'}) AS body,
               action_url, created_at
          FROM notifications
         WHERE tenant_id = $1 AND notification_type IN ('health_guard','security_guard','report_ready','sla_escalation','coaching')
@@ -126,6 +130,7 @@ export class BotsController {
   }
 }
 
-function sevAr(s: string) {
+function sev(s: string, lang: 'ar' | 'en') {
+  if (lang === 'en') return s === 'risk' ? 'Risk' : s === 'caution' ? 'Caution' : s === 'ok' ? 'Healthy' : 'Info';
   return s === 'risk' ? 'خطر' : s === 'caution' ? 'انتباه' : s === 'ok' ? 'سليم' : 'معلومة';
 }
