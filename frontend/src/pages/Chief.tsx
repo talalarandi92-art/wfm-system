@@ -3,42 +3,43 @@ import { useNavigate } from 'react-router-dom';
 import {
   Crown, Loader2, RefreshCw, Target, Activity, ShieldAlert, Server, GraduationCap, Brain,
   Zap, CheckCircle2, XCircle, Undo2, ShieldCheck, FileBarChart, Sparkles, Bot, Power, Award, Telescope, ScrollText, Network,
+  Pause, Info,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 
 type Sev = 'risk' | 'caution' | 'ok' | 'info';
-interface Domain { key: string; labelAr: string; sev: Sev; line: string }
+interface Domain { key: string; label: string; sev: Sev; line: string }
 interface Priority { sev: Sev; domain: string; title: string; action: string }
 interface Briefing {
   date: string; posture: Sev; directive: string; llm: boolean; executiveBrief: string;
   domains: Domain[]; priorities: Priority[];
   learning: { learnedSamples: number; decisionsLogged: number };
-  autoMode: { enabled: boolean; autoApprove: boolean; autoReject: boolean; allowedTypes: string[]; approved: number; rejected: number; last24: number } | null;
+  autoMode: { enabled: boolean; autoApprove: boolean; autoReject: boolean; allowedTypes: string[]; approved: number; rejected: number; held?: number; last24: number; topHoldReason?: string | null; topHoldCount?: number } | null;
   selfTest: { passed: number; total: number; probes: { name: string; ok: boolean }[] } | null;
   lastReport: any;
 }
 interface AutoDecision { id: string; request_type: string; decision: string; reason: string; function_name: string; scope_date: string; reverted: boolean; decided_at: string }
 
 const TEAM = [
-  { route: '/system-health', icon: ShieldCheck, ar: 'السلامة', color: '#22c55e' },
-  { route: '/analyst', icon: Brain, ar: 'المحلّل', color: '#a855f7' },
-  { route: '/reports-bot', icon: FileBarChart, ar: 'الناشر', color: '#0ea5e9' },
-  { route: '/security-guard', icon: ShieldAlert, ar: 'الأمني', color: '#ef4444' },
-  { route: '/scorecard-guard', icon: Award, ar: 'السكور كارد', color: '#f59e0b' },
-  { route: '/researcher', icon: Telescope, ar: 'الباحث', color: '#818cf8' },
-  { route: '/expert', icon: GraduationCap, ar: 'الخبير', color: '#10b981' },
-  { route: '/knowledge-ledger', icon: ScrollText, ar: 'سجلّ المعرفة', color: '#14b8a6' },
-  { route: '/team-learning', icon: Network, ar: 'تعلّم الفريق', color: '#a855f7' },
-  { route: '/diagnostics', icon: Activity, ar: 'تقرير المشاكل', color: '#ef4444' },
-  { route: '/advisor', icon: Sparkles, ar: 'المستشار', color: '#ec4899' },
-  { route: '/bots', icon: Bot, ar: 'المركز', color: '#818cf8' },
+  { route: '/system-health', icon: ShieldCheck, ar: 'السلامة', en: 'Health', color: '#22c55e' },
+  { route: '/analyst', icon: Brain, ar: 'المحلّل', en: 'Analyst', color: '#a855f7' },
+  { route: '/reports-bot', icon: FileBarChart, ar: 'الناشر', en: 'Reporter', color: '#0ea5e9' },
+  { route: '/security-guard', icon: ShieldAlert, ar: 'الأمني', en: 'Security', color: '#ef4444' },
+  { route: '/scorecard-guard', icon: Award, ar: 'السكور كارد', en: 'Scorecard', color: '#f59e0b' },
+  { route: '/researcher', icon: Telescope, ar: 'الباحث', en: 'Researcher', color: '#818cf8' },
+  { route: '/expert', icon: GraduationCap, ar: 'الخبير', en: 'Expert', color: '#10b981' },
+  { route: '/knowledge-ledger', icon: ScrollText, ar: 'سجلّ المعرفة', en: 'Knowledge Ledger', color: '#14b8a6' },
+  { route: '/team-learning', icon: Network, ar: 'تعلّم الفريق', en: 'Team Learning', color: '#a855f7' },
+  { route: '/diagnostics', icon: Activity, ar: 'تقرير المشاكل', en: 'Diagnostics', color: '#ef4444' },
+  { route: '/advisor', icon: Sparkles, ar: 'المستشار', en: 'Advisor', color: '#ec4899' },
+  { route: '/bots', icon: Bot, ar: 'المركز', en: 'Hub', color: '#818cf8' },
 ];
 
-const SEV: Record<Sev, { color: string; ar: string }> = {
-  risk: { color: '#ef4444', ar: 'خطر' }, caution: { color: '#f59e0b', ar: 'انتباه' },
-  ok: { color: '#22c55e', ar: 'مستقرّ' }, info: { color: '#64748b', ar: 'معلومة' },
+const SEV: Record<Sev, { color: string; ar: string; en: string }> = {
+  risk: { color: '#ef4444', ar: 'خطر', en: 'Risk' }, caution: { color: '#f59e0b', ar: 'انتباه', en: 'Caution' },
+  ok: { color: '#22c55e', ar: 'مستقرّ', en: 'Stable' }, info: { color: '#64748b', ar: 'معلومة', en: 'Info' },
 };
 const DICON: Record<string, any> = { operations: Activity, security: ShieldAlert, system: Server };
 
@@ -52,7 +53,7 @@ export default function ChiefPage() {
   const [loading, setL] = useState(true);
   const [decisions, setDecisions] = useState<AutoDecision[]>([]);
   const [busy, setBusy] = useState(false);
-  const [smoke, setSmoke] = useState<{ passed: number; total: number; probes: { name: string; labelAr: string; ok: boolean; error?: string }[] } | null>(null);
+  const [smoke, setSmoke] = useState<{ passed: number; total: number; probes: { name: string; label?: string; labelAr: string; ok: boolean; error?: string }[] } | null>(null);
   const [smokeBusy, setSmokeBusy] = useState(false);
 
   const runSmoke = async () => {
@@ -65,13 +66,13 @@ export default function ChiefPage() {
     setL(true);
     try {
       const [{ data }, dec] = await Promise.all([
-        apiClient.get<Briefing>('/chief/briefing'),
+        apiClient.get<Briefing>(`/chief/briefing?lang=${ar ? 'ar' : 'en'}`),
         apiClient.get<AutoDecision[]>('/automode/decisions').catch(() => ({ data: [] })),
       ]);
       setData(data); setDecisions((dec as any).data || []);
     } catch { setData(null); }
     setL(false);
-  }, []);
+  }, [ar]);
   useEffect(() => { load(); }, [load]);
 
   const saveAuto = async (patch: Record<string, any>) => {
@@ -116,7 +117,7 @@ export default function ChiefPage() {
           {/* Posture + directive banner */}
           <div className="rounded-2xl p-5" style={{ background: `linear-gradient(135deg, ${posture.color}1a, rgba(255,255,255,0.02))`, border: `1px solid ${posture.color}40` }}>
             <div className="flex items-center gap-3 mb-2">
-              <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ background: posture.color, color: '#0b0f1c' }}>{ar ? 'الوضع العام' : 'Posture'}: {posture.ar}</span>
+              <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ background: posture.color, color: '#0b0f1c' }}>{ar ? 'الوضع العام' : 'Posture'}: {ar ? posture.ar : posture.en}</span>
               <span className="text-[11px]" style={{ color: '#64748b' }}>{data.date}{data.llm ? '' : ` · ${ar ? 'موجز قواعدي' : 'rule-based'}`}</span>
             </div>
             <p className="text-sm whitespace-pre-line leading-relaxed" style={{ color: '#e2e8f0' }}>{data.executiveBrief}</p>
@@ -133,8 +134,8 @@ export default function ChiefPage() {
               return (
                 <div key={d.key} className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${s.color}2e` }}>
                   <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2"><Ic size={15} style={{ color: s.color }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{d.labelAr}</span></div>
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${s.color}1a`, color: s.color }}>{s.ar}</span>
+                    <div className="flex items-center gap-2"><Ic size={15} style={{ color: s.color }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{d.label}</span></div>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${s.color}1a`, color: s.color }}>{ar ? s.ar : s.en}</span>
                   </div>
                   <p className="text-[11px]" style={{ color: '#94a3b8' }}>{d.line}</p>
                 </div>
@@ -189,8 +190,22 @@ export default function ChiefPage() {
               <div className="flex items-center gap-3 flex-wrap text-[11px] mb-2" style={{ color: '#94a3b8' }}>
                 <span className="flex items-center gap-1"><CheckCircle2 size={12} style={{ color: '#22c55e' }} /> {data.autoMode.approved} {ar ? 'موافقة' : 'approved'}</span>
                 <span className="flex items-center gap-1"><XCircle size={12} style={{ color: '#f87171' }} /> {data.autoMode.rejected} {ar ? 'رفض' : 'rejected'}</span>
+                {(data.autoMode.held ?? 0) > 0 && (
+                  <span className="flex items-center gap-1" style={{ color: '#fbbf24' }}><Pause size={12} /> {data.autoMode.held} {ar ? 'محجوز للمراجعة' : 'held for review'}</span>
+                )}
                 <span style={{ color: '#64748b' }}>· {data.autoMode.last24} {ar ? 'آخر 24 ساعة' : 'last 24h'}</span>
               </div>
+              {/* Transparency: why is it holding instead of acting? */}
+              {(data.autoMode.held ?? 0) > 0 && (data.autoMode.approved + data.autoMode.rejected) === 0 && (
+                <div className="flex items-start gap-2 text-[11px] px-3 py-2 rounded-xl mb-2" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', color: '#fcd34d' }}>
+                  <Info size={13} className="mt-0.5 flex-shrink-0" />
+                  <span>
+                    {ar
+                      ? `الوضع التلقائي شغّال ويقيّم الطلبات، لكنه يحجبها كلها للمراجعة لأن التغطية غير آمنة حالياً — لا يوافق إلا عند وجود فائض آمن. ${data.autoMode.topHoldReason ? 'أكثر سبب: ' + data.autoMode.topHoldReason : ''}`
+                      : `Auto Mode is running and evaluating requests, but holding them all for review because coverage isn't safe right now — it only approves when there's a safe surplus. ${data.autoMode.topHoldReason ? 'Top reason: ' + data.autoMode.topHoldReason : ''}`}
+                  </span>
+                </div>
+              )}
               {decisions.length > 0 && (
                 <div className="space-y-1 mt-2">
                   {decisions.filter(d => d.decision !== 'hold').slice(0, 6).map(d => (
@@ -227,7 +242,7 @@ export default function ChiefPage() {
               <div className="flex flex-wrap gap-1.5">
                 {smoke.probes.map(p => (
                   <span key={p.name} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg" style={{ background: p.ok ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.12)', color: p.ok ? '#4ade80' : '#f87171' }} title={p.error || ''}>
-                    {p.ok ? <CheckCircle2 size={10} /> : <XCircle size={10} />} {p.labelAr}
+                    {p.ok ? <CheckCircle2 size={10} /> : <XCircle size={10} />} {ar ? p.labelAr : (p.label ?? p.labelAr)}
                   </span>
                 ))}
               </div>
@@ -240,7 +255,7 @@ export default function ChiefPage() {
             <div className="flex items-center gap-2 flex-wrap">
               {TEAM.map(g => (
                 <button key={g.route} onClick={() => nav(g.route)} className="flex items-center gap-1.5 text-[11px] px-2.5 py-1.5 rounded-lg" style={{ background: `${g.color}12`, color: g.color }}>
-                  <g.icon size={13} /> {g.ar}
+                  <g.icon size={13} /> {ar ? g.ar : g.en}
                 </button>
               ))}
             </div>

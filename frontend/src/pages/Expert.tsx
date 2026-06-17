@@ -5,6 +5,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { BackToChief } from '@/components/BackToChief';
 
 interface Topic { topic: string; titleAr: string; titleEn: string; tags: string[] }
 interface KEntry { topic: string; titleAr: string; titleEn: string; body: string; tags: string[] }
@@ -51,6 +52,7 @@ export default function ExpertPage() {
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
+      <BackToChief />
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.22)' }}>

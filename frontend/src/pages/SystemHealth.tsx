@@ -6,6 +6,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles, scoreColor } from '@/components/ds';
+import { BackToChief } from '@/components/BackToChief';
 
 type Status = 'pass' | 'warn' | 'fail' | 'skip';
 interface Check {
@@ -50,6 +51,7 @@ export default function SystemHealthPage() {
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
+      <BackToChief />
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">

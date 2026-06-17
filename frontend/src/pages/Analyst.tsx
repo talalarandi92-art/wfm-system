@@ -6,6 +6,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { BackToChief } from '@/components/BackToChief';
 
 type Verdict = 'approve' | 'caution' | 'danger';
 type Severity = 'ok' | 'info' | 'caution' | 'risk';
@@ -20,15 +21,15 @@ interface Assessment {
 }
 
 const SEV = {
-  ok: { color: '#22c55e', Icon: CheckCircle2, ar: 'سليم' },
-  info: { color: '#64748b', Icon: CheckCircle2, ar: 'معلومة' },
-  caution: { color: '#f59e0b', Icon: AlertTriangle, ar: 'انتباه' },
-  risk: { color: '#ef4444', Icon: XCircle, ar: 'خطر' },
+  ok: { color: '#22c55e', Icon: CheckCircle2, ar: 'سليم', en: 'Healthy' },
+  info: { color: '#64748b', Icon: CheckCircle2, ar: 'معلومة', en: 'Info' },
+  caution: { color: '#f59e0b', Icon: AlertTriangle, ar: 'انتباه', en: 'Caution' },
+  risk: { color: '#ef4444', Icon: XCircle, ar: 'خطر', en: 'Risk' },
 } as const;
 const VERD = {
-  approve: { color: '#22c55e', ar: 'وافِق' },
-  caution: { color: '#f59e0b', ar: 'بحذر' },
-  danger: { color: '#ef4444', ar: 'خطر' },
+  approve: { color: '#22c55e', ar: 'وافِق', en: 'Approve' },
+  caution: { color: '#f59e0b', ar: 'بحذر', en: 'Caution' },
+  danger: { color: '#ef4444', ar: 'خطر', en: 'Danger' },
 } as const;
 const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
 
@@ -46,12 +47,12 @@ export default function AnalystPage() {
   const load = useCallback(async () => {
     setL(true);
     try {
-      const { data } = await apiClient.get<Assessment>('/analyst/assessment', { params: date ? { date } : {} });
+      const { data } = await apiClient.get<Assessment>('/analyst/assessment', { params: { ...(date ? { date } : {}), lang: ar ? 'ar' : 'en' } });
       setData(data); if (!date && data?.date) setDate(data.date); setActed({});
     } catch { setData(null); }
     setL(false);
-  }, [date]);
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  }, [date, ar]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [ar]);
 
   // Each rec carries its DB id from the assessment — feedback posts it directly.
   const sendFeedback = async (rec: Rec, decision: 'accepted' | 'rejected') => {
@@ -73,7 +74,7 @@ export default function AnalystPage() {
       <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: `${SEV[sev].color}0d` }}>
         <Icon size={15} style={{ color: SEV[sev].color }} />
         <span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? titleAr : titleEn}</span>
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg ms-auto" style={{ background: `${SEV[sev].color}1a`, color: SEV[sev].color }}>{SEV[sev].ar}</span>
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg ms-auto" style={{ background: `${SEV[sev].color}1a`, color: SEV[sev].color }}>{ar ? SEV[sev].ar : SEV[sev].en}</span>
       </div>
       <div className="p-3">{children}</div>
     </div>
@@ -81,6 +82,7 @@ export default function AnalystPage() {
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
+      <BackToChief />
       {/* Header */}
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -111,7 +113,7 @@ export default function AnalystPage() {
           <div className="flex items-center gap-3 rounded-2xl px-5 py-3" style={{ background: `${SEV[data.headline].color}12`, border: `1px solid ${SEV[data.headline].color}33` }}>
             <ShieldAlert size={20} style={{ color: SEV[data.headline].color }} />
             <div>
-              <p className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'تقييم الوضع' : 'Situation'}: <span style={{ color: SEV[data.headline].color }}>{SEV[data.headline].ar}</span></p>
+              <p className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'تقييم الوضع' : 'Situation'}: <span style={{ color: SEV[data.headline].color }}>{ar ? SEV[data.headline].ar : SEV[data.headline].en}</span></p>
               <p className="text-[11px]" style={{ color: '#64748b' }}>{data.date} · {ar ? 'عتبة الفائض الآمن' : 'safe-surplus threshold'} = {data.thresholds.surplusSafe}</p>
             </div>
           </div>
@@ -129,7 +131,7 @@ export default function AnalystPage() {
                       <div className="flex items-start gap-2 flex-wrap">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            {r.verdict && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${VERD[r.verdict].color}1a`, color: VERD[r.verdict].color }}>{VERD[r.verdict].ar}</span>}
+                            {r.verdict && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${VERD[r.verdict].color}1a`, color: VERD[r.verdict].color }}>{ar ? VERD[r.verdict].ar : VERD[r.verdict].en}</span>}
                             <span className="text-xs font-bold" style={{ color: tp(dark) }}>{r.title}</span>
                           </div>
                           <p className="text-[11px] mt-1" style={{ color: '#94a3b8' }}>{r.summary}</p>
@@ -158,7 +160,7 @@ export default function AnalystPage() {
                 <div key={f.functionId} className="rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${VERD[f.verdict].color}33` }}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold truncate" style={{ color: tp(dark) }}>{f.functionName}</span>
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${VERD[f.verdict].color}1a`, color: VERD[f.verdict].color }}>{VERD[f.verdict].ar}</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${VERD[f.verdict].color}1a`, color: VERD[f.verdict].color }}>{ar ? VERD[f.verdict].ar : VERD[f.verdict].en}</span>
                   </div>
                   <p className="text-[10px] mt-1" style={{ color: '#64748b' }}>
                     {ar ? 'أضيق نقطة' : 'tightest'} {hh(f.bottleneck.hour)}: {ar ? 'فجوة' : 'gap'} <b style={{ color: VERD[f.verdict].color }}>{f.bottleneck.gap >= 0 ? `+${f.bottleneck.gap}` : f.bottleneck.gap}</b> ({f.bottleneck.available}/{f.bottleneck.required})
@@ -192,7 +194,7 @@ export default function AnalystPage() {
                   {data.compliance.offenders.slice(0, 8).map((o, i) => (
                     <div key={i} className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
                       <span className="truncate" style={{ color: tp(dark) }}>{o.name} <span style={{ color: '#64748b' }}>· {o.fn}</span></span>
-                      <span className="truncate ms-2" style={{ color: '#fb923c', maxWidth: 160 }}>{o.issues.join('، ')}</span>
+                      <span className="truncate ms-2" style={{ color: '#fb923c', maxWidth: 160 }}>{o.issues.join(ar ? '، ' : ', ')}</span>
                     </div>
                   ))}
                 </div>
@@ -204,7 +206,7 @@ export default function AnalystPage() {
           {data.schedule.findings.length > 0 && sectionCard(CalendarCheck, 'سلامة الجدول والقواعد', 'Schedule & rule integrity', data.schedule.severity, (
             <div className="space-y-1.5">
               {data.schedule.findings.map((c, i) => (
-                <div key={i} className="text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', color: c.status === 'fail' ? '#f87171' : '#fbbf24' }}>{c.labelAr} — {c.count} ({c.detail})</div>
+                <div key={i} className="text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', color: c.status === 'fail' ? '#f87171' : '#fbbf24' }}>{ar ? c.labelAr : c.label} — {c.count} ({c.detail})</div>
               ))}
             </div>
           ))}

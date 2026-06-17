@@ -5,6 +5,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { BackToChief } from '@/components/BackToChief';
 
 interface Issue { source: string; area: string; severity: 'fail' | 'warn' | 'info'; title: string; detail: string }
 interface Report {
@@ -31,10 +32,10 @@ export default function DiagnosticsPage() {
 
   const load = useCallback(async (smoke: boolean) => {
     setL(true);
-    try { const { data } = await apiClient.get<Report>('/diagnostics', { params: smoke ? { smoke: 1 } : {} }); setData(data); }
+    try { const { data } = await apiClient.get<Report>('/diagnostics', { params: { ...(smoke ? { smoke: 1 } : {}), lang: ar ? 'ar' : 'en' } }); setData(data); }
     catch { setData(null); }
     setL(false);
-  }, []);
+  }, [ar]);
   useEffect(() => { load(false); }, [load]);
 
   const buildText = (): string => {
@@ -58,6 +59,7 @@ export default function DiagnosticsPage() {
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
+      <BackToChief />
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.22)' }}>

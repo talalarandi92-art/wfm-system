@@ -13,7 +13,7 @@ export class ChiefController {
 
   @Get('briefing')
   @ApiOperation({ summary: 'Executive briefing synthesized from the whole guard team' })
-  briefing(@CurrentUser() u: any, @Query('date') date?: string) {
-    return this.svc.briefing(u.tenantId, date);
+  briefing(@CurrentUser() u: any, @Query('date') date?: string, @Query('lang') lang?: string) {
+    return this.svc.briefing(u.tenantId, date, lang === 'en' ? 'en' : 'ar');
   }
 }

@@ -6,6 +6,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles, scoreColor } from '@/components/ds';
+import { BackToChief } from '@/components/BackToChief';
 
 type Status = 'pass' | 'warn' | 'fail' | 'skip';
 interface Check { id: string; category: 'accounts' | 'access' | 'audit'; label: string; labelAr: string; status: Status; count: number; detail: string; sample?: any[] }
@@ -29,9 +30,9 @@ export default function SecurityGuardPage() {
 
   const load = useCallback(async () => {
     setL(true);
-    try { const { data } = await apiClient.get<Report>('/security-guard'); setData(data); } catch { setData(null); }
+    try { const { data } = await apiClient.get<Report>(`/security-guard?lang=${ar ? 'ar' : 'en'}`); setData(data); } catch { setData(null); }
     setL(false);
-  }, []);
+  }, [ar]);
   useEffect(() => { load(); }, [load]);
 
   const groups: { key: 'accounts' | 'access' | 'audit'; Icon: any; ar: string; en: string }[] = [
@@ -42,6 +43,7 @@ export default function SecurityGuardPage() {
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
+      <BackToChief />
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.22)' }}>

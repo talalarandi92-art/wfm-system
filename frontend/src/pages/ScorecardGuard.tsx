@@ -3,6 +3,7 @@ import { Award, Loader2, RefreshCw, TrendingUp, TrendingDown, GraduationCap } fr
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { BackToChief } from '@/components/BackToChief';
 
 interface Review {
   week: string | null; empty?: boolean;
@@ -41,6 +42,7 @@ export default function ScorecardGuardPage() {
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
+      <BackToChief />
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.22)' }}>

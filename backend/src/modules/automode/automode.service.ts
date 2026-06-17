@@ -160,9 +160,22 @@ export class AutoModeService implements OnModuleInit, OnModuleDestroy {
     const [c] = await this.ds.query(
       `SELECT COUNT(*) FILTER (WHERE decision='approve' AND NOT reverted)::int approved,
               COUNT(*) FILTER (WHERE decision='reject' AND NOT reverted)::int rejected,
+              COUNT(*) FILTER (WHERE decision='hold')::int held,
               COUNT(*) FILTER (WHERE decided_at > NOW() - INTERVAL '24 hours')::int last24
          FROM automode_decisions WHERE tenant_id = $1`, [tid]).catch(() => [{}]);
-    return { enabled: s.enabled, autoApprove: s.auto_approve, autoReject: s.auto_reject, allowedTypes: s.allowed_types, approved: c?.approved ?? 0, rejected: c?.rejected ?? 0, last24: c?.last24 ?? 0 };
+    // Why is it holding everything? Surface the dominant hold reason so the
+    // Auto Mode panel reads as "working but conservative", not "dead at 0/0".
+    const [topHold] = await this.ds.query(
+      `SELECT reason, COUNT(*)::int n FROM automode_decisions
+         WHERE tenant_id = $1 AND decision='hold' AND decided_at > NOW() - INTERVAL '24 hours'
+         GROUP BY reason ORDER BY n DESC LIMIT 1`, [tid]).catch(() => [{}]);
+    return {
+      enabled: s.enabled, autoApprove: s.auto_approve, autoReject: s.auto_reject,
+      allowedTypes: s.allowed_types,
+      approved: c?.approved ?? 0, rejected: c?.rejected ?? 0,
+      held: c?.held ?? 0, last24: c?.last24 ?? 0,
+      topHoldReason: topHold?.reason ?? null, topHoldCount: topHold?.n ?? 0,
+    };
   }
 }
 
