@@ -36,16 +36,16 @@ interface Preview {
 
 const fmtD = (d: string) => d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-const FIELD_LABELS: Record<string, { ar: string }> = {
-  timestamp:     { ar: 'وقت التواصل' },
-  channel:       { ar: 'القناة' },
-  payment:       { ar: 'طريقة الدفع' },
-  reason:        { ar: 'سبب التواصل' },
-  agentName:     { ar: 'اسم الموظف' },
-  agentLogin:    { ar: 'إيميل/لوجن' },
-  surveySent:    { ar: 'سيرفي مرسل' },
-  surveyClicked: { ar: 'سيرفي مفتوح' },
-  rating:        { ar: 'التقييم' },
+const FIELD_LABELS: Record<string, { ar: string; en: string }> = {
+  timestamp:     { ar: 'وقت التواصل', en: 'Contact Time' },
+  channel:       { ar: 'القناة', en: 'Channel' },
+  payment:       { ar: 'طريقة الدفع', en: 'Payment Method' },
+  reason:        { ar: 'سبب التواصل', en: 'Contact Reason' },
+  agentName:     { ar: 'اسم الموظف', en: 'Agent Name' },
+  agentLogin:    { ar: 'إيميل/لوجن', en: 'Email / Login' },
+  surveySent:    { ar: 'سيرفي مرسل', en: 'Survey Sent' },
+  surveyClicked: { ar: 'سيرفي مفتوح', en: 'Survey Clicked' },
+  rating:        { ar: 'التقييم', en: 'Rating' },
 };
 
 /* ─── KPI Card ──────────────────────────────────────────────────────────── */
@@ -151,7 +151,7 @@ export default function OperationsAnalyticsPage() {
       setPreview(data);
       setUploadFile(file);
     } catch (e: any) {
-      setUploadMsg({ type: 'err', text: e?.response?.data?.message ?? 'فشل تحليل الملف' });
+      setUploadMsg({ type: 'err', text: e?.response?.data?.message ?? (ar ? 'فشل تحليل الملف' : 'Failed to analyze the file') });
     } finally { setUploading(false); }
   };
 
@@ -164,12 +164,12 @@ export default function OperationsAnalyticsPage() {
       const { data } = await (apiClient as any).post('/ops-analytics/upload/commit', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setUploadMsg({ type: 'ok', text: `تم حفظ ${data.totalRows.toLocaleString()} سجل بنجاح` });
+      setUploadMsg({ type: 'ok', text: ar ? `تم حفظ ${data.totalRows.toLocaleString()} سجل بنجاح` : `Saved ${data.totalRows.toLocaleString()} records successfully` });
       setPreview(null); setUploadFile(null);
       await loadBatches();
       setTab('overview');
     } catch (e: any) {
-      setUploadMsg({ type: 'err', text: e?.response?.data?.message ?? 'فشل حفظ البيانات' });
+      setUploadMsg({ type: 'err', text: e?.response?.data?.message ?? (ar ? 'فشل حفظ البيانات' : 'Failed to save the data') });
     } finally { setUploading(false); }
   };
 
@@ -546,13 +546,13 @@ export default function OperationsAnalyticsPage() {
                       {Object.entries(preview.detectedColumns).map(([field, header]) => (
                         <span key={field} className="px-2.5 py-1 rounded-lg text-[10px]"
                           style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)', color: '#86efac' }}>
-                          {FIELD_LABELS[field]?.ar ?? field} ← <b>{header}</b>
+                          {(ar ? FIELD_LABELS[field]?.ar : FIELD_LABELS[field]?.en) ?? field} ← <b>{header}</b>
                         </span>
                       ))}
                     </div>
                     {preview.unmappedHeaders.length > 0 && (
                       <p className="text-[9px] text-slate-600 mt-2">
-                        {ar ? 'أعمدة غير مستخدمة:' : 'Unmapped:'} {preview.unmappedHeaders.slice(0, 10).join('، ')}
+                        {ar ? 'أعمدة غير مستخدمة:' : 'Unmapped:'} {preview.unmappedHeaders.slice(0, 10).join(ar ? '، ' : ', ')}
                       </p>
                     )}
                   </div>

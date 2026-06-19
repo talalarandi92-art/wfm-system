@@ -12,15 +12,15 @@ interface Guard { key: string; name: string; nameEn: string; route: string; stat
 interface Feed { type: string; title: string; body: string; action_url: string; created_at: string }
 interface Team { guards: Guard[]; feed: Feed[] }
 
-const STAT: Record<string, { color: string; Icon: any; ar: string }> = {
-  ok: { color: '#22c55e', Icon: CheckCircle2, ar: 'سليم' },
-  pass: { color: '#22c55e', Icon: CheckCircle2, ar: 'سليم' },
-  info: { color: '#64748b', Icon: MinusCircle, ar: 'معلومة' },
-  caution: { color: '#f59e0b', Icon: AlertTriangle, ar: 'انتباه' },
-  warn: { color: '#f59e0b', Icon: AlertTriangle, ar: 'تحذير' },
-  risk: { color: '#ef4444', Icon: XCircle, ar: 'خطر' },
-  fail: { color: '#ef4444', Icon: XCircle, ar: 'فشل' },
-  skip: { color: '#64748b', Icon: MinusCircle, ar: 'مؤجّل' },
+const STAT: Record<string, { color: string; Icon: any; ar: string; en: string }> = {
+  ok: { color: '#22c55e', Icon: CheckCircle2, ar: 'سليم', en: 'Healthy' },
+  pass: { color: '#22c55e', Icon: CheckCircle2, ar: 'سليم', en: 'Pass' },
+  info: { color: '#64748b', Icon: MinusCircle, ar: 'معلومة', en: 'Info' },
+  caution: { color: '#f59e0b', Icon: AlertTriangle, ar: 'انتباه', en: 'Caution' },
+  warn: { color: '#f59e0b', Icon: AlertTriangle, ar: 'تحذير', en: 'Warning' },
+  risk: { color: '#ef4444', Icon: XCircle, ar: 'خطر', en: 'Risk' },
+  fail: { color: '#ef4444', Icon: XCircle, ar: 'فشل', en: 'Fail' },
+  skip: { color: '#64748b', Icon: MinusCircle, ar: 'مؤجّل', en: 'Skipped' },
 };
 const ICON: Record<string, any> = { health: ShieldCheck, analyst: BrainCircuit, reporter: FileBarChart, advisor: Sparkles };
 
@@ -35,9 +35,9 @@ export default function BotsHubPage() {
 
   const load = useCallback(async () => {
     setL(true);
-    try { const { data } = await apiClient.get<Team>('/bots/team'); setData(data); } catch { setData(null); }
+    try { const { data } = await apiClient.get<Team>(`/bots/team?lang=${ar ? 'ar' : 'en'}`); setData(data); } catch { setData(null); }
     setL(false);
-  }, []);
+  }, [ar]);
   useEffect(() => { load(); }, [load]);
 
   return (
@@ -74,7 +74,7 @@ export default function BotsHubPage() {
                   style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${st.color}2e`, opacity: g.enabled ? 1 : 0.65 }}>
                   <div className="flex items-center justify-between mb-2">
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: `${st.color}14` }}><GIcon size={17} style={{ color: st.color }} /></div>
-                    <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg" style={{ background: `${st.color}18`, color: st.color }}><st.Icon size={11} />{st.ar}</span>
+                    <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg" style={{ background: `${st.color}18`, color: st.color }}><st.Icon size={11} />{ar ? st.ar : st.en}</span>
                   </div>
                   <p className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? g.name : g.nameEn}</p>
                   <p className="text-[11px] mt-1 leading-snug" style={{ color: '#94a3b8' }}>{g.line}</p>

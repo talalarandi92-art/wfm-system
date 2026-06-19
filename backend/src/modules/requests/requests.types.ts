@@ -17,6 +17,16 @@ export interface CreateLeaveDto {
   attachmentSubmitted?: boolean;
 }
 
+export interface CreateBreakDto {
+  employeeId: string;
+  startTime: string;     // HH:MM (from)
+  endTime: string;       // HH:MM (to)
+  breakDate?: string;    // YYYY-MM-DD — optional; defaults to submission date (today, Asia/Kuwait)
+  breakType?: 'manual' | 'lunch' | 'coffee' | 'prayer' | 'medical' | 'other';
+  reason?: string;
+  notes?: string;
+}
+
 export interface CreateOvertimeDto {
   employeeId: string;
   otDate: string;       // YYYY-MM-DD

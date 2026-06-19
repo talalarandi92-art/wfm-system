@@ -285,7 +285,10 @@ export default function WorkforceAnalyticsPage() {
               <table className="w-full text-xs" style={{ minWidth: 920 }}>
                 <thead>
                   <tr className="text-slate-500 text-[10px] uppercase" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    {['كود/Code','الوردية/Shift','ساعات','مجدول','حاضر','غياب','مرضي','إجازة','عطلة','عن بُعد','OT','تأخير','بصمة ناقصة','استئذان','بريك','مخطط','غير مخطط','حضور%','Shrinkage%'].map(h => (
+                    {(ar
+                      ? ['كود','الوردية','ساعات','مجدول','حاضر','غياب','مرضي','إجازة','عطلة','عن بُعد','OT','تأخير','بصمة ناقصة','استئذان','بريك','مخطط','غير مخطط','حضور%','Shrinkage%']
+                      : ['Code','Shift','Hours','Scheduled','Present','Absent','Sick','Leave','Holiday','WFH','OT','Late','Missing Punch','Permission','Break','Planned','Unplanned','Attendance%','Shrinkage%']
+                    ).map(h => (
                       <th key={h} className="px-2.5 py-3 text-center first:text-start">{h}</th>
                     ))}
                   </tr>
@@ -409,7 +412,7 @@ export default function WorkforceAnalyticsPage() {
                     {pts.map((p, i) => (
                       <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 group relative" style={{ minWidth: 24 }}>
                         <div className="absolute hidden group-hover:block z-10 px-2 py-1 rounded text-[9px] whitespace-nowrap" style={{ background: '#0f1527', color: '#fff', bottom: 150 }}>
-                          {p.bucket} · {ar ? 'إجمالي' : 'total'} {p.totalPct}% (مخطط {p.plannedPct} / غير {p.unplannedPct})
+                          {p.bucket} · {ar ? 'إجمالي' : 'total'} {p.totalPct}% ({ar ? 'مخطط' : 'planned'} {p.plannedPct} / {ar ? 'غير' : 'unplanned'} {p.unplannedPct})
                         </div>
                         {/* stacked: planned (indigo) + unplanned (red) */}
                         <div className="w-full flex flex-col-reverse rounded-t overflow-hidden" style={{ height: Math.max(2, Math.round(150 * p.totalPct / max)) }}>

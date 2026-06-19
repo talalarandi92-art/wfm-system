@@ -100,8 +100,10 @@ export class BotsController {
       {
         key: 'researcher', name: 'الباحث', nameEn: 'Researcher', route: '/researcher',
         status: 'info', enabled: true,
-        metrics: { items: researchStatus.items, gaps: researchStatus.gaps, llm: researchStatus.configured },
-        line: L(`${researchStatus.items} research · ${researchStatus.gaps} gaps vs industry`, `${researchStatus.items} بحث · ${researchStatus.gaps} فجوة مقابل الصناعة`) + (researchStatus.configured ? '' : L(' · curated research', ' · بحث منسّق')),
+        metrics: researchStatus ? { items: researchStatus.items, gaps: researchStatus.gaps, llm: researchStatus.configured } : null,
+        line: researchStatus
+          ? L(`${researchStatus.items} research · ${researchStatus.gaps} gaps vs industry`, `${researchStatus.items} بحث · ${researchStatus.gaps} فجوة مقابل الصناعة`) + (researchStatus.configured ? '' : L(' · curated research', ' · بحث منسّق'))
+          : L('Unavailable', 'غير متاح'),
       },
       {
         key: 'expert', name: 'المستشار الخبير', nameEn: 'Expert Advisor', route: '/expert',

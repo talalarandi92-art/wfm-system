@@ -224,7 +224,7 @@ export default function BreaksPage() {
     try {
       const { data } = await apiClient.post('/breaks/generate', { scheduleDate: date, functionId: functionId || undefined });
       await load();
-      alert(`✅ ${data.message}${data.warnings?.length ? '\n\nتحذيرات:\n' + data.warnings.join('\n') : ''}`);
+      alert(`✅ ${data.message}${data.warnings?.length ? '\n\n' + (ar ? 'تحذيرات:' : 'Warnings:') + '\n' + data.warnings.join('\n') : ''}`);
     } catch (e: any) {
       setError(e?.response?.data?.message ?? 'Generation failed');
     } finally {
@@ -251,18 +251,27 @@ export default function BreaksPage() {
       // Show the live queue impact behind the decision
       const lv = data.liveImpact;
       let msg = data.autoApproved
-        ? '✅ تمت الموافقة التلقائية — وضع الطوابير يسمح'
-        : '⏳ الطلب قيد مراجعة الـ RTA';
+        ? (ar ? '✅ تمت الموافقة التلقائية — وضع الطوابير يسمح' : '✅ Auto-approved — queue status allows it')
+        : (ar ? '⏳ الطلب قيد مراجعة الـ RTA' : '⏳ Request pending RTA review');
       if (lv?.availableNow != null) {
-        msg += `\n\nالتأثير المباشر:\n• المتاحين الآن: ${lv.availableNow} ← ${lv.availableAfter} بعد الموافقة`
+        msg += ar
+          ? `\n\nالتأثير المباشر:\n• المتاحين الآن: ${lv.availableNow} ← ${lv.availableAfter} بعد الموافقة`
             + `\n• عملاء بالانتظار: ${lv.totalWaiting}`
-            + `\n• طوابير بخطر: ${lv.atRiskQueues?.length ?? 0}`;
+            + `\n• طوابير بخطر: ${lv.atRiskQueues?.length ?? 0}`
+          : `\n\nLive impact:\n• Available now: ${lv.availableNow} ← ${lv.availableAfter} after approval`
+            + `\n• Customers waiting: ${lv.totalWaiting}`
+            + `\n• Queues at risk: ${lv.atRiskQueues?.length ?? 0}`;
         if (!data.autoApproved) {
-          const REASONS: Record<string, string> = {
+          const REASONS: Record<string, string> = ar ? {
             pending_no_live_data:   'السبب: لا توجد بيانات حية من سبرينكلر',
             pending_queues_at_risk: 'السبب: يوجد طوابير تحت الخطر الآن',
             pending_low_coverage:   `السبب: التغطية ستنزل تحت الحد الأدنى (${lv.minAvailableThreshold} متاحين)`,
             pending_schedule_gap:   'السبب: فجوة في تغطية الجدول',
+          } : {
+            pending_no_live_data:   'Reason: no live data from Sprinklr',
+            pending_queues_at_risk: 'Reason: queues are currently at risk',
+            pending_low_coverage:   `Reason: coverage would drop below the minimum (${lv.minAvailableThreshold} available)`,
+            pending_schedule_gap:   'Reason: schedule coverage gap',
           };
           msg += `\n${REASONS[lv.decision] ?? ''}`;
         }
@@ -284,7 +293,7 @@ export default function BreaksPage() {
   };
 
   const handleReject = async (id: string) => {
-    const reason = prompt('سبب الرفض / Rejection reason:');
+    const reason = prompt(ar ? 'سبب الرفض:' : 'Rejection reason:');
     if (!reason) return;
     setActioningId(id);
     try { await apiClient.patch(`/breaks/requests/${id}/reject`, { reason }); load(); }

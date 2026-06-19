@@ -20,8 +20,8 @@ export class AnalystController {
 
   @Get('assessment')
   @ApiOperation({ summary: 'Full WFM/RTA situation assessment + recommendations' })
-  async assessment(@CurrentUser() user: any, @Query('date') date?: string) {
-    return this.svc.assess(user.tenantId, date);
+  async assessment(@CurrentUser() user: any, @Query('date') date?: string, @Query('lang') lang?: string) {
+    return this.svc.assess(user.tenantId, date, lang === 'en' ? 'en' : 'ar');
   }
 
   @Post('feedback')

@@ -139,10 +139,11 @@ function Panel({ title, dark, children }: { title: string; dark: boolean; childr
   );
 }
 function Row({ a, vol, inv, total }: { a: string; vol: number; inv: number; total: number }) {
+  const ar = useUiStore(s => s.lang) === 'ar';
   return (
     <div className="flex items-center gap-2 px-2 py-1.5 text-[11px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
       <span className="flex-1 min-w-0 truncate" style={{ color: '#cbd5e1' }}>{a}</span>
-      {vol > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>{vol} {'استقالة'}</span>}
+      {vol > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>{vol} {ar ? 'استقالة' : 'RES'}</span>}
       {inv > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>{inv} TER</span>}
       <span className="tabular-nums font-bold" style={{ color: '#f87171' }}>{total}</span>
     </div>

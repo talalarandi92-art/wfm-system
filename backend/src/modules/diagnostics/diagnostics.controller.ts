@@ -27,27 +27,29 @@ export class DiagnosticsController {
 
   @Get()
   @ApiOperation({ summary: 'Consolidated issues report (add ?smoke=1 to also run the functional smoke test)' })
-  async report(@CurrentUser() user: any, @Query('smoke') smokeQ?: string) {
+  async report(@CurrentUser() user: any, @Query('smoke') smokeQ?: string, @Query('lang') langQ?: string) {
     const tid = user.tenantId;
+    const lang: 'ar' | 'en' = langQ === 'en' ? 'en' : 'ar';
+    const L = (en: string, ar: string) => (lang === 'en' ? en : ar);
     const issues: { source: string; area: string; severity: 'fail' | 'warn' | 'info'; title: string; detail: string }[] = [];
 
     const [h, s, assess] = await Promise.all([
       this.health.run(tid).catch(() => null),
-      this.security.run(tid).catch(() => null),
-      this.analyst.assess(tid).catch(() => null),
+      this.security.run(tid, lang).catch(() => null),
+      this.analyst.assess(tid, undefined, lang).catch(() => null),
     ]);
 
     // Health guard (technical + calculation integrity)
     if (h) for (const c of h.checks.filter(c => c.status === 'fail' || c.status === 'warn'))
-      issues.push({ source: 'حارس السلامة', area: c.category, severity: c.status as any, title: c.labelAr, detail: c.detail + (c.count ? ` (${c.count})` : '') });
+      issues.push({ source: L('Health Guard', 'حارس السلامة'), area: c.category, severity: c.status as any, title: lang === 'en' ? c.label : c.labelAr, detail: c.detail + (c.count ? ` (${c.count})` : '') });
 
     // Security guard
     if (s) for (const c of s.checks.filter(c => c.status === 'fail' || c.status === 'warn'))
-      issues.push({ source: 'الحارس الأمني', area: c.category, severity: c.status as any, title: c.labelAr, detail: c.detail + (c.count ? ` (${c.count})` : '') });
+      issues.push({ source: L('Security Guard', 'الحارس الأمني'), area: c.category, severity: c.status as any, title: lang === 'en' ? c.label : c.labelAr, detail: c.detail + (c.count ? ` (${c.count})` : '') });
 
     // Schedule-rule violations from the analyst
     if (assess) for (const f of assess.schedule.findings)
-      issues.push({ source: 'المحلّل', area: 'schedule', severity: f.status === 'fail' ? 'fail' : 'warn', title: f.labelAr, detail: `${f.count}: ${f.detail}` });
+      issues.push({ source: L('Analyst', 'المحلّل'), area: 'schedule', severity: f.status === 'fail' ? 'fail' : 'warn', title: lang === 'en' ? f.label : f.labelAr, detail: `${f.count}: ${f.detail}` });
 
     // Functional smoke test (only when asked — it runs a real generate)
     let smokeSummary: any = null;
@@ -56,7 +58,7 @@ export class DiagnosticsController {
       if (sm) {
         smokeSummary = { passed: sm.passed, total: sm.total };
         for (const p of sm.probes.filter(p => !p.ok))
-          issues.push({ source: 'الاختبار الوظيفي', area: p.area, severity: 'fail', title: p.labelAr, detail: p.error ?? 'فشل المسار' });
+          issues.push({ source: L('Functional smoke test', 'الاختبار الوظيفي'), area: p.area, severity: 'fail', title: (lang === 'en' && (p as any).label) ? (p as any).label : p.labelAr, detail: p.error ?? L('Path failed', 'فشل المسار') });
       }
     }
 

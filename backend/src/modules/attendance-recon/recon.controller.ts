@@ -92,8 +92,29 @@ export class ReconController {
   @Get('ot-bonus')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Days with ≥ minHours overtime (default 5) for the manager bonus list — who/day/window/before-after' })
-  async otBonus(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('minHours') minHours?: string) {
-    return this.ingestion.otBonus(req.user.tenantId, from, to, minHours ? parseFloat(minHours) : 5);
+  async otBonus(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('minHours') minHours?: string, @Query('q') q?: string) {
+    return this.ingestion.otBonus(req.user.tenantId, from, to, minHours ? parseFloat(minHours) : 5, q);
+  }
+
+  @Get('metric')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Detailed metric view (late/early/absence/conformance/sick) — summary, by function/month, top, detail rows' })
+  async metric(@Req() req: any, @Query('metric') metric: string, @Query('from') from?: string, @Query('to') to?: string, @Query('func') func?: string, @Query('q') q?: string) {
+    return this.ingestion.metricDetail(req.user.tenantId, metric || 'late', from, to, func, q);
+  }
+
+  @Get('overtime')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Detailed overtime — before/after/holiday split, by function/month, top employees (180h cap), filterable detail rows' })
+  async overtime(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('func') func?: string, @Query('q') q?: string) {
+    return this.ingestion.overtime(req.user.tenantId, from, to, func, q);
+  }
+
+  @Get('permissions-detail')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Permission details — type/window/status per (employee, day), filterable by date and name/ID/email' })
+  async permissionsDetail(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('q') q?: string, @Query('status') status?: string) {
+    return this.ingestion.permissionDetails(req.user.tenantId, from, to, q, status);
   }
 
   @Get('coverage-intervals')

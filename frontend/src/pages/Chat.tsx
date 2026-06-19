@@ -811,7 +811,7 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
       setIsRecording(true);
       setRecordingSecs(0);
       recTimerRef.current = setInterval(() => setRecordingSecs(s => s + 1), 1000);
-    } catch { alert('تعذر الوصول إلى الميكروفون'); }
+    } catch { alert(ar ? 'تعذر الوصول إلى الميكروفون' : 'Could not access the microphone'); }
   };
 
   const stopRecording = () => {
@@ -921,7 +921,7 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
     if (!w) return;
     const chName = esc(activeChannel?.name_ar || activeChannel?.name || '');
     w.document.write(`<html><head><title>Chat Export</title><style>
-      body{font-family:Cairo,Arial,sans-serif;direction:rtl;padding:24px;background:#fff;color:#111;}
+      body{font-family:Cairo,Arial,sans-serif;direction:${ar ? 'rtl' : 'ltr'};padding:24px;background:#fff;color:#111;}
       h2{font-size:18px;margin-bottom:4px;}.meta{font-size:12px;color:#888;margin-bottom:16px;}
       .msg{margin:8px 0;padding:10px 14px;border-radius:10px;max-width:70%;}
       .mine{background:#e8eaf6;margin-left:auto;}.other{background:#f5f5f5;}
@@ -929,8 +929,8 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
       .content{font-size:13px;}.time{font-size:10px;color:#aaa;margin-top:4px;}
       .att{font-size:11px;color:#4338ca;margin-top:4px;}
     </style></head><body>
-    <h2>محادثة: ${chName}</h2>
-    <div class="meta">تصدير: ${esc(new Date().toLocaleString('ar-KW'))}</div>
+    <h2>${ar ? 'محادثة' : 'Conversation'}: ${chName}</h2>
+    <div class="meta">${ar ? 'تصدير' : 'Exported'}: ${esc(new Date().toLocaleString(ar ? 'ar-KW' : 'en-GB'))}</div>
     ${messages.map(m => `
       <div class="msg ${m.sender_id === currentUserId ? 'mine' : 'other'}">
         <div class="sender">${esc(m.sender_name)}</div>

@@ -15,7 +15,7 @@ import { GeneratorService } from '@modules/schedule-generator/generator.service'
  *  • real-path: call the real service method then clean up (e.g. save → delete).
  */
 
-export interface Probe { name: string; labelAr: string; area: string; ok: boolean; error?: string }
+export interface Probe { name: string; label: string; labelAr: string; area: string; ok: boolean; error?: string }
 
 @Injectable()
 export class SmokeTestService implements OnModuleInit, OnModuleDestroy {
@@ -69,12 +69,12 @@ export class SmokeTestService implements OnModuleInit, OnModuleDestroy {
   async run(tid: string, userId: string): Promise<{ passed: number; total: number; probes: Probe[] }> {
     const probes: Probe[] = [];
     probes.push(await this.scheduleSave(tid, userId));
-    probes.push(await this.txProbe('publish_apply', 'نشر الجدول للموظفين', 'schedule', q => this.publishApplyStep(tid, q)));
-    probes.push(await this.txProbe('request_create', 'إنشاء طلب', 'requests', q => this.requestStep(tid, q)));
-    probes.push(await this.txProbe('attendance_correction', 'تصحيح حضور', 'attendance', q => this.attendanceStep(tid, q)));
-    probes.push(await this.readProbe('functions_read', 'قراءة الأقسام', 'schedule', () => this.gen.getFunctions(tid)));
-    probes.push(await this.readProbe('versions_read', 'قراءة نسخ الجدول', 'schedule', () => this.gen.listVersions(tid)));
-    probes.push(await this.readProbe('coverage_read', 'قراءة التغطية', 'coverage',
+    probes.push(await this.txProbe('publish_apply', 'Publish schedule to staff', 'نشر الجدول للموظفين', 'schedule', q => this.publishApplyStep(tid, q)));
+    probes.push(await this.txProbe('request_create', 'Create request', 'إنشاء طلب', 'requests', q => this.requestStep(tid, q)));
+    probes.push(await this.txProbe('attendance_correction', 'Attendance correction', 'تصحيح حضور', 'attendance', q => this.attendanceStep(tid, q)));
+    probes.push(await this.readProbe('functions_read', 'Read functions', 'قراءة الأقسام', 'schedule', () => this.gen.getFunctions(tid)));
+    probes.push(await this.readProbe('versions_read', 'Read schedule versions', 'قراءة نسخ الجدول', 'schedule', () => this.gen.listVersions(tid)));
+    probes.push(await this.readProbe('coverage_read', 'Read coverage', 'قراءة التغطية', 'coverage',
       () => this.ds.query(`SELECT 1 FROM attendance_records WHERE tenant_id=$1 LIMIT 1`, [tid])));
 
     const passed = probes.filter(p => p.ok).length;
@@ -82,38 +82,38 @@ export class SmokeTestService implements OnModuleInit, OnModuleDestroy {
   }
 
   // ── Probe helpers ────────────────────────────────────────────────────────────
-  private async txProbe(name: string, labelAr: string, area: string, steps: (q: (t: string, p?: any[]) => Promise<any>) => Promise<void>): Promise<Probe> {
+  private async txProbe(name: string, label: string, labelAr: string, area: string, steps: (q: (t: string, p?: any[]) => Promise<any>) => Promise<void>): Promise<Probe> {
     const qr = this.ds.createQueryRunner();
     try {
       await qr.connect(); await qr.startTransaction();
       await steps((t, p) => qr.query(t, p));
       await qr.rollbackTransaction();
-      return { name, labelAr, area, ok: true };
+      return { name, label, labelAr, area, ok: true };
     } catch (e: any) {
       try { await qr.rollbackTransaction(); } catch { /* */ }
-      return { name, labelAr, area, ok: false, error: e?.message ?? String(e) };
+      return { name, label, labelAr, area, ok: false, error: e?.message ?? String(e) };
     } finally { try { await qr.release(); } catch { /* */ } }
   }
 
-  private async readProbe(name: string, labelAr: string, area: string, fn: () => Promise<any>): Promise<Probe> {
-    try { await fn(); return { name, labelAr, area, ok: true }; }
-    catch (e: any) { return { name, labelAr, area, ok: false, error: e?.message ?? String(e) }; }
+  private async readProbe(name: string, label: string, labelAr: string, area: string, fn: () => Promise<any>): Promise<Probe> {
+    try { await fn(); return { name, label, labelAr, area, ok: true }; }
+    catch (e: any) { return { name, label, labelAr, area, ok: false, error: e?.message ?? String(e) }; }
   }
 
   // ── Real-path: generate (one small function) → saveDraft → delete ────────────
   private async scheduleSave(tid: string, userId: string): Promise<Probe> {
-    const name = 'schedule_save', labelAr = 'حفظ جدول (مسار حقيقي)', area = 'schedule';
+    const name = 'schedule_save', label = 'Save schedule (real path)', labelAr = 'حفظ جدول (مسار حقيقي)', area = 'schedule';
     let versionId: string | null = null;
     try {
       const funcs = await this.gen.getFunctions(tid);
-      if (!funcs.length) return { name, labelAr, area, ok: true };  // nothing to generate → not a failure
+      if (!funcs.length) return { name, label, labelAr, area, ok: true };  // nothing to generate → not a failure
       const smallest = [...funcs].sort((a: any, b: any) => Number(a.employee_count) - Number(b.employee_count))[0];
       const sat = this.nextSaturday();
       const result = await this.gen.generate(tid, sat, [smallest.id], {});
       versionId = await this.gen.saveDraft(tid, result as any, userId, '__smoke__');
-      return { name, labelAr, area, ok: true };
+      return { name, label, labelAr, area, ok: true };
     } catch (e: any) {
-      return { name, labelAr, area, ok: false, error: e?.message ?? String(e) };
+      return { name, label, labelAr, area, ok: false, error: e?.message ?? String(e) };
     } finally {
       if (versionId) {
         await this.ds.query(`DELETE FROM schedule_entries WHERE schedule_version_id = $1`, [versionId]).catch(() => {});

@@ -876,6 +876,206 @@ function UploadZone({ onPreview, dark }: { onPreview: (file: File) => void; dark
 /* ═══════════════════════════════════════════════════════════════════════════
    Main Page
 ═══════════════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════════════
+   PERFORMANCE ANALYZE — cumulative cross-month: trend, gaps, coaching, interns
+════════════════════════════════════════════════════════════════════════ */
+function Sparkline({ data, dark }: { data: (number | null)[]; dark: boolean }) {
+  const pts = data.filter((v): v is number => v != null);
+  if (pts.length < 2) return <span style={{ color: dark ? '#475569' : '#cbd5e1', fontSize: 11 }}>—</span>;
+  const min = Math.min(...pts, 0), max = Math.max(...pts, 1), rng = max - min || 1;
+  const W = 84, H = 26;
+  const step = W / (pts.length - 1);
+  const path = pts.map((v, i) => `${i * step},${H - ((v - min) / rng) * H}`).join(' ');
+  const up = pts[pts.length - 1] >= pts[0];
+  const col = up ? '#10b981' : '#f43f5e';
+  return (
+    <svg width={W} height={H} style={{ display: 'block' }}>
+      <polyline points={path} fill="none" stroke={col} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={(pts.length - 1) * step} cy={H - ((pts[pts.length - 1] - min) / rng) * H} r={2.5} fill={col} />
+    </svg>
+  );
+}
+
+function PerformanceTab({ dark, ar }: { dark: boolean; ar: boolean }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [sort, setSort] = useState<'trend' | 'latest'>('trend');
+  useEffect(() => {
+    setLoading(true);
+    apiClient.get('/scorecard/analyze')
+      .then(({ data }) => setData(data))
+      .catch(() => setData({ months: [], employees: [], interns: [], insights: {} }))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const textPri = dark ? '#e2e8f0' : '#1e293b';
+  const textSec = dark ? '#94a3b8' : '#64748b';
+  const cardBg = dark ? 'rgba(255,255,255,0.03)' : '#ffffff';
+  const border = dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.06)';
+  const rowBg = dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.015)';
+
+  if (loading) return <div className="text-center py-20" style={{ color: textSec }}>{ar ? 'جارٍ التحليل…' : 'Analyzing…'}</div>;
+  const ins = data?.insights || {};
+  const months: any[] = data?.months || [];
+  if (!months.length) return (
+    <div className="text-center py-20 rounded-2xl" style={{ background: cardBg, border }}>
+      <TrendingUp size={28} style={{ color: textSec, margin: '0 auto 12px' }} />
+      <div style={{ color: textPri, fontWeight: 600 }}>{ar ? 'لا توجد بيانات بعد' : 'No data yet'}</div>
+      <div style={{ color: textSec, fontSize: 13, marginTop: 4 }}>{ar ? 'ارفع سكوركارد شهر أو أكثر لرؤية التحليل التراكمي' : 'Upload one or more monthly scorecards to see cumulative analysis'}</div>
+    </div>
+  );
+
+  const frontline = (data.employees || []).filter((e: any) => !e.intern);
+  const sorted = [...frontline].sort((a, b) => sort === 'trend' ? b.trend - a.trend : (b.latestNet ?? -999) - (a.latestNet ?? -999));
+  const interns: any[] = data.interns || [];
+
+  const Stat = ({ label, value, color, sub }: any) => (
+    <div className="rounded-2xl p-4" style={{ background: cardBg, border }}>
+      <div style={{ fontSize: 12, color: textSec, marginBottom: 6 }}>{label}</div>
+      <div className="tabular-nums" style={{ fontSize: 26, fontWeight: 800, color: color || textPri, lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: textSec, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+  const recColor = (r: string) => r === 'Keep' ? '#10b981' : r === 'Let go' ? '#f43f5e' : '#f59e0b';
+
+  return (
+    <div className="space-y-5">
+      {/* insights */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))' }}>
+        <Stat label={ar ? 'موظفين' : 'Frontline'} value={ins.frontline ?? 0} sub={`${months.length} ${ar ? 'شهر' : 'months'}`} />
+        <Stat label={ar ? 'يتحسّنون' : 'Improving'} value={ins.improving ?? 0} color="#10b981" />
+        <Stat label={ar ? 'يتراجعون' : 'Declining'} value={ins.declining ?? 0} color="#f43f5e" />
+        <Stat label={ar ? 'محتاج كوتشينج' : 'Need coaching'} value={ins.needCoaching ?? 0} color="#f59e0b" />
+        <Stat label={ar ? 'انترن للاستغناء' : 'Interns: let go'} value={ins.internLetGo ?? 0} color="#f43f5e" sub={`${ins.internCount ?? 0} ${ar ? 'انترن' : 'interns'}`} />
+      </div>
+
+      {/* top movers */}
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))' }}>
+        {[{ t: ar ? 'الأكثر تحسّناً' : 'Top improvers', d: ins.topImprovers || [], c: '#10b981', up: true },
+          { t: ar ? 'الأكثر تراجعاً' : 'Top decliners', d: ins.topDecliners || [], c: '#f43f5e', up: false }].map((blk, i) => (
+          <div key={i} className="rounded-2xl p-4" style={{ background: cardBg, border }}>
+            <div className="flex items-center gap-1.5 mb-3" style={{ color: blk.c, fontWeight: 700, fontSize: 13 }}>
+              {blk.up ? <TrendingUp size={15} /> : <TrendingDown size={15} />}{blk.t}
+            </div>
+            {blk.d.length ? blk.d.map((e: any, j: number) => (
+              <div key={j} className="flex items-center justify-between py-1.5" style={{ borderTop: j ? border : 'none' }}>
+                <div><div style={{ color: textPri, fontSize: 13, fontWeight: 600 }}>{e.name}</div><div style={{ color: textSec, fontSize: 11 }}>{e.func}</div></div>
+                <span className="tabular-nums" style={{ color: blk.c, fontWeight: 800, fontSize: 14 }}>{e.trend > 0 ? '+' : ''}{e.trend}</span>
+              </div>
+            )) : <div style={{ color: textSec, fontSize: 12 }}>—</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* employee performance table */}
+      <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border }}>
+        <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: border }}>
+          <div style={{ color: textPri, fontWeight: 700 }}>{ar ? 'أداء الموظفين عبر الأشهر' : 'Employee performance across months'}</div>
+          <div className="flex gap-1 rounded-lg p-0.5" style={{ background: rowBg }}>
+            {[['trend', ar ? 'الاتجاه' : 'Trend'], ['latest', ar ? 'الأحدث' : 'Latest']].map(([k, l]) => (
+              <button key={k} onClick={() => setSort(k as any)} className="text-xs px-2.5 py-1 rounded-md"
+                style={{ background: sort === k ? (dark ? 'rgba(255,255,255,0.08)' : '#fff') : 'transparent', color: sort === k ? textPri : textSec, fontWeight: 600 }}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="w-full" style={{ borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead><tr style={{ color: textSec, fontSize: 11, textAlign: ar ? 'right' : 'left' }}>
+              <th className="px-4 py-2 font-semibold">{ar ? 'الموظف' : 'Agent'}</th>
+              <th className="px-3 py-2 font-semibold">{ar ? 'الاتجاه' : 'Trend'}</th>
+              <th className="px-3 py-2 font-semibold text-center">{ar ? 'الأحدث' : 'Latest'}</th>
+              <th className="px-3 py-2 font-semibold text-center">{ar ? 'التغيّر' : 'Δ'}</th>
+              <th className="px-3 py-2 font-semibold">{ar ? 'نقاط ضعف' : 'Weak KPIs'}</th>
+            </tr></thead>
+            <tbody>
+              {sorted.map((e: any, i: number) => (
+                <tr key={i} style={{ borderTop: border, background: e.needsCoaching ? (dark ? 'rgba(245,158,11,0.05)' : 'rgba(245,158,11,0.04)') : 'transparent' }}>
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span style={{ color: textPri, fontWeight: 600 }}>{e.name}</span>
+                      {e.needsCoaching && <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', fontWeight: 600 }}>{ar ? 'كوتشينج' : 'coach'}</span>}
+                    </div>
+                    <div style={{ color: textSec, fontSize: 11 }}>{e.func}</div>
+                  </td>
+                  <td className="px-3 py-2.5"><Sparkline data={e.months} dark={dark} /></td>
+                  <td className="px-3 py-2.5 text-center tabular-nums" style={{ fontWeight: 800, color: (e.latestNet ?? 0) > 0 ? textPri : '#f43f5e' }}>{e.latestNet ?? '—'}</td>
+                  <td className="px-3 py-2.5 text-center">
+                    <span className="tabular-nums" style={{ fontWeight: 700, color: e.trend > 0 ? '#10b981' : e.trend < 0 ? '#f43f5e' : textSec }}>
+                      {e.trend > 0 ? '▲ +' : e.trend < 0 ? '▼ ' : '– '}{e.trend !== 0 ? e.trend : ''}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-wrap gap-1">
+                      {e.weakKpis?.length ? e.weakKpis.map((k: string) => (
+                        <span key={k} className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e' }}>{k}</span>
+                      )) : <CheckCircle size={14} style={{ color: '#10b981' }} />}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* coaching plans */}
+      {(() => {
+        const need = frontline.filter((e: any) => e.needsCoaching);
+        if (!need.length) return null;
+        return (
+          <div className="rounded-2xl p-4" style={{ background: cardBg, border }}>
+            <div className="flex items-center gap-1.5 mb-3" style={{ color: '#f59e0b', fontWeight: 700 }}>
+              <Star size={15} />{ar ? 'خطط الكوتشينج' : 'Coaching plans'}
+              <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>{need.length}</span>
+            </div>
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))' }}>
+              {need.slice(0, 30).map((e: any, i: number) => (
+                <div key={i} className="rounded-xl p-3" style={{ background: rowBg, borderInlineStart: '3px solid #f59e0b' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span style={{ color: textPri, fontWeight: 600, fontSize: 13 }}>{e.name}</span>
+                    <span style={{ color: textSec, fontSize: 11 }}>{e.func} · {ar ? 'آخر' : 'latest'} {e.latestNet ?? '—'}</span>
+                  </div>
+                  {(e.coaching || []).map((c: any, j: number) => (
+                    <div key={j} className="mb-2" style={{ paddingInlineStart: 8, borderInlineStart: '2px solid rgba(244,63,94,0.3)' }}>
+                      <div style={{ color: '#f43f5e', fontWeight: 600, fontSize: 12 }}>{c.kpi} — {c.issue}</div>
+                      <div style={{ color: textPri, fontSize: 12, marginTop: 2 }}>{c.action}</div>
+                      <div style={{ color: '#10b981', fontSize: 11, marginTop: 2 }}>🎯 {c.target}</div>
+                    </div>
+                  ))}
+                  {!e.coaching?.length && <div style={{ color: textSec, fontSize: 12 }}>{ar ? 'Net منخفض — مراجعة عامة مع TL' : 'Low Net — general review with TL'}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* intern review */}
+      {interns.length > 0 && (
+        <div className="rounded-2xl p-4" style={{ background: cardBg, border }}>
+          <div className="flex items-center gap-1.5 mb-3" style={{ color: '#a855f7', fontWeight: 700 }}>
+            <Star size={15} />{ar ? 'تقييم الانترن (حضور + سكور)' : 'Intern review (attendance + score)'}
+          </div>
+          <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))' }}>
+            {interns.map((e: any, i: number) => (
+              <div key={i} className="rounded-xl p-3" style={{ background: rowBg, borderInlineStart: `3px solid ${recColor(e.recommendation)}` }}>
+                <div className="flex items-center justify-between">
+                  <span style={{ color: textPri, fontWeight: 600, fontSize: 13 }}>{e.name}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: recColor(e.recommendation) + '22', color: recColor(e.recommendation), fontWeight: 700 }}>
+                    {e.recommendation === 'Keep' ? (ar ? 'إبقاء' : 'Keep') : e.recommendation === 'Let go' ? (ar ? 'استغناء' : 'Let go') : (ar ? 'مراجعة' : 'Review')}
+                  </span>
+                </div>
+                <div style={{ color: textSec, fontSize: 11, marginTop: 4 }}>{e.func}</div>
+                <div style={{ color: textSec, fontSize: 11, marginTop: 2 }}>{e.why}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ScorecardPage() {
   const { lang, dark } = useUiStore();
   const { user, hasPermission } = useAuthStore();
@@ -887,7 +1087,7 @@ export default function ScorecardPage() {
   const isAgentView = !!user && !canImport
     && !user.roles.some(r => ['wfm', 'admin', 'platform_admin', 'operations_manager', 'rta', 'team_leader'].includes(r));
 
-  const [tab, setTab] = useState<'batches' | 'upload' | 'results' | 'kpisource' | 'mine' | 'dashboard'>('batches');
+  const [tab, setTab] = useState<'batches' | 'upload' | 'results' | 'kpisource' | 'mine' | 'dashboard' | 'performance'>('batches');
   const [batches, setBatches]     = useState<Batch[]>([]);
   const [bLoading, setBLoading]   = useState(false);
 
@@ -1102,6 +1302,7 @@ export default function ScorecardPage() {
     ...(canImport    ? [{ id: 'kpisource', label: ar ? 'بيانات KPI' : 'KPI Source', icon: Database }] : []),
     ...(selectedBatch && !isAgentView ? [{ id: 'dashboard', label: ar ? 'الملخص' : 'Dashboard', icon: LayoutDashboard }] : []),
     ...(selectedBatch && !isAgentView ? [{ id: 'results',   label: ar ? 'النتائج' : 'Results',   icon: Trophy          }] : []),
+    ...(!isAgentView ? [{ id: 'performance', label: ar ? 'تحليل الأداء' : 'Performance', icon: TrendingUp }] : []),
   ];
 
   /* ════════════════════════════════════════════════════════════════════════
@@ -1158,6 +1359,11 @@ export default function ScorecardPage() {
       {/* ══ DASHBOARD ════════════════════════════════════════════════════ */}
       {tab === 'dashboard' && selectedBatch && (
         <DashboardTab batchId={selectedBatch.id} dark={dark} ar={ar} />
+      )}
+
+      {/* ══ PERFORMANCE ANALYZE (cumulative across months) ════════════════ */}
+      {tab === 'performance' && (
+        <PerformanceTab dark={dark} ar={ar} />
       )}
 
       {/* ══ MY SCORE (agent self-view) ════════════════════════════════════ */}

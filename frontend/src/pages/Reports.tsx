@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import {
   FileText, Download, Calendar, Users, Clock, Zap,
-  Loader2, ChevronRight, BarChart2, ArrowUpDown,
+  Loader2, ChevronRight, ChevronDown, BarChart2, ArrowUpDown,
+  CheckCircle2, XCircle, AlertTriangle, Timer, Send, ShieldCheck,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
@@ -29,7 +30,8 @@ interface OtRow {
 }
 
 type Report = 'home' | 'attendance' | 'late' | 'overtime' | 'requests' | 'crossSkill'
-  | 'requestsDetailed' | 'permissions' | 'breaks' | 'audit' | 'overtimeDetailed';
+  | 'requestsDetailed' | 'permissions' | 'breaks' | 'audit' | 'overtimeDetailed'
+  | 'coaching' | 'outages' | 'techIssues';
 
 // Detailed reports rendered with a generic, schema-agnostic table.
 // endpoint + optional `view` query + which response field holds the rows.
@@ -39,6 +41,9 @@ const GENERIC: Record<string, { endpoint: string; view?: string; field: string; 
   breaks:           { endpoint: '/reports/breaks',            field: 'detail',   sheet: 'Breaks' },
   audit:            { endpoint: '/reports/audit',             field: 'detail',   sheet: 'Audit' },
   overtimeDetailed: { endpoint: '/reports/overtime-detailed', view: 'ranking', field: 'ranking', sheet: 'Overtime' },
+  coaching:         { endpoint: '/reports/coaching',          field: 'detail',   sheet: 'Coaching' },
+  outages:          { endpoint: '/reports/outages',           field: 'detail',   sheet: 'Outages' },
+  techIssues:       { endpoint: '/reports/tech-issues',       field: 'detail',   sheet: 'TechIssues' },
 };
 
 interface ReqRow {
@@ -85,6 +90,8 @@ export default function ReportsPage() {
   const [reqBreakdown, setReqBreakdown] = useState<Record<string, number>>({});
   const [csData, setCs] = useState<CrossSkillRow[]>([]);
   const [genRows, setGenRows] = useState<any[]>([]);   // generic detailed-report rows
+  const [summary, setSummary] = useState<any>(null);   // dashboard summary (requests/coaching/outages/tech)
+  const [expanded, setExpanded] = useState<number | null>(null); // expanded timeline row
   const [total, setTotal] = useState(0);
   const [wbLoading, setWb] = useState(false);
 
@@ -127,6 +134,8 @@ export default function ReportsPage() {
         const { data } = await apiClient.get(g.endpoint, { params: { ...params, ...(g.view ? { view: g.view } : {}) } });
         const rows = data[g.field] ?? data.data ?? [];
         setGenRows(Array.isArray(rows) ? rows : []);
+        setSummary(data.summary ?? null);
+        setExpanded(null);
         setTotal(Array.isArray(rows) ? rows.length : 0);
       }
     } catch {}
@@ -173,6 +182,9 @@ export default function ReportsPage() {
     { id: 'permissions', labelAr: 'تقرير الاستئذان', labelEn: 'Permissions Report', icon: Clock, color: '#38bdf8', descAr: 'الساعات والأنواع (تأخير/خروج مبكر) والانترفلز', descEn: 'Hours, types (late-in/early-out) & interval breakdown' },
     { id: 'breaks',     labelAr: 'تقرير البريكات',  labelEn: 'Breaks Report',       icon: Clock,     color: '#2dd4bf', descAr: 'كم مرة والمدة والشفت ومين وافق', descEn: 'Count, duration, shift window & approver' },
     { id: 'overtimeDetailed', labelAr: 'الإضافي — تفصيلي', labelEn: 'Overtime — Detailed', icon: Zap, color: '#22d3ee', descAr: 'قبل/بعد الشفت + النسبة من ساعات الدوام', descEn: 'Before/after shift + % of working hours' },
+    { id: 'coaching',   labelAr: 'تقرير الكوتشينج',  labelEn: 'Coaching Report',     icon: Users,     color: '#818cf8', descAr: 'الفلاغات والجلسات: السبب، الخطورة، ومدة الإغلاق', descEn: 'Flags & sessions: trigger, severity, time-to-resolve' },
+    { id: 'outages',    labelAr: 'تقرير الأعطال',    labelEn: 'Outages Report',      icon: Zap,       color: '#f87171', descAr: 'بلاغ→تحقق→حل: المدة وحالة الـ SLA', descEn: 'Report→validate→resolve: duration & SLA status' },
+    { id: 'techIssues', labelAr: 'المشاكل التقنية',  labelEn: 'Technical Issues',    icon: BarChart2, color: '#fbbf24', descAr: 'بلاغ→تحقق→تصعيد→حل + علم CX + SLA 48 ساعة', descEn: 'Report→validate→escalate→resolve + CX flag + 48h SLA' },
     { id: 'audit',      labelAr: 'سجل التدقيق',     labelEn: 'Audit Trail',         icon: BarChart2, color: '#f472b6', descAr: 'مين عدّل، متى، وليش — لكل عملية', descEn: 'Who changed what, when & why' },
     { id: 'crossSkill', labelAr: 'تقرير Cross-Skill', labelEn: 'Cross-Skill Report', icon: Zap,       color: '#fb923c', descAr: 'تغطية الفجوات: من غطّى أي قناة ومتى', descEn: 'Coverage dispatch: who covered which channel & when' },
   ];
@@ -418,8 +430,21 @@ export default function ReportsPage() {
         </TableShell>
       )}
 
-      {/* ── Generic detailed-report table (requests/permissions/breaks/audit/OT) ── */}
-      {GENERIC[active] && !loading && (
+      {/* ── Requests workflow dashboard + approval-chain timeline ──────── */}
+      {active === 'requestsDetailed' && !loading && (
+        <RequestsWorkflow
+          ar={ar} dark={dark} rows={genRows} summary={summary}
+          page={page} limit={limit} expanded={expanded} setExpanded={setExpanded}
+        />
+      )}
+
+      {/* ── Workflow summary strip (coaching / outages / tech issues) ──── */}
+      {(active === 'coaching' || active === 'outages' || active === 'techIssues') && !loading && summary && (
+        <SummaryStrip ar={ar} active={active} summary={summary} />
+      )}
+
+      {/* ── Generic detailed-report table (permissions/breaks/audit/OT/coaching/outages/tech) ── */}
+      {GENERIC[active] && active !== 'requestsDetailed' && !loading && (
         genRows.length === 0 ? (
           <div className="text-center py-16 rounded-2xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#475569' }}>
             {ar ? 'لا توجد بيانات في هذه الفترة' : 'No data in this period'}
@@ -511,5 +536,239 @@ function Td({ children, color }: { children: React.ReactNode; color?: string }) 
       style={color ? { color } : { color: '#94a3b8' }}>
       {children}
     </td>
+  );
+}
+
+/* ─── Workflow dashboard helpers ─────────────────────────────────────────── */
+
+// One KPI tile.
+function Kpi({ label, value, sub, color, icon: Icon }:
+  { label: string; value: string | number; sub?: string; color: string; icon: any }) {
+  return (
+    <div className="rounded-2xl p-3.5 flex flex-col gap-1.5"
+      style={{ background: `${color}10`, border: `1px solid ${color}28` }}>
+      <div className="flex items-center gap-1.5">
+        <Icon size={13} style={{ color }} />
+        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#94a3b8' }}>{label}</span>
+      </div>
+      <div className="text-2xl font-extrabold tabular-nums" style={{ color }}>{value}</div>
+      {sub && <div className="text-[10px]" style={{ color: '#64748b' }}>{sub}</div>}
+    </div>
+  );
+}
+
+const slaColor = (pct: number | null) =>
+  pct == null ? '#64748b' : pct >= 90 ? '#34d399' : pct >= 75 ? '#fbbf24' : '#f87171';
+
+const REQ_STATUS_C: Record<string, string> = {
+  approved: '#34d399', rejected: '#f87171', pending: '#fbbf24',
+  peer_pending: '#a78bfa', cancelled: '#64748b', withdrawn: '#64748b', expired: '#f87171',
+};
+
+// Build the ordered approval-chain timeline for one detailed request row.
+function buildTimeline(r: any, ar: boolean) {
+  const steps: { label: string; at: string; actor?: string; color: string; icon: any; done: boolean }[] = [];
+  steps.push({ label: ar ? 'تقديم الطلب' : 'Submitted', at: r.submittedAt, actor: r.requestedBy, color: '#38bdf8', icon: Send, done: true });
+  if (r.peerRejectedAt)
+    steps.push({ label: ar ? 'رفض الزميل' : 'Peer rejected', at: r.peerRejectedAt, color: '#f87171', icon: XCircle, done: true });
+  else if (r.peerAcceptedAt)
+    steps.push({ label: ar ? 'قبول الزميل' : 'Peer accepted', at: r.peerAcceptedAt, color: '#a78bfa', icon: CheckCircle2, done: true });
+  if (r.approvedL1At)
+    steps.push({ label: ar ? 'موافقة المستوى 1' : 'L1 approved', at: r.approvedL1At, actor: r.approverL1, color: '#34d399', icon: ShieldCheck, done: true });
+  if (r.approvedL2At)
+    steps.push({ label: ar ? 'موافقة المستوى 2' : 'L2 approved', at: r.approvedL2At, actor: r.approverL2, color: '#22c55e', icon: ShieldCheck, done: true });
+  if (r.rejectedAt)
+    steps.push({ label: ar ? 'رفض' : 'Rejected', at: r.rejectedAt, actor: r.rejectedBy, color: '#f87171', icon: XCircle, done: true });
+  // Open / awaiting step
+  if (!r.rejectedAt && r.status !== 'approved' && r.status !== 'cancelled' && r.status !== 'withdrawn')
+    steps.push({ label: ar ? 'بانتظار الموافقة' : 'Awaiting', at: '', actor: r.currentApprover || r.approverL1, color: '#fbbf24', icon: Clock, done: false });
+  return steps;
+}
+
+// Horizontal timeline strip for an expanded request.
+function Timeline({ row, ar }: { row: any; ar: boolean }) {
+  const steps = buildTimeline(row, ar);
+  return (
+    <div className="flex flex-wrap items-stretch gap-1 py-2">
+      {steps.map((s, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <div className="rounded-xl px-3 py-2 min-w-[130px]"
+            style={{ background: `${s.color}12`, border: `1px solid ${s.color}30`, opacity: s.done ? 1 : 0.7 }}>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <s.icon size={12} style={{ color: s.color }} />
+              <span className="text-[11px] font-bold" style={{ color: s.color }}>{s.label}</span>
+            </div>
+            <div className="text-[10px] font-mono" style={{ color: '#cbd5e1' }}>{s.at || (ar ? '—' : 'pending')}</div>
+            {s.actor && <div className="text-[10px]" style={{ color: '#64748b' }}>{s.actor}</div>}
+          </div>
+          {i < steps.length - 1 && <ChevronRight size={14} style={{ color: '#334155' }} className={ar ? 'rotate-180' : ''} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Requests workflow report: KPI dashboard + per-type rollup + expandable timeline table.
+function RequestsWorkflow({ ar, dark, rows, summary, page, limit, expanded, setExpanded }:
+  { ar: boolean; dark: boolean; rows: any[]; summary: any; page: number; limit: number;
+    expanded: number | null; setExpanded: (n: number | null) => void }) {
+  if (!rows || rows.length === 0)
+    return (
+      <div className="text-center py-16 rounded-2xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#475569' }}>
+        {ar ? 'لا توجد طلبات في هذه الفترة' : 'No requests in this period'}
+      </div>
+    );
+
+  const s = summary ?? {};
+  const slice = rows.slice((page - 1) * limit, page * limit);
+
+  return (
+    <div className="space-y-5">
+      {/* KPI dashboard */}
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        <Kpi label={ar ? 'الإجمالي' : 'Total'}     value={s.total ?? rows.length} color="#818cf8" icon={FileText} />
+        <Kpi label={ar ? 'موافق' : 'Approved'}      value={s.approved ?? 0} color="#34d399" icon={CheckCircle2} />
+        <Kpi label={ar ? 'مرفوض' : 'Rejected'}      value={s.rejected ?? 0} color="#f87171" icon={XCircle} />
+        <Kpi label={ar ? 'قيد الموافقة' : 'Pending'} value={s.pending ?? 0} color="#fbbf24" icon={Clock} />
+        <Kpi label={ar ? 'متوسط الموافقة' : 'Avg approval'}
+          value={s.avgApprovalHours != null ? `${s.avgApprovalHours}h` : '—'} color="#22d3ee" icon={Timer}
+          sub={s.fastestHours != null ? `${ar ? 'أسرع' : 'min'} ${s.fastestHours}h · ${ar ? 'أبطأ' : 'max'} ${s.slowestHours}h` : undefined} />
+        <Kpi label={ar ? 'التزام SLA' : 'SLA met'}
+          value={s.slaCompliancePct != null ? `${s.slaCompliancePct}%` : '—'} color={slaColor(s.slaCompliancePct)} icon={ShieldCheck}
+          sub={`${ar ? 'تجاوز' : 'breached'} ${(s.slaBreached ?? 0) + (s.slaOpenBreach ?? 0)}`} />
+      </div>
+
+      {/* Per-type breakdown */}
+      {Array.isArray(s.byType) && s.byType.length > 0 && (
+        <div className="rounded-2xl overflow-x-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="px-4 pt-3 pb-2 text-xs font-bold" style={{ color: '#cbd5e1' }}>
+            {ar ? 'حسب نوع الطلب' : 'By request type'}
+          </div>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                {[ar ? 'النوع' : 'Type', ar ? 'إجمالي' : 'Total', ar ? 'موافق' : 'Appr.', ar ? 'مرفوض' : 'Rej.',
+                  ar ? 'قيد' : 'Pend.', ar ? 'متوسط (س)' : 'Avg h', 'SLA %'].map((h, i) => (
+                  <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2" style={{ color: '#475569' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {s.byType.map((t: any, i: number) => (
+                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                  <td className="px-3 py-2 text-[11px] font-medium" style={{ color: '#e2e8f0' }}>{t.type || t.typeCode}</td>
+                  <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#94a3b8' }}>{t.total}</td>
+                  <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#34d399' }}>{t.approved}</td>
+                  <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#f87171' }}>{t.rejected}</td>
+                  <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#fbbf24' }}>{t.pending}</td>
+                  <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#22d3ee' }}>{t.avgApprovalHours ?? '—'}</td>
+                  <td className="px-3 py-2 text-[11px] tabular-nums font-bold" style={{ color: slaColor(t.slaCompliancePct) }}>{t.slaCompliancePct != null ? `${t.slaCompliancePct}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Detail table with expandable approval-chain timeline */}
+      <div className="rounded-2xl overflow-x-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {['', ar ? 'تاريخ التقديم' : 'Submitted', ar ? 'الموظف' : 'Employee', ar ? 'النوع' : 'Type',
+                ar ? 'التفاصيل' : 'Detail', ar ? 'الحالة' : 'Status', 'SLA', ar ? 'مدة الموافقة' : 'Approval'].map((h, i) => (
+                <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2.5" style={{ color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {slice.map((r: any, i: number) => {
+              const idx = (page - 1) * limit + i;
+              const stc = REQ_STATUS_C[r.status] ?? '#94a3b8';
+              const isOpen = expanded === idx;
+              const slaC = r.slaStatus === 'Met' ? '#34d399'
+                : String(r.slaStatus).includes('Breach') ? '#f87171' : '#64748b';
+              return (
+                <Fragment key={idx}>
+                  <tr onClick={() => setExpanded(isOpen ? null : idx)}
+                    className="cursor-pointer hover:bg-white/[0.025]"
+                    style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', background: isOpen ? 'rgba(129,140,248,0.06)' : undefined }}>
+                    <td className="px-3 py-2.5">
+                      {isOpen ? <ChevronDown size={13} style={{ color: '#818cf8' }} /> : <ChevronRight size={13} style={{ color: '#475569' }} className={ar ? 'rotate-180' : ''} />}
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px] font-mono" style={{ color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                      {r.submittedAt || '—'}{r.urgent === 'Yes' && <span className="ms-1" style={{ color: '#f87171' }}>●</span>}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="text-[11px] font-medium" style={{ color: '#e2e8f0' }}>{r.employee || '—'}</div>
+                      {r.employeeNo && <div className="text-[10px]" style={{ color: '#475569' }}>#{r.employeeNo} · {r.function}</div>}
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px]" style={{ color: '#cbd5e1', whiteSpace: 'nowrap' }}>{r.type}</td>
+                    <td className="px-3 py-2.5 text-[11px]" style={{ color: '#94a3b8', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.detail}>{r.detail || '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: `${stc}22`, color: stc }}>{r.status}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-[11px] font-semibold" style={{ color: slaC, whiteSpace: 'nowrap' }}>{r.slaStatus || '—'}</td>
+                    <td className="px-3 py-2.5 text-[11px] tabular-nums" style={{ color: '#22d3ee' }}>{r.decisionHours != null ? `${r.decisionHours}h` : '—'}</td>
+                  </tr>
+                  {isOpen && (
+                    <tr style={{ background: 'rgba(0,0,0,0.18)' }}>
+                      <td colSpan={8} className="px-4 py-2">
+                        <Timeline row={r} ar={ar} />
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 mt-1 text-[11px]">
+                          <span style={{ color: '#64748b' }}>{ar ? 'SLA المستحق' : 'SLA due'}: <span style={{ color: '#cbd5e1' }}>{r.slaDueAt || '—'}</span></span>
+                          {r.reason && <span style={{ color: '#64748b' }}>{ar ? 'السبب' : 'Reason'}: <span style={{ color: '#cbd5e1' }}>{r.reason}</span></span>}
+                          {r.rejectionReason && <span style={{ color: '#64748b' }}>{ar ? 'سبب الرفض' : 'Rejection'}: <span style={{ color: '#f87171' }}>{r.rejectionReason}</span></span>}
+                          {r.notes && <span style={{ color: '#64748b' }}>{ar ? 'ملاحظات' : 'Notes'}: <span style={{ color: '#cbd5e1' }}>{r.notes}</span></span>}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Compact KPI strip for coaching / outages / technical-issues reports.
+function SummaryStrip({ ar, active, summary }: { ar: boolean; active: string; summary: any }) {
+  const s = summary ?? {};
+  let tiles: { label: string; value: string | number; color: string; icon: any }[] = [];
+  if (active === 'coaching') {
+    tiles = [
+      { label: ar ? 'الإجمالي' : 'Total', value: s.total ?? 0, color: '#818cf8', icon: Users },
+      { label: ar ? 'مفتوح' : 'Open', value: s.open ?? 0, color: '#fbbf24', icon: Clock },
+      { label: ar ? 'تمت معالجته' : 'Addressed', value: s.addressed ?? 0, color: '#34d399', icon: CheckCircle2 },
+      { label: ar ? 'مرفوض' : 'Dismissed', value: s.dismissed ?? 0, color: '#64748b', icon: XCircle },
+      { label: ar ? 'له جلسة' : 'With session', value: s.withSession ?? 0, color: '#a78bfa', icon: Calendar },
+      { label: ar ? 'متوسط الإغلاق' : 'Avg resolve', value: s.avgDaysToResolve != null ? `${s.avgDaysToResolve}d` : '—', color: '#22d3ee', icon: Timer },
+    ];
+  } else if (active === 'outages') {
+    tiles = [
+      { label: ar ? 'الإجمالي' : 'Total', value: s.total ?? 0, color: '#818cf8', icon: Zap },
+      { label: ar ? 'جارية' : 'Ongoing', value: s.ongoing ?? 0, color: '#f87171', icon: AlertTriangle },
+      { label: ar ? 'محلولة' : 'Resolved', value: s.resolved ?? 0, color: '#34d399', icon: CheckCircle2 },
+      { label: ar ? 'متوسط الحل' : 'Avg resolve', value: s.avgResolveMin != null ? `${s.avgResolveMin}m` : '—', color: '#22d3ee', icon: Timer },
+      { label: ar ? 'التزام SLA' : 'SLA met', value: s.slaCompliancePct != null ? `${s.slaCompliancePct}%` : '—', color: slaColor(s.slaCompliancePct), icon: ShieldCheck },
+      { label: ar ? 'تجاوز SLA' : 'SLA breached', value: (s.slaBreached ?? 0) + (s.slaOpenBreach ?? 0), color: '#f87171', icon: XCircle },
+    ];
+  } else {
+    tiles = [
+      { label: ar ? 'الإجمالي' : 'Total', value: s.total ?? 0, color: '#818cf8', icon: BarChart2 },
+      { label: ar ? 'مفتوح' : 'Open', value: s.open ?? 0, color: '#fbbf24', icon: Clock },
+      { label: ar ? 'محلول' : 'Resolved', value: s.resolved ?? 0, color: '#34d399', icon: CheckCircle2 },
+      { label: ar ? 'مشاكل CX' : 'CX issues', value: s.cxIssues ?? 0, color: '#fb923c', icon: AlertTriangle },
+      { label: ar ? 'متوسط الحل' : 'Avg resolve', value: s.avgResolveHrs != null ? `${s.avgResolveHrs}h` : '—', color: '#22d3ee', icon: Timer },
+      { label: ar ? 'التزام SLA' : 'SLA met', value: s.slaCompliancePct != null ? `${s.slaCompliancePct}%` : '—', color: slaColor(s.slaCompliancePct), icon: ShieldCheck },
+    ];
+  }
+  return (
+    <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-4">
+      {tiles.map((t, i) => <Kpi key={i} label={t.label} value={t.value} color={t.color} icon={t.icon} />)}
+    </div>
   );
 }

@@ -40,11 +40,11 @@ interface Stats {
 }
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
-const SEV: Record<string, { ar: string; color: string; bg: string }> = {
-  low:      { ar: 'منخفض', color: '#34d399', bg: 'rgba(52,211,153,0.12)'  },
-  medium:   { ar: 'متوسط', color: '#fbbf24', bg: 'rgba(251,191,36,0.12)'  },
-  high:     { ar: 'عالي',  color: '#fb923c', bg: 'rgba(251,146,60,0.12)'  },
-  critical: { ar: 'حرج',   color: '#f87171', bg: 'rgba(239,68,68,0.12)'   },
+const SEV: Record<string, { ar: string; en: string; color: string; bg: string }> = {
+  low:      { ar: 'منخفض', en: 'Low',      color: '#34d399', bg: 'rgba(52,211,153,0.12)'  },
+  medium:   { ar: 'متوسط', en: 'Medium',   color: '#fbbf24', bg: 'rgba(251,191,36,0.12)'  },
+  high:     { ar: 'عالي',  en: 'High',     color: '#fb923c', bg: 'rgba(251,146,60,0.12)'  },
+  critical: { ar: 'حرج',   en: 'Critical', color: '#f87171', bg: 'rgba(239,68,68,0.12)'   },
 };
 const ST: Record<string, { ar: string; en: string; color: string; bg: string }> = {
   pending_rta:          { ar: 'قيد مراجعة RTA', en: 'Pending RTA',   color: '#f87171', bg: 'rgba(239,68,68,0.12)'   },
@@ -304,7 +304,7 @@ export default function TechnicalIssuesPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-semibold truncate" style={{ color:'#e2e8f0' }}>{ti.title}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background:st.bg, color:st.color }}>{ar?st.ar:st.en}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background:sv.bg, color:sv.color }}>{sv.ar}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background:sv.bg, color:sv.color }}>{ar?sv.ar:sv.en}</span>
                       {isPendingRTA(ti) && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full animate-pulse"
                           style={{ background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.3)', color:'#f87171' }}>
@@ -365,7 +365,7 @@ export default function TechnicalIssuesPage() {
                       </span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full"
                         style={{ background:SEV[detail.severity]?.bg, color:SEV[detail.severity]?.color }}>
-                        {SEV[detail.severity]?.ar}
+                        {ar ? SEV[detail.severity]?.ar : SEV[detail.severity]?.en}
                       </span>
                     </div>
                     <h2 className="text-base font-bold" style={{ color:'#f1f5f9' }}>{detail.title}</h2>
@@ -542,7 +542,7 @@ export default function TechnicalIssuesPage() {
                   <label className="block text-[11px] mb-1.5" style={{ color:'#64748b' }}>{ar?'خطورة العطل':'Outage Severity'}</label>
                   <select value={valSeverity} onChange={e => setValSeverity(e.target.value)} className="inp w-full text-xs">
                     {['critical','high','medium','low'].map(s => (
-                      <option key={s} value={s}>{ar ? SEV[s].ar : s}</option>
+                      <option key={s} value={s}>{ar ? SEV[s].ar : SEV[s].en}</option>
                     ))}
                   </select>
                 </div>
@@ -621,7 +621,7 @@ export default function TechnicalIssuesPage() {
                 <Fld label={ar ? 'الخطورة' : 'Severity'}>
                   <select value={form.severity} onChange={e => setForm(f=>({...f,severity:e.target.value}))} className="inp">
                     {['critical','high','medium','low'].map(s => (
-                      <option key={s} value={s}>{ar ? SEV[s].ar : s.charAt(0).toUpperCase()+s.slice(1)}</option>
+                      <option key={s} value={s}>{ar ? SEV[s].ar : SEV[s].en}</option>
                     ))}
                   </select>
                 </Fld>
@@ -711,15 +711,25 @@ export default function TechnicalIssuesPage() {
 
 // ── WhatsApp Share ─────────────────────────────────────────────────────────────
 function WhatsAppShare({ ti, ar }: { ti: TIDetail; ar: boolean }) {
-  const text = `🔧 *مشكلة تقنية — ${ti.title}*\n` +
-    `• الخطورة: ${ti.severity}\n` +
-    `• القسم: ${ti.functionName ?? '—'}\n` +
-    `• القناة: ${ti.channel ?? '—'}\n` +
-    `• المُبلِّغ: ${ti.reporterName ?? '—'}\n` +
-    `• الوقت: ${fmtDateTime(ti.createdAt, true)}\n` +
-    (ti.description ? `• الوصف: ${ti.description}\n` : '') +
-    `• المرفقات: ${ti.attachmentsCount}\n` +
-    `\n📌 منصة WFM — Boutiqaat Contact Center`;
+  const text = ar
+    ? `🔧 *مشكلة تقنية — ${ti.title}*\n` +
+      `• الخطورة: ${ti.severity}\n` +
+      `• القسم: ${ti.functionName ?? '—'}\n` +
+      `• القناة: ${ti.channel ?? '—'}\n` +
+      `• المُبلِّغ: ${ti.reporterName ?? '—'}\n` +
+      `• الوقت: ${fmtDateTime(ti.createdAt, true)}\n` +
+      (ti.description ? `• الوصف: ${ti.description}\n` : '') +
+      `• المرفقات: ${ti.attachmentsCount}\n` +
+      `\n📌 منصة WFM — Boutiqaat Contact Center`
+    : `🔧 *Technical Issue — ${ti.title}*\n` +
+      `• Severity: ${ti.severity}\n` +
+      `• Function: ${ti.functionName ?? '—'}\n` +
+      `• Channel: ${ti.channel ?? '—'}\n` +
+      `• Reporter: ${ti.reporterName ?? '—'}\n` +
+      `• Time: ${fmtDateTime(ti.createdAt, false)}\n` +
+      (ti.description ? `• Description: ${ti.description}\n` : '') +
+      `• Attachments: ${ti.attachmentsCount}\n` +
+      `\n📌 WFM Platform — Boutiqaat Contact Center`;
 
   return (
     <a href={`https://wa.me/?text=${encodeURIComponent(text)}`} target="_blank" rel="noreferrer"

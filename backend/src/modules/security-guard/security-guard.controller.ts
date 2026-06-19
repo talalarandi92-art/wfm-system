@@ -1,8 +1,8 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
-import { SecurityGuardService } from './security-guard.service';
+import { SecurityGuardService, Lang } from './security-guard.service';
 
 @ApiTags('Security Guard')
 @ApiBearerAuth()
@@ -13,7 +13,7 @@ export class SecurityGuardController {
 
   @Get()
   @ApiOperation({ summary: 'Run the security/compliance battery for the current tenant' })
-  async run(@CurrentUser() user: any) {
-    return this.svc.run(user.tenantId);
+  async run(@CurrentUser() user: any, @Query('lang') lang?: string) {
+    return this.svc.run(user.tenantId, lang === 'en' ? 'en' : 'ar');
   }
 }

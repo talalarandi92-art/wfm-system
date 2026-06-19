@@ -84,12 +84,12 @@ function ArticleEditor({ article, categories, onClose, onSaved, ar }: {
         style={{ background: '#0f1527', border: '1px solid rgba(255,255,255,0.12)' }}
         onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between border-b border-white/[0.07] flex-shrink-0">
-          <h3 className="text-sm font-bold text-white">{isEdit ? 'تعديل المقال' : 'مقال جديد'}</h3>
+          <h3 className="text-sm font-bold text-white">{isEdit ? (ar ? 'تعديل المقال' : 'Edit Article') : (ar ? 'مقال جديد' : 'New Article')}</h3>
           <div className="flex items-center gap-2">
             <button onClick={() => setPreview(p => !p)}
               className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all
                 ${preview ? 'bg-indigo-500/20 text-indigo-300' : 'text-slate-400 hover:bg-white/5'}`}>
-              <Eye size={12} className="inline me-1" /> معاينة
+              <Eye size={12} className="inline me-1" /> {ar ? 'معاينة' : 'Preview'}
             </button>
             <button onClick={onClose} className="text-slate-500 hover:text-white"><X size={16} /></button>
           </div>
@@ -134,12 +134,12 @@ function ArticleEditor({ article, categories, onClose, onSaved, ar }: {
           <button onClick={() => save('draft')} disabled={!title.trim() || saving}
             className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 transition-all disabled:opacity-40"
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <FileEdit size={13} className="inline me-1" /> حفظ كمسودة
+            <FileEdit size={13} className="inline me-1" /> {ar ? 'حفظ كمسودة' : 'Save as Draft'}
           </button>
           <button onClick={() => save('published')} disabled={!title.trim() || saving}
             className="px-4 py-2 rounded-xl text-xs font-bold text-white transition-all disabled:opacity-40"
             style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)' }}>
-            <Globe size={13} className="inline me-1" /> نشر
+            <Globe size={13} className="inline me-1" /> {ar ? 'نشر' : 'Publish'}
           </button>
         </div>
       </div>

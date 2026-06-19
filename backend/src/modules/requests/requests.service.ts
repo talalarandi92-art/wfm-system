@@ -5,6 +5,7 @@ import {
   CreateShiftSwapDto,
   CreateLeaveDto,
   CreateOvertimeDto,
+  CreateBreakDto,
   PeerRespondDto,
   ApproveRejectDto,
   SwapValidation,
@@ -298,7 +299,13 @@ export class RequestsService {
          -- Leave
          rl.leave_type, rl.start_date AS leave_start, rl.end_date AS leave_end,
          rl.duration_days, rl.is_half_day, rl.medical_certificate_required,
-         rl.attachment_submitted
+         rl.attachment_submitted,
+         -- Break
+         rb.break_date, rb.start_time AS break_start, rb.end_time AS break_end,
+         rb.duration_minutes AS break_minutes, rb.break_type, rb.reason AS break_reason,
+         -- Attachments count
+         (SELECT COUNT(*)::int FROM attachments a
+            WHERE a.entity_type = 'request' AND a.entity_id = r.id) AS attachment_count
        FROM requests r
        JOIN request_types rt ON rt.id = r.request_type_id
        JOIN employees e ON e.id = r.employee_id
@@ -309,6 +316,7 @@ export class RequestsService {
        LEFT JOIN shift_codes tgt_sc ON tgt_sc.id = rss.target_shift_code_id
        LEFT JOIN employees te ON te.id = rss.target_employee_id
        LEFT JOIN request_leaves rl ON rl.request_id = r.id
+       LEFT JOIN request_breaks rb ON rb.request_id = r.id
        WHERE ${where}
        ORDER BY r.submitted_at DESC NULLS LAST, r.created_at DESC
        LIMIT $${pi++} OFFSET $${pi++}`,
@@ -364,6 +372,14 @@ export class RequestsService {
         isHalfDay: r.is_half_day,
         medicalCertRequired: r.medical_certificate_required,
         attachmentSubmitted: r.attachment_submitted,
+        attachmentCount: r.attachment_count ?? 0,
+        // Break
+        breakDate: r.break_date,
+        breakStart: r.break_start,
+        breakEnd: r.break_end,
+        breakMinutes: r.break_minutes,
+        breakType: r.break_type,
+        breakReason: r.break_reason,
         // Approval
         approvedL1At: r.approved_l1_at,
         approvedL2At: r.approved_l2_at,
@@ -656,6 +672,12 @@ export class RequestsService {
       [requestId, approverId, tenantId],
     );
 
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, notes)
+       VALUES ($1,$2,'request.approved','requests','request',$3,$4)`,
+      [tenantId, approverId, requestId, `Approved ${req.type_code}`],
+    ).catch(() => {});
+
     return { success: true, message: 'ØªÙ…Øª Ø§Ù„Ù…ÙˆØ§ÙÙ‚Ø© Ø¹Ù„Ù‰ Ø§Ù„Ø·Ù„Ø¨' };
   }
 
@@ -675,6 +697,11 @@ export class RequestsService {
        WHERE id = $1 AND tenant_id = $4`,
       [requestId, rejecterId, dto.reason ?? 'Ù…Ø±ÙÙˆØ¶', tenantId],
     );
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, notes)
+       VALUES ($1,$2,'request.rejected','requests','request',$3,$4)`,
+      [tenantId, rejecterId, requestId, dto.reason ?? 'rejected'],
+    ).catch(() => {});
     return { success: true, message: 'ØªÙ… Ø±ÙØ¶ Ø§Ù„Ø·Ù„Ø¨' };
   }
 
@@ -1013,6 +1040,106 @@ export class RequestsService {
       id: requestId, status: 'pending',
       message: `تم تقديم طلب الأوفر تايم (${dto.hours} ساعة) بنجاح`,
     };
+  }
+
+  /* ────────────────────────────────────────────────────────────────────────
+   *  CREATE MANUAL BREAK REQUEST
+   * ──────────────────────────────────────────────────────────────────────── */
+  async createBreak(tenantId: string, dto: CreateBreakDto) {
+    const requesterId = await this.resolveRequesterId(tenantId, dto.employeeId);
+
+    const emp = await this.ds.query(
+      `SELECT id FROM employees WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+      [dto.employeeId, tenantId],
+    );
+    if (!emp.length) throw new BadRequestException('الموظف غير موجود أو غير نشط');
+
+    const rtRow = await this.ds.query(
+      `SELECT id, sla_hours FROM request_types WHERE code = 'break' AND tenant_id = $1`,
+      [tenantId],
+    );
+    if (!rtRow.length) throw new BadRequestException('نوع الطلب break غير مدعوم');
+
+    // From → To times. Duration is derived; date defaults to submission date (today).
+    const toMin = (t: string) => {
+      const [h, m] = String(t).split(':').map(Number);
+      return isNaN(h) ? NaN : h * 60 + (m || 0);
+    };
+    const sMin = toMin(dto.startTime), eMin = toMin(dto.endTime);
+    if (isNaN(sMin) || isNaN(eMin)) throw new BadRequestException('وقت البداية أو النهاية غير صحيح');
+    const dur = eMin - sMin;
+    if (dur <= 0) throw new BadRequestException('وقت النهاية يجب أن يكون بعد وقت البداية');
+    if (dur < 5 || dur > 240) throw new BadRequestException('مدة البريك بين 5 و 240 دقيقة');
+
+    const requestId = uuid();
+
+    await this.ds.query(
+      `INSERT INTO requests
+         (id, tenant_id, request_type_id, requester_id, employee_id,
+          status, notes, sla_due_at, submitted_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6,
+               NOW() + ($7 || ' hours')::interval,
+               NOW(), NOW(), NOW())`,
+      [requestId, tenantId, rtRow[0].id, requesterId, dto.employeeId,
+       dto.notes ?? null, rtRow[0].sla_hours],
+    );
+
+    // break_date defaults to today (Asia/Kuwait) — auto from submission time.
+    const [{ break_date }] = await this.ds.query(
+      `INSERT INTO request_breaks
+         (request_id, break_date, start_time, end_time, duration_minutes, break_type, reason)
+       VALUES ($1, COALESCE($2::date, (NOW() AT TIME ZONE 'Asia/Kuwait')::date), $3, $4, $5, $6, $7)
+       RETURNING break_date`,
+      [requestId, dto.breakDate ?? null, dto.startTime, dto.endTime, dur, dto.breakType ?? 'manual', dto.reason ?? null],
+    );
+
+    return {
+      id: requestId, status: 'pending', breakDate: break_date,
+      message: `تم تقديم طلب البريك (${dto.startTime}-${dto.endTime}، ${dur} دقيقة) بنجاح`,
+    };
+  }
+
+  /* ────────────────────────────────────────────────────────────────────────
+   *  ATTACHMENTS — upload / list a file linked to a request (entity_type='request')
+   * ──────────────────────────────────────────────────────────────────────── */
+  async addAttachment(
+    tenantId: string, requestId: string,
+    file: { originalname: string; filename: string; path: string; size: number; mimetype: string },
+    uploadedByUserId?: string,
+  ) {
+    const reqRow = await this.ds.query(
+      `SELECT id FROM requests WHERE id = $1 AND tenant_id = $2`,
+      [requestId, tenantId],
+    );
+    if (!reqRow.length) throw new BadRequestException('الطلب غير موجود');
+
+    const id = uuid();
+    await this.ds.query(
+      `INSERT INTO attachments
+         (id, tenant_id, entity_type, entity_id, original_filename, stored_filename,
+          file_path, file_size_bytes, mime_type, uploaded_by, created_at)
+       VALUES ($1, $2, 'request', $3, $4, $5, $6, $7, $8, $9, NOW())`,
+      [id, tenantId, requestId, file.originalname, file.filename,
+       `/uploads/requests/${file.filename}`, file.size, file.mimetype, uploadedByUserId ?? null],
+    );
+    // Flag the request as having its attachment submitted (leave extension if present).
+    await this.ds.query(
+      `UPDATE request_leaves SET attachment_submitted = TRUE WHERE request_id = $1`,
+      [requestId],
+    ).catch(() => {});
+
+    return { id, url: `/uploads/requests/${file.filename}`, name: file.originalname, size: file.size };
+  }
+
+  async listAttachments(tenantId: string, requestId: string) {
+    return this.ds.query(
+      `SELECT id, original_filename AS name, file_path AS url, file_size_bytes AS size,
+              mime_type AS type, created_at
+         FROM attachments
+        WHERE tenant_id = $1 AND entity_type = 'request' AND entity_id = $2
+        ORDER BY created_at`,
+      [tenantId, requestId],
+    );
   }
 
   async getPeerPending(tenantId: string, employeeId: string) {

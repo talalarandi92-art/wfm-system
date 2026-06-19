@@ -59,7 +59,53 @@ export class ReportsController {
     const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
     const rows = await this.svc.requestsDetailed(user.tenantId, fromDate, toDate, type, status);
     if (format) return this.deliver(res!, rows, format, `requests_detailed_${fromDate}_${toDate}`, 'Requests');
-    return { period: { from: fromDate, to: toDate }, total: rows.length, data: rows };
+    const summary = this.svc.requestsSummary(rows);
+    return { period: { from: fromDate, to: toDate }, total: rows.length, summary, data: rows };
+  }
+
+  /* ── Coaching: auto-flags + linked session, time-to-resolve ── */
+  @Get('coaching')
+  @ApiOperation({ summary: 'Coaching flags: trigger, severity, session, resolve time' })
+  async coaching(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const r = await this.svc.coachingDetailed(user.tenantId, fromDate, toDate);
+    if (format) return this.deliver(res!, r.detail, format, `coaching_${fromDate}_${toDate}`, 'Coaching');
+    return { period: { from: fromDate, to: toDate }, total: r.detail.length, ...r };
+  }
+
+  /* ── Outages: report→validate→resolve, duration & SLA ── */
+  @Get('outages')
+  @ApiOperation({ summary: 'Outages: timeline, duration, SLA met/breached' })
+  async outages(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const r = await this.svc.outagesDetailed(user.tenantId, fromDate, toDate);
+    if (format) return this.deliver(res!, r.detail, format, `outages_${fromDate}_${toDate}`, 'Outages');
+    return { period: { from: fromDate, to: toDate }, total: r.detail.length, ...r };
+  }
+
+  /* ── Technical issues: report→validate→escalate→resolve, 48h SLA ── */
+  @Get('tech-issues')
+  @ApiOperation({ summary: 'Technical issues: escalation timeline, CX flag, SLA' })
+  async techIssues(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('format') format?: string,
+    @Res({ passthrough: true }) res?: Response,
+  ) {
+    const { fromDate, toDate } = await this.svc.resolveRange(user.tenantId, from, to);
+    const r = await this.svc.techIssuesDetailed(user.tenantId, fromDate, toDate);
+    if (format) return this.deliver(res!, r.detail, format, `tech_issues_${fromDate}_${toDate}`, 'TechIssues');
+    return { period: { from: fromDate, to: toDate }, total: r.detail.length, ...r };
   }
 
   /* ── Permissions (استئذان): hours, type, intervals early/late ── */

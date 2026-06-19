@@ -21,6 +21,7 @@ import { HealthGuardService } from '@modules/health-guard/health-guard.service';
 
 type Verdict = 'approve' | 'caution' | 'danger';
 type Severity = 'ok' | 'info' | 'caution' | 'risk';
+type Lang = 'ar' | 'en';
 
 @Injectable()
 export class AnalystService {
@@ -59,7 +60,7 @@ export class AnalystService {
   }
 
   // ── Main assessment ─────────────────────────────────────────────────────────
-  async assess(tid: string, dateQ?: string) {
+  async assess(tid: string, dateQ?: string, lang: Lang = 'ar') {
     const [ld] = await this.ds.query(
       `SELECT MAX(attendance_date)::text d FROM attendance_records WHERE tenant_id = $1`, [tid],
     ).catch(() => [{ d: null }]);
@@ -75,6 +76,8 @@ export class AnalystService {
 
     // Persist fresh pending recommendations (preserve already-decided ones),
     // then attach each rec's DB id so the UI can give feedback without re-matching.
+    // Persistence + id-matching always use the canonical Arabic title so the dedup
+    // key and saved accept/reject decisions stay stable across UI languages.
     const recs = [...coverage.recs, ...schedule.recs, ...queues.recs, ...compliance.recs];
     await this.logRecommendations(tid, date, recs);
     const idRows = await this.ds.query(
@@ -83,6 +86,19 @@ export class AnalystService {
     const idMap = new Map<string, { id: string; decision: string }>(
       idRows.map((r: any) => [`${r.area}|${r.title}`, { id: r.id, decision: r.decision }] as [string, { id: string; decision: string }]));
     for (const r of recs) { const m = idMap.get(`${r.area}|${r.title}`); r.id = m?.id ?? null; r.decision = m?.decision ?? 'pending'; }
+
+    // Now that persistence/matching is done, swap display text to the requested
+    // language (mutates the same objects referenced by coverage/schedule/… .recs).
+    if (lang === 'en') {
+      for (const r of recs) {
+        if (r.titleEn) r.title = r.titleEn;
+        if (r.summaryEn) r.summary = r.summaryEn;
+        if (r.recommendationEn) r.recommendation = r.recommendationEn;
+      }
+      for (const o of compliance.offenders) if (o.issuesEn) o.issues = o.issuesEn;
+    }
+    for (const r of recs) { delete r.titleEn; delete r.summaryEn; delete r.recommendationEn; }
+    for (const o of compliance.offenders) delete o.issuesEn;
 
     // Headline = worst area.
     const order: Severity[] = ['risk', 'caution', 'info', 'ok'];
@@ -171,21 +187,31 @@ export class AnalystService {
       const verdict: Verdict = bottleneck.gap < 0 ? 'danger' : bottleneck.gap < surplusSafe ? 'caution' : 'approve';
       const severity: Severity = verdict === 'danger' ? 'risk' : verdict === 'caution' ? 'caution' : 'ok';
 
-      let summary: string, recommendation: string;
+      let summary: string, recommendation: string, summaryEn: string, recommendationEn: string;
       if (verdict === 'danger') {
         summary = `نقص تغطية: القسم ${a.name} يقصّر ${-bottleneck.gap} عند الساعة ${pad(bottleneck.hour)} (مطلوب ${bottleneck.required}, متاح ${bottleneck.available}).`;
         recommendation = `خطر — لا توافق على إجازات/استئذان بهالساعة. غطِّ النقص بأوفرتايم أو نقل cross-skill أو استدعاء، خصوصاً ${pad(bottleneck.hour)}.`;
+        summaryEn = `Coverage shortfall: ${a.name} is short ${-bottleneck.gap} at ${pad(bottleneck.hour)} (required ${bottleneck.required}, available ${bottleneck.available}).`;
+        recommendationEn = `Risk — don't approve leave/permission at this hour. Fill the gap with overtime, cross-skill transfer or call-in, especially ${pad(bottleneck.hour)}.`;
       } else if (verdict === 'caution') {
         summary = `تغطية محدودة: أضيق نقطة بالقسم ${a.name} فائض ${bottleneck.gap} فقط عند ${pad(bottleneck.hour)}.`;
         recommendation = `بحذر — تقدر توافق على ${bottleneck.gap} كحد أقصى بهالساعة، وراقب عن قرب.`;
+        summaryEn = `Tight coverage: ${a.name}'s tightest point has only a ${bottleneck.gap} surplus at ${pad(bottleneck.hour)}.`;
+        recommendationEn = `Caution — you can approve at most ${bottleneck.gap} at this hour; watch closely.`;
       } else {
         summary = `فائض آمن: القسم ${a.name} عنده فائض لا يقل عن ${bottleneck.gap} طوال اليوم.`;
         recommendation = `تقدر توافق على لغاية ${bottleneck.gap} استئذان/إجازة بأضيق ساعة (${pad(bottleneck.hour)}) أو تحرّر أوفرتايم/تنقل للنقص بقسم ثاني.`;
+        summaryEn = `Safe surplus: ${a.name} keeps a surplus of at least ${bottleneck.gap} all day.`;
+        recommendationEn = `You can approve up to ${bottleneck.gap} permission/leave at the tightest hour (${pad(bottleneck.hour)}), or free overtime / move to cover a shortfall elsewhere.`;
       }
-      if (uncovered.length) recommendation += ` ⚠ ساعات بلا أي تغطية: ${uncovered.map(x => pad(x.hour)).join(', ')}.`;
+      if (uncovered.length) {
+        const hrsList = uncovered.map(x => pad(x.hour)).join(', ');
+        recommendation += ` ⚠ ساعات بلا أي تغطية: ${hrsList}.`;
+        recommendationEn += ` ⚠ Hours with no coverage at all: ${hrsList}.`;
+      }
 
       functions.push({ functionId: a.id, functionName: a.name, verdict, bottleneck, uncovered: uncovered.map(x => x.hour), hours: opHours });
-      recs.push({ area: 'coverage', functionId: a.id === 'none' ? null : a.id, functionName: a.name, severity, verdict, title: `التغطية — ${a.name}`, summary, recommendation, metrics: { bottleneckHour: bottleneck.hour, bottleneckGap: bottleneck.gap, required: bottleneck.required, available: bottleneck.available, uncovered: uncovered.map(x => x.hour) } });
+      recs.push({ area: 'coverage', functionId: a.id === 'none' ? null : a.id, functionName: a.name, severity, verdict, title: `التغطية — ${a.name}`, titleEn: `Coverage — ${a.name}`, summary, summaryEn, recommendation, recommendationEn, metrics: { bottleneckHour: bottleneck.hour, bottleneckGap: bottleneck.gap, required: bottleneck.required, available: bottleneck.available, uncovered: uncovered.map(x => x.hour) } });
     }
     functions.sort((a, b) => ({ danger: 0, caution: 1, approve: 2 } as any)[a.verdict] - ({ danger: 0, caution: 1, approve: 2 } as any)[b.verdict]);
     const severity: Severity = functions.some(f => f.verdict === 'danger') ? 'risk' : functions.some(f => f.verdict === 'caution') ? 'caution' : 'ok';
@@ -201,7 +227,7 @@ export class AnalystService {
     for (const c of findings) {
       const sev: Severity = c.status === 'fail' ? 'risk' : 'caution';
       if (sev === 'risk') severity = 'risk'; else if (severity === 'ok') severity = 'caution';
-      recs.push({ area: 'schedule', functionId: null, functionName: null, severity: sev, verdict: null, title: `الجدول — ${c.labelAr}`, summary: `${c.count} حالة: ${c.detail}`, recommendation: c.status === 'fail' ? 'مخالفة قاعدة صارمة — عدّل الجدول قبل النشر.' : 'راجع وأكّد إن كان استثناء مقصود.', metrics: { count: c.count, sample: c.sample ?? [] } });
+      recs.push({ area: 'schedule', functionId: null, functionName: null, severity: sev, verdict: null, title: `الجدول — ${c.labelAr}`, titleEn: `Schedule — ${c.label}`, summary: `${c.count} حالة: ${c.detail}`, summaryEn: `${c.count} case(s): ${c.detail}`, recommendation: c.status === 'fail' ? 'مخالفة قاعدة صارمة — عدّل الجدول قبل النشر.' : 'راجع وأكّد إن كان استثناء مقصود.', recommendationEn: c.status === 'fail' ? 'Hard-rule violation — fix the schedule before publishing.' : 'Review and confirm whether it is an intended exception.', metrics: { count: c.count, sample: c.sample ?? [] } });
     }
     return { severity, findings, recs };
   }
@@ -223,8 +249,11 @@ export class AnalystService {
     for (const p of problems.slice(0, 8)) {
       recs.push({ area: 'queues', functionId: null, functionName: p.name, severity: (p.sla < slaTarget * 0.75 || p.breached > 0 ? 'risk' : 'caution') as Severity, verdict: null,
         title: `الكيو — ${p.name}`,
+        titleEn: `Queue — ${p.name}`,
         summary: `SLA ${p.sla}% · باكلوج ${p.backlog} · بالانتظار ${p.waiting} · متاح ${p.agentsAvailable}${p.breached ? ` · خرق SLA ${p.breached}` : ''}.`,
+        summaryEn: `SLA ${p.sla}% · backlog ${p.backlog} · waiting ${p.waiting} · available ${p.agentsAvailable}${p.breached ? ` · SLA breached ${p.breached}` : ''}.`,
         recommendation: p.agentsAvailable === 0 ? 'لا يوجد متاح — حرّك cross-skill أو أنهِ بريكات أو أوفرتايم فوراً.' : 'وجّه المتاحين لهالكيو أو قلّل البريكات حتى ينزل الباكلوج.',
+        recommendationEn: p.agentsAvailable === 0 ? 'No one available — move cross-skill, end breaks, or add overtime immediately.' : 'Route available agents to this queue or cut breaks until the backlog drops.',
         metrics: { sla: p.sla, backlog: p.backlog, waiting: p.waiting, breached: p.breached, agentsAvailable: p.agentsAvailable } });
     }
     return { severity, capturedAt: snap.captured_at, queues: problems, recs };
@@ -247,13 +276,14 @@ export class AnalystService {
     const offenders = rows.map((r: any) => {
       const score = (r.pl ?? 0) + (r.sl ?? 0) + (r.pe ?? 0) + (r.se ?? 0) + (r.mp ? 30 : 0) + (r.ms ? 30 : 0);
       const issues: string[] = [];
-      if (r.pl) issues.push(`تأخير بصمة ${r.pl}د`);
-      if (r.sl) issues.push(`تأخير سيستم ${r.sl}د`);
-      if (r.pe) issues.push(`خروج مبكر ${r.pe}د`);
-      if (r.se) issues.push(`خروج سيستم مبكر ${r.se}د`);
-      if (r.mp) issues.push('بصمة ناقصة');
-      if (r.ms) issues.push('لوجين ناقص');
-      return { employeeId: r.id, name: `${r.first_name_en} ${r.last_name_en}`, employeeNo: r.employee_no, fn: r.fn, score, issues };
+      const issuesEn: string[] = [];
+      if (r.pl) { issues.push(`تأخير بصمة ${r.pl}د`); issuesEn.push(`punch late ${r.pl}m`); }
+      if (r.sl) { issues.push(`تأخير سيستم ${r.sl}د`); issuesEn.push(`system late ${r.sl}m`); }
+      if (r.pe) { issues.push(`خروج مبكر ${r.pe}د`); issuesEn.push(`early out ${r.pe}m`); }
+      if (r.se) { issues.push(`خروج سيستم مبكر ${r.se}د`); issuesEn.push(`system early out ${r.se}m`); }
+      if (r.mp) { issues.push('بصمة ناقصة'); issuesEn.push('missing punch'); }
+      if (r.ms) { issues.push('لوجين ناقص'); issuesEn.push('missing login'); }
+      return { employeeId: r.id, name: `${r.first_name_en} ${r.last_name_en}`, employeeNo: r.employee_no, fn: r.fn, score, issues, issuesEn };
     }).sort((a, b) => b.score - a.score);
 
     const recs: any[] = [];
@@ -266,12 +296,18 @@ export class AnalystService {
     if (repeat.length) severity = 'risk';
     if (offenders.length) {
       const top = offenders.slice(0, 5).map(o => `${o.name} (${o.issues.join('، ')})`).join('؛ ');
+      const topEn = offenders.slice(0, 5).map(o => `${o.name} (${o.issuesEn.join(', ')})`).join('; ');
       recs.push({ area: 'compliance', functionId: null, functionName: null, severity, verdict: null,
         title: `عدم الالتزام اليوم — ${offenders.length} موظف`,
+        titleEn: `Non-compliance today — ${offenders.length} staff`,
         summary: `${offenders.length} غير ملتزمين. الأعلى: ${top}.`,
+        summaryEn: `${offenders.length} non-compliant. Top: ${topEn}.`,
         recommendation: repeat.length
           ? `${repeat.length} منهم متكرّرين ومعلّمين بالكوتشينج — افتح إنسيدنت/جلسة كوتشينج لـ ${repeat.slice(0, 3).map(o => o.name).join('، ')}.`
           : 'وجّه تنبيه للأعلى تأخيراً؛ لو تكرّر يتحوّل لإنسيدنت كوتشينج تلقائياً.',
+        recommendationEn: repeat.length
+          ? `${repeat.length} of them are repeat, coaching-flagged offenders — open an incident/coaching session for ${repeat.slice(0, 3).map(o => o.name).join(', ')}.`
+          : 'Warn the latest offenders; if it repeats it auto-escalates to a coaching incident.',
         metrics: { total: offenders.length, repeat: repeat.length, top: offenders.slice(0, 10) } });
     }
     return { severity, offenders: offenders.slice(0, 25), recs };

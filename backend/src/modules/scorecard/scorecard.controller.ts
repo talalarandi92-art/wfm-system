@@ -236,6 +236,11 @@ export class ScorecardController {
       user.id,
       { notes },
     );
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, actor_email, action, module, entity_type, entity_id, notes)
+       VALUES ($1,$2,$3,'scorecard.committed','scorecard','scorecard_batch',$4,$5)`,
+      [user.tenantId, user.id, user.email ?? null, result.batchId, `Committed ${result.totalEntries} entries from ${file.originalname}`],
+    ).catch(() => {});
     return { success: true, ...result };
   }
 
@@ -543,6 +548,97 @@ export class ScorecardController {
         };
       }),
     };
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     PERFORMANCE ANALYZE — cumulative across ALL months: trend, KPI gaps,
+     coaching-need (+ why), intern keep/let-go. Frontline ranked; interns review-only.
+  ════════════════════════════════════════════════════════════════════════ */
+  @Get('analyze')
+  @ApiOperation({ summary: 'Cumulative performance analysis across all uploaded months' })
+  async analyze(@CurrentUser() user: any, @Query('function') fn?: string) {
+    const tid = user.tenantId;
+    const batches = await this.ds.query(
+      `SELECT id, period_year, period_month, period_name FROM scorecard_batches
+       WHERE tenant_id=$1 AND status='active' ORDER BY period_year, period_month`, [tid]);
+    if (!batches.length) return { months: [], employees: [], interns: [], insights: {} };
+    const batchIds = batches.map((b: any) => b.id);
+    const order: Record<string, number> = {}; batches.forEach((b: any, i: number) => (order[b.id] = i));
+
+    const rows = await this.ds.query(
+      `SELECT batch_id, user_id_login, employee_name, employee_no, function_name, team_leader,
+              net_points, quality_score, aht_score, fcr_score, prr_points, productivity_score,
+              ctr_score, quiz_score, mistakes_score, response_time_score,
+              working_days_pct
+       FROM scorecard_entries
+       WHERE tenant_id=$1 AND batch_id = ANY($2) AND week_label='Final'
+       ${fn ? 'AND function_name = $3' : ''}`,
+      fn ? [tid, batchIds, fn] : [tid, batchIds]);
+
+    const toN = (v: any) => (v === null || v === undefined ? null : parseInt(v, 10));
+    const KPI: [string, string][] = [['Quality', 'quality_score'], ['AHT', 'aht_score'], ['FCR', 'fcr_score'],
+      ['PRR', 'prr_points'], ['Productivity', 'productivity_score'], ['CTR', 'ctr_score'],
+      ['Quiz', 'quiz_score'], ['Common Mistakes', 'mistakes_score'], ['Response Time', 'response_time_score']];
+    const isIntern = (f: string) => /intern/i.test(f || '');
+
+    // deterministic coaching content per weak KPI (below bar). Actionable + target.
+    const ADVICE: Record<string, { issue: string; action: string; target: string }> = {
+      Quality: { issue: 'Quality below the 80% bar', action: 'Review the QA rubric on recent contacts; focus on accuracy, process adherence and empathy; shadow a top performer', target: 'Quality ≥ 95%' },
+      AHT: { issue: 'Handling time above target', action: 'Use canned responses / knowledge base, reduce dead-air and after-call work, avoid unnecessary holds', target: 'AHT ≤ 48h equivalent' },
+      FCR: { issue: 'First-contact resolution low', action: 'Confirm the full issue is resolved before closing; use resolution checklists; reduce re-contacts', target: 'FCR ≥ 85%' },
+      CTR: { issue: 'Call-to-ticket ratio off target', action: 'Log every actionable contact as a ticket; align tagging with policy', target: 'CTR ≥ 95%' },
+      Quiz: { issue: 'Weekly training quiz below 90%', action: 'Complete the weekly quiz on time; review the training material before attempting', target: 'Quiz ≥ 90%' },
+      Productivity: { issue: 'Productivity below 91%', action: 'Manage break timing (stay within Short/Tea/Lunch/Bio limits), reduce idle/unavailable time', target: 'Productivity ≥ 91%' },
+      'Common Mistakes': { issue: 'Repeated common mistakes', action: 'Address the flagged recurring errors; pair with TL on the specific cases', target: '0 mistakes' },
+      'Response Time': { issue: 'First-response time too high', action: 'Reply to the first message faster; manage concurrent chats; use greetings/templates', target: 'FRT ≤ 1h' },
+      PRR: { issue: 'Positive response rate low', action: 'Improve closing and CSAT-driving behaviours; ask for feedback', target: 'PRR ≥ 80%' },
+    };
+    const coachingFor = (weak: string[]) => weak.map(k => ({ kpi: k, ...(ADVICE[k] || { issue: `${k} below bar`, action: 'Review with TL', target: 'meet the bar' }) }));
+
+    const emps: Record<string, any> = {};
+    for (const r of rows) {
+      const e = (emps[r.user_id_login] = emps[r.user_id_login] || { loginId: r.user_id_login, name: r.employee_name, empNo: r.employee_no, func: r.function_name, tl: r.team_leader, series: [] });
+      e.series.push({ idx: order[r.batch_id], net: toN(r.net_points), row: r });
+    }
+
+    const employees = Object.values(emps).map((e: any) => {
+      e.series.sort((a: any, b: any) => a.idx - b.idx);
+      const nets = e.series.map((s: any) => s.net).filter((n: any) => n != null);
+      const latest = e.series[e.series.length - 1];
+      const trend = nets.length >= 2 ? nets[nets.length - 1] - nets[0] : 0;
+      const weak = latest ? KPI.filter(([, c]) => (toN(latest.row[c]) ?? 0) < 0).map(([n]) => n) : [];
+      const avgNet = nets.length ? Math.round(nets.reduce((a: number, b: number) => a + b, 0) / nets.length) : null;
+      const latestNet = latest ? toN(latest.row.net_points) : null;
+      const needsCoaching = weak.length > 0 || (latestNet ?? 0) <= 0;
+      return {
+        loginId: e.loginId, name: e.name, empNo: e.empNo, func: e.func, tl: e.tl, intern: isIntern(e.func),
+        months: e.series.map((s: any) => s.net), latestNet, avgNet, trend,
+        direction: trend > 0 ? 'improving' : trend < 0 ? 'declining' : 'flat',
+        weakKpis: weak, needsCoaching, coaching: needsCoaching ? coachingFor(weak) : [],
+        attendance: latest && latest.row.working_days_pct != null ? Number(latest.row.working_days_pct) : null,
+      };
+    });
+
+    const interns = employees.filter((e: any) => e.intern).map((e: any) => {
+      const att = e.attendance || 0, net = e.latestNet || 0;
+      const recommendation = att >= 0.85 && net >= 80 ? 'Keep' : att < 0.7 || net < 50 ? 'Let go' : 'Review';
+      const why = recommendation === 'Keep' ? `attendance ${Math.round(att * 100)}% + score ${net}`
+        : recommendation === 'Let go' ? `low ${att < 0.7 ? 'attendance ' + Math.round(att * 100) + '%' : ''}${att < 0.7 && net < 50 ? ' & ' : ''}${net < 50 ? 'score ' + net : ''}`
+        : `attendance ${Math.round(att * 100)}%, score ${net}`;
+      return { ...e, recommendation, why };
+    }).sort((a: any, b: any) => (b.attendance + b.latestNet / 130) - (a.attendance + a.latestNet / 130));
+
+    const frontline = employees.filter((e: any) => !e.intern);
+    const insights = {
+      totalEmployees: employees.length, frontline: frontline.length, internCount: interns.length,
+      improving: frontline.filter((e: any) => e.direction === 'improving').length,
+      declining: frontline.filter((e: any) => e.direction === 'declining').length,
+      needCoaching: frontline.filter((e: any) => e.needsCoaching).length,
+      topImprovers: [...frontline].sort((a, b) => b.trend - a.trend).slice(0, 5).map((e: any) => ({ name: e.name, func: e.func, trend: e.trend })),
+      topDecliners: [...frontline].sort((a, b) => a.trend - b.trend).slice(0, 5).map((e: any) => ({ name: e.name, func: e.func, trend: e.trend })),
+      internLetGo: interns.filter((i: any) => i.recommendation === 'Let go').length,
+    };
+    return { months: batches.map((b: any) => ({ id: b.id, name: b.period_name, year: b.period_year, month: b.period_month })), employees, interns, insights };
   }
 
   /** Download rankings as Excel */

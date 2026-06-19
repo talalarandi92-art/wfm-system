@@ -423,12 +423,17 @@ export class RosterIngestionService {
 
   /** Employees who worked ≥ minHours OT on a SINGLE day — for the manager's bonus
    *  list. Each row: who, day, OT hours, before/after split and the OT window. */
-  async otBonus(tenantId: string, from?: string, to?: string, minHours = 5) {
+  async otBonus(tenantId: string, from?: string, to?: string, minHours = 5, q?: string) {
     await this.ensureTable();
     const where: string[] = ['tenant_id = $1']; const p: any[] = [tenantId];
     if (from) { p.push(from); where.push(`work_date >= $${p.length}`); }
     if (to) { p.push(to); where.push(`work_date <= $${p.length}`); }
     p.push(minHours * 60); where.push(`ot_rounded_min >= $${p.length}`);
+    if (q && q.trim()) {
+      p.push(`%${q.toLowerCase()}%`); const qi = p.length;
+      where.push(`(employee_no = $${qi + 1} OR lower(name) LIKE $${qi} OR lower(payload->>'email') LIKE $${qi})`);
+      p.push(q.trim());
+    }
     const raw = await this.dataSource.query(
       `SELECT work_date::text AS date, payload FROM roster_daily WHERE ${where.join(' AND ')} ORDER BY ot_rounded_min DESC`, p);
     const n = (v: any) => Number(v) || 0;
@@ -441,16 +446,256 @@ export class RosterIngestionService {
       const offDay = r.shiftStartMin == null;
       const otFrom = offDay ? hm(r.punchInMin ?? r.systemStartMin) : (after && r.shiftEndMin != null ? hm(r.shiftEndMin) : hm(r.shiftStartMin - n(r.otBeforeMin)));
       const otTo = offDay ? hm(r.punchOutMin ?? r.systemEndMin) : (after && r.shiftEndMin != null ? hm(r.shiftEndMin + n(r.otAfterMin)) : hm(r.shiftStartMin));
+      const isHoliday = String(r.dayType || '').toLowerCase().includes('holiday');
       return {
         employeeId: r.employeeId, name: r.name, func: r.func, date: r.date, shiftCode: r.shiftCode || r.attendanceCode,
+        dayType: r.dayType,
         otHours: Math.round(n(r.otRoundedMin) / 60 * 10) / 10, otBeforeMin: n(r.otBeforeMin), otAfterMin: n(r.otAfterMin),
-        position: offDay ? 'off-day' : (after ? 'after' : 'before'), otFrom, otTo,
+        position: offDay ? (isHoliday ? 'holiday' : 'off-day') : (after ? 'after' : 'before'), otFrom, otTo,
         shiftStart: hm(r.shiftStartMin), shiftEnd: hm(r.shiftEndMin), inAt, outAt,
       };
     });
     const totalHours = Math.round(rows.reduce((s: number, r: any) => s + r.otHours, 0) * 10) / 10;
     const people = new Set(rows.map((r: any) => r.employeeId)).size;
     return { minHours, count: rows.length, people, totalHours, rows };
+  }
+
+  /** Generic detailed metric view (late / early / absence / conformance / sick).
+   *  Returns one common envelope — summary KPIs, by function, monthly trend, top
+   *  employees and filterable detail rows — so a single UI panel renders any metric. */
+  async metricDetail(tenantId: string, metric: string, from?: string, to?: string, func?: string, q?: string) {
+    await this.ensureTable();
+    const base: string[] = ['tenant_id = $1']; const p: any[] = [tenantId];
+    if (from) { p.push(from); base.push(`work_date >= $${p.length}`); }
+    if (to) { p.push(to); base.push(`work_date <= $${p.length}`); }
+    if (func) { p.push(func); base.push(`func = $${p.length}`); }
+    if (q && q.trim()) {
+      p.push(`%${q.toLowerCase()}%`); const qi = p.length;
+      base.push(`(employee_no = $${qi + 1} OR lower(name) LIKE $${qi} OR lower(payload->>'email') LIKE $${qi})`);
+      p.push(q.trim());
+    }
+    // metric-specific row filter (keeps the query light)
+    const filt: Record<string, string> = {
+      late: `(payload->>'effectiveLateMin')::numeric > 0`,
+      early: `(payload->>'effectiveEarlyOutMin')::numeric > 0`,
+      absence: `presence = 'absent'`,
+      sick: `payload->>'dayType' = 'Sick Leave'`,
+      conformance: `shift_start_min IS NOT NULL`,   // all scheduled days (for avg + distribution)
+    };
+    const rowFilter = filt[metric] || filt.late;
+    const raw = await this.dataSource.query(
+      `SELECT work_date::text AS date, payload FROM roster_daily WHERE ${[...base, rowFilter].join(' AND ')} ORDER BY work_date DESC`, p);
+    const rows = raw.map((x: any) => ({ ...(x.payload || {}), date: x.date }));
+    const n = (v: any) => Number(v) || 0;
+    const h1 = (m: number) => Math.round(m / 60 * 10) / 10;
+    const hm = (m: number | null | undefined) => { if (m == null) return null; const t = ((m % 1440) + 1440) % 1440; let hh = Math.floor(t / 60); const mm = t % 60; const ap = hh < 12 ? 'AM' : 'PM'; hh = hh % 12 || 12; return `${hh}:${String(mm).padStart(2, '0')} ${ap}`; };
+
+    const byFunc = new Map<string, { v: number; c: number; emp: Set<string> }>();
+    const byMonth = new Map<string, { v: number; c: number }>();
+    const perEmp = new Map<string, { id: string; name: string; func: string; v: number; c: number }>();
+    // value(r) per metric, plus how the "top"/aggregate is summarised
+    const val = (r: any) => metric === 'late' ? n(r.effectiveLateMin)
+      : metric === 'early' ? n(r.effectiveEarlyOutMin)
+      : metric === 'conformance' ? n(r.conformancePct)
+      : 1;   // absence / sick → count days
+    for (const r of rows) {
+      const v = val(r);
+      const fk = r.func || '(none)'; if (!byFunc.has(fk)) byFunc.set(fk, { v: 0, c: 0, emp: new Set() }); const F = byFunc.get(fk)!; F.v += v; F.c++; F.emp.add(r.employeeId);
+      const mo = r.date.slice(0, 7); if (!byMonth.has(mo)) byMonth.set(mo, { v: 0, c: 0 }); const M = byMonth.get(mo)!; M.v += v; M.c++;
+      if (!perEmp.has(r.employeeId)) perEmp.set(r.employeeId, { id: r.employeeId, name: r.name, func: r.func, v: 0, c: 0 });
+      const E = perEmp.get(r.employeeId)!; E.v += v; E.c++;
+    }
+    const avgMode = metric === 'conformance';
+    const agg = (v: number, c: number) => avgMode ? (c ? Math.round(v / c) : 0) : (metric === 'late' || metric === 'early' ? h1(v) : v);
+
+    // summary KPIs
+    let summary: Array<{ label: string; labelAr: string; value: any; color: string }> = [];
+    if (metric === 'late') {
+      const totalMin = rows.reduce((s, r) => s + n(r.effectiveLateMin), 0);
+      const ded = rows.filter(r => r.deductionApplies).length;
+      const excused = await this.countFlag(tenantId, base, p, 'late_covered_by_permission');
+      summary = [
+        { label: 'Late days (no perm)', labelAr: 'أيام تأخير (بدون إذن)', value: rows.length, color: '#f97316' },
+        { label: 'Late hours', labelAr: 'ساعات التأخير', value: h1(totalMin), color: '#f97316' },
+        { label: 'Deduction days', labelAr: 'أيام خصم (>20د)', value: ded, color: '#ef4444' },
+        { label: 'Excused (permission)', labelAr: 'بإذن', value: excused, color: '#22c55e' },
+        { label: 'People', labelAr: 'موظفين', value: perEmp.size, color: '#6366f1' },
+      ];
+    } else if (metric === 'early') {
+      const totalMin = rows.reduce((s, r) => s + n(r.effectiveEarlyOutMin), 0);
+      const excused = await this.countFlag(tenantId, base, p, 'early_covered_by_permission');
+      summary = [
+        { label: 'Early-out days (no perm)', labelAr: 'أيام خروج مبكر (بدون إذن)', value: rows.length, color: '#eab308' },
+        { label: 'Early hours', labelAr: 'ساعات الخروج المبكر', value: h1(totalMin), color: '#eab308' },
+        { label: 'Excused (permission)', labelAr: 'بإذن', value: excused, color: '#22c55e' },
+        { label: 'People', labelAr: 'موظفين', value: perEmp.size, color: '#6366f1' },
+      ];
+    } else if (metric === 'absence') {
+      summary = [
+        { label: 'Absences (confirmed)', labelAr: 'غياب مؤكد', value: rows.length, color: '#ef4444' },
+        { label: 'People', labelAr: 'موظفين', value: perEmp.size, color: '#6366f1' },
+        { label: 'Avg per person', labelAr: 'متوسط/فرد', value: perEmp.size ? Math.round(rows.length / perEmp.size * 10) / 10 : 0, color: '#f97316' },
+      ];
+    } else if (metric === 'sick') {
+      summary = [
+        { label: 'Sick days', labelAr: 'أيام مرضية', value: rows.length, color: '#0ea5e9' },
+        { label: 'People', labelAr: 'موظفين', value: perEmp.size, color: '#6366f1' },
+      ];
+    } else if (metric === 'conformance') {
+      const avg = rows.length ? Math.round(rows.reduce((s, r) => s + n(r.conformancePct), 0) / rows.length) : 0;
+      const below70 = rows.filter(r => n(r.conformancePct) < 70).length;
+      const below50 = rows.filter(r => n(r.conformancePct) < 50).length;
+      summary = [
+        { label: 'Avg conformance', labelAr: 'متوسط التوافق', value: avg + '%', color: avg >= 85 ? '#22c55e' : avg >= 70 ? '#f59e0b' : '#ef4444' },
+        { label: 'Days below 70%', labelAr: 'أيام تحت 70%', value: below70, color: '#f59e0b' },
+        { label: 'Days below 50%', labelAr: 'أيام تحت 50%', value: below50, color: '#ef4444' },
+        { label: 'Scheduled days', labelAr: 'أيام مجدولة', value: rows.length, color: '#6366f1' },
+      ];
+    }
+
+    // top employees (most for offence metrics; LOWEST for conformance)
+    let top = [...perEmp.values()].map(e => ({ id: e.id, name: e.name, func: e.func, value: agg(e.v, e.c), days: e.c }));
+    top = avgMode ? top.sort((a, b) => a.value - b.value).slice(0, 30) : top.sort((a, b) => b.value - a.value).slice(0, 30);
+
+    // detail rows (metric-specific extra fields)
+    const detail = rows.slice(0, 1500).map((r: any) => {
+      const common = { date: r.date, employeeId: r.employeeId, name: r.name, func: r.func, shiftCode: r.shiftCode || r.attendanceCode, shiftStart: hm(r.shiftStartMin), shiftEnd: hm(r.shiftEndMin) };
+      if (metric === 'late') return { ...common, minutes: n(r.effectiveLateMin), inAt: hm(r.systemStartMin ?? r.punchInMin), deduction: !!r.deductionApplies };
+      if (metric === 'early') return { ...common, minutes: n(r.effectiveEarlyOutMin), outAt: hm(r.systemEndMin ?? r.punchOutMin) };
+      if (metric === 'conformance') return { ...common, conformance: n(r.conformancePct), inAt: hm(r.systemStartMin ?? r.punchInMin), outAt: hm(r.systemEndMin ?? r.punchOutMin) };
+      // absence / sick
+      return { ...common, dayType: r.dayType, presence: r.presence };
+    });
+
+    return {
+      metric, range: { from: from || null, to: to || null, func: func || null, q: q || null },
+      summary, avgMode,
+      byFunction: [...byFunc.entries()].map(([f, v]) => ({ func: f, value: agg(v.v, v.c), days: v.c, people: v.emp.size })).sort((a, b) => avgMode ? a.value - b.value : b.value - a.value),
+      byMonth: [...byMonth.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([month, v]) => ({ month, value: agg(v.v, v.c) })),
+      top, rows: detail,
+    };
+  }
+
+  /** Count rows in range carrying a given flag (for excused late/early). */
+  private async countFlag(tenantId: string, base: string[], baseParams: any[], flag: string): Promise<number> {
+    const p = [...baseParams, flag];
+    const [r] = await this.dataSource.query(
+      `SELECT COUNT(*)::int AS c FROM roster_daily WHERE ${base.join(' AND ')} AND flags ? $${p.length}`, p);
+    return r?.c ?? 0;
+  }
+
+  /** Detailed overtime view: summary (before/after/holiday/off split), by function,
+   *  by month, top employees (with 180h/yr cap status) and filterable detail rows.
+   *  Filter by date range, function and name/ID/email. */
+  async overtime(tenantId: string, from?: string, to?: string, func?: string, q?: string) {
+    await this.ensureTable();
+    const where: string[] = ['tenant_id = $1', 'ot_rounded_min > 0']; const p: any[] = [tenantId];
+    if (from) { p.push(from); where.push(`work_date >= $${p.length}`); }
+    if (to) { p.push(to); where.push(`work_date <= $${p.length}`); }
+    if (func) { p.push(func); where.push(`func = $${p.length}`); }
+    if (q && q.trim()) {
+      p.push(`%${q.toLowerCase()}%`); const qi = p.length;
+      where.push(`(employee_no = $${qi + 1} OR lower(name) LIKE $${qi} OR lower(payload->>'email') LIKE $${qi})`);
+      p.push(q.trim());
+    }
+    const raw = await this.dataSource.query(
+      `SELECT work_date::text AS date, payload FROM roster_daily WHERE ${where.join(' AND ')} ORDER BY ot_rounded_min DESC`, p);
+    const rows = raw.map((x: any) => ({ ...(x.payload || {}), date: x.date }));
+    const n = (v: any) => Number(v) || 0;
+    const h1 = (m: number) => Math.round(m / 60 * 10) / 10;
+    const hm = (m: number | null | undefined) => { if (m == null) return null; const t = ((m % 1440) + 1440) % 1440; let hh = Math.floor(t / 60); const mm = t % 60; const ap = hh < 12 ? 'AM' : 'PM'; hh = hh % 12 || 12; return `${hh}:${String(mm).padStart(2, '0')} ${ap}`; };
+
+    let totalMin = 0, beforeMin = 0, afterMin = 0, holidayMin = 0, offMin = 0, workingMin = 0;
+    const byFunc = new Map<string, { min: number; emp: Set<string> }>();
+    const byMonth = new Map<string, number>();
+    const perEmp = new Map<string, { id: string; name: string; func: string; min: number; before: number; after: number; holiday: number; days: number }>();
+    const detail = rows.map((r: any) => {
+      const ot = n(r.otRoundedMin); totalMin += ot; beforeMin += n(r.otBeforeMin); afterMin += n(r.otAfterMin);
+      const dt = String(r.dayType || '').toLowerCase();
+      const isHoliday = dt.includes('holiday'); const isOff = dt.includes('off') || r.shiftStartMin == null;
+      if (isHoliday) holidayMin += ot; else if (isOff && r.shiftStartMin == null) offMin += ot; else workingMin += ot;
+      const fk = r.func || '(none)'; if (!byFunc.has(fk)) byFunc.set(fk, { min: 0, emp: new Set() }); const F = byFunc.get(fk)!; F.min += ot; F.emp.add(r.employeeId);
+      const mo = r.date.slice(0, 7); byMonth.set(mo, (byMonth.get(mo) || 0) + ot);
+      if (!perEmp.has(r.employeeId)) perEmp.set(r.employeeId, { id: r.employeeId, name: r.name, func: r.func, min: 0, before: 0, after: 0, holiday: 0, days: 0 });
+      const E = perEmp.get(r.employeeId)!; E.min += ot; E.before += n(r.otBeforeMin); E.after += n(r.otAfterMin); if (isHoliday) E.holiday += ot; E.days++;
+      // position + window
+      const offDay = r.shiftStartMin == null;
+      const after = n(r.otAfterMin) >= n(r.otBeforeMin);
+      const otFrom = offDay ? hm(r.punchInMin ?? r.systemStartMin) : (after && r.shiftEndMin != null ? hm(r.shiftEndMin) : hm(r.shiftStartMin - n(r.otBeforeMin)));
+      const otTo = offDay ? hm(r.punchOutMin ?? r.systemEndMin) : (after && r.shiftEndMin != null ? hm(r.shiftEndMin + n(r.otAfterMin)) : hm(r.shiftStartMin));
+      return {
+        date: r.date, employeeId: r.employeeId, name: r.name, func: r.func, shiftCode: r.shiftCode || r.attendanceCode,
+        shiftStart: hm(r.shiftStartMin), shiftEnd: hm(r.shiftEndMin),
+        otHours: h1(ot), otBeforeMin: n(r.otBeforeMin), otAfterMin: n(r.otAfterMin),
+        position: offDay ? (isHoliday ? 'holiday' : 'off-day') : (after ? 'after' : 'before'),
+        otFrom, otTo, flags: (r.flags || []).filter((f: string) => /bleed|capped|maternity|holiday/.test(f)),
+      };
+    });
+
+    // 180h/yr cap status per employee (whole-year, regardless of the filter window)
+    const year = (to || from || '2026').slice(0, 4);
+    const capRows = await this.dataSource.query(
+      `SELECT employee_no, ROUND(SUM(ot_rounded_min)/60.0,1)::float AS yr FROM roster_daily
+       WHERE tenant_id=$1 AND work_date >= $2 AND work_date <= $3 GROUP BY employee_no`,
+      [tenantId, `${year}-01-01`, `${year}-12-31`]);
+    const capMap = new Map<string, number>(capRows.map((r: any) => [r.employee_no, r.yr]));
+
+    const topEmployees = [...perEmp.values()].map(e => ({
+      id: e.id, name: e.name, func: e.func, hours: h1(e.min), beforeHours: h1(e.before), afterHours: h1(e.after),
+      holidayHours: h1(e.holiday), days: e.days, ytdHours: capMap.get(e.id) ?? 0,
+      capStatus: (capMap.get(e.id) ?? 0) >= 180 ? 'EXCEEDED' : (capMap.get(e.id) ?? 0) >= 150 ? 'APPROACHING' : 'OK',
+    })).sort((a, b) => b.hours - a.hours);
+
+    return {
+      range: { from: from || null, to: to || null, func: func || null, q: q || null },
+      summary: {
+        totalHours: h1(totalMin), beforeHours: h1(beforeMin), afterHours: h1(afterMin),
+        holidayHours: h1(holidayMin), offHours: h1(offMin), workingHours: h1(workingMin),
+        people: perEmp.size, days: rows.length, avgPerPerson: perEmp.size ? h1(totalMin / perEmp.size) : 0,
+      },
+      byFunction: [...byFunc.entries()].map(([f, v]) => ({ func: f, hours: h1(v.min), people: v.emp.size })).sort((a, b) => b.hours - a.hours),
+      byMonth: [...byMonth.entries()].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([month, m]) => ({ month, hours: h1(m) })),
+      topEmployees: topEmployees.slice(0, 30),
+      rows: detail.slice(0, 1500),
+    };
+  }
+
+  /** Permission details: every (employee, day) that has a permission — type, window
+   *  (from→to), status (Approved/Refused/Pending) and whether it actually covered a
+   *  late/early. Filter by date range and name/ID/email. */
+  async permissionDetails(tenantId: string, from?: string, to?: string, q?: string, status?: string) {
+    await this.ensureTable();
+    const where: string[] = ['tenant_id = $1', `payload->>'permissionType' IS NOT NULL`, `payload->>'permissionType' <> ''`];
+    const p: any[] = [tenantId];
+    if (from) { p.push(from); where.push(`work_date >= $${p.length}`); }
+    if (to) { p.push(to); where.push(`work_date <= $${p.length}`); }
+    if (q && q.trim()) {
+      p.push(`%${q.toLowerCase()}%`); const qi = p.length;
+      where.push(`(employee_no = $${qi + 1} OR lower(name) LIKE $${qi} OR lower(payload->>'email') LIKE $${qi})`);
+      p.push(q.trim());
+    }
+    const raw = await this.dataSource.query(
+      `SELECT work_date::text AS date, payload FROM roster_daily WHERE ${where.join(' AND ')} ORDER BY work_date DESC`, p);
+    let rows = raw.map((x: any) => {
+      const r = { ...(x.payload || {}), date: x.date };
+      const fl: string[] = r.flags || [];
+      return {
+        date: r.date, employeeId: r.employeeId, name: r.name, func: r.func,
+        type: r.permissionType, from: r.permissionFrom, to: r.permissionTo,
+        status: r.permissionStatus || 'Pending',
+        covered: fl.includes('late_covered_by_permission') || fl.includes('early_covered_by_permission'),
+        shiftCode: r.shiftCode,
+      };
+    });
+    if (status) rows = rows.filter((r: any) => String(r.status).toLowerCase().includes(status.toLowerCase()));
+    const counts = { total: rows.length, approved: 0, refused: 0, pending: 0 };
+    for (const r of rows) {
+      const s = String(r.status).toLowerCase();
+      if (s.includes('approv')) counts.approved++; else if (s.includes('refus') || s.includes('reject')) counts.refused++; else counts.pending++;
+    }
+    const byType: Record<string, number> = {};
+    for (const r of rows) byType[r.type] = (byType[r.type] || 0) + 1;
+    return { counts, byType: Object.entries(byType).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count), rows: rows.slice(0, 1000) };
   }
 
   /** Half-hourly headcount by function for one date: scheduled vs actually-present,

@@ -90,7 +90,10 @@ export class ReportsService {
               -- swap detail
               rs.swap_type, rs.requester_date AS s_req_date, rs.target_date AS s_tgt_date,
               rs.peer_accepted_at, rs.peer_rejected_at, rs.peer_rejection_reason,
-              te.first_name_en || ' ' || COALESCE(te.last_name_en,'') AS swap_target_name
+              te.first_name_en || ' ' || COALESCE(te.last_name_en,'') AS swap_target_name,
+              -- break detail
+              rb.break_date, rb.start_time AS b_start, rb.end_time AS b_end,
+              rb.duration_minutes AS b_dur, rb.break_type, rb.reason AS b_reason
          FROM requests r
          JOIN request_types rt ON rt.id = r.request_type_id
          LEFT JOIN employees e ON e.id = r.employee_id
@@ -105,6 +108,7 @@ export class ReportsService {
          LEFT JOIN request_overtimes ro   ON ro.request_id = r.id
          LEFT JOIN request_shift_swaps rs ON rs.request_id = r.id
          LEFT JOIN employees te ON te.id = rs.target_employee_id
+         LEFT JOIN request_breaks rb ON rb.request_id = r.id
         WHERE r.tenant_id = $1 AND r.submitted_at::date BETWEEN $2 AND $3 ${extra}
         ORDER BY r.submitted_at DESC
         LIMIT 10000`,
@@ -129,6 +133,8 @@ export class ReportsService {
         detail = `OT ${fmtDate(r.ot_date)} ${HH(r.o_start)}-${HH(r.o_end)} (${fmtDur(r.o_dur)})`;
       } else if (r.swap_type) {
         detail = `${r.swap_type} ${fmtDate(r.s_req_date)}↔${fmtDate(r.s_tgt_date)} w/ ${r.swap_target_name ?? '—'}`;
+      } else if (r.break_date) {
+        detail = `${r.break_type ?? 'break'} ${fmtDate(r.break_date)} ${HH(r.b_start)}-${HH(r.b_end)} (${fmtDur(r.b_dur)})`.trim();
       }
       return {
         requestId:       r.id,
@@ -138,7 +144,7 @@ export class ReportsService {
         employee:        (r.employee_name ?? '').trim(),
         function:        r.function_name ?? '',
         detail,
-        reason:          (r.p_reason ?? r.ot_reason ?? '').trim(),
+        reason:          (r.p_reason ?? r.ot_reason ?? r.b_reason ?? '').trim(),
         submittedAt:     fmtDateTime(r.submitted_at),
         requestedBy:     r.requester_name ?? '',
         status:          r.status,
@@ -159,6 +165,78 @@ export class ReportsService {
         notes:           (r.notes ?? '').trim(),
       };
     });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+   *  1b) REQUESTS DASHBOARD SUMMARY — counts, avg approval time, SLA %
+   *      Derived from the already-mapped requestsDetailed rows so the numbers
+   *      always match the detail table exactly.
+   * ═══════════════════════════════════════════════════════════════════════ */
+  requestsSummary(rows: any[]) {
+    const total = rows.length;
+    const cnt = (pred: (r: any) => boolean) => rows.filter(pred).length;
+
+    const byStatus: Record<string, number> = {};
+    for (const r of rows) byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+
+    // Approval speed — only requests that reached a decision and have a duration.
+    const decisionTimes = rows
+      .map(r => r.decisionHours)
+      .filter((h: any) => typeof h === 'number' && h >= 0) as number[];
+    const sum = decisionTimes.reduce((a, b) => a + b, 0);
+    const avgApprovalHours = decisionTimes.length ? +(sum / decisionTimes.length).toFixed(1) : null;
+    const fastestHours = decisionTimes.length ? +Math.min(...decisionTimes).toFixed(1) : null;
+    const slowestHours = decisionTimes.length ? +Math.max(...decisionTimes).toFixed(1) : null;
+
+    // SLA — count rows that carry a verdict (Met / Breached / Breached (open)).
+    const slaMet        = cnt(r => r.slaStatus === 'Met');
+    const slaBreached   = cnt(r => r.slaStatus === 'Breached');
+    const slaOpenBreach = cnt(r => r.slaStatus === 'Breached (open)');
+    const slaDenom = slaMet + slaBreached + slaOpenBreach;
+    const slaCompliancePct = slaDenom ? +((slaMet / slaDenom) * 100).toFixed(1) : null;
+
+    // Per request-type rollup.
+    const typeMap = new Map<string, any>();
+    for (const r of rows) {
+      const k = r.typeCode || r.type || '—';
+      const t = typeMap.get(k) ?? {
+        typeCode: r.typeCode, type: r.type, total: 0,
+        approved: 0, rejected: 0, pending: 0, cancelled: 0,
+        _times: [] as number[], slaMet: 0, slaTracked: 0,
+      };
+      t.total++;
+      if (r.status === 'approved') t.approved++;
+      else if (r.status === 'rejected') t.rejected++;
+      else if (r.status === 'cancelled' || r.status === 'withdrawn') t.cancelled++;
+      else t.pending++;
+      if (typeof r.decisionHours === 'number' && r.decisionHours >= 0) t._times.push(r.decisionHours);
+      if (r.slaStatus === 'Met' || r.slaStatus === 'Breached' || r.slaStatus === 'Breached (open)') {
+        t.slaTracked++;
+        if (r.slaStatus === 'Met') t.slaMet++;
+      }
+      typeMap.set(k, t);
+    }
+    const byType = [...typeMap.values()]
+      .map(t => ({
+        type: t.type, typeCode: t.typeCode, total: t.total,
+        approved: t.approved, rejected: t.rejected, pending: t.pending, cancelled: t.cancelled,
+        avgApprovalHours: t._times.length ? +(t._times.reduce((a: number, b: number) => a + b, 0) / t._times.length).toFixed(1) : null,
+        slaCompliancePct: t.slaTracked ? +((t.slaMet / t.slaTracked) * 100).toFixed(1) : null,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    return {
+      total,
+      approved:   byStatus['approved']   ?? 0,
+      rejected:   byStatus['rejected']   ?? 0,
+      pending:    (byStatus['pending'] ?? 0) + (byStatus['peer_pending'] ?? 0),
+      cancelled:  (byStatus['cancelled'] ?? 0) + (byStatus['withdrawn'] ?? 0),
+      urgent:     cnt(r => r.urgent === 'Yes' || r.urgent === true),
+      decided:    slaMet + slaBreached + cnt(r => r.status === 'approved' || r.status === 'rejected'),
+      avgApprovalHours, fastestHours, slowestHours,
+      slaMet, slaBreached, slaOpenBreach, slaCompliancePct,
+      byStatus, byType,
+    };
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -492,16 +570,252 @@ export class ReportsService {
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
+   *  6) COACHING — auto-flags + linked session, time-to-resolve
+   * ═══════════════════════════════════════════════════════════════════════ */
+  async coachingDetailed(tid: string, from: string, to: string) {
+    const rows = await this.ds.query(
+      `SELECT cf.id, cf.trigger_type, cf.severity, cf.status, cf.occurrences, cf.period_days,
+              cf.detail, cf.detected_at, cf.resolved_at,
+              ${USER_NAME('rb')} AS resolved_by,
+              e.employee_no, e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS employee_name,
+              f.name AS function_name,
+              cs.scheduled_at AS session_at, cs.status AS session_status,
+              cs.follow_up_date, cs.employee_acknowledged,
+              ${USER_NAME('co')} AS coach
+         FROM coaching_flags cf
+         LEFT JOIN employees e ON e.id = cf.employee_id
+         LEFT JOIN functions f ON f.id = e.function_id
+         LEFT JOIN users rb ON rb.id = cf.resolved_by
+         LEFT JOIN coaching_sessions cs ON cs.id = cf.coaching_session_id
+         LEFT JOIN users co ON co.id = cs.coach_id
+        WHERE cf.tenant_id = $1 AND cf.detected_at::date BETWEEN $2 AND $3
+        ORDER BY cf.detected_at DESC
+        LIMIT 10000`,
+      [tid, from, to],
+    ).catch(() => []);
+
+    const detail = rows.map((r: any) => {
+      const endRef = r.resolved_at ?? null;
+      const daysOpen = +(((new Date(endRef ?? Date.now()).getTime() - new Date(r.detected_at).getTime()) / 8.64e7)).toFixed(1);
+      return {
+        triggerType:    r.trigger_type,
+        employeeNo:     r.employee_no ?? '',
+        employee:       (r.employee_name ?? '').trim(),
+        function:       r.function_name ?? '',
+        severity:       r.severity,
+        status:         r.status,
+        occurrences:    r.occurrences ?? 0,
+        windowDays:     r.period_days ?? 0,
+        detail:         (r.detail ?? '').trim(),
+        detectedAt:     fmtDateTime(r.detected_at),
+        sessionAt:      fmtDateTime(r.session_at),
+        sessionStatus:  r.session_status ?? '',
+        coach:          r.coach ?? '',
+        acknowledged:   r.employee_acknowledged ? 'Yes' : (r.session_at ? 'No' : ''),
+        followUp:       fmtDate(r.follow_up_date),
+        resolvedAt:     fmtDateTime(r.resolved_at),
+        resolvedBy:     r.resolved_by ?? '',
+        daysOpen,
+      };
+    });
+
+    const bySeverity: Record<string, number> = {};
+    const byTrigger: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    const resolveTimes: number[] = [];
+    for (const d of detail) {
+      bySeverity[d.severity] = (bySeverity[d.severity] ?? 0) + 1;
+      byTrigger[d.triggerType] = (byTrigger[d.triggerType] ?? 0) + 1;
+      byStatus[d.status] = (byStatus[d.status] ?? 0) + 1;
+      if (d.resolvedAt) resolveTimes.push(d.daysOpen);
+    }
+    const summary = {
+      total: detail.length,
+      open: byStatus['open'] ?? 0,
+      addressed: byStatus['addressed'] ?? 0,
+      dismissed: byStatus['dismissed'] ?? 0,
+      withSession: detail.filter(d => d.sessionAt).length,
+      avgDaysToResolve: resolveTimes.length ? +(resolveTimes.reduce((a, b) => a + b, 0) / resolveTimes.length).toFixed(1) : null,
+      bySeverity, byTrigger, byStatus,
+    };
+    return { detail, summary };
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+   *  7) OUTAGES — report → validate → resolve, duration & SLA
+   * ═══════════════════════════════════════════════════════════════════════ */
+  async outagesDetailed(tid: string, from: string, to: string) {
+    const rows = await this.ds.query(
+      `SELECT o.id, o.title, o.severity, o.status, o.started_at, o.ended_at, o.duration_minutes,
+              o.validated_at, o.resolved_at, o.sla_due_at, o.root_cause, o.resolution,
+              oty.name AS outage_type,
+              ${USER_NAME('rp')} AS reported_by,
+              ${USER_NAME('vb')} AS validated_by,
+              ${USER_NAME('ab')} AS assigned_to,
+              ${USER_NAME('sb')} AS resolved_by
+         FROM outages o
+         LEFT JOIN outage_types oty ON oty.id = o.outage_type_id
+         LEFT JOIN users rp ON rp.id = o.reported_by
+         LEFT JOIN users vb ON vb.id = o.validated_by
+         LEFT JOIN users ab ON ab.id = o.assigned_to
+         LEFT JOIN users sb ON sb.id = o.resolved_by
+        WHERE o.tenant_id = $1 AND o.started_at::date BETWEEN $2 AND $3
+        ORDER BY o.started_at DESC
+        LIMIT 10000`,
+      [tid, from, to],
+    ).catch(() => []);
+
+    const detail = rows.map((r: any) => {
+      const slaStatus = r.sla_due_at && r.resolved_at
+        ? (new Date(r.resolved_at) <= new Date(r.sla_due_at) ? 'Met' : 'Breached')
+        : (r.sla_due_at && !r.resolved_at && new Date() > new Date(r.sla_due_at) ? 'Breached (open)' : '');
+      const resolveMin = r.resolved_at
+        ? Math.round((new Date(r.resolved_at).getTime() - new Date(r.started_at).getTime()) / 60000)
+        : null;
+      return {
+        title:        (r.title ?? '').trim(),
+        type:         r.outage_type ?? '',
+        severity:     r.severity,
+        status:       r.status,
+        startedAt:    fmtDateTime(r.started_at),
+        validatedAt:  fmtDateTime(r.validated_at),
+        resolvedAt:   fmtDateTime(r.resolved_at),
+        durationMin:  r.duration_minutes ?? resolveMin ?? '',
+        reportedBy:   r.reported_by ?? '',
+        validatedBy:  r.validated_by ?? '',
+        assignedTo:   r.assigned_to ?? '',
+        resolvedBy:   r.resolved_by ?? '',
+        slaDueAt:     fmtDateTime(r.sla_due_at),
+        slaStatus,
+        rootCause:    (r.root_cause ?? '').trim(),
+        resolution:   (r.resolution ?? '').trim(),
+      };
+    });
+
+    const bySeverity: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    const resolveTimes: number[] = [];
+    let slaMet = 0, slaBreached = 0, slaOpen = 0;
+    for (const d of detail) {
+      bySeverity[d.severity] = (bySeverity[d.severity] ?? 0) + 1;
+      byStatus[d.status] = (byStatus[d.status] ?? 0) + 1;
+      if (typeof d.durationMin === 'number' && d.resolvedAt) resolveTimes.push(d.durationMin);
+      if (d.slaStatus === 'Met') slaMet++;
+      else if (d.slaStatus === 'Breached') slaBreached++;
+      else if (d.slaStatus === 'Breached (open)') slaOpen++;
+    }
+    const slaDenom = slaMet + slaBreached + slaOpen;
+    const summary = {
+      total: detail.length,
+      ongoing: detail.filter(d => !d.resolvedAt).length,
+      resolved: detail.filter(d => !!d.resolvedAt).length,
+      avgResolveMin: resolveTimes.length ? Math.round(resolveTimes.reduce((a, b) => a + b, 0) / resolveTimes.length) : null,
+      slaMet, slaBreached, slaOpenBreach: slaOpen,
+      slaCompliancePct: slaDenom ? +((slaMet / slaDenom) * 100).toFixed(1) : null,
+      bySeverity, byStatus,
+    };
+    return { detail, summary };
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+   *  8) TECHNICAL ISSUES — report → validate → escalate → resolve, 48h SLA
+   * ═══════════════════════════════════════════════════════════════════════ */
+  async techIssuesDetailed(tid: string, from: string, to: string) {
+    const rows = await this.ds.query(
+      `SELECT ti.id, ti.title, ti.issue_reason, ti.channel, ti.sku, ti.original_case_id,
+              ti.status, ti.repeated_count, ti.is_cx_issue,
+              ti.created_at, ti.validated_at, ti.escalated_at, ti.resolved_at,
+              ti.sla_due_at, ti.resolution,
+              f.name AS function_name,
+              ${USER_NAME('rp')} AS reported_by,
+              ${USER_NAME('vb')} AS validated_by,
+              ${USER_NAME('eb')} AS escalated_to,
+              ${USER_NAME('sb')} AS resolved_by
+         FROM technical_issues ti
+         LEFT JOIN functions f ON f.id = ti.function_id
+         LEFT JOIN users rp ON rp.id = ti.reported_by
+         LEFT JOIN users vb ON vb.id = ti.validated_by
+         LEFT JOIN users eb ON eb.id = ti.escalated_to
+         LEFT JOIN users sb ON sb.id = ti.resolved_by
+        WHERE ti.tenant_id = $1 AND ti.created_at::date BETWEEN $2 AND $3
+        ORDER BY ti.created_at DESC
+        LIMIT 10000`,
+      [tid, from, to],
+    ).catch(() => []);
+
+    const detail = rows.map((r: any) => {
+      const slaStatus = r.sla_due_at && r.resolved_at
+        ? (new Date(r.resolved_at) <= new Date(r.sla_due_at) ? 'Met' : 'Breached')
+        : (r.sla_due_at && !r.resolved_at && new Date() > new Date(r.sla_due_at) ? 'Breached (open)' : '');
+      const resolveHrs = r.resolved_at
+        ? +(((new Date(r.resolved_at).getTime() - new Date(r.created_at).getTime()) / 3.6e6)).toFixed(1)
+        : null;
+      return {
+        title:        (r.title ?? '').trim(),
+        issueReason:  (r.issue_reason ?? '').trim(),
+        channel:      r.channel ?? '',
+        function:     r.function_name ?? '',
+        caseId:       r.original_case_id ?? '',
+        sku:          r.sku ?? '',
+        status:       r.status,
+        repeated:     r.repeated_count ?? 1,
+        cxIssue:      r.is_cx_issue ? 'Yes' : 'No',
+        reportedAt:   fmtDateTime(r.created_at),
+        validatedAt:  fmtDateTime(r.validated_at),
+        escalatedAt:  fmtDateTime(r.escalated_at),
+        resolvedAt:   fmtDateTime(r.resolved_at),
+        resolveHrs:   resolveHrs ?? '',
+        reportedBy:   r.reported_by ?? '',
+        validatedBy:  r.validated_by ?? '',
+        escalatedTo:  r.escalated_to ?? '',
+        resolvedBy:   r.resolved_by ?? '',
+        slaDueAt:     fmtDateTime(r.sla_due_at),
+        slaStatus,
+        resolution:   (r.resolution ?? '').trim(),
+      };
+    });
+
+    const byStatus: Record<string, number> = {};
+    const byChannel: Record<string, number> = {};
+    const resolveTimes: number[] = [];
+    let slaMet = 0, slaBreached = 0, slaOpen = 0;
+    for (const d of detail) {
+      byStatus[d.status] = (byStatus[d.status] ?? 0) + 1;
+      if (d.channel) byChannel[d.channel] = (byChannel[d.channel] ?? 0) + 1;
+      if (typeof d.resolveHrs === 'number') resolveTimes.push(d.resolveHrs);
+      if (d.slaStatus === 'Met') slaMet++;
+      else if (d.slaStatus === 'Breached') slaBreached++;
+      else if (d.slaStatus === 'Breached (open)') slaOpen++;
+    }
+    const slaDenom = slaMet + slaBreached + slaOpen;
+    const summary = {
+      total: detail.length,
+      open: detail.filter(d => !d.resolvedAt).length,
+      resolved: detail.filter(d => !!d.resolvedAt).length,
+      cxIssues: detail.filter(d => d.cxIssue === 'Yes').length,
+      avgResolveHrs: resolveTimes.length ? +(resolveTimes.reduce((a, b) => a + b, 0) / resolveTimes.length).toFixed(1) : null,
+      slaMet, slaBreached, slaOpenBreach: slaOpen,
+      slaCompliancePct: slaDenom ? +((slaMet / slaDenom) * 100).toFixed(1) : null,
+      byStatus, byChannel,
+    };
+    return { detail, summary };
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
    *  MASTER WORKBOOK — every report in one multi-sheet .xlsx
    * ═══════════════════════════════════════════════════════════════════════ */
   async buildWorkbook(tid: string, from: string, to: string): Promise<Buffer> {
-    const [requests, perms, breaks, audit, ot] = await Promise.all([
+    const [requests, perms, breaks, audit, ot, coaching, outages, tech] = await Promise.all([
       this.requestsDetailed(tid, from, to),
       this.permissionsDetailed(tid, from, to),
       this.breaksDetailed(tid, from, to),
       this.auditDetailed(tid, from, to),
       this.overtimeDetailed(tid, from, to),
+      this.coachingDetailed(tid, from, to),
+      this.outagesDetailed(tid, from, to),
+      this.techIssuesDetailed(tid, from, to),
     ]);
+    const reqSummary = this.requestsSummary(requests);
 
     const wb = XLSX.utils.book_new();
     const add = (name: string, rows: any[]) => {
@@ -510,6 +824,7 @@ export class ReportsService {
     };
 
     add('Requests', requests);
+    add('Requests by Type', reqSummary.byType);
     add('Permissions', perms.detail);
     add('Permission Intervals', perms.intervals);
     add('Permission Summary', perms.summary);
@@ -520,6 +835,9 @@ export class ReportsService {
     add('Audit Log', audit.detail);
     add('Audit by Actor', audit.summary.byActor);
     add('Audit by Action', audit.summary.byAction);
+    add('Coaching', coaching.detail);
+    add('Outages', outages.detail);
+    add('Technical Issues', tech.detail);
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }

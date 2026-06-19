@@ -154,7 +154,7 @@ function KpiCard({ label, val, color, icon: Icon, sub }: {
 }
 
 /* ── Queue Grid Card ─────────────────────────────────────────────────────── */
-function QueueCard({ q, selected, onClick }: { q: SpQueue; selected: boolean; onClick: () => void }) {
+function QueueCard({ q, selected, onClick, ar }: { q: SpQueue; selected: boolean; onClick: () => void; ar: boolean }) {
   const risk = (q.slaPct ?? 100) < 80 || q.waiting > 50;
   const chColor = CH_COLOR[q.channel] || '#64748b';
   const total = Math.max(1, q.waiting + q.inProgress);
@@ -198,16 +198,16 @@ function QueueCard({ q, selected, onClick }: { q: SpQueue; selected: boolean; on
             style={{ color: q.waiting > 0 ? (risk ? '#f87171' : '#fbbf24') : '#334155' }}>
             {fmtNum(q.waiting)}
           </div>
-          <div className="text-[9px] mt-0.5" style={{ color: '#334155' }}>انتظار</div>
+          <div className="text-[9px] mt-0.5" style={{ color: '#334155' }}>{ar ? 'انتظار' : 'Waiting'}</div>
         </div>
         <div className="flex gap-3 mb-0.5 ms-auto">
           <div className="text-center">
             <div className="text-sm font-bold" style={{ color: '#818cf8' }}>{q.inProgress}</div>
-            <div className="text-[9px]" style={{ color: '#334155' }}>نشط</div>
+            <div className="text-[9px]" style={{ color: '#334155' }}>{ar ? 'نشط' : 'Active'}</div>
           </div>
           <div className="text-center">
             <div className="text-sm font-bold" style={{ color: '#22c55e' }}>{q.agentsAvailable}</div>
-            <div className="text-[9px]" style={{ color: '#334155' }}>متاح</div>
+            <div className="text-[9px]" style={{ color: '#334155' }}>{ar ? 'متاح' : 'Available'}</div>
           </div>
           <div className="text-center">
             <div className="text-sm font-bold" style={{ color: slaColor(q.slaPct ?? 100) }}>{q.slaPct ?? 100}%</div>
@@ -326,7 +326,7 @@ function AgentStateBreakdown({ agents, breakData, ar }: { agents: SpAgent[]; bre
               <span key={a.agentId} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg"
                 style={{ background: `${color}10`, border: `1px solid ${color}22`, color: '#cbd5e1' }}>
                 {a.agentName}
-                {bi?.statusRaw && <span className="text-[9px]" style={{ color }}>· {bi.statusRaw}{bi.minutesSoFar != null ? ` ${bi.minutesSoFar}د` : ''}{bi.isAuthorized === false ? ' ⚠' : ''}</span>}
+                {bi?.statusRaw && <span className="text-[9px]" style={{ color }}>· {bi.statusRaw}{bi.minutesSoFar != null ? ` ${bi.minutesSoFar}${ar ? 'د' : 'm'}` : ''}{bi.isAuthorized === false ? ' ⚠' : ''}</span>}
                 {!bi && a.statusRaw && a.statusRaw !== a.status && <span className="text-[9px]" style={{ color: '#475569' }}>· {a.statusRaw}</span>}
               </span>
             );
@@ -395,7 +395,7 @@ function LiveAgentsPanel({ live, breakData, ar }: { live: SpLive | null; breakDa
                 <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: sd.color }} /><span style={{ color: sd.color }}>{ar ? sd.ar : sd.en}</span></span>
                 <span style={{ color: loggedIn ? '#86efac' : '#475569' }}>{loggedIn ? (ar ? 'داخل' : 'In') : (ar ? 'خارج' : 'Out')}</span>
                 <span className="truncate" style={{ color: '#64748b' }}>
-                  {bi?.statusRaw ? `${bi.statusRaw}${bi.minutesSoFar != null ? ` ${bi.minutesSoFar}د` : ''}${bi.isAuthorized === false ? ' ⚠' : ''}` : (a.statusRaw || '—')}
+                  {bi?.statusRaw ? `${bi.statusRaw}${bi.minutesSoFar != null ? ` ${bi.minutesSoFar}${ar ? 'د' : 'm'}` : ''}${bi.isAuthorized === false ? ' ⚠' : ''}` : (a.statusRaw || '—')}
                 </span>
               </div>
             );
@@ -443,8 +443,8 @@ function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose }: {
       {/* Extra */}
       <div className="grid grid-cols-3 gap-2 mb-3">
         {[
-          { l: ar ? 'وقت انتظار' : 'Avg Wait', v: q.avgWaitSeconds > 0 ? `${Math.round(q.avgWaitSeconds / 60)}د` : '—', c: '#64748b' },
-          { l: 'AHT',                           v: q.aht > 0 ? `${Math.round(q.aht / 60)}د` : '—',             c: '#64748b' },
+          { l: ar ? 'وقت انتظار' : 'Avg Wait', v: q.avgWaitSeconds > 0 ? `${Math.round(q.avgWaitSeconds / 60)}${ar ? 'د' : 'm'}` : '—', c: '#64748b' },
+          { l: 'AHT',                           v: q.aht > 0 ? `${Math.round(q.aht / 60)}${ar ? 'د' : 'm'}` : '—',             c: '#64748b' },
           { l: ar ? 'SLA خُرق' : 'Breached',   v: q.slaBreached,                                               c: q.slaBreached > 0 ? '#f87171' : '#64748b' },
         ].map(item => (
           <div key={item.l} className="rounded-xl p-2 text-center"
@@ -2067,7 +2067,7 @@ function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRefresh, 
                       <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#f59e0b' }}>{fmtMin(r.busy_minutes)}</td>
                       <td className="px-2.5 py-1.5 text-[10px] tabular-nums"
                         style={{ color: (r.break_breakdown?.total_break ?? r.break_minutes) > 60 ? '#f87171' : '#818cf8', fontWeight: (r.break_breakdown?.total_break ?? r.break_minutes) > 60 ? 700 : 400 }}
-                        title={r.break_breakdown ? `Tea ${r.break_breakdown.tea_break ?? 0}د · Lunch ${r.break_breakdown.lunch_break ?? 0}د · Bio ${r.break_breakdown.bio_break ?? 0}د · Prayer ${r.break_breakdown.prayer_break ?? 0}د` : undefined}>
+                        title={r.break_breakdown ? `Tea ${r.break_breakdown.tea_break ?? 0}${ar ? 'د' : 'm'} · Lunch ${r.break_breakdown.lunch_break ?? 0}${ar ? 'د' : 'm'} · Bio ${r.break_breakdown.bio_break ?? 0}${ar ? 'د' : 'm'} · Prayer ${r.break_breakdown.prayer_break ?? 0}${ar ? 'د' : 'm'}` : undefined}>
                         {fmtMin(r.break_breakdown?.total_break ?? r.break_minutes)}
                         {(r.break_breakdown?.total_break ?? r.break_minutes) > 60 ? ' ⚠' : ''}
                       </td>
@@ -2925,7 +2925,7 @@ export default function RTAPage() {
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: selectedQueueObj ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: 8 }}>
                     {filteredQueues.map(q => (
-                      <QueueCard key={q.queueId} q={q}
+                      <QueueCard key={q.queueId} q={q} ar={ar}
                         selected={selectedQueue === q.queueId}
                         onClick={() => setSelectedQueue(p => p === q.queueId ? null : q.queueId)} />
                     ))}

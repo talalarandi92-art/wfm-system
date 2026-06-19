@@ -83,7 +83,15 @@ function GenShiftCell({ day }: { day: DayAssignment }) {
 }
 
 // ─── Coverage Bars ────────────────────────────────────────────────────────────
+const DAY_NAMES_EN = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function fmtDateEn(iso: string) {
+  const d = new Date(iso + 'T00:00:00');
+  return `${DAY_NAMES_EN[d.getDay()]} ${d.getDate()}`;
+}
 function CoverageBar({ days, dates }: { days: CoverageDay[]; dates: string[] }) {
+  const { lang } = useUiStore();
+  const ar = lang === 'ar';
+  const fmtDay = (iso: string) => ar ? fmtDateAr(iso) : fmtDateEn(iso);
   return (
     <div className="flex gap-1">
       {dates.map(date => {
@@ -96,8 +104,8 @@ function CoverageBar({ days, dates }: { days: CoverageDay[]; dates: string[] }) 
             <div className="w-full rounded-full bg-slate-900/10 dark:bg-white/[0.06]" style={{ height: 5 }}>
               <div className="h-full rounded-full" style={{ width: `${pct}%`, background: col }} />
             </div>
-            <span className="text-[9px] text-slate-500">{fmtDateAr(date).split(' ')[0]}</span>
-            <span className="text-[9px] text-slate-500">{fmtDateAr(date).split(' ')[1]}</span>
+            <span className="text-[9px] text-slate-500">{fmtDay(date).split(' ')[0]}</span>
+            <span className="text-[9px] text-slate-500">{fmtDay(date).split(' ')[1]}</span>
           </div>
         );
       })}

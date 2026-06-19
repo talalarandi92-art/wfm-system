@@ -1,6 +1,11 @@
 ﻿import {
   Controller, Get, Post, Patch, Body, Param, Query, UseGuards, UnauthorizedException,
+  BadRequestException, UseInterceptors, UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { Throttle } from '@nestjs/throttler';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { RequestsService } from './requests.service';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
@@ -9,9 +14,26 @@ import {
   CreateShiftSwapDto,
   CreateLeaveDto,
   CreateOvertimeDto,
+  CreateBreakDto,
   PeerRespondDto,
   ApproveRejectDto,
 } from './requests.types';
+
+// Disk storage for request attachments (schedule/appointment images, certificates).
+const requestStorage = diskStorage({
+  destination: './uploads/requests',
+  filename: (_req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, unique + extname(file.originalname));
+  },
+});
+
+// Images + PDF only — these are appointment/exam schedules and certificates.
+const requestFileFilter = (_req: any, file: Express.Multer.File, cb: any) => {
+  const ok = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+  if (ok.includes(file.mimetype)) cb(null, true);
+  else cb(new BadRequestException('صيغة الملف غير مدعومة (صور أو PDF فقط)'), false);
+};
 
 @Controller('requests')
 @UseGuards(JwtAuthGuard)
@@ -104,6 +126,36 @@ export class RequestsController {
   @RequirePermissions('requests.create')
   createOvertime(@CurrentUser() user: any, @Body() dto: CreateOvertimeDto) {
     return this.svc.createOvertime(this.tid(user), dto);
+  }
+
+  /* ── Manual break request ───────────────────────────────────────────── */
+  @Post('break')
+  @RequirePermissions('requests.create')
+  createBreak(@CurrentUser() user: any, @Body() dto: CreateBreakDto) {
+    return this.svc.createBreak(this.tid(user), dto);
+  }
+
+  /* ── Attachments (schedule/appointment image, certificate) ──────────── */
+  @Get(':id/attachments')
+  listAttachments(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.svc.listAttachments(this.tid(user), id);
+  }
+
+  @Post(':id/attachments')
+  @RequirePermissions('requests.create')
+  @Throttle({ default: { ttl: 60000, limit: 20 } })
+  @UseInterceptors(FileInterceptor('file', {
+    storage: requestStorage,
+    limits: { fileSize: 15 * 1024 * 1024 },  // 15 MB
+    fileFilter: requestFileFilter,
+  }))
+  uploadAttachment(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('لم يتم إرفاق ملف');
+    return this.svc.addAttachment(this.tid(user), id, file, user?.sub ?? user?.userId);
   }
 
   /* ── Peer accept / reject swap ──────────────────────────────────────── */

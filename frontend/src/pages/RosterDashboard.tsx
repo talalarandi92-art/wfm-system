@@ -123,8 +123,21 @@ export default function RosterDashboardPage() {
             <div className="flex gap-2 flex-wrap">{d.permissionsByType.map((p: any) => <span key={p.type} className="px-2.5 py-1 rounded-full text-[11px] font-semibold" style={{ background: '#a855f714', color: '#a855f7' }}>{p.type}: {fmt(p.count)}</span>)}</div>
           </div>
 
+          {/* PERMISSION DETAILS */}
+          <PermissionsDetail ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} />
+
           {/* HALF-HOURLY HEADCOUNT */}
           <HeadcountSection ar={ar} dark={dark} card={card} txt={txt} sub={sub} funcs={funcs} defaultDate={to} />
+
+          {/* OVERTIME — detailed */}
+          <OvertimeDetail ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} funcs={funcs} />
+
+          {/* DETAILED METRICS (late / early / absence / conformance / sick) */}
+          <MetricPanel metric="late" title={ar ? 'التأخير — تفصيل' : 'Late — detailed'} icon={Clock} color="#f97316" ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} funcs={funcs} />
+          <MetricPanel metric="early" title={ar ? 'الخروج المبكر — تفصيل' : 'Early-out — detailed'} icon={LogOut} color="#eab308" ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} funcs={funcs} />
+          <MetricPanel metric="absence" title={ar ? 'الغياب — تفصيل' : 'Absence — detailed'} icon={UserX} color="#ef4444" ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} funcs={funcs} />
+          <MetricPanel metric="conformance" title={ar ? 'التوافق — تفصيل' : 'Conformance — detailed'} icon={ShieldCheck} color="#22c55e" ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} funcs={funcs} />
+          <MetricPanel metric="sick" title={ar ? 'الإجازات المرضية — تفصيل' : 'Sick leave — detailed'} icon={Activity} color="#0ea5e9" ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} funcs={funcs} />
 
           {/* 5h+ OT BONUS */}
           <OtBonus ar={ar} dark={dark} card={card} txt={txt} sub={sub} line={line} from={from} to={to} />
@@ -177,8 +190,8 @@ export default function RosterDashboardPage() {
 
           {/* top employees */}
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
-            <Panel title={ar ? 'الأكثر تأخيراً' : 'Most late'} icon={Clock} color="#f97316"><TopList rows={d.topLate} valueKey="lateHours" suffix={ar ? ' س' : 'h'} sub={(e: any) => `${e.lateDays} ${ar ? 'يوم' : 'd'}`} color="#f97316" dark={dark} txt={txt} subc={sub} /></Panel>
-            <Panel title={ar ? 'الأكثر خروج مبكر' : 'Most early-out'} icon={LogOut} color="#eab308"><TopList rows={d.topEarly} valueKey="earlyMin" suffix="m" sub={(e: any) => `${e.earlyDays} ${ar ? 'يوم' : 'd'}`} color="#eab308" dark={dark} txt={txt} subc={sub} /></Panel>
+            <Panel title={ar ? 'الأكثر تأخيراً (بدون إذن)' : 'Most late (no permission)'} icon={Clock} color="#f97316"><TopList rows={d.topLate} valueKey="lateHours" suffix={ar ? ' س' : 'h'} sub={(e: any) => `${e.lateDays} ${ar ? 'يوم' : 'd'}`} color="#f97316" dark={dark} txt={txt} subc={sub} /></Panel>
+            <Panel title={ar ? 'الأكثر خروج مبكر (بدون إذن)' : 'Most early-out (no permission)'} icon={LogOut} color="#eab308"><TopList rows={d.topEarly} valueKey="earlyMin" suffix="m" sub={(e: any) => `${e.earlyDays} ${ar ? 'يوم' : 'd'}`} color="#eab308" dark={dark} txt={txt} subc={sub} /></Panel>
             <Panel title={ar ? 'الأكثر غياباً' : 'Most absent'} icon={UserX} color="#ef4444"><TopList rows={d.topAbsent} valueKey="absences" suffix="" sub={(e: any) => `${e.worked} ${ar ? 'دوام' : 'wk'}`} color="#ef4444" dark={dark} txt={txt} subc={sub} /></Panel>
             <Panel title={ar ? 'الأكثر أوفر تايم' : 'Most overtime'} icon={Activity} color="#06b6d4"><TopList rows={d.topOt} valueKey="otHours" suffix={ar ? ' س' : 'h'} sub={() => ''} color="#06b6d4" dark={dark} txt={txt} subc={sub} /></Panel>
           </div>
@@ -333,24 +346,278 @@ function EmployeeEval({ ar, dark, card, txt, sub, line, from, to, funcs }: any) 
   );
 }
 
+/* ───────── Generic detailed metric panel (late/early/absence/conformance/sick) ───────── */
+function MetricPanel({ metric, title, icon: Icon, color, ar, dark, card, txt, sub, line, from, to, funcs }: any) {
+  const [q, setQ] = useState('');
+  const [fn, setFn] = useState('');
+  const [mFrom, setMFrom] = useState(from);
+  const [mTo, setMTo] = useState(to);
+  const [data, setData] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setMFrom(from); setMTo(to); }, [from, to]);
+  const load = useCallback(() => {
+    setBusy(true);
+    const p = new URLSearchParams({ metric }); if (mFrom) p.set('from', mFrom); if (mTo) p.set('to', mTo); if (fn) p.set('func', fn); if (q.trim()) p.set('q', q.trim());
+    apiClient.get(`/attendance-recon/metric?${p}`).then((r: any) => setData(r.data)).catch(() => setData(null)).finally(() => setBusy(false));
+  }, [metric, mFrom, mTo, fn, q]);
+  useEffect(() => { if (open) load(); }, [open, load]);
+  const unit = metric === 'late' || metric === 'early' ? (ar ? 'د' : 'm') : metric === 'conformance' ? '%' : '';
+  const fnUnit = metric === 'late' || metric === 'early' ? 'h' : metric === 'conformance' ? '%' : (ar ? ' يوم' : 'd');
+  const maxFn = data ? Math.max(1, ...data.byFunction.map((f: any) => Math.abs(f.value))) : 1;
+  const maxMo = data ? Math.max(1, ...data.byMonth.map((m: any) => Math.abs(m.value))) : 1;
+  return (
+    <div style={{ ...card, padding: 16 }}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2"><Icon size={16} style={{ color }} /><h3 className="text-sm font-bold" style={{ color: txt }}>{title}</h3><ChevronRight size={14} style={{ color: sub, transform: open ? 'rotate(90deg)' : 'none' }} /></button>
+        {open && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'اسم/رقم/إيميل…' : 'name/ID/email…'} className="w-36 px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+            <select value={fn} onChange={e => setFn(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer" style={{ ...card, color: txt }}>
+              <option value="" style={{ background: '#0f1527' }}>{ar ? 'كل الفنكشن' : 'All functions'}</option>
+              {(funcs || []).map((f: string) => <option key={f} value={f} style={{ background: '#0f1527' }}>{f}</option>)}
+            </select>
+            <input type="date" value={mFrom} onChange={e => setMFrom(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+            <span style={{ color: sub }}>→</span>
+            <input type="date" value={mTo} onChange={e => setMTo(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+          </div>
+        )}
+      </div>
+      {!open && <p className="text-[11px]" style={{ color: sub }}>{ar ? 'اضغط للتوسيع — ملخص · حسب الفنكشن · شهري · أعلى الموظفين · جدول مفصّل' : 'Click to expand — summary · by function · monthly · top employees · detail table'}</p>}
+      {open && busy && <Loader2 size={18} className="animate-spin" style={{ color }} />}
+      {open && data && (
+        <div className="space-y-4">
+          {/* summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {data.summary.map((k: any) => (
+              <div key={k.label} className="rounded-lg px-3 py-2" style={{ background: (k.color as string) + '14' }}><p className="text-[10px]" style={{ color: sub }}>{ar ? k.labelAr : k.label}</p><p className="text-base font-bold" style={{ color: k.color }}>{k.value}</p></div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div><p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{ar ? 'حسب الفنكشن' : 'By function'}{data.avgMode ? (ar ? ' (الأقل أولاً)' : ' (lowest first)') : ''}</p>
+              {data.byFunction.slice(0, 10).map((f: any) => (
+                <div key={f.func} className="flex items-center gap-2 mb-1.5">
+                  <div className="text-[11px] w-28 shrink-0 truncate text-right" style={{ color: sub }} title={f.func}>{f.func}</div>
+                  <div className="flex-1 h-5 rounded-md overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}>
+                    <div className="h-full rounded-md flex items-center justify-end px-1.5" style={{ width: `${Math.max(4, (Math.abs(f.value) / maxFn) * 100)}%`, background: color }}><span className="text-[10px] font-bold text-white">{f.value}{fnUnit}</span></div>
+                  </div>
+                  <span className="text-[9px] w-9" style={{ color: sub }}>{f.people}{ar ? 'ف' : 'p'}</span>
+                </div>
+              ))}
+            </div>
+            <div><p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{ar ? 'الاتجاه الشهري' : 'Monthly trend'}</p>
+              {data.byMonth.map((m: any) => (
+                <div key={m.month} className="flex items-center gap-2 mb-1.5">
+                  <div className="text-[11px] w-16 shrink-0" style={{ color: sub }}>{m.month}</div>
+                  <div className="flex-1 h-5 rounded-md overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}>
+                    <div className="h-full rounded-md flex items-center justify-end px-1.5" style={{ width: `${Math.max(4, (Math.abs(m.value) / maxMo) * 100)}%`, background: color }}><span className="text-[10px] font-bold text-white">{m.value}{fnUnit}</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* top employees */}
+          <div><p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{data.avgMode ? (ar ? 'أدنى الموظفين توافقاً' : 'Lowest-conformance employees') : (ar ? 'أعلى الموظفين' : 'Top employees')}</p>
+            <div className="overflow-x-auto max-h-72 overflow-y-auto">
+              <table className="w-full text-[11px]" style={{ color: txt }}>
+                <thead className="sticky top-0" style={{ background: dark ? '#0f1527' : '#fff' }}><tr style={{ color: sub }} className="text-[9px] uppercase">{[ar ? 'الموظف' : 'Employee', ar ? 'الفنكشن' : 'Func', ar ? 'القيمة' : 'Value', ar ? 'أيام' : 'Days'].map((h, i) => <th key={h} className={`py-1.5 ${i === 0 ? 'text-start' : 'text-center'}`}>{h}</th>)}</tr></thead>
+                <tbody>{data.top.map((e: any) => (
+                  <tr key={e.id} style={{ borderTop: `1px solid ${line}` }}>
+                    <td className="py-1.5 text-start whitespace-nowrap font-semibold">{e.name} <span style={{ color: sub }}>#{e.id}</span></td>
+                    <td className="text-center" style={{ color: sub }}>{e.func}</td>
+                    <td className="text-center font-bold" style={{ color }}>{e.value}{fnUnit}</td>
+                    <td className="text-center">{e.days}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+          {/* detail rows */}
+          <div><p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{ar ? `التفصيل (${data.rows.length})` : `Detail (${data.rows.length})`}</p>
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-[11px]" style={{ color: txt }}>
+                <thead className="sticky top-0" style={{ background: dark ? '#0f1527' : '#fff' }}><tr style={{ color: sub }} className="text-[9px] uppercase">
+                  <th className="py-1.5 text-center">{ar ? 'اليوم' : 'Date'}</th>
+                  <th className="py-1.5 text-start">{ar ? 'الموظف' : 'Employee'}</th>
+                  <th className="py-1.5 text-center">{ar ? 'وردية' : 'Shift'}</th>
+                  <th className="py-1.5 text-center">{ar ? 'وقت الشفت' : 'Shift hrs'}</th>
+                  {(metric === 'late' || metric === 'early') && <><th className="py-1.5 text-center">{ar ? 'الدقائق' : 'Minutes'}</th><th className="py-1.5 text-center">{metric === 'late' ? (ar ? 'دخول' : 'In') : (ar ? 'خروج' : 'Out')}</th>{metric === 'late' && <th className="py-1.5 text-center">{ar ? 'خصم؟' : 'Deduct'}</th>}</>}
+                  {metric === 'conformance' && <><th className="py-1.5 text-center">{ar ? 'التوافق' : 'Conf'}</th><th className="py-1.5 text-center">{ar ? 'دخول→خروج' : 'In→Out'}</th></>}
+                  {(metric === 'absence' || metric === 'sick') && <th className="py-1.5 text-center">{ar ? 'النوع' : 'Type'}</th>}
+                </tr></thead>
+                <tbody>{data.rows.map((r: any, i: number) => (
+                  <tr key={i} style={{ borderTop: `1px solid ${line}` }}>
+                    <td className="text-center whitespace-nowrap">{r.date}</td>
+                    <td className="py-1.5 text-start whitespace-nowrap">{r.name} <span style={{ color: sub }}>#{r.employeeId}</span></td>
+                    <td className="text-center font-semibold">{r.shiftCode || '—'}</td>
+                    <td className="text-center whitespace-nowrap" style={{ color: sub }}>{r.shiftStart ? `${r.shiftStart}–${r.shiftEnd}` : 'OFF'}</td>
+                    {(metric === 'late' || metric === 'early') && <><td className="text-center font-bold" style={{ color }}>{r.minutes}{unit}</td><td className="text-center whitespace-nowrap" style={{ color: sub }}>{(metric === 'late' ? r.inAt : r.outAt) || '—'}</td>{metric === 'late' && <td className="text-center">{r.deduction ? '⚠' : '—'}</td>}</>}
+                    {metric === 'conformance' && <><td className="text-center font-bold" style={{ color: r.conformance >= 85 ? '#22c55e' : r.conformance >= 70 ? '#f59e0b' : '#ef4444' }}>{r.conformance}%</td><td className="text-center whitespace-nowrap" style={{ color: sub }}>{(r.inAt || '—')}→{(r.outAt || '—')}</td></>}
+                    {(metric === 'absence' || metric === 'sick') && <td className="text-center" style={{ color: sub }}>{r.dayType || r.presence}</td>}
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ───────── Overtime — detailed ───────── */
+function OvertimeDetail({ ar, dark, card, txt, sub, line, from, to, funcs }: any) {
+  const [q, setQ] = useState('');
+  const [fn, setFn] = useState('');
+  const [oFrom, setOFrom] = useState(from);
+  const [oTo, setOTo] = useState(to);
+  const [data, setData] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setOFrom(from); setOTo(to); }, [from, to]);
+  const load = useCallback(() => {
+    setBusy(true);
+    const p = new URLSearchParams(); if (oFrom) p.set('from', oFrom); if (oTo) p.set('to', oTo); if (fn) p.set('func', fn); if (q.trim()) p.set('q', q.trim());
+    apiClient.get(`/attendance-recon/overtime?${p}`).then((r: any) => setData(r.data)).catch(() => setData(null)).finally(() => setBusy(false));
+  }, [oFrom, oTo, fn, q]);
+  useEffect(() => { if (open) load(); }, [open, load]);
+  const capColor = (s: string) => s === 'EXCEEDED' ? '#ef4444' : s === 'APPROACHING' ? '#f59e0b' : '#22c55e';
+  const posBadge = (pos: string) => {
+    const m: any = { after: ['#06b6d4', ar ? 'بعد' : 'after'], before: ['#a855f7', ar ? 'قبل' : 'before'], holiday: ['#a855f7', ar ? 'عيد/عطلة' : 'holiday'], 'off-day': ['#64748b', ar ? 'يوم OFF' : 'off-day'] };
+    const [c, t] = m[pos] || ['#64748b', pos];
+    return <span className="px-1.5 py-0.5 rounded text-[9px]" style={{ background: c + '22', color: c }}>{t}</span>;
+  };
+  const s = data?.summary;
+  const maxFn = data ? Math.max(1, ...data.byFunction.map((f: any) => f.hours)) : 1;
+  const maxMo = data ? Math.max(1, ...data.byMonth.map((m: any) => m.hours)) : 1;
+  return (
+    <div style={{ ...card, padding: 16 }}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2"><Activity size={16} style={{ color: '#06b6d4' }} /><h3 className="text-sm font-bold" style={{ color: txt }}>{ar ? 'الأوفرتايم — تفصيل موسّع' : 'Overtime — detailed'}</h3><ChevronRight size={14} style={{ color: sub, transform: open ? 'rotate(90deg)' : 'none' }} /></button>
+        {open && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'اسم/رقم/إيميل…' : 'name/ID/email…'} className="w-36 px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+            <select value={fn} onChange={e => setFn(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer" style={{ ...card, color: txt }}>
+              <option value="" style={{ background: '#0f1527' }}>{ar ? 'كل الفنكشن' : 'All functions'}</option>
+              {(funcs || []).map((f: string) => <option key={f} value={f} style={{ background: '#0f1527' }}>{f}</option>)}
+            </select>
+            <input type="date" value={oFrom} onChange={e => setOFrom(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+            <span style={{ color: sub }}>→</span>
+            <input type="date" value={oTo} onChange={e => setOTo(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+          </div>
+        )}
+      </div>
+      {!open && <p className="text-[11px]" style={{ color: sub }}>{ar ? 'اضغط للتوسيع — قبل/بعد الشفت · عيد/OFF · حسب الفنكشن · اتجاه شهري · أعلى الموظفين · سقف 180 ساعة · جدول مفصّل' : 'Click to expand — before/after · holiday/off · by function · monthly trend · top employees · 180h cap · detail table'}</p>}
+      {open && busy && <Loader2 size={18} className="animate-spin" style={{ color: '#06b6d4' }} />}
+      {open && data && s && (
+        <div className="space-y-4">
+          {/* summary KPIs */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {[[ar ? 'إجمالي' : 'Total', s.totalHours + 'h', '#06b6d4'], [ar ? 'قبل الشفت' : 'Before', s.beforeHours + 'h', '#a855f7'], [ar ? 'بعد الشفت' : 'After', s.afterHours + 'h', '#06b6d4'], [ar ? 'عيد/عطلة' : 'Holiday', s.holidayHours + 'h', '#a855f7'], [ar ? 'يوم OFF' : 'Off-day', s.offHours + 'h', '#64748b'], [ar ? 'موظفين' : 'People', s.people, '#6366f1'], [ar ? 'متوسط/فرد' : 'Avg/person', s.avgPerPerson + 'h', '#22c55e']].map(([l, v, c]: any) => (
+              <div key={l} className="rounded-lg px-3 py-2" style={{ background: (c as string) + '14' }}><p className="text-[10px]" style={{ color: sub }}>{l}</p><p className="text-base font-bold" style={{ color: c }}>{v}</p></div>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* by function */}
+            <div><p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{ar ? 'حسب الفنكشن' : 'By function'}</p>
+              {data.byFunction.slice(0, 10).map((f: any) => (
+                <div key={f.func} className="flex items-center gap-2 mb-1.5">
+                  <div className="text-[11px] w-28 shrink-0 truncate text-right" style={{ color: sub }} title={f.func}>{f.func}</div>
+                  <div className="flex-1 h-5 rounded-md overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}>
+                    <div className="h-full rounded-md flex items-center justify-end px-1.5" style={{ width: `${Math.max(4, (f.hours / maxFn) * 100)}%`, background: '#06b6d4' }}><span className="text-[10px] font-bold text-white">{f.hours}h</span></div>
+                  </div>
+                  <span className="text-[9px] w-10" style={{ color: sub }}>{f.people}{ar ? ' ف' : 'p'}</span>
+                </div>
+              ))}
+            </div>
+            {/* by month */}
+            <div><p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{ar ? 'الاتجاه الشهري' : 'Monthly trend'}</p>
+              {data.byMonth.map((m: any) => (
+                <div key={m.month} className="flex items-center gap-2 mb-1.5">
+                  <div className="text-[11px] w-16 shrink-0" style={{ color: sub }}>{m.month}</div>
+                  <div className="flex-1 h-5 rounded-md overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)' }}>
+                    <div className="h-full rounded-md flex items-center justify-end px-1.5" style={{ width: `${Math.max(4, (m.hours / maxMo) * 100)}%`, background: '#22c55e' }}><span className="text-[10px] font-bold text-white">{m.hours}h</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* top employees with 180h cap */}
+          <div>
+            <p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{ar ? 'أعلى الموظفين أوفرتايم (مع سقف 180 ساعة/سنة)' : 'Top OT employees (with 180h/yr cap)'}</p>
+            <div className="overflow-x-auto max-h-72 overflow-y-auto">
+              <table className="w-full text-[11px]" style={{ color: txt }}>
+                <thead className="sticky top-0" style={{ background: dark ? '#0f1527' : '#fff' }}><tr style={{ color: sub }} className="text-[9px] uppercase">{[ar ? 'الموظف' : 'Employee', ar ? 'الفنكشن' : 'Func', ar ? 'إجمالي' : 'Total', ar ? 'قبل' : 'Before', ar ? 'بعد' : 'After', ar ? 'عيد' : 'Holiday', ar ? 'أيام' : 'Days', ar ? 'سنوي (سقف 180)' : 'YTD (cap 180)'].map((h, i) => <th key={h} className={`py-1.5 ${i === 0 ? 'text-start' : 'text-center'}`}>{h}</th>)}</tr></thead>
+                <tbody>{data.topEmployees.map((e: any) => (
+                  <tr key={e.id} style={{ borderTop: `1px solid ${line}` }}>
+                    <td className="py-1.5 text-start whitespace-nowrap font-semibold">{e.name} <span style={{ color: sub }}>#{e.id}</span></td>
+                    <td className="text-center" style={{ color: sub }}>{e.func}</td>
+                    <td className="text-center font-bold" style={{ color: '#06b6d4' }}>{e.hours}h</td>
+                    <td className="text-center" style={{ color: sub }}>{e.beforeHours}h</td>
+                    <td className="text-center" style={{ color: sub }}>{e.afterHours}h</td>
+                    <td className="text-center" style={{ color: sub }}>{e.holidayHours}h</td>
+                    <td className="text-center">{e.days}</td>
+                    <td className="text-center"><span className="px-1.5 py-0.5 rounded font-bold" style={{ background: capColor(e.capStatus) + '22', color: capColor(e.capStatus) }}>{e.ytdHours}h</span></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+          {/* detail rows */}
+          <div>
+            <p className="text-[11px] font-semibold mb-2" style={{ color: sub }}>{ar ? `كل أيام الأوفرتايم (${data.rows.length})` : `All OT days (${data.rows.length})`}</p>
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-[11px]" style={{ color: txt }}>
+                <thead className="sticky top-0" style={{ background: dark ? '#0f1527' : '#fff' }}><tr style={{ color: sub }} className="text-[9px] uppercase">{[ar ? 'اليوم' : 'Date', ar ? 'الموظف' : 'Employee', ar ? 'وردية' : 'Shift', ar ? 'وقت الشفت' : 'Shift hours', 'OT', ar ? 'الموقع' : 'When', ar ? 'فترة OT' : 'OT window', ar ? 'ملاحظات' : 'Flags'].map((h, i) => <th key={h} className={`py-1.5 ${i === 1 ? 'text-start' : 'text-center'}`}>{h}</th>)}</tr></thead>
+                <tbody>{data.rows.map((r: any, i: number) => (
+                  <tr key={i} style={{ borderTop: `1px solid ${line}` }}>
+                    <td className="text-center whitespace-nowrap">{r.date}</td>
+                    <td className="py-1.5 text-start whitespace-nowrap">{r.name} <span style={{ color: sub }}>#{r.employeeId}</span></td>
+                    <td className="text-center font-semibold">{r.shiftCode || '—'}</td>
+                    <td className="text-center whitespace-nowrap" style={{ color: sub }}>{r.shiftStart ? `${r.shiftStart}–${r.shiftEnd}` : (r.position === 'holiday' ? (ar ? 'عيد' : 'Holiday') : 'OFF')}</td>
+                    <td className="text-center font-bold" style={{ color: '#06b6d4' }}>{r.otHours}h</td>
+                    <td className="text-center">{posBadge(r.position)}</td>
+                    <td className="text-center whitespace-nowrap" style={{ color: sub }}>{r.otFrom ? `${r.otFrom} → ${r.otTo}` : '—'}</td>
+                    <td className="text-center" style={{ color: sub }}>{(r.flags || []).join(', ') || '—'}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ───────── 5h+ OT bonus ───────── */
 function OtBonus({ ar, dark, card, txt, sub, line, from, to }: any) {
   const [minH, setMinH] = useState(5);
+  const [bFrom, setBFrom] = useState(from);
+  const [bTo, setBTo] = useState(to);
+  const [q, setQ] = useState('');
   const [data, setData] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  // follow the dashboard range unless the user overrides it here
+  useEffect(() => { setBFrom(from); setBTo(to); }, [from, to]);
   const load = useCallback(() => {
     setBusy(true);
-    apiClient.get(`/attendance-recon/ot-bonus?from=${from}&to=${to}&minHours=${minH}`).then((r: any) => setData(r.data)).catch(() => setData(null)).finally(() => setBusy(false));
-  }, [from, to, minH]);
+    const p = new URLSearchParams({ minHours: String(minH) });
+    if (bFrom) p.set('from', bFrom); if (bTo) p.set('to', bTo); if (q.trim()) p.set('q', q.trim());
+    apiClient.get(`/attendance-recon/ot-bonus?${p}`).then((r: any) => setData(r.data)).catch(() => setData(null)).finally(() => setBusy(false));
+  }, [bFrom, bTo, minH, q]);
   useEffect(() => { load(); }, [load]);
   return (
     <div style={{ ...card, padding: 16 }}>
       <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
         <div className="flex items-center gap-2"><Gift size={16} style={{ color: '#f43f5e' }} /><h3 className="text-sm font-bold" style={{ color: txt }}>{ar ? `قائمة المكافأة — أوفر تايم ≥ ${minH} ساعات بيوم واحد` : `Bonus list — ≥ ${minH}h OT in a single day`}</h3></div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'اسم/رقم/إيميل…' : 'name/ID/email…'} className="w-36 px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+          <input type="date" value={bFrom} onChange={e => setBFrom(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+          <span style={{ color: sub }}>→</span>
+          <input type="date" value={bTo} onChange={e => setBTo(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
           <span className="text-[11px]" style={{ color: sub }}>{ar ? 'الحد:' : 'Min:'}</span>
-          <input type="number" min={1} max={12} step={0.5} value={minH} onChange={e => setMinH(parseFloat(e.target.value) || 5)} className="w-16 px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
-          <span className="text-[11px]" style={{ color: sub }}>{ar ? 'ساعة' : 'h'}</span>
+          <input type="number" min={1} max={12} step={0.5} value={minH} onChange={e => setMinH(parseFloat(e.target.value) || 5)} className="w-14 px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
         </div>
       </div>
       {busy && <Loader2 size={20} className="animate-spin" style={{ color: '#f43f5e' }} />}
@@ -370,10 +637,77 @@ function OtBonus({ ar, dark, card, txt, sub, line, from, to }: any) {
                   <td className="text-center" style={{ color: sub }}>{r.employeeId}</td>
                   <td className="text-center whitespace-nowrap">{r.date}</td>
                   <td className="text-center font-semibold">{r.shiftCode || '—'}</td>
-                  <td className="text-center whitespace-nowrap" style={{ color: sub }}>{r.shiftStart ? `${r.shiftStart}–${r.shiftEnd}` : (ar ? 'OFF' : 'OFF')}</td>
+                  <td className="text-center whitespace-nowrap" style={{ color: sub }}>{r.shiftStart ? `${r.shiftStart}–${r.shiftEnd}` : (r.position === 'holiday' ? (ar ? 'عيد/عطلة' : 'Holiday') : 'OFF')}</td>
                   <td className="text-center font-bold" style={{ color: '#f43f5e' }}>{r.otHours}h</td>
-                  <td className="text-center"><span className="px-1.5 py-0.5 rounded text-[9px]" style={{ background: '#06b6d422', color: '#06b6d4' }}>{r.position === 'after' ? (ar ? 'بعد' : 'after') : r.position === 'before' ? (ar ? 'قبل' : 'before') : (ar ? 'يوم OFF' : 'off-day')}</span></td>
+                  <td className="text-center"><span className="px-1.5 py-0.5 rounded text-[9px]" style={{ background: r.position === 'holiday' ? '#a855f722' : '#06b6d422', color: r.position === 'holiday' ? '#a855f7' : '#06b6d4' }}>{r.position === 'after' ? (ar ? 'بعد' : 'after') : r.position === 'before' ? (ar ? 'قبل' : 'before') : r.position === 'holiday' ? (ar ? 'عيد/عطلة' : 'holiday') : (ar ? 'يوم OFF' : 'off-day')}</span></td>
                   <td className="text-center whitespace-nowrap" style={{ color: sub }}>{r.otFrom ? `${r.otFrom} → ${r.otTo}` : '—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ───────── Permission details ───────── */
+function PermissionsDetail({ ar, dark, card, txt, sub, line, from, to }: any) {
+  const [q, setQ] = useState('');
+  const [status, setStatus] = useState('');
+  const [pFrom, setPFrom] = useState(from);
+  const [pTo, setPTo] = useState(to);
+  const [data, setData] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { setPFrom(from); setPTo(to); }, [from, to]);
+  const load = useCallback(() => {
+    setBusy(true);
+    const p = new URLSearchParams(); if (pFrom) p.set('from', pFrom); if (pTo) p.set('to', pTo); if (q.trim()) p.set('q', q.trim()); if (status) p.set('status', status);
+    apiClient.get(`/attendance-recon/permissions-detail?${p}`).then((r: any) => setData(r.data)).catch(() => setData(null)).finally(() => setBusy(false));
+  }, [pFrom, pTo, q, status]);
+  useEffect(() => { if (open) load(); }, [open, load]);
+  const stColor = (s: string) => /approv/i.test(s) ? '#22c55e' : /refus|reject/i.test(s) ? '#ef4444' : '#f59e0b';
+  return (
+    <div style={{ ...card, padding: 16 }}>
+      <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+        <button onClick={() => setOpen(o => !o)} className="flex items-center gap-2"><CalendarDays size={16} style={{ color: '#a855f7' }} /><h3 className="text-sm font-bold" style={{ color: txt }}>{ar ? 'تفاصيل الاستئذانات' : 'Permission details'}</h3><ChevronRight size={14} style={{ color: sub, transform: open ? 'rotate(90deg)' : 'none' }} /></button>
+        {open && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'اسم/رقم/إيميل…' : 'name/ID/email…'} className="w-36 px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+            <select value={status} onChange={e => setStatus(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none cursor-pointer" style={{ ...card, color: txt }}>
+              <option value="" style={{ background: '#0f1527' }}>{ar ? 'كل الحالات' : 'All status'}</option>
+              <option value="approv" style={{ background: '#0f1527' }}>{ar ? 'معتمد' : 'Approved'}</option>
+              <option value="refus" style={{ background: '#0f1527' }}>{ar ? 'مرفوض' : 'Refused'}</option>
+              <option value="pend" style={{ background: '#0f1527' }}>{ar ? 'معلّق' : 'Pending'}</option>
+            </select>
+            <input type="date" value={pFrom} onChange={e => setPFrom(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+            <span style={{ color: sub }}>→</span>
+            <input type="date" value={pTo} onChange={e => setPTo(e.target.value)} className="px-2 py-1 rounded-lg text-xs outline-none" style={{ ...card, color: txt }} />
+          </div>
+        )}
+      </div>
+      {!open && <p className="text-[11px]" style={{ color: sub }}>{ar ? 'اضغط للعرض — كل استئذان: مين/متى/النوع/من-إلى/الحالة' : 'Click to expand — every permission: who/when/type/window/status'}</p>}
+      {open && busy && <Loader2 size={18} className="animate-spin" style={{ color: '#a855f7' }} />}
+      {open && data && (
+        <>
+          <div className="flex gap-2 flex-wrap mb-3">
+            {[[ar ? 'إجمالي' : 'Total', data.counts.total, '#a855f7'], [ar ? 'معتمد' : 'Approved', data.counts.approved, '#22c55e'], [ar ? 'مرفوض' : 'Refused', data.counts.refused, '#ef4444'], [ar ? 'معلّق' : 'Pending', data.counts.pending, '#f59e0b']].map(([l, v, c]: any) => (
+              <div key={l} className="rounded-lg px-3 py-1.5" style={{ background: c + '14' }}><span className="text-[10px]" style={{ color: sub }}>{l}: </span><span className="text-sm font-bold" style={{ color: c }}>{fmt(v)}</span></div>
+            ))}
+            {data.byType.map((t: any) => <div key={t.type} className="rounded-lg px-2.5 py-1.5" style={{ background: '#a855f714' }}><span className="text-[10px]" style={{ color: sub }}>{t.type}: </span><span className="text-xs font-bold" style={{ color: '#a855f7' }}>{t.count}</span></div>)}
+          </div>
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+            <table className="w-full text-[11px]" style={{ color: txt }}>
+              <thead className="sticky top-0" style={{ background: dark ? '#0f1527' : '#fff' }}><tr style={{ color: sub }} className="text-[9px] uppercase">{[ar ? 'اليوم' : 'Date', ar ? 'الموظف' : 'Employee', ar ? 'النوع' : 'Type', ar ? 'من → إلى' : 'From → To', ar ? 'الحالة' : 'Status', ar ? 'غطّى؟' : 'Covered'].map((h, i) => <th key={h} className={`py-1.5 ${i === 1 ? 'text-start' : 'text-center'}`}>{h}</th>)}</tr></thead>
+              <tbody>{data.rows.map((r: any, i: number) => (
+                <tr key={i} style={{ borderTop: `1px solid ${line}` }}>
+                  <td className="text-center whitespace-nowrap">{r.date}</td>
+                  <td className="py-1.5 text-start whitespace-nowrap">{r.name} <span style={{ color: sub }}>#{r.employeeId}</span></td>
+                  <td className="text-center">{r.type}</td>
+                  <td className="text-center whitespace-nowrap" style={{ color: sub }}>{r.from || r.to ? `${r.from || '?'} → ${r.to || '?'}` : '—'}</td>
+                  <td className="text-center"><span className="px-1.5 py-0.5 rounded font-bold" style={{ background: stColor(r.status) + '22', color: stColor(r.status) }}>{r.status}</span></td>
+                  <td className="text-center">{r.covered ? '✓' : '—'}</td>
                 </tr>
               ))}</tbody>
             </table>
@@ -386,7 +720,10 @@ function OtBonus({ ar, dark, card, txt, sub, line, from, to }: any) {
 
 /* ───────── Half-hourly headcount ───────── */
 function HeadcountSection({ ar, dark, card, txt, sub, funcs, defaultDate }: any) {
-  const [date, setDate] = useState(defaultDate || '2026-06-15');
+  // Default to a populated recent date (today) rather than the range-end, which may be
+  // in the future (no actual attendance yet → empty headcount).
+  const today = new Date().toISOString().slice(0, 10);
+  const [date, setDate] = useState(today <= (defaultDate || today) ? today : defaultDate);
   const [fn, setFn] = useState(funcs[0] || '');
   const [agent, setAgent] = useState('');
   const [data, setData] = useState<any>(null);
@@ -441,6 +778,21 @@ function HeadcountSection({ ar, dark, card, txt, sub, funcs, defaultDate }: any)
             </div>
           </div>
           <p className="text-[11px] mt-2" style={{ color: sub }}>{ar ? `${f.func} · ${f.employees} موظف · ذروة المجدول ${f.peakScheduled} · أوفرتايم ${f.otHours}س (${f.otPeople} موظف)` : `${f.func} · ${f.employees} staff · peak scheduled ${f.peakScheduled} · overtime ${f.otHours}h (${f.otPeople} ppl)`}</p>
+          {/* explicit table: scheduled vs ACTUAL (with OT) per half hour — shows how OT raises the headcount */}
+          <div className="overflow-x-auto mt-3 max-h-72 overflow-y-auto">
+            <table className="w-full text-[11px]" style={{ color: txt }}>
+              <thead className="sticky top-0" style={{ background: dark ? '#0f1527' : '#fff' }}><tr style={{ color: sub }} className="text-[9px] uppercase">{[ar ? 'الساعة' : 'Time', ar ? 'مجدول' : 'Scheduled', ar ? 'فعلي (مع OT)' : 'Actual (w/ OT)', ar ? 'منهم OT' : 'in OT', ar ? 'نقص' : 'Gap'].map((h, i) => <th key={h} className={`py-1 ${i === 0 ? 'text-start' : 'text-center'}`}>{h}</th>)}</tr></thead>
+              <tbody>{f.buckets.filter((b: any) => b.scheduled > 0 || b.present > 0).map((b: any) => (
+                <tr key={b.t} style={{ borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}` }}>
+                  <td className="py-1 text-start whitespace-nowrap">{b.t}</td>
+                  <td className="text-center">{b.scheduled}</td>
+                  <td className="text-center font-bold" style={{ color: b.present > b.scheduled ? '#06b6d4' : txt }}>{b.present}{b.present > b.scheduled ? ` (+${b.present - b.scheduled})` : ''}</td>
+                  <td className="text-center" style={{ color: b.inOt ? '#06b6d4' : sub }}>{b.inOt || '—'}</td>
+                  <td className="text-center" style={{ color: b.shrinkage ? '#ef4444' : sub }}>{b.shrinkage || '—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
         </>
       )}
       {data && !f && <p className="text-xs" style={{ color: sub }}>{ar ? 'لا بيانات لهذا اليوم/الفنكشن' : 'No data for this date/function'}</p>}

@@ -64,6 +64,20 @@ const TYPE_LABELS_AR: Record<string, string> = {
   general:      'عام',
 };
 
+const TYPE_LABELS_EN: Record<string, string> = {
+  coaching:     'Coaching',
+  meeting:      'Meeting',
+  shift_change: 'Shift Change',
+  training:     'Training',
+  cross_skill:  'Cross-Skill',
+  off:          'Off',
+  general:      'General',
+};
+
+function typeLabel(type: string, ar: boolean) {
+  return ar ? (TYPE_LABELS_AR[type] ?? type) : (TYPE_LABELS_EN[type] ?? type);
+}
+
 function fmt(iso: string, opts?: Intl.DateTimeFormatOptions) {
   return new Date(iso).toLocaleString('ar-KW', opts ?? { hour: '2-digit', minute: '2-digit' });
 }
@@ -116,7 +130,7 @@ function EventModal({ event, dark, ar, onClose }: { event: CalEvent; dark: boole
               <div className="font-bold text-sm" style={{ color: textPri }}>{event.title}</div>
               <div className="text-xs px-2 py-0.5 rounded-full mt-0.5 inline-block"
                 style={{ background: `${color}15`, color }}>
-                {ar ? TYPE_LABELS_AR[event.eventType] : event.eventType}
+                {typeLabel(event.eventType, ar)}
               </div>
             </div>
           </div>
@@ -249,8 +263,8 @@ function CreateEventModal({ date, dark, ar, onClose, onCreated }: { date: string
             onChange={e => setForm(f => ({ ...f, eventType: e.target.value }))}
             className="w-full rounded-xl px-3 py-2 text-sm outline-none"
             style={{ background: inputBg, border: `1px solid ${border}`, color: textPri }}>
-            {Object.entries(TYPE_LABELS_AR).map(([v, l]) => (
-              <option key={v} value={v}>{ar ? l : v}</option>
+            {Object.keys(TYPE_LABELS_AR).map(v => (
+              <option key={v} value={v}>{typeLabel(v, ar)}</option>
             ))}
           </select>
         </div>
@@ -573,7 +587,7 @@ export default function CalendarPage() {
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded-full flex-shrink-0"
                   style={{ background: `${color}15`, color }}>
-                  {ar ? TYPE_LABELS_AR[ev.eventType] : ev.eventType}
+                  {typeLabel(ev.eventType, ar)}
                 </span>
               </div>
             );
@@ -583,10 +597,10 @@ export default function CalendarPage() {
 
       {/* Event type legend */}
       <div className="mt-4 flex flex-wrap gap-3">
-        {Object.entries(TYPE_LABELS_AR).map(([type, labelAr]) => (
+        {Object.keys(TYPE_LABELS_AR).map(type => (
           <div key={type} className="flex items-center gap-1.5 text-[10px]" style={{ color: textSec }}>
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: EVENT_COLORS[type] }} />
-            {ar ? labelAr : type}
+            {typeLabel(type, ar)}
           </div>
         ))}
       </div>

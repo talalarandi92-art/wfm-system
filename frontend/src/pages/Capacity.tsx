@@ -416,6 +416,12 @@ export default function CapacityPage() {
   const [livePlan, setLivePlan] = useState<any | null>(null);
   const [livePlanLoading, setLivePlanLoading] = useState(false);
   const [lpSaveMsg, setLpSaveMsg] = useState('');
+  const [savedScenarios, setSavedScenarios] = useState<any[]>([]);
+  const loadSavedScenarios = useCallback(() => {
+    apiClient.get('/capacity/scenarios').then(r => setSavedScenarios(Array.isArray(r.data) ? r.data : [])).catch(() => setSavedScenarios([]));
+  }, []);
+  useEffect(() => { loadSavedScenarios(); }, [loadSavedScenarios]);
+  const deleteScenario = async (id: string) => { await apiClient.post('/capacity/scenarios/delete', { id }).catch(() => {}); loadSavedScenarios(); };
 
   // HC by Function × Hour
   const [fnHourly, setFnHourly] = useState<any | null>(null);
@@ -448,6 +454,7 @@ export default function CapacityPage() {
         notes: ar ? 'محفوظ من الخطة الحية' : 'Saved from live plan',
       });
       setLpSaveMsg(ar ? '✅ حُفظ السيناريو' : '✅ Scenario saved');
+      loadSavedScenarios();
     } catch {
       setLpSaveMsg(ar ? '✗ فشل الحفظ' : '✗ Save failed');
     }
@@ -683,6 +690,27 @@ export default function CapacityPage() {
           </button>
           {lpSaveMsg && <span className="text-xs font-bold text-emerald-400">{lpSaveMsg}</span>}
         </div>
+
+        {savedScenarios.length > 0 && (
+          <div className="mb-3 rounded-xl p-3" style={{ background: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', border: `0.5px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}` }}>
+            <div className="text-xs font-semibold mb-2" style={{ color: dark ? '#cbd5e1' : '#475569' }}>{ar ? `السيناريوهات المحفوظة (${savedScenarios.length})` : `Saved scenarios (${savedScenarios.length})`}</div>
+            <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
+              {savedScenarios.map((s: any) => (
+                <div key={s.id} className="flex items-center justify-between rounded-lg px-2.5 py-1.5" style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#fff', border: `0.5px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` }}>
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold truncate" style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>{s.name}</div>
+                    <div className="text-[10px]" style={{ color: dark ? '#64748b' : '#94a3b8' }}>
+                      {s.channel} · {s.scenario_type || 'base'}
+                      {s.results?.summary?.peakErlangs != null && ` · ${ar ? 'ذروة' : 'peak'} ${s.results.summary.peakErlangs}`}
+                      {s.created_by_name && ` · ${s.created_by_name}`}
+                    </div>
+                  </div>
+                  <button onClick={() => deleteScenario(s.id)} className="text-[10px] px-1.5 py-0.5 rounded shrink-0 ms-2" style={{ background: 'rgba(244,63,94,0.12)', color: '#f43f5e' }}>{ar ? 'حذف' : 'del'}</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {!livePlan ? (
           <p className={`text-xs ${dark ? 'text-slate-500' : 'text-slate-400'}`}>

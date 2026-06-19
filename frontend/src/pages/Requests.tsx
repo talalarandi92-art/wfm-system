@@ -6,6 +6,7 @@ import {
   Users, Calendar, ChevronDown, ChevronUp, Search, RefreshCw,
   ArrowLeftRight, Plane, Stethoscope, Heart, Gift, Home, UserCheck,
   X, Check, AlertCircle, Send, Loader2, Shield, Timer, TrendingUp, BookOpen,
+  Coffee, Upload, Paperclip, CalendarClock,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
@@ -63,6 +64,14 @@ interface UnifiedRequest {
   isHalfDay?: boolean;
   medicalCertRequired?: boolean;
   attachmentSubmitted?: boolean;
+  attachmentCount?: number;
+  // Break
+  breakDate?: string;
+  breakStart?: string;
+  breakEnd?: string;
+  breakMinutes?: number;
+  breakType?: string;
+  breakReason?: string;
   // Approval
   approvedL1At?: string;
   rejectedAt?: string;
@@ -112,8 +121,9 @@ const REQUEST_TYPES: Array<{
   { code: 'death_leave',  labelAr: 'إجازة وفاة',    labelEn: 'Bereavement',   icon: Heart,          color: '#64748b', descAr: 'إجازة الوفاة (3 أيام)',           descEn: 'Bereavement leave (3 days)',                     },
   { code: 'comp_off',     labelAr: 'يوم تعويضي',    labelEn: 'Comp Day',      icon: Gift,           color: '#10b981', descAr: 'استخدام يوم تعويضي',             descEn: 'Use a compensatory day off',                     },
   { code: 'wfh',          labelAr: 'عمل من المنزل', labelEn: 'Work From Home', icon: Home,          color: '#06b6d4', descAr: 'طلب العمل من المنزل',            descEn: 'Request to work from home',                      },
-  { code: 'university_exam', labelAr: 'جامعة / امتحان', labelEn: 'University / Exam', icon: BookOpen, color: '#a855f7', descAr: 'طلب وقت لامتحان جامعي',          descEn: 'Time off for a university exam',                 },
+  { code: 'university_exam', labelAr: 'مواعيد و امتحانات', labelEn: 'Appointments & Exams', icon: CalendarClock, color: '#a855f7', descAr: 'موعد أو امتحان — أرفق صورة الجدول/الموعد', descEn: 'Appointment or exam — attach the schedule/appointment image', },
   { code: 'permission',   labelAr: 'استئذان',        labelEn: 'Permission',    icon: UserCheck,      color: '#ec4899', descAr: 'استئذان مبكر أو متأخر',           descEn: 'Early leave or late arrival',                    },
+  { code: 'break',        labelAr: 'بريك يدوي',      labelEn: 'Manual Break',  icon: Coffee,         color: '#14b8a6', descAr: 'طلب بريك في وقت محدد',           descEn: 'Request a break at a specific time',             },
   { code: 'overtime',     labelAr: 'أوفر تايم',      labelEn: 'Overtime',      icon: Timer,          color: '#f97316', descAr: 'طلب ساعات إضافية',               descEn: 'Request overtime hours',                         },
 ];
 
@@ -436,6 +446,54 @@ function ValidationBadge({ passed, labelAr, labelEn, ar }: { passed?: boolean; l
   );
 }
 
+/* ─── Attachments Panel (schedule/appointment image, certificate) ───────────── */
+function AttachmentsPanel({ requestId, ar }: { requestId: string; ar: boolean }) {
+  const [files, setFiles] = useState<Array<{ id: string; name: string; url: string; type?: string }>>([]);
+  const [view, setView] = useState<{ name: string; url: string; kind: 'image' | 'pdf' | 'other' } | null>(null);
+  useEffect(() => {
+    apiClient.get(`/requests/${requestId}/attachments`)
+      .then(r => setFiles(Array.isArray(r.data) ? r.data : []))
+      .catch(() => setFiles([]));
+  }, [requestId]);
+  if (!files.length) return null;
+  const kindOf = (f: { url: string; type?: string }): 'image' | 'pdf' | 'other' =>
+    (f.type ?? '').startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(f.url) ? 'image'
+      : (f.type ?? '').includes('pdf') || /\.pdf$/i.test(f.url) ? 'pdf' : 'other';
+  return (
+    <div>
+      <div className="text-xs text-slate-500 mb-1.5">{ar ? 'المرفقات' : 'Attachments'}</div>
+      <div className="flex flex-wrap gap-2">
+        {files.map(f => {
+          const kind = kindOf(f);
+          return (
+            <button key={f.id} type="button"
+              onClick={() => kind === 'other' ? window.open(f.url, '_blank') : setView({ name: f.name, url: f.url, kind })}
+              className="flex items-center gap-2 rounded-xl px-2.5 py-2 transition-colors hover:opacity-80"
+              style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
+              {kind === 'image'
+                ? <img src={f.url} alt={f.name} className="w-10 h-10 rounded-lg object-cover" style={{ border: '1px solid rgba(168,85,247,0.25)' }} />
+                : <Paperclip size={16} style={{ color: '#a855f7' }} />}
+              <span className="text-xs max-w-[160px] truncate" style={{ color: '#c4b5fd' }}>{f.name}</span>
+            </button>
+          );
+        })}
+      </div>
+      {view && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.85)' }} onClick={() => setView(null)}>
+          <div className="absolute top-4 inset-x-0 text-center text-sm text-white/80 flex items-center justify-center gap-3 px-4">
+            <span className="truncate max-w-[55%]">{view.name}</span>
+            <a href={view.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.12)' }}>{ar ? 'فتح' : 'Open'}</a>
+            <button onClick={() => setView(null)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.12)' }}>✕</button>
+          </div>
+          {view.kind === 'image'
+            ? <img src={view.url} alt={view.name} className="max-w-full max-h-full rounded-xl object-contain" onClick={e => e.stopPropagation()} />
+            : <iframe src={view.url} title={view.name} className="w-[90vw] h-[85vh] rounded-xl bg-white" onClick={e => e.stopPropagation()} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Request Card ───────────────────────────────────────────────────────── */
 function RequestCard({
   req, dark, onApprove, onReject, onPeerAccept, onPeerReject,
@@ -599,6 +657,21 @@ function RequestCard({
             </div>
           )}
 
+          {/* Break details */}
+          {req.breakDate && (
+            <div className="flex gap-4 text-xs flex-wrap">
+              <div><span className="text-slate-500">{ar ? 'التاريخ:' : 'Date:'}</span> <span className="text-slate-800 dark:text-slate-200">{fmt(req.breakDate, ar)}</span></div>
+              <div><span className="text-slate-500">{ar ? 'من:' : 'From:'}</span> <span className="text-slate-800 dark:text-slate-200">{fmtTime(req.breakStart, ar)}</span></div>
+              <div><span className="text-slate-500">{ar ? 'إلى:' : 'To:'}</span> <span className="text-slate-800 dark:text-slate-200">{fmtTime(req.breakEnd, ar)}</span></div>
+              <div><span className="text-slate-500">{ar ? 'المدة:' : 'Duration:'}</span> <span className="text-teal-300">{fmtDuration(req.breakMinutes, ar)}</span></div>
+              {req.breakType && req.breakType !== 'manual' && <div className="text-teal-400">{req.breakType}</div>}
+              {req.breakReason && <div className="text-slate-400 italic">"{fixEncoding(req.breakReason)}"</div>}
+            </div>
+          )}
+
+          {/* Attachments (schedule / appointment image, certificate) */}
+          {(req.attachmentCount ?? 0) > 0 && <AttachmentsPanel requestId={req.id} ar={ar} />}
+
           {/* Notes */}
           {req.notes && (
             <div className="text-xs text-slate-400 italic">"{fixEncoding(req.notes)}"</div>
@@ -741,6 +814,15 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
   const [success, setSuccess] = useState('');
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [weeklyUsage, setWeeklyUsage] = useState<{ used: number; remaining: number; max: number; weekStart: string; weekEnd: string } | null>(null);
+  const [attachFile, setAttachFile] = useState<File | null>(null);
+
+  // Upload an attachment (schedule/appointment image) to a just-created request.
+  const uploadAttachment = async (requestId: string) => {
+    if (!attachFile) return;
+    const fd = new FormData();
+    fd.append('file', attachFile);
+    await apiClient.post(`/requests/${requestId}/attachments`, fd);
+  };
 
   // Load employees
   useEffect(() => {
@@ -800,6 +882,9 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
         setSuccess(res.data.message ?? (ar ? 'تم إرسال طلب التبادل' : 'Swap request submitted'));
       } else if (isLeaveType) {
         if (!form.startDate || !form.endDate) { setError(ar ? 'اختر تاريخ البداية والنهاية' : 'Select start and end dates'); setLoading(false); return; }
+        if (selectedType === 'university_exam' && !attachFile) {
+          setError(ar ? 'أرفق صورة الجدول أو الموعد' : 'Attach the schedule/appointment image'); setLoading(false); return;
+        }
         const res = await apiClient.post('/requests/leave', {
           employeeId: selectedEmp.id,
           leaveType: selectedType,
@@ -808,7 +893,29 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
           isHalfDay: form.isHalfDay === 'true',
           notes: form.notes,
         });
+        if (attachFile && res.data?.id) {
+          try { await uploadAttachment(res.data.id); }
+          catch { setError(ar ? 'تم تقديم الطلب لكن فشل رفع الصورة' : 'Request submitted but image upload failed'); }
+        }
         setSuccess(res.data.message ?? (ar ? 'تم تقديم الطلب بنجاح' : 'Request submitted'));
+      } else if (selectedType === 'break') {
+        if (!form.breakStartTime || !form.breakEndTime) {
+          setError(ar ? 'حدد من الساعة وإلى الساعة' : 'Set from and to times'); setLoading(false); return;
+        }
+        const [sh, sm] = form.breakStartTime.split(':').map(Number);
+        const [eh, em] = form.breakEndTime.split(':').map(Number);
+        const dur = (eh * 60 + em) - (sh * 60 + sm);
+        if (dur <= 0) { setError(ar ? 'وقت النهاية يجب أن يكون بعد البداية' : 'End time must be after start time'); setLoading(false); return; }
+        if (dur < 5 || dur > 240) { setError(ar ? 'مدة البريك بين 5 و 240 دقيقة' : 'Break duration must be 5–240 minutes'); setLoading(false); return; }
+        const res = await apiClient.post('/requests/break', {
+          employeeId: selectedEmp.id,
+          startTime: form.breakStartTime,
+          endTime: form.breakEndTime,
+          breakType: form.breakKind || 'manual',
+          reason: form.reason ?? '',
+          notes: form.notes ?? '',
+        });
+        setSuccess(res.data?.message ?? (ar ? 'تم تقديم طلب البريك بنجاح' : 'Break request submitted'));
       } else if (selectedType === 'permission') {
         if (!form.permissionDate || !form.startTime || !form.endTime) {
           setError(ar ? 'اكمل بيانات الاستئذان (التاريخ، من، إلى)' : 'Fill in date, from and to times'); setLoading(false); return;
@@ -868,6 +975,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
         setForm({});
         setSelectedTarget(null);
         setTargetDate('');
+        setAttachFile(null);
         onSuccess();
       }, 2000);
     } catch (e: any) {
@@ -1089,6 +1197,59 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                   <span className="text-xs text-slate-400">{ar ? 'نصف يوم' : 'Half day'}</span>
                 </label>
               )}
+              {selectedType === 'university_exam' && (
+                <div>
+                  <label style={labelStyle}>{ar ? 'صورة الجدول / الموعد (مطلوب)' : 'Schedule / appointment image (required)'}</label>
+                  <label className="flex items-center gap-2 cursor-pointer rounded-xl px-3 py-2.5 transition-colors"
+                    style={{ background: attachFile ? 'rgba(168,85,247,0.1)' : 'rgba(168,85,247,0.06)', border: `1px dashed ${attachFile ? 'rgba(168,85,247,0.5)' : 'rgba(168,85,247,0.3)'}` }}>
+                    {attachFile ? <Paperclip size={14} style={{ color: '#a855f7' }} /> : <Upload size={14} style={{ color: '#a855f7' }} />}
+                    <span className="text-xs flex-1 truncate" style={{ color: attachFile ? '#c4b5fd' : '#94a3b8' }}>
+                      {attachFile ? attachFile.name : (ar ? 'اضغط لاختيار صورة أو PDF' : 'Tap to choose an image or PDF')}
+                    </span>
+                    {attachFile && (
+                      <button type="button" onClick={(e) => { e.preventDefault(); setAttachFile(null); }}
+                        className="text-slate-400 hover:text-red-400"><X size={13} /></button>
+                    )}
+                    <input type="file" accept="image/*,application/pdf" className="hidden"
+                      onChange={e => setAttachFile(e.target.files?.[0] ?? null)} />
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Manual break form */}
+          {selectedType === 'break' && selectedEmp && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'rgba(20,184,166,0.08)', border: '1px solid rgba(20,184,166,0.2)' }}>
+                <CalendarClock size={14} className="text-teal-400" />
+                <span className="text-xs text-teal-400">{ar ? 'التاريخ تلقائي = تاريخ اليوم (وقت تقديم الطلب)' : 'Date is automatic = today (submission date)'}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={labelStyle}>{ar ? 'من الساعة' : 'From time'}</label>
+                  <input type="time" value={form.breakStartTime ?? ''} onChange={e => setForm(f => ({ ...f, breakStartTime: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>{ar ? 'إلى الساعة' : 'To time'}</label>
+                  <input type="time" value={form.breakEndTime ?? ''} onChange={e => setForm(f => ({ ...f, breakEndTime: e.target.value }))} style={inputStyle} />
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>{ar ? 'نوع البريك' : 'Break type'}</label>
+                <select value={form.breakKind ?? 'manual'} onChange={e => setForm(f => ({ ...f, breakKind: e.target.value }))} style={inputStyle}>
+                  <option value="manual">{ar ? 'يدوي' : 'Manual'}</option>
+                  <option value="lunch">{ar ? 'غداء' : 'Lunch'}</option>
+                  <option value="coffee">{ar ? 'قهوة' : 'Coffee'}</option>
+                  <option value="prayer">{ar ? 'صلاة' : 'Prayer'}</option>
+                  <option value="medical">{ar ? 'طبي' : 'Medical'}</option>
+                  <option value="other">{ar ? 'أخرى' : 'Other'}</option>
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>{ar ? 'السبب (اختياري)' : 'Reason (optional)'}</label>
+                <input type="text" value={form.reason ?? ''} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} style={inputStyle} />
+              </div>
             </div>
           )}
 
@@ -1423,6 +1584,8 @@ function MyRequests({ dark, showToast }: { dark: boolean; showToast: (msg: strin
       return `${fmt(r.requesterDate, ar)} ${ar ? 'مع' : 'with'} ${r.targetName ?? '—'}${r.targetDate && r.targetDate !== r.requesterDate ? ` (${fmt(r.targetDate, ar)})` : ''}`;
     if (r.leaveStart)
       return `${fmt(r.leaveStart, ar)} → ${fmt(r.leaveEnd, ar)} (${r.leaveDays ?? '—'} ${ar ? 'يوم' : 'd'})`;
+    if (r.type === 'break' && r.breakDate)
+      return `${fmt(r.breakDate, ar)} · ${fmtTime(r.breakStart, ar)}–${fmtTime(r.breakEnd, ar)} (${fmtDuration(r.breakMinutes, ar)})`;
     return fmt(r.submittedAt, ar);
   };
 
@@ -1554,6 +1717,9 @@ function MyRequests({ dark, showToast }: { dark: boolean; showToast: (msg: strin
             </div>
 
             {req.notes && <div className="text-xs text-slate-400">"{req.notes}"</div>}
+
+            {/* Attachments — viewable any time (schedule/appointment image, certificate) */}
+            {(req.attachmentCount ?? 0) > 0 && <AttachmentsPanel requestId={req.id} ar={ar} />}
 
             {/* Rejection reason */}
             {req.status === 'rejected' && req.rejectionReason && (

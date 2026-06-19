@@ -297,7 +297,7 @@ export default function OutagesPage() {
       setForm({ title:'', description:'', outageTypeId:'', severity:'high', impactedFunctionIds:[], startedAt:'', impactDescription:'', slaTargetMinutes:'' });
       load(); loadDashboard();
     } catch (err: any) {
-      setFormError(err?.response?.data?.message ?? 'فشل الإرسال — تأكد من الحقول المطلوبة');
+      setFormError(err?.response?.data?.message ?? (ar ? 'فشل الإرسال — تأكد من الحقول المطلوبة' : 'Submit failed — check the required fields'));
     }
     setSaving(false);
   };
@@ -1267,32 +1267,53 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
   const SEV_AR: Record<string,string> = { low:'منخفض', medium:'متوسط', high:'عالي', critical:'حرج' };
   const ST_AR:  Record<string,string> = { reported:'مُبلَّغ', validated:'تم التحقق', in_progress:'جاري المعالجة', resolved:'محلول', closed:'مغلق' };
 
-  const fmtDur = (m: number) => fmtDuration(m, true);
-  const fmtDt  = (iso: string) => fmtDateTime(iso, true);
+  const fmtDur = (m: number) => fmtDuration(m, ar);
+  const fmtDt  = (iso: string) => fmtDateTime(iso, ar);
 
   const sevMeta = SEV[outage.severity] ?? { color:'#94a3b8', bg:'rgba(148,163,184,0.1)' };
   const images  = (outage.attachments ?? []).filter(a => a.isImage);
   const videos  = (outage.attachments ?? []).filter(a => a.isVideo);
 
-  const summaryText =
-    `*[تنبيه عطل] ${outage.title}*\n` +
-    `──────────────────────\n` +
-    `*الخطورة:* ${SEV_AR[outage.severity] ?? outage.severity}\n` +
-    `*الحالة:* ${ST_AR[outage.status] ?? outage.status}\n` +
-    `*النوع:* ${outage.typeNameAr ?? outage.typeName ?? '—'}\n` +
-    `*المعالج:* ${outage.handlerName ?? 'غير محدد'}\n` +
-    `*البداية:* ${fmtDt(outage.startedAt)}\n` +
-    (outage.endedAt ? `*النهاية:* ${fmtDt(outage.endedAt)}\n` : `*الحالة:* مستمر حتى الآن\n`) +
-    (outage.durationMinutes ? `*المدة:* ${fmtDur(outage.durationMinutes)}\n` : '') +
-    (outage.slaBreached ? `*SLA:* تجاوز الهدف\n` : `*SLA:* ضمن الهدف\n`) +
-    (outage.impactedFunctions?.length ? `*الأقسام:* ${outage.impactedFunctions.join('، ')}\n` : '') +
-    (outage.description ? `\n*الوصف:*\n${outage.description}\n` : '') +
-    (outage.rootCause   ? `\n*السبب:* ${outage.rootCause}\n` : '') +
-    (outage.resolution  ? `\n*الحل:* ${outage.resolution}\n` : '') +
-    `\n──────────────────────\n_منصة WFM — Boutiqaat Contact Center_`;
+  const summaryText = ar
+    ? (
+      `*[تنبيه عطل] ${outage.title}*\n` +
+      `──────────────────────\n` +
+      `*الخطورة:* ${SEV_AR[outage.severity] ?? outage.severity}\n` +
+      `*الحالة:* ${ST_AR[outage.status] ?? outage.status}\n` +
+      `*النوع:* ${outage.typeNameAr ?? outage.typeName ?? '—'}\n` +
+      `*المعالج:* ${outage.handlerName ?? 'غير محدد'}\n` +
+      `*البداية:* ${fmtDt(outage.startedAt)}\n` +
+      (outage.endedAt ? `*النهاية:* ${fmtDt(outage.endedAt)}\n` : `*الحالة:* مستمر حتى الآن\n`) +
+      (outage.durationMinutes ? `*المدة:* ${fmtDur(outage.durationMinutes)}\n` : '') +
+      (outage.slaBreached ? `*SLA:* تجاوز الهدف\n` : `*SLA:* ضمن الهدف\n`) +
+      (outage.impactedFunctions?.length ? `*الأقسام:* ${outage.impactedFunctions.join('، ')}\n` : '') +
+      (outage.description ? `\n*الوصف:*\n${outage.description}\n` : '') +
+      (outage.rootCause   ? `\n*السبب:* ${outage.rootCause}\n` : '') +
+      (outage.resolution  ? `\n*الحل:* ${outage.resolution}\n` : '') +
+      `\n──────────────────────\n_منصة WFM — Boutiqaat Contact Center_`
+    )
+    : (
+      `*[Outage Alert] ${outage.title}*\n` +
+      `──────────────────────\n` +
+      `*Severity:* ${SEV[outage.severity]?.en ?? outage.severity}\n` +
+      `*Status:* ${ST[outage.status]?.en ?? outage.status}\n` +
+      `*Type:* ${outage.typeName ?? outage.typeNameAr ?? '—'}\n` +
+      `*Handler:* ${outage.handlerName ?? 'Unassigned'}\n` +
+      `*Started:* ${fmtDt(outage.startedAt)}\n` +
+      (outage.endedAt ? `*Ended:* ${fmtDt(outage.endedAt)}\n` : `*Status:* Ongoing\n`) +
+      (outage.durationMinutes ? `*Duration:* ${fmtDur(outage.durationMinutes)}\n` : '') +
+      (outage.slaBreached ? `*SLA:* Breached\n` : `*SLA:* On Target\n`) +
+      (outage.impactedFunctions?.length ? `*Functions:* ${outage.impactedFunctions.join(', ')}\n` : '') +
+      (outage.description ? `\n*Description:*\n${outage.description}\n` : '') +
+      (outage.rootCause   ? `\n*Root Cause:* ${outage.rootCause}\n` : '') +
+      (outage.resolution  ? `\n*Resolution:* ${outage.resolution}\n` : '') +
+      `\n──────────────────────\n_WFM Platform — Boutiqaat Contact Center_`
+    );
 
   const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(summaryText)}`;
-  const mailSubject = encodeURIComponent(`[عطل] ${SEV_AR[outage.severity] ?? ''} — ${outage.title}`);
+  const mailSubject = encodeURIComponent(
+    ar ? `[عطل] ${SEV_AR[outage.severity] ?? ''} — ${outage.title}`
+       : `[Outage] ${SEV[outage.severity]?.en ?? ''} — ${outage.title}`);
   const mailBody    = encodeURIComponent(summaryText);
   const mailUrl     = `mailto:?subject=${mailSubject}&body=${mailBody}`;
 

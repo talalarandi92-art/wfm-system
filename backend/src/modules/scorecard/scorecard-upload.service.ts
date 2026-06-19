@@ -250,6 +250,14 @@ export class ScorecardUploadService {
   private parseRows(rows: any[][], headerRow: number, colMap: Record<string, number>): ScorecardEntryRaw[] {
     const entries: ScorecardEntryRaw[] = [];
 
+    // Some workbooks include the empty leading column A in the parsed range (index 0 = null),
+    // others skip it → the fixed colMap can be off by one. Auto-detect the offset from the
+    // "Net Points" header position and shift every index so alignment is robust either way.
+    const hdr = rows[headerRow] || [];
+    const netIdx = hdr.findIndex((c: any) => /net\s*point/i.test(String(c ?? '')));
+    const offset = netIdx >= 0 ? netIdx - colMap.netPts : 0;
+    if (offset) colMap = Object.fromEntries(Object.entries(colMap).map(([k, v]) => [k, v + offset])) as Record<string, number>;
+
     for (let i = headerRow + 1; i < rows.length; i++) {
       const r = rows[i];
       if (!r) continue;
