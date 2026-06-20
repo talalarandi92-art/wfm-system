@@ -35,6 +35,32 @@ export class ScorecardController {
     private readonly uploadSvc: ScorecardUploadService,
   ) {}
 
+  /**
+   * Row-level visibility for scorecards:
+   *  - scorecard.view_all (WFM/HR/admin) → everyone (all=true)
+   *  - team leader → their own + anyone they manage (direct reports or a team they own)
+   *  - agent → only themselves
+   */
+  private async resolveScope(user: any): Promise<{ all: boolean; empIds: string[]; empNos: string[] }> {
+    const perms: string[] = user?.permissionCodes ?? user?.permissions ?? [];
+    if (perms.includes('scorecard.view_all')) return { all: true, empIds: [], empNos: [] };
+    const tid = user.tenantId;
+    const selfId = user.employeeId;
+    if (!selfId) return { all: false, empIds: [], empNos: [] };
+    const rows = await this.ds.query(
+      `SELECT id, employee_no FROM employees
+        WHERE tenant_id = $1 AND (
+          id = $2
+          OR direct_manager_id = $2
+          OR team_id IN (SELECT id FROM teams WHERE tenant_id = $1 AND manager_id = $2)
+        )`, [tid, selfId]);
+    return {
+      all: false,
+      empIds: rows.map((r: any) => r.id),
+      empNos: rows.map((r: any) => r.employee_no).filter(Boolean),
+    };
+  }
+
   /* ════════════════════════════════════════════════════════════════════════
      Attendance-based scorecard (legacy — used by old Scorecard.tsx tabs)
   ════════════════════════════════════════════════════════════════════════ */
@@ -67,6 +93,8 @@ export class ScorecardController {
     const empFilters: string[] = [];
     if (functionId) { params.push(functionId); empFilters.push(`e.function_id = $${params.length}`); }
     if (gender)     { params.push(gender);      empFilters.push(`e.gender = $${params.length}`); }
+    const scope = await this.resolveScope(user);
+    if (!scope.all) { params.push(scope.empIds); empFilters.push(`e.id = ANY($${params.length}::uuid[])`); }
     const empWhere = empFilters.length ? 'AND ' + empFilters.join(' AND ') : '';
 
     const validSortCols: Record<string, string> = {
@@ -158,6 +186,10 @@ export class ScorecardController {
     const fromDate = from ?? latest.slice(0, 7) + '-01';
     const toDate   = to   ?? latest;
 
+    const fParams: any[] = [tid, fromDate, toDate];
+    const scope = await this.resolveScope(user);
+    let fScope = '';
+    if (!scope.all) { fParams.push(scope.empIds); fScope = `AND e.id = ANY($${fParams.length}::uuid[])`; }
     const rows = await this.ds.query(
       `SELECT f.name AS function_name,
          COUNT(DISTINCT e.id) AS headcount,
@@ -174,9 +206,9 @@ export class ScorecardController {
        LEFT JOIN attendance_records ar
          ON ar.employee_id = e.id AND ar.tenant_id = $1
          AND ar.attendance_date BETWEEN $2 AND $3
-       WHERE e.tenant_id = $1 AND e.status = 'active'
+       WHERE e.tenant_id = $1 AND e.status = 'active' ${fScope}
        GROUP BY f.name ORDER BY attendance_rate DESC`,
-      [tid, fromDate, toDate],
+      fParams,
     );
 
     return {
@@ -284,8 +316,11 @@ export class ScorecardController {
   ) {
     const weekLabel = week ?? 'Final';
     const params: any[] = [user.tenantId, batchId, weekLabel];
-    const fnFilter = fn ? `AND se.function_name = $4` : '';
-    if (fn) params.push(fn);
+    let fnFilter = '';
+    if (fn) { params.push(fn); fnFilter = `AND se.function_name = $${params.length}`; }
+    const scope = await this.resolveScope(user);
+    let scopeFilter = '';
+    if (!scope.all) { params.push(scope.empNos); scopeFilter = `AND se.employee_no = ANY($${params.length}::text[])`; }
 
     const rows = await this.ds.query(
       `SELECT se.employee_name, se.employee_no, se.user_id_login,
@@ -304,7 +339,7 @@ export class ScorecardController {
               se.response_rate
        FROM scorecard_entries se
        WHERE se.tenant_id = $1 AND se.batch_id = $2 AND se.week_label = $3
-       ${fnFilter}
+       ${fnFilter} ${scopeFilter}
        ORDER BY se.function_name, COALESCE(se.function_rank, 9999), se.net_points DESC NULLS LAST`,
       params,
     );
@@ -347,11 +382,15 @@ export class ScorecardController {
     @Param('loginId') loginId: string,
     @CurrentUser()    user: any,
   ) {
+    const scope = await this.resolveScope(user);
+    const params: any[] = [user.tenantId, batchId, loginId];
+    let scopeFilter = '';
+    if (!scope.all) { params.push(scope.empNos); scopeFilter = `AND employee_no = ANY($${params.length}::text[])`; }
     const rows = await this.ds.query(
       `SELECT * FROM scorecard_entries
-       WHERE tenant_id=$1 AND batch_id=$2 AND user_id_login=$3
+       WHERE tenant_id=$1 AND batch_id=$2 AND user_id_login=$3 ${scopeFilter}
        ORDER BY CASE week_label WHEN 'W1' THEN 1 WHEN 'W2' THEN 2 WHEN 'W3' THEN 3 WHEN 'W4' THEN 4 ELSE 5 END`,
-      [user.tenantId, batchId, loginId],
+      params,
     );
     return rows;
   }
@@ -373,6 +412,9 @@ export class ScorecardController {
   @ApiOperation({ summary: 'Dashboard summary for a scorecard batch' })
   async batchDashboard(@Param('id') batchId: string, @CurrentUser() user: any) {
     const tid = user.tenantId;
+    const scope = await this.resolveScope(user);
+    const sc = scope.all ? '' : `AND employee_no = ANY($3::text[])`;
+    const p: any[] = scope.all ? [tid, batchId] : [tid, batchId, scope.empNos];
 
     const [totals] = await this.ds.query(
       `SELECT COUNT(*) AS total_employees,
@@ -382,8 +424,8 @@ export class ScorecardController {
               MAX(net_points)                            AS highest,
               MIN(net_points)                            AS lowest
        FROM scorecard_entries
-       WHERE tenant_id=$1 AND batch_id=$2 AND week_label='Final'`,
-      [tid, batchId],
+       WHERE tenant_id=$1 AND batch_id=$2 AND week_label='Final' ${sc}`,
+      p,
     );
 
     const fnAvgs = await this.ds.query(
@@ -397,9 +439,9 @@ export class ScorecardController {
               COUNT(*) FILTER (WHERE net_points < 0)                          AS below_zero_count,
               COUNT(*) FILTER (WHERE net_points >= 0)                         AS passing_count
        FROM scorecard_entries
-       WHERE tenant_id=$1 AND batch_id=$2 AND week_label='Final'
+       WHERE tenant_id=$1 AND batch_id=$2 AND week_label='Final' ${sc}
        GROUP BY function_name ORDER BY avg_net_points DESC`,
-      [tid, batchId],
+      p,
     );
 
     const top3 = await this.ds.query(
@@ -412,10 +454,10 @@ export class ScorecardController {
          ) AS rn
          FROM scorecard_entries
          WHERE tenant_id=$1 AND batch_id=$2 AND week_label='Final'
-           AND net_points > 0
+           AND net_points > 0 ${sc}
        ) sub WHERE rn <= 3
        ORDER BY function_name, rn`,
-      [tid, batchId],
+      p,
     );
 
     const coaching = await this.ds.query(
@@ -424,9 +466,9 @@ export class ScorecardController {
               quiz_score, mistakes_actual, mistakes_score, incidents_actual, function_rank
        FROM scorecard_entries
        WHERE tenant_id=$1 AND batch_id=$2 AND week_label='Final'
-         AND (net_points < 0 OR net_points IS NULL)
+         AND (net_points < 0 OR net_points IS NULL) ${sc}
        ORDER BY net_points ASC NULLS LAST`,
-      [tid, batchId],
+      p,
     );
 
     const toN = (v: any) => v === null || v === undefined ? null : parseInt(v, 10);
@@ -509,19 +551,23 @@ export class ScorecardController {
       [tid, thisBatch.period_year, thisBatch.period_month],
     );
 
+    const scope = await this.resolveScope(user);
+    const sc = scope.all ? '' : `AND employee_no = ANY($4::text[])`;
+    const cp: any[] = scope.all ? [tid, batchId, weekLabel] : [tid, batchId, weekLabel, scope.empNos];
+
     const current = await this.ds.query(
       `SELECT user_id_login, employee_name, function_name, net_points, function_rank,
               quality_actual, aht_actual, fcr_actual, working_days_pct
-       FROM scorecard_entries WHERE tenant_id=$1 AND batch_id=$2 AND week_label=$3`,
-      [tid, batchId, weekLabel],
+       FROM scorecard_entries WHERE tenant_id=$1 AND batch_id=$2 AND week_label=$3 ${sc}`,
+      cp,
     );
 
     if (!prevBatch) return { entries: current.map((r: any) => ({ loginId: r.user_id_login, employeeName: r.employee_name, functionName: r.function_name, netPoints: r.net_points !== null ? parseInt(r.net_points, 10) : null, prevNetPoints: null, delta: null, rankDelta: null })), prevBatch: null };
 
     const previous = await this.ds.query(
       `SELECT user_id_login, net_points, function_rank FROM scorecard_entries
-       WHERE tenant_id=$1 AND batch_id=$2 AND week_label=$3`,
-      [tid, prevBatch.id, weekLabel],
+       WHERE tenant_id=$1 AND batch_id=$2 AND week_label=$3 ${sc}`,
+      scope.all ? [tid, prevBatch.id, weekLabel] : [tid, prevBatch.id, weekLabel, scope.empNos],
     );
 
     const prevMap: Record<string, any> = {};
@@ -565,6 +611,11 @@ export class ScorecardController {
     const batchIds = batches.map((b: any) => b.id);
     const order: Record<string, number> = {}; batches.forEach((b: any, i: number) => (order[b.id] = i));
 
+    const aParams: any[] = [tid, batchIds];
+    let aFn = '', aScope = '';
+    if (fn) { aParams.push(fn); aFn = `AND function_name = $${aParams.length}`; }
+    const scope = await this.resolveScope(user);
+    if (!scope.all) { aParams.push(scope.empNos); aScope = `AND employee_no = ANY($${aParams.length}::text[])`; }
     const rows = await this.ds.query(
       `SELECT batch_id, user_id_login, employee_name, employee_no, function_name, team_leader,
               net_points, quality_score, aht_score, fcr_score, prr_points, productivity_score,
@@ -572,8 +623,8 @@ export class ScorecardController {
               working_days_pct
        FROM scorecard_entries
        WHERE tenant_id=$1 AND batch_id = ANY($2) AND week_label='Final'
-       ${fn ? 'AND function_name = $3' : ''}`,
-      fn ? [tid, batchIds, fn] : [tid, batchIds]);
+       ${aFn} ${aScope}`,
+      aParams);
 
     const toN = (v: any) => (v === null || v === undefined ? null : parseInt(v, 10));
     const KPI: [string, string][] = [['Quality', 'quality_score'], ['AHT', 'aht_score'], ['FCR', 'fcr_score'],
