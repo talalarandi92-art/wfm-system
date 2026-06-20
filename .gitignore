@@ -106,3 +106,6 @@ frontend/frontend.err
 
 # Stray skill-upload artifact
 nice-upload-root.zip
+
+# Local repo backups (kept outside the repo)
+_backups/
