@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Settings as SettingsIcon, Save, RotateCcw, ChevronRight,
   Code, Building2, Users, Loader2, Check, X, Tag,
-  Shield, ToggleLeft, ToggleRight, Calendar, Zap,
+  Shield, ToggleLeft, ToggleRight, Calendar, Zap, Plane,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
@@ -19,8 +19,17 @@ interface ShiftCode {
   isActive: boolean; displayColor: string | null; categoryName: string | null;
 }
 interface FuncRow { id: string; name: string; headcount: string; active_count: string }
+interface LeaveBal { leaveType: string; configured: boolean; entitlement: number; taken: number; pending: number; remaining: number | null }
+interface LeaveRow { employeeId: string; employeeNo: string; name: string; functionName: string | null; balances: LeaveBal[] }
 
-type View = 'overview' | 'settings' | 'shifts' | 'functions';
+type View = 'overview' | 'settings' | 'shifts' | 'functions' | 'leaves';
+
+const LEAVE_TYPES = ['annual_leave', 'comp_off', 'sick_leave'] as const;
+const LEAVE_LABEL: Record<string, { ar: string; en: string }> = {
+  annual_leave: { ar: 'سنوية', en: 'Annual' },
+  comp_off:     { ar: 'تعويضية', en: 'Comp-off' },
+  sick_leave:   { ar: 'مرضية', en: 'Sick' },
+};
 
 const GROUP_ICONS: Record<string, any> = {
   schedule:   Calendar,
@@ -53,6 +62,11 @@ export default function SettingsPage() {
   const [saved, setSaved]       = useState<string | null>(null);
   const [edits, setEdits]       = useState<Record<string, any>>({});
   const [shiftFilter, setShiftFilter] = useState('');
+  const [leaves, setLeaves]     = useState<LeaveRow[]>([]);
+  const [leaveYear, setLeaveYear] = useState<number>(new Date().getFullYear());
+  const [leaveFilter, setLeaveFilter] = useState('');
+  const [entEdits, setEntEdits] = useState<Record<string, string>>({});  // `${empId}|${type}` → days
+  const [entSaving, setEntSaving] = useState<string | null>(null);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -73,11 +87,34 @@ export default function SettingsPage() {
     setFuncs(data); setLoading(false);
   }, []);
 
+  const loadLeaves = useCallback(async (year: number) => {
+    setLoading(true);
+    try {
+      const { data } = await apiClient.get(`/leave-balances/all?year=${year}`);
+      setLeaves(Array.isArray(data) ? data : []);
+    } catch { setLeaves([]); }
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     if (view === 'settings') loadSettings();
     else if (view === 'shifts') loadShifts();
     else if (view === 'functions') loadFuncs();
-  }, [view]);
+    else if (view === 'leaves') loadLeaves(leaveYear);
+  }, [view, leaveYear]);
+
+  const saveEntitlement = async (employeeId: string, leaveType: string, daysRaw: string) => {
+    const days = parseFloat(daysRaw);
+    if (!Number.isFinite(days) || days < 0) return;
+    const k = `${employeeId}|${leaveType}`;
+    setEntSaving(k);
+    try {
+      await apiClient.post('/leave-balances/entitlement', { employeeId, leaveType, year: leaveYear, days });
+      setEntEdits(d => { const n = { ...d }; delete n[k]; return n; });
+      await loadLeaves(leaveYear);
+    } catch {}
+    setEntSaving(null);
+  };
 
   const saveSetting = async (key: string, rawVal: string) => {
     setSaving(key);
@@ -102,7 +139,13 @@ export default function SettingsPage() {
     { id: 'settings',   labelAr: 'الإعدادات العامة', labelEn: 'General Settings', icon: SettingsIcon, descAr: 'إعدادات النظام المجمّعة', descEn: 'System-wide configuration', color: '#818cf8' },
     { id: 'shifts',     labelAr: 'قاموس الورديات',  labelEn: 'Shift Dictionary', icon: Code,         descAr: 'تعريفات أكواد الورديات',  descEn: 'Shift code definitions',   color: '#34d399' },
     { id: 'functions',  labelAr: 'الوظائف',          labelEn: 'Functions',        icon: Building2,    descAr: 'وظائف قسم الاتصال',       descEn: 'Contact center functions', color: '#fbbf24' },
+    { id: 'leaves',     labelAr: 'أرصدة الإجازات',   labelEn: 'Leave Balances',   icon: Plane,        descAr: 'تحديد استحقاق الإجازات للموظفين', descEn: 'Set annual leave entitlements', color: '#22d3ee' },
   ];
+
+  const filteredLeaves = leaves.filter(r =>
+    !leaveFilter || r.name.toLowerCase().includes(leaveFilter.toLowerCase())
+      || (r.employeeNo ?? '').includes(leaveFilter)
+      || (r.functionName ?? '').toLowerCase().includes(leaveFilter.toLowerCase()));
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'}>
@@ -297,6 +340,95 @@ export default function SettingsPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── Leave balances (admin entitlements) ────────────────────────── */}
+      {view === 'leaves' && !loading && (
+        <div>
+          <div className="mb-4 flex items-center gap-3 flex-wrap">
+            <input value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)}
+              placeholder={ar ? 'بحث بالاسم / الرقم / الوظيفة...' : 'Search name / no. / function...'}
+              className="text-xs rounded-xl px-3 py-2 outline-none w-60"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs" style={{ color: tsColor(dark) }}>{ar ? 'السنة' : 'Year'}</span>
+              <select value={leaveYear} onChange={e => setLeaveYear(parseInt(e.target.value, 10))}
+                className="text-xs rounded-xl px-2 py-2 outline-none"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }}>
+                {[0, -1, 1].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
+              </select>
+            </div>
+            <span className="text-xs" style={{ color: '#475569' }}>
+              {filteredLeaves.length} / {leaves.length} {ar ? 'موظف' : 'employees'}
+            </span>
+          </div>
+
+          <div className="rounded-2xl overflow-x-auto" style={{ ...cardStyle(dark) }}>
+            <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  <th className="text-start font-semibold px-3 py-2.5" style={{ color: tsColor(dark) }}>{ar ? 'الموظف' : 'Employee'}</th>
+                  {LEAVE_TYPES.map(t => (
+                    <th key={t} className="text-center font-semibold px-3 py-2.5" style={{ color: '#22d3ee' }}>
+                      {ar ? LEAVE_LABEL[t].ar : LEAVE_LABEL[t].en}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredLeaves.map(r => (
+                  <tr key={r.employeeId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td className="px-3 py-2">
+                      <div className="font-medium" style={{ color: tp(dark) }}>{r.name || '—'}</div>
+                      <div className="text-[10px]" style={{ color: '#475569' }}>
+                        {r.employeeNo ? `#${r.employeeNo}` : ''}{r.functionName ? ` · ${r.functionName}` : ''}
+                      </div>
+                    </td>
+                    {LEAVE_TYPES.map(t => {
+                      const b = r.balances.find(x => x.leaveType === t);
+                      const k = `${r.employeeId}|${t}`;
+                      const editVal = entEdits[k] ?? (b?.configured ? String(b.entitlement) : '');
+                      const isEdited = entEdits[k] !== undefined && entEdits[k] !== (b?.configured ? String(b.entitlement) : '');
+                      return (
+                        <td key={t} className="px-3 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <input
+                              value={editVal}
+                              onChange={e => setEntEdits(d => ({ ...d, [k]: e.target.value }))}
+                              placeholder="—" inputMode="decimal"
+                              className="w-14 text-center text-xs rounded-lg px-1.5 py-1 outline-none"
+                              style={{ background: 'rgba(255,255,255,0.05)', border: `1px solid ${isEdited ? '#22d3ee' : 'rgba(255,255,255,0.1)'}`, color: '#e2e8f0' }} />
+                            {isEdited && (
+                              <button onClick={() => saveEntitlement(r.employeeId, t, editVal)} disabled={entSaving === k}
+                                className="p-1 rounded-md hover:bg-white/5" style={{ color: '#34d399' }}>
+                                {entSaving === k ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+                              </button>
+                            )}
+                          </div>
+                          {b?.configured && (
+                            <div className="text-[9px] mt-0.5" style={{ color: '#475569' }}>
+                              {ar ? 'متبقٍ' : 'left'} <b style={{ color: (b.remaining ?? 0) > 0 ? '#34d399' : '#f87171' }}>{b.remaining}</b>
+                              {(b.taken + b.pending) > 0 && <span> · {ar ? 'مأخوذ' : 'used'} {b.taken}{b.pending > 0 ? `+${b.pending}` : ''}</span>}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                {filteredLeaves.length === 0 && (
+                  <tr><td colSpan={LEAVE_TYPES.length + 1} className="text-center py-8" style={{ color: '#475569' }}>
+                    {ar ? 'لا يوجد موظفون' : 'No employees'}
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[10px] mt-2" style={{ color: '#475569' }}>
+            {ar ? 'أدخل أيام الاستحقاق ثم احفظ — يُحسب المتبقّي تلقائياً من الإجازات المعتمدة والمعلّقة.'
+                : 'Enter entitlement days then save — remaining is computed live from approved + pending leave.'}
+          </p>
         </div>
       )}
     </div>

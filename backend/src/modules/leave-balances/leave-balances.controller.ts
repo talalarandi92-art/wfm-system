@@ -18,11 +18,18 @@ export class LeaveBalancesController {
     return id;
   }
 
+  /** Non-supervisors may only query their own balance — prevents reading peers' balances. */
+  private scopeEmployee(user: any, requested: string): string {
+    const perms = user?.permissionCodes ?? user?.permissions ?? [];
+    if (perms.includes('requests.view_team') || perms.includes('requests.view_all')) return requested;
+    return user?.employeeId ?? '00000000-0000-0000-0000-000000000000';
+  }
+
   @Get()
   @RequirePermissions('requests.view_own')
   @ApiOperation({ summary: 'Leave balances (entitlement/taken/pending/remaining) for an employee' })
   list(@CurrentUser() user: any, @Query('employeeId') employeeId: string, @Query('year') year?: string) {
-    return this.svc.listForEmployee(this.tid(user), employeeId, year ? parseInt(year, 10) : undefined);
+    return this.svc.listForEmployee(this.tid(user), this.scopeEmployee(user, employeeId), year ? parseInt(year, 10) : undefined);
   }
 
   @Get('one')
@@ -34,7 +41,14 @@ export class LeaveBalancesController {
     @Query('leaveType') leaveType: string,
     @Query('year') year?: string,
   ) {
-    return this.svc.getBalance(this.tid(user), employeeId, leaveType, year ? parseInt(year, 10) : undefined);
+    return this.svc.getBalance(this.tid(user), this.scopeEmployee(user, employeeId), leaveType, year ? parseInt(year, 10) : undefined);
+  }
+
+  @Get('all')
+  @RequirePermissions('requests.view_team')
+  @ApiOperation({ summary: 'Admin grid: every active employee with their leave balances for a year' })
+  all(@CurrentUser() user: any, @Query('year') year?: string) {
+    return this.svc.listAllEmployees(this.tid(user), year ? parseInt(year, 10) : undefined);
   }
 
   @Post('entitlement')

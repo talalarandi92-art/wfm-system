@@ -48,6 +48,63 @@ export class LeaveBalancesService {
     return Promise.all(BALANCE_LEAVE_TYPES.map(t => this.getBalance(tenantId, employeeId, t, year)));
   }
 
+  /**
+   * Admin grid: every active employee with their balance for each balance-bearing
+   * type in a year. One pass for entitlements + one each for taken/pending, joined
+   * in memory — avoids 162×3×2 round-trips.
+   */
+  async listAllEmployees(tenantId: string, yearIn?: number) {
+    const year = this.year(yearIn);
+    const employees = await this.ds.query(
+      `SELECT e.id, e.employee_no, e.first_name_en, e.last_name_en, f.name AS function_name
+         FROM employees e
+         LEFT JOIN functions f ON f.id = e.function_id
+        WHERE e.tenant_id = $1 AND e.status = 'active'
+        ORDER BY e.first_name_en, e.last_name_en`,
+      [tenantId]);
+
+    const ents = await this.ds.query(
+      `SELECT employee_id, leave_type, entitlement_days
+         FROM leave_balances WHERE tenant_id = $1 AND calendar_year = $2`,
+      [tenantId, year]);
+    const drawn = await this.ds.query(
+      `SELECT r.employee_id, rl.leave_type, r.status,
+              COALESCE(SUM(rl.duration_days),0)::numeric AS days
+         FROM requests r
+         JOIN request_leaves rl ON rl.request_id = r.id
+        WHERE r.tenant_id = $1 AND EXTRACT(YEAR FROM rl.start_date) = $2
+          AND r.status IN ('approved','pending')
+        GROUP BY r.employee_id, rl.leave_type, r.status`,
+      [tenantId, year]);
+
+    const entMap = new Map<string, number>();      // emp|type → entitlement
+    for (const e of ents) entMap.set(`${e.employee_id}|${e.leave_type}`, Number(e.entitlement_days));
+    const takenMap = new Map<string, number>(), pendMap = new Map<string, number>();
+    for (const d of drawn) {
+      const k = `${d.employee_id}|${d.leave_type}`;
+      (d.status === 'approved' ? takenMap : pendMap).set(k, Number(d.days));
+    }
+
+    return employees.map((e: any) => ({
+      employeeId: e.id,
+      employeeNo: e.employee_no,
+      name: `${e.first_name_en ?? ''} ${e.last_name_en ?? ''}`.trim(),
+      functionName: e.function_name,
+      balances: BALANCE_LEAVE_TYPES.map(t => {
+        const k = `${e.id}|${t}`;
+        const entitlement = entMap.get(k);
+        const taken = takenMap.get(k) ?? 0, pending = pendMap.get(k) ?? 0;
+        return {
+          leaveType: t,
+          configured: entitlement !== undefined,
+          entitlement: entitlement ?? 0,
+          taken, pending,
+          remaining: entitlement === undefined ? null : Math.round((entitlement - taken - pending) * 10) / 10,
+        };
+      }),
+    }));
+  }
+
   /** Admin: set/replace the entitlement for an employee/type/year. */
   async setEntitlement(tenantId: string, userId: string | null, body: {
     employeeId: string; leaveType: string; year?: number; days: number; notes?: string;
