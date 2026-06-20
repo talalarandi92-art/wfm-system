@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router-dom';
 import { MessageCircle, BookOpen } from 'lucide-react';
-import { useUiStore } from '@/store/ui.store';
+import HubTabs from '@/components/HubTabs';
 import { useAuthStore } from '@/store/auth.store';
 import ChatPage from '@/pages/Chat';
 import KnowledgeBasePage from '@/pages/KnowledgeBase';
@@ -17,7 +17,6 @@ const TABS: { key: HubTab; icon: typeof MessageCircle; ar: string; en: string; p
  * Active tab lives in ?tab= so the old /knowledge-base route redirects here.
  */
 export default function WorkspaceHub() {
-  const ar = useUiStore(s => s.lang) === 'ar';
   const hasPermission = useAuthStore(s => s.hasPermission);
   const [params, setParams] = useSearchParams();
 
@@ -28,26 +27,7 @@ export default function WorkspaceHub() {
   return (
     <div className="page-enter">
       {visible.length > 1 && (
-        <div className="flex flex-wrap items-center gap-2 mb-5">
-          {visible.map(t => {
-            const Icon = t.icon;
-            const active = tab === t.key;
-            return (
-              <button
-                key={t.key}
-                onClick={() => setParams({ tab: t.key }, { replace: true })}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                  active
-                    ? 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <Icon size={16} />
-                {ar ? t.ar : t.en}
-              </button>
-            );
-          })}
-        </div>
+        <HubTabs tabs={visible} active={tab} onChange={k => setParams({ tab: k }, { replace: true })} />
       )}
 
       {tab === 'chat' && <ChatPage />}

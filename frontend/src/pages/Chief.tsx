@@ -185,7 +185,35 @@ export default function ChiefPage() {
               <div className="flex items-center gap-2 flex-wrap mb-3">
                 <Toggle on={data.autoMode.autoApprove} label={ar ? 'موافقة تلقائية' : 'auto-approve'} onClick={() => saveAuto({ autoApprove: !data.autoMode!.autoApprove })} busy={busy} color="#22c55e" />
                 <Toggle on={data.autoMode.autoReject} label={ar ? 'رفض تلقائي (حساس)' : 'auto-reject (sensitive)'} onClick={() => saveAuto({ autoReject: !data.autoMode!.autoReject })} busy={busy} color="#ef4444" />
-                <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.03)', color: '#64748b' }}>{ar ? 'الأنواع' : 'types'}: {data.autoMode.allowedTypes.join(', ')}</span>
+              </div>
+              {/* Editable allowed request types — click to include/exclude from Auto Mode */}
+              <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                <span className="text-[10px] uppercase tracking-wider" style={{ color: '#64748b' }}>{ar ? 'الأنواع المسموحة' : 'allowed types'}</span>
+                {(() => {
+                  const LABELS: Record<string, { ar: string; en: string }> = {
+                    permission: { ar: 'استئذان', en: 'permission' }, break: { ar: 'بريك', en: 'break' },
+                    overtime: { ar: 'أوفرتايم', en: 'overtime' }, off_swap: { ar: 'تبديل OFF', en: 'off swap' },
+                    shift_swap: { ar: 'تبديل شفت', en: 'shift swap' }, wfh: { ar: 'عمل عن بُعد', en: 'wfh' },
+                  };
+                  const current = data.autoMode!.allowedTypes;
+                  const candidates = Array.from(new Set([...Object.keys(LABELS), ...current]));
+                  return candidates.map(code => {
+                    const on = current.includes(code);
+                    const lbl = LABELS[code] ?? { ar: code, en: code };
+                    return (
+                      <button key={code} disabled={busy}
+                        onClick={() => saveAuto({ allowedTypes: on ? current.filter(c => c !== code) : [...current, code] })}
+                        className="text-[11px] px-2 py-1 rounded-lg transition-all disabled:opacity-50"
+                        style={{
+                          background: on ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.03)',
+                          color: on ? '#a5b4fc' : '#64748b',
+                          border: `1px solid ${on ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                        }}>
+                        {on ? '✓ ' : ''}{ar ? lbl.ar : lbl.en}
+                      </button>
+                    );
+                  });
+                })()}
               </div>
               <div className="flex items-center gap-3 flex-wrap text-[11px] mb-2" style={{ color: '#94a3b8' }}>
                 <span className="flex items-center gap-1"><CheckCircle2 size={12} style={{ color: '#22c55e' }} /> {data.autoMode.approved} {ar ? 'موافقة' : 'approved'}</span>

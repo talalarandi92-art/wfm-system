@@ -592,7 +592,7 @@ export class OutagesController {
     if (require('fs').existsSync(filePath)) require('fs').unlinkSync(filePath);
 
     await this.ds.query(
-      `DELETE FROM outage_attachments WHERE id = $1`, [attachmentId]);
+      `DELETE FROM outage_attachments WHERE id = $1 AND tenant_id = $2`, [attachmentId, actor.tenantId]);
     return { success: true };
   }
 
@@ -689,6 +689,10 @@ export class OutagesController {
 function buildOutageShareHtml(o: any, notes: any[], attachments: any[], baseUrl = ''): string {
   const fmtDt  = (d: string) => d ? new Date(d).toLocaleString('ar-KW', { dateStyle:'medium', timeStyle:'short' }) : '—';
   const fmtDur = (min: number) => !min ? '—' : min < 60 ? `${Math.round(min)}m` : `${Math.floor(min/60)}h ${Math.round(min%60)}m`;
+  // HTML-escape every user-controlled string before interpolating into the report
+  // (prevents stored XSS via outage title/description/notes/attachment names).
+  const esc = (v: any) => String(v ?? '').replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c] as string));
 
   const SEV_AR: Record<string, string>   = { low:'منخفض', medium:'متوسط', high:'عالي', critical:'حرج' };
   const SEV_CLR: Record<string, string>  = { low:'#34d399', medium:'#fbbf24', high:'#fb923c', critical:'#f87171' };
@@ -711,7 +715,7 @@ function buildOutageShareHtml(o: any, notes: any[], attachments: any[], baseUrl 
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>تقرير عطل — ${o.title}</title>
+<title>تقرير عطل — ${esc(o.title)}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
 <style>
@@ -842,12 +846,12 @@ body{font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(-
   </div>
   <div class="cover-title">
     <span class="sev-line">تقرير عطل — ${SEV_AR[sev] ?? sev} / ${ST_AR[st] ?? st}</span>
-    ${o.title}
+    ${esc(o.title)}
   </div>
   <div class="badges">
     <span class="badge badge-sev">${SEV_AR[sev] ?? sev}</span>
     <span class="badge badge-st">${ST_AR[st] ?? st}</span>
-    ${o.type_name_ar || o.type_name ? `<span class="badge badge-type">${o.type_name_ar ?? o.type_name}</span>` : ''}
+    ${o.type_name_ar || o.type_name ? `<span class="badge badge-type">${esc(o.type_name_ar ?? o.type_name)}</span>` : ''}
     ${isBreached ? `<span class="badge badge-breach">SLA تجاوز</span>` : ''}
   </div>
   <div class="kpis">
@@ -881,8 +885,8 @@ body{font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(-
     <div class="section-hd"><span class="dot"></span>بيانات الحادثة</div>
     <div class="info-grid">
       ${[
-        { l:'مُبلَّغ بواسطة', v: (o.reported_by_name ?? '').trim() || '—' },
-        { l:'المعالج (RTA)',   v: (o.handler_name ?? '').trim() || 'غير محدد' },
+        { l:'مُبلَّغ بواسطة', v: esc((o.reported_by_name ?? '').trim()) || '—' },
+        { l:'المعالج (RTA)',   v: esc((o.handler_name ?? '').trim()) || 'غير محدد' },
         { l:'وقت البداية',    v: fmtDt(o.started_at) },
         { l:'وقت الانتهاء',   v: o.ended_at ? fmtDt(o.ended_at) : '—' },
         { l:'المدة الفعلية',  v: fmtDur(dur ?? 0) },
@@ -894,17 +898,17 @@ body{font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(-
   ${o.description || o.impact_description || o.root_cause || o.resolution ? `
   <div class="section">
     <div class="section-hd"><span class="dot"></span>تفاصيل المشكلة والحل</div>
-    ${o.description        ? `<div class="text-block"><div class="text-block-label">وصف المشكلة</div><p>${o.description}</p></div>` : ''}
-    ${o.impact_description ? `<div class="text-block orange"><div class="text-block-label">تأثير العطل على العمليات</div><p>${o.impact_description}</p></div>` : ''}
-    ${o.root_cause         ? `<div class="text-block yellow"><div class="text-block-label">السبب الجذري</div><p>${o.root_cause}</p></div>` : ''}
-    ${o.resolution         ? `<div class="text-block green"><div class="text-block-label">الحل المتخذ</div><p>${o.resolution}</p></div>` : ''}
+    ${o.description        ? `<div class="text-block"><div class="text-block-label">وصف المشكلة</div><p>${esc(o.description)}</p></div>` : ''}
+    ${o.impact_description ? `<div class="text-block orange"><div class="text-block-label">تأثير العطل على العمليات</div><p>${esc(o.impact_description)}</p></div>` : ''}
+    ${o.root_cause         ? `<div class="text-block yellow"><div class="text-block-label">السبب الجذري</div><p>${esc(o.root_cause)}</p></div>` : ''}
+    ${o.resolution         ? `<div class="text-block green"><div class="text-block-label">الحل المتخذ</div><p>${esc(o.resolution)}</p></div>` : ''}
   </div>` : ''}
 
   ${imgs.length > 0 ? `
   <div class="section">
     <div class="section-hd"><span class="dot"></span>صور الحادثة (${imgs.length})</div>
     <div class="img-grid">
-      ${imgs.map(a => `<div class="img-item"><img src="${baseUrl}/uploads/outages/${a.stored_name}" alt="${a.original_name}" loading="lazy"></div>`).join('')}
+      ${imgs.map(a => `<div class="img-item"><img src="${baseUrl}/uploads/outages/${encodeURIComponent(a.stored_name)}" alt="${esc(a.original_name)}" loading="lazy"></div>`).join('')}
     </div>
   </div>` : ''}
 
@@ -912,9 +916,9 @@ body{font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(-
   <div class="section">
     <div class="section-hd"><span class="dot"></span>مقاطع الفيديو (${vids.length})</div>
     ${vids.map(a => `
-    <a class="video-item" href="${baseUrl}/uploads/outages/${a.stored_name}" target="_blank">
+    <a class="video-item" href="${baseUrl}/uploads/outages/${encodeURIComponent(a.stored_name)}" target="_blank">
       <span class="media-icon-v">&#9654;</span>
-      <div><div class="media-name">${a.original_name}</div><div class="media-size">${Math.round((a.file_size ?? 0)/1024)} KB</div></div>
+      <div><div class="media-name">${esc(a.original_name)}</div><div class="media-size">${Math.round((a.file_size ?? 0)/1024)} KB</div></div>
     </a>`).join('')}
   </div>` : ''}
 
@@ -922,9 +926,9 @@ body{font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(-
   <div class="section">
     <div class="section-hd"><span class="dot"></span>مرفقات أخرى (${docs.length})</div>
     ${docs.map(a => `
-    <a class="doc-item" href="${baseUrl}/uploads/outages/${a.stored_name}" target="_blank">
+    <a class="doc-item" href="${baseUrl}/uploads/outages/${encodeURIComponent(a.stored_name)}" target="_blank">
       <span class="media-icon-d">&#128196;</span>
-      <div><div class="media-name">${a.original_name}</div><div class="media-size">${Math.round((a.file_size ?? 0)/1024)} KB</div></div>
+      <div><div class="media-name">${esc(a.original_name)}</div><div class="media-size">${Math.round((a.file_size ?? 0)/1024)} KB</div></div>
     </a>`).join('')}
   </div>` : ''}
 
@@ -935,12 +939,12 @@ body{font-family:'Tajawal',system-ui,sans-serif;background:var(--bg);color:var(-
     <div class="note ${n.is_internal ? 'note-internal' : 'note-public'}">
       <div class="note-header">
         <div style="display:flex;align-items:center;gap:8px">
-          <span class="note-author">${n.author_name ?? '—'}</span>
+          <span class="note-author">${esc(n.author_name ?? '—')}</span>
           <span class="note-badge">${n.is_internal ? 'داخلي' : 'عام'}</span>
         </div>
         <span class="note-time">${fmtDt(n.created_at)}</span>
       </div>
-      <div class="note-body">${n.content}</div>
+      <div class="note-body">${esc(n.content)}</div>
     </div>`).join('')}
   </div>` : ''}
 

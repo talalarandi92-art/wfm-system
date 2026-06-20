@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router-dom';
 import { Activity, BarChart3, FileText, UserMinus } from 'lucide-react';
-import { useUiStore } from '@/store/ui.store';
+import HubTabs from '@/components/HubTabs';
 import OperationsAnalyticsPage from '@/pages/OperationsAnalytics';
 import WorkforceAnalyticsPage from '@/pages/WorkforceAnalytics';
 import ReportsPage from '@/pages/Reports';
@@ -22,34 +22,13 @@ const TABS: { key: HubTab; icon: typeof Activity; ar: string; en: string }[] = [
  * redirect here) land on the right tab.
  */
 export default function AnalyticsHub() {
-  const lang = useUiStore(s => s.lang);
-  const ar = lang === 'ar';
   const [params, setParams] = useSearchParams();
   const raw = params.get('tab');
   const tab: HubTab = raw === 'ops' || raw === 'reports' || raw === 'attrition' ? raw : 'workforce';
 
   return (
     <div className="page-enter">
-      <div className="flex flex-wrap items-center gap-2 mb-5">
-        {TABS.map(t => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          return (
-            <button
-              key={t.key}
-              onClick={() => setParams({ tab: t.key }, { replace: true })}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                active
-                  ? 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/30'
-                  : 'text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-            >
-              <Icon size={16} />
-              {ar ? t.ar : t.en}
-            </button>
-          );
-        })}
-      </div>
+      <HubTabs tabs={TABS} active={tab} onChange={k => setParams({ tab: k }, { replace: true })} />
 
       {tab === 'workforce' && <WorkforceAnalyticsPage />}
       {tab === 'ops'       && <OperationsAnalyticsPage />}

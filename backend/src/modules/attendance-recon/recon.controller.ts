@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Put, Query, Req, Res, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Put, Query, Req, Res, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import * as fs from 'fs';
@@ -133,7 +133,14 @@ export class ReconController {
 
   @Post('upload')
   @RequirePermissions('attendance.view_team')
-  @UseInterceptors(FilesInterceptor('files', 12))
+  @UseInterceptors(FilesInterceptor('files', 12, {
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB per file
+    fileFilter: (_req, file, cb) => {
+      // Roster sources are spreadsheets/CSV only — reject anything else.
+      if (/\.(xlsx|xls|xlsm|csv)$/i.test(file.originalname)) cb(null, true);
+      else cb(new BadRequestException(`File type not allowed: ${file.originalname}`), false);
+    },
+  }))
   @ApiOperation({ summary: 'Upload source files (Odoo/Ameyo/Sprinklr/schedule) → saved server-side + roster re-ingested' })
   async upload(@Req() req: any, @UploadedFiles() files: Array<{ originalname: string; buffer: Buffer }>) {
     const saved: { name: string; type: string }[] = [];

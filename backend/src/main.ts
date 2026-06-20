@@ -20,9 +20,29 @@ async function bootstrap() {
   const port = config.get<number>('APP_PORT', 3000);
   const corsOrigins = config.get<string>('CORS_ORIGINS', 'http://localhost:5173');
 
-  // Security headers
+  // Security headers — helmet defaults (nosniff, frameguard=SAMEORIGIN, hidePoweredBy …)
+  // plus an explicit referrer policy and HSTS in production. CSP stays off because the
+  // SPA + Swagger UI use inline styles/scripts; enable a tuned CSP before public exposure.
+  const isProd = config.get('NODE_ENV') === 'production';
   app.use(helmet({
-    contentSecurityPolicy: false, // Disable for Swagger UI in dev
+    // In prod the only HTML this server emits is the outage share report
+    // (same-origin styles/images + Google Fonts, no inline scripts), so a tuned
+    // CSP is safe. In dev it stays off because Swagger UI needs inline/eval.
+    contentSecurityPolicy: isProd ? {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc:  ["'self'"],
+        styleSrc:   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc:    ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc:     ["'self'", 'data:'],
+        objectSrc:  ["'none'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    } : false,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    hsts: isProd ? { maxAge: 15552000, includeSubDomains: true } : false,
+    crossOriginResourcePolicy: { policy: 'same-site' },
   }));
 
   // CORS — whitelist only
@@ -72,7 +92,16 @@ async function bootstrap() {
   // Serve uploaded files (outage attachments, etc.)
   const uploadsDir = path.join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-  app.use('/uploads', express.static(uploadsDir));
+  app.use('/uploads', express.static(uploadsDir, {
+    // Never let the browser MIME-sniff an uploaded file into something executable,
+    // and force download semantics for anything that isn't an inline-safe media type.
+    setHeaders: (res, filePath) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (!/\.(jpg|jpeg|png|gif|webp|svg|mp4|mov|webm|pdf)$/i.test(filePath)) {
+        res.setHeader('Content-Disposition', 'attachment');
+      }
+    },
+  }));
 
   // Chat WebSocket — Redis adapter (falls back to in-memory if Redis is down)
   const redisIoAdapter = new RedisIoAdapter(app);

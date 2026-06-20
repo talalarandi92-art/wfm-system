@@ -175,8 +175,8 @@ export class AnalyticsService {
         scheduledDays: n(row.scheduled),
         plannedPct:   Math.round(1000 * planned / scheduled) / 10,
         unplannedPct: Math.round(1000 * unplanned / scheduled) / 10,
-        latePct:      Math.round(1000 * lateDays / scheduled) / 10,
-        totalPct:     Math.round(1000 * (planned + unplanned + lateDays) / scheduled) / 10,
+        latePct:      Math.min(100, Math.round(1000 * lateDays / scheduled) / 10),
+        totalPct:     Math.min(100, Math.round(1000 * (planned + unplanned + lateDays) / scheduled) / 10),
         breakdown: { leave: n(row.leave), holiday: n(row.holiday), absent: n(row.absent), sick: n(row.sick), lateMinutes: n(row.late_minutes) },
       };
     };

@@ -13,6 +13,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { apiClient } from '@/api/client';
 import type { LinkedEmployee } from '@/types/auth.types';
 import { useInjectDsStyles } from '@/components/ds';
+import EmptyState from '@/components/EmptyState';
 import { fmtDate, fmtDateShort, fmtTime, fmtDuration, fixEncoding, fmtLocalDate } from '@/utils/format';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -814,6 +815,8 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
   const [success, setSuccess] = useState('');
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [weeklyUsage, setWeeklyUsage] = useState<{ used: number; remaining: number; max: number; weekStart: string; weekEnd: string } | null>(null);
+  const [hcImpact, setHcImpact] = useState<any>(null);
+  const [hcLoading, setHcLoading] = useState(false);
   const [attachFile, setAttachFile] = useState<File | null>(null);
 
   // Upload an attachment (schedule/appointment image) to a just-created request.
@@ -847,6 +850,25 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
     }).then(r => setWeeklyUsage(r.data))
       .catch(() => setWeeklyUsage(null));
   }, [selectedType, selectedEmp, form.permissionDate]);
+
+  // Live HC-impact preview before submitting a permission (coverage before/after).
+  useEffect(() => {
+    if (selectedType !== 'permission' || !selectedEmp || !form.permissionDate || !form.startTime || !form.endTime) {
+      setHcImpact(null); return;
+    }
+    const sM = form.startTime.split(':').map(Number);
+    const eM = form.endTime.split(':').map(Number);
+    if ((eM[0] * 60 + eM[1]) - (sM[0] * 60 + sM[1]) <= 0) { setHcImpact(null); return; }
+    setHcLoading(true);
+    const timer = setTimeout(() => {
+      apiClient.post('/permission-requests/calculate-impact', {
+        date: form.permissionDate, startTime: form.startTime, endTime: form.endTime,
+        functionId: selectedEmp.function_id || undefined,
+      }).then(r => setHcImpact(r.data)).catch(() => setHcImpact(null))
+        .finally(() => setHcLoading(false));
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [selectedType, selectedEmp, form.permissionDate, form.startTime, form.endTime]);
 
   // When requester + date changes for swaps, fetch candidates
   useEffect(() => {
@@ -1349,6 +1371,64 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                     {tooShort && <span> — {ar ? 'الحد الأدنى 30 دقيقة' : 'min 30 min'}</span>}
                     {tooLong  && <span> — {ar ? 'الحد الأقصى 3 ساعات' : 'max 3 hrs'}</span>}
                     {!tooShort && !tooLong && <span className="text-emerald-400"> ✓</span>}
+                  </div>
+                );
+              })()}
+
+              {/* Live HC-impact preview — coverage before/after this permission */}
+              {(hcLoading || hcImpact) && (() => {
+                if (hcLoading && !hcImpact) return (
+                  <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
+                    style={{ background: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', color: '#94a3b8' }}>
+                    <Timer size={12} className="animate-pulse" />
+                    <span>{ar ? 'يحسب أثر التغطية…' : 'Calculating coverage impact…'}</span>
+                  </div>
+                );
+                const RC: Record<string, { c: string; ar: string; en: string }> = {
+                  ok:       { c: '#10b981', ar: 'التغطية آمنة', en: 'Coverage safe' },
+                  warning:  { c: '#f59e0b', ar: 'تغطية حدّية', en: 'Tight coverage' },
+                  critical: { c: '#ef4444', ar: 'نقص تغطية', en: 'Coverage gap' },
+                };
+                const r = RC[hcImpact.worstRisk] ?? RC.ok;
+                const fns = (hcImpact.functions ?? []) as any[];
+                return (
+                  <div className="rounded-xl p-3 space-y-2"
+                    style={{ background: `${r.c}0d`, border: `1px solid ${r.c}40` }}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold" style={{ color: r.c }}>
+                        {ar ? 'أثر الهيدكاونت' : 'HC impact'} — {ar ? r.ar : r.en}
+                      </span>
+                      <span className="text-[10px]" style={{ color: '#94a3b8' }}>
+                        {ar ? 'قبل الموافقة' : 'pre-approval'}
+                      </span>
+                    </div>
+                    {fns.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {fns.map(fn => {
+                          const fc = RC[fn.overallRisk] ?? RC.ok;
+                          return (
+                            <div key={fn.functionId} className="flex items-center justify-between text-xs">
+                              <span className="text-slate-600 dark:text-slate-300">{fn.functionName}</span>
+                              <span className="flex items-center gap-2">
+                                <span className="tnum" style={{ color: '#94a3b8' }}>
+                                  {ar ? 'مجدول' : 'sched'} {fn.peakScheduledHc}
+                                </span>
+                                <span className="tnum font-semibold" style={{ color: fc.c }}>
+                                  {ar ? 'أدنى متاح' : 'min avail'} {fn.minAvailableHc}
+                                </span>
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-xs" style={{ color: '#94a3b8' }}>
+                        {ar ? 'لا يوجد موظفون مجدولون متأثرون' : 'No scheduled staff affected'}
+                      </div>
+                    )}
+                    {(hcImpact.warnings ?? []).map((w: string, i: number) => (
+                      <div key={i} className="text-[11px]" style={{ color: '#fbbf24' }}>{w}</div>
+                    ))}
                   </div>
                 );
               })()}
@@ -1945,10 +2025,10 @@ export default function RequestsPage() {
                   <Loader2 size={18} className="animate-spin" /> {ar ? 'جاري التحميل...' : 'Loading...'}
                 </div>
               ) : requests.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-slate-500 gap-2">
-                  <FileText size={32} className="opacity-30" />
-                  <div className="text-sm">{ar ? 'لا توجد طلبات' : 'No requests found'}</div>
-                </div>
+                <EmptyState icon={FileText}
+                  titleAr="لا توجد طلبات" titleEn="No requests found"
+                  subAr="ستظهر الطلبات هنا فور إنشائها أو تقديمها للموافقة."
+                  subEn="Requests will appear here once created or submitted for approval." />
               ) : (
                 <div className="space-y-2">
                   {requests.map(req => (

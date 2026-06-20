@@ -46,8 +46,8 @@ export class EmployeesController {
     @Query('limit')          limitQ?: string,
     @Query('offset')         offsetQ?: string,
   ) {
-    const limit  = Math.min(parseInt(limitQ  ?? '100', 10), 500);
-    const offset = parseInt(offsetQ ?? '0', 10);
+    const limit  = Math.min(Math.max(parseInt(limitQ  ?? '100', 10) || 100, 1), 500);
+    const offset = Math.max(parseInt(offsetQ ?? '0', 10) || 0, 0);
 
     const params: any[] = [user.tenantId];
     const conditions: string[] = ['e.tenant_id = $1'];

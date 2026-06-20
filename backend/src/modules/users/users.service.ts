@@ -1,5 +1,5 @@
 import {
-  Injectable, NotFoundException, ConflictException,
+  Injectable, NotFoundException, ConflictException, BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -41,7 +41,16 @@ export class UsersService {
     return { data, total, page, limit };
   }
 
+  /** Enforce a sane strength policy on user-chosen passwords. */
+  private assertStrongPassword(pw: string): void {
+    if (!pw || pw.length < 10)
+      throw new BadRequestException('Password must be at least 10 characters.');
+    if (!/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw))
+      throw new BadRequestException('Password must include lowercase, uppercase, and a digit.');
+  }
+
   async setPassword(userId: string, plainPassword: string): Promise<void> {
+    this.assertStrongPassword(plainPassword);
     const rounds = this.config.get<number>('BCRYPT_ROUNDS', 12);
     const hash = await bcrypt.hash(plainPassword, rounds);
     await this.repo.update(userId, {
