@@ -103,3 +103,6 @@ backend/server.out
 backend/server.err
 frontend/frontend.out
 frontend/frontend.err
+
+# Stray skill-upload artifact
+nice-upload-root.zip
