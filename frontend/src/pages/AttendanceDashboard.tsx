@@ -168,7 +168,7 @@ export default function AttendanceDashboard() {
       setByFunc(funcRes.data);
       setMarkers(markRes.data);
     } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'Failed to load data');
+      setError(e?.response?.data?.message ?? (ar ? 'فشل تحميل البيانات' : 'Failed to load data'));
     } finally {
       setLoading(false);
     }
@@ -294,7 +294,7 @@ export default function AttendanceDashboard() {
           { key: 'overview',  en: 'By Function',   ar: 'حسب القسم'      },
           { key: 'late',      en: 'Top Late',       ar: 'الأكثر تأخراً'  },
           { key: 'wfh',       en: 'WFH vs Office',  ar: 'بيت / مكتب'   },
-          { key: 'missing',   en: 'Missing Punch',  ar: 'Missing Punch' },
+          { key: 'missing',   en: 'Missing Punch',  ar: 'بصمة ناقصة' },
         ].map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
             style={{
@@ -540,7 +540,7 @@ function MissingTable({
 
   if (!rows.length) return (
     <p style={{ textAlign: 'center', padding: 32, color: tsFn(dark), fontSize: 13 }}>
-      {ar ? 'لا توجد سجلات missing punch' : 'No missing punch records'}
+      {ar ? 'لا توجد سجلات بصمة ناقصة' : 'No missing punch records'}
     </p>
   );
 

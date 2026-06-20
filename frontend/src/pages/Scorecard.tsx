@@ -257,9 +257,9 @@ function EmployeeRow({ e, ar, dark, trendDelta }: { e: Entry; ar: boolean; dark:
                 {e.teamLeader && (
                   <span>TL: <span style={{ color: dark ? '#94a3b8' : '#64748b' }}>{e.teamLeader}</span></span>
                 )}
-                <span>Week: <span style={{ color: dark ? '#94a3b8' : '#64748b' }}>{e.weekLabel}</span></span>
+                <span>{ar ? 'الأسبوع' : 'Week'}: <span style={{ color: dark ? '#94a3b8' : '#64748b' }}>{e.weekLabel}</span></span>
                 {e.responseRate !== null && (
-                  <span>Response Rate: <span style={{ color: '#818cf8' }}>{pct(e.responseRate)}</span></span>
+                  <span>{ar ? 'معدل الرد' : 'Response Rate'}: <span style={{ color: '#818cf8' }}>{pct(e.responseRate)}</span></span>
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -671,8 +671,8 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
             style={{ width: `${passingPct}%`, background: `linear-gradient(90deg, ${passColor}99, ${passColor})` }} />
         </div>
         <div className="flex justify-between mt-1.5 text-[10px]" style={{ color: textSec }}>
-          <span>{totals.passing} passing</span>
-          <span>{totals.failing} need coaching</span>
+          <span>{totals.passing} {ar ? 'ناجح' : 'passing'}</span>
+          <span>{totals.failing} {ar ? 'يحتاج تدريب' : 'need coaching'}</span>
         </div>
       </div>
 
@@ -692,7 +692,7 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold" style={{ color: fc }}>{fn.functionName}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: `${fc}15`, color: fc }}>
-                      {fn.empCount} emp
+                      {fn.empCount} {ar ? 'موظف' : 'emp'}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
@@ -711,7 +711,7 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
                   </div>
                   <div>
                     <div className="flex justify-between text-[9px] mb-1" style={{ color: textSec }}>
-                      <span>Pass rate</span>
+                      <span>{ar ? 'نسبة النجاح' : 'Pass rate'}</span>
                       <span style={{ color: fnPassPct >= 70 ? '#22c55e' : '#f59e0b' }}>{fnPassPct}%</span>
                     </div>
                     <div className="h-1.5 rounded-full overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
@@ -839,7 +839,7 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
 }
 
 /* ─── Upload zone ────────────────────────────────────────────────────────── */
-function UploadZone({ onPreview, dark }: { onPreview: (file: File) => void; dark: boolean }) {
+function UploadZone({ onPreview, dark, ar }: { onPreview: (file: File) => void; dark: boolean; ar: boolean }) {
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   return (
@@ -863,10 +863,10 @@ function UploadZone({ onPreview, dark }: { onPreview: (file: File) => void; dark
       </div>
       <div className="text-center">
         <div className="text-sm font-semibold" style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>
-          Drop Scorecard Excel here
+          {ar ? 'اسحب وأفلت ملف السكوركارد هنا' : 'Drop Scorecard Excel here'}
         </div>
         <div className="text-xs mt-1" style={{ color: dark ? '#475569' : '#94a3b8' }}>
-          Supports: Feb SC 26, Feb 26, Results · .xlsx / .xls
+          {ar ? 'يدعم: Feb SC 26 و Feb 26 و Results · ‎.xlsx / .xls' : 'Supports: Feb SC 26, Feb 26, Results · .xlsx / .xls'}
         </div>
       </div>
     </div>
@@ -1136,7 +1136,7 @@ export default function ScorecardPage() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setPreview(data); setTab('upload');
-    } catch (err: any) { alert(err?.response?.data?.message ?? 'Parse failed'); }
+    } catch (err: any) { alert(err?.response?.data?.message ?? (ar ? 'فشل التحليل' : 'Parse failed')); }
     setPreviewLoading(false);
   };
 
@@ -1151,7 +1151,7 @@ export default function ScorecardPage() {
       setCommitDone(true); setPreview(null); setPreviewFile(null);
       await loadBatches();
       setTimeout(() => { setCommitDone(false); setTab('batches'); }, 2000);
-    } catch (err: any) { alert(err?.response?.data?.message ?? 'Commit failed'); }
+    } catch (err: any) { alert(err?.response?.data?.message ?? (ar ? 'فشل الحفظ' : 'Commit failed')); }
     setCommitting(false);
   };
 
@@ -1168,7 +1168,7 @@ export default function ScorecardPage() {
   };
 
   const deleteBatch = async (b: Batch) => {
-    if (!confirm(`Delete ${b.periodName} scorecard?`)) return;
+    if (!confirm(ar ? `حذف سكوركارد ${b.periodName}؟` : `Delete ${b.periodName} scorecard?`)) return;
     await apiClient.delete(`/scorecard/batches/${b.id}`);
     loadBatches();
     if (selectedBatch?.id === b.id) { setSelectedBatch(null); setEntries([]); setTab('batches'); }
@@ -1194,14 +1194,14 @@ export default function ScorecardPage() {
         `/api/v1/scorecard/batches/${batch.id}/export?week=${encodeURIComponent(week)}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      if (!resp.ok) { alert('Export failed'); return; }
+      if (!resp.ok) { alert(ar ? 'فشل التصدير' : 'Export failed'); return; }
       const blob = await resp.blob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href = url; a.download = `scorecard_${batch.periodName}_${week}.xlsx`;
       document.body.appendChild(a); a.click();
       document.body.removeChild(a); URL.revokeObjectURL(url);
-    } catch { alert('Export failed'); }
+    } catch { alert(ar ? 'فشل التصدير' : 'Export failed'); }
   };
 
   // KPI Source state
@@ -1233,7 +1233,7 @@ export default function ScorecardPage() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setKpiPreview(data);
-    } catch (err: any) { alert(err?.response?.data?.message ?? 'Parse failed'); }
+    } catch (err: any) { alert(err?.response?.data?.message ?? (ar ? 'فشل التحليل' : 'Parse failed')); }
     setKpiPreviewLoading(false);
   };
 
@@ -1248,7 +1248,7 @@ export default function ScorecardPage() {
       setKpiDone(true); setKpiPreview(null); setKpiFile(null);
       await loadKpiBatches();
       setTimeout(() => setKpiDone(false), 3000);
-    } catch (err: any) { alert(err?.response?.data?.message ?? 'Commit failed'); }
+    } catch (err: any) { alert(err?.response?.data?.message ?? (ar ? 'فشل الحفظ' : 'Commit failed')); }
     setKpiCommitting(false);
   };
 
@@ -1460,7 +1460,7 @@ export default function ScorecardPage() {
                   </div>
                 ))}
               </div>
-              {canImport && <div className="mt-6"><UploadZone onPreview={handlePreview} dark={dark} /></div>}
+              {canImport && <div className="mt-6"><UploadZone onPreview={handlePreview} dark={dark} ar={ar} /></div>}
             </>
           )}
         </div>
@@ -1486,7 +1486,7 @@ export default function ScorecardPage() {
                 <div>
                   <h2 className="text-lg font-bold" style={{ color: textPri }}>{preview.periodName}</h2>
                   <p className="text-xs mt-1" style={{ color: textSec }}>
-                    {preview.totalEmployees} employees · {preview.totalEntries} rows
+                    {preview.totalEmployees} {ar ? 'موظف' : 'employees'} · {preview.totalEntries} {ar ? 'صف' : 'rows'}
                   </p>
                 </div>
                 <button onClick={() => { setPreview(null); setPreviewFile(null); }}
@@ -1545,14 +1545,14 @@ export default function ScorecardPage() {
             </div>
           ) : (
             <>
-              <UploadZone onPreview={handlePreview} dark={dark} />
+              <UploadZone onPreview={handlePreview} dark={dark} ar={ar} />
               <div className="mt-5 rounded-2xl p-4 space-y-2"
                 style={{ background: surface, border: `1px solid ${border}` }}>
-                <div className="text-xs font-semibold" style={{ color: textSec }}>Supported sheet formats</div>
+                <div className="text-xs font-semibold" style={{ color: textSec }}>{ar ? 'صيغ الأوراق المدعومة' : 'Supported sheet formats'}</div>
                 {[
-                  ['Feb SC 26', 'Main sheet (headers at row 13)'],
-                  ['Feb 26 / Results', 'Simplified view (headers at row 1)'],
-                  ['Any month name', 'Auto-detected period'],
+                  ['Feb SC 26', ar ? 'الورقة الرئيسية (العناوين في الصف 13)' : 'Main sheet (headers at row 13)'],
+                  ['Feb 26 / Results', ar ? 'عرض مبسّط (العناوين في الصف 1)' : 'Simplified view (headers at row 1)'],
+                  ['Any month name', ar ? 'يُكتشف الشهر تلقائياً' : 'Auto-detected period'],
                 ].map(([n, d]) => (
                   <div key={n} className="flex items-start gap-2">
                     <span className="text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 mt-0.5"
@@ -1607,8 +1607,8 @@ export default function ScorecardPage() {
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-3 text-xs" style={{ color: textSec }}>
-                        <span>{kpiPreview.totalRows} rows</span>
-                        <span>{kpiPreview.totalAgents} agents</span>
+                        <span>{kpiPreview.totalRows} {ar ? 'صف' : 'rows'}</span>
+                        <span>{kpiPreview.totalAgents} {ar ? 'موظف' : 'agents'}</span>
                         <span className="px-2 py-0.5 rounded-full"
                           style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24' }}>
                           {kpiPreview.channelType}
@@ -1627,7 +1627,7 @@ export default function ScorecardPage() {
                         style={{ border: `1px solid ${border}` }}>
                         <div className="grid grid-cols-4 px-3 py-1.5 text-[9px] uppercase tracking-wide font-semibold"
                           style={{ color: textSec, borderBottom: `1px solid ${border}` }}>
-                          <span>Agent</span><span>Week</span><span>Contacts</span><span>Avg AHT</span>
+                          <span>{ar ? 'الموظف' : 'Agent'}</span><span>{ar ? 'الأسبوع' : 'Week'}</span><span>{ar ? 'التواصلات' : 'Contacts'}</span><span>{ar ? 'متوسط AHT' : 'Avg AHT'}</span>
                         </div>
                         {kpiPreview.sampleRows.slice(0, 6).map((r: any, i: number) => (
                           <div key={i} className="grid grid-cols-4 px-3 py-2"
@@ -1679,7 +1679,7 @@ export default function ScorecardPage() {
                         {ar ? 'اسحب وأفلت ملف الأداء' : 'Drop agent performance file here'}
                       </div>
                       <div className="text-xs mt-1" style={{ color: textSec }}>
-                        .xlsx / .xls — Auto-detects: date, agent, AHT, response time
+                        {ar ? '‎.xlsx / .xls — يكتشف تلقائياً: التاريخ، الموظف، AHT، وقت الرد' : '.xlsx / .xls — Auto-detects: date, agent, AHT, response time'}
                       </div>
                     </div>
                   </div>
@@ -1729,7 +1729,7 @@ export default function ScorecardPage() {
                         </button>
                         <button
                           onClick={async () => {
-                            if (!confirm(`Delete ${b.period_name}?`)) return;
+                            if (!confirm(ar ? `حذف ${b.period_name}؟` : `Delete ${b.period_name}?`)) return;
                             await apiClient.delete(`/kpi-source/batches/${b.id}`);
                             loadKpiBatches();
                             if (kpiViewBatch?.id === b.id) { setKpiViewBatch(null); setKpiSummaries([]); }
@@ -1765,13 +1765,13 @@ export default function ScorecardPage() {
                   </div>
 
                   {kpiSummaries.length === 0 ? (
-                    <div className="text-center py-8 text-sm" style={{ color: textMuted }}>No data</div>
+                    <div className="text-center py-8 text-sm" style={{ color: textMuted }}>{ar ? 'لا توجد بيانات' : 'No data'}</div>
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead>
                           <tr style={{ borderBottom: `1px solid ${border}` }}>
-                            {['Agent','Function','Days','Contacts','Login (h)','Avg AHT','Avg RT'].map(h => (
+                            {[ar ? 'الموظف' : 'Agent', ar ? 'القسم' : 'Function', ar ? 'أيام' : 'Days', ar ? 'تواصلات' : 'Contacts', ar ? 'تسجيل (س)' : 'Login (h)', ar ? 'متوسط AHT' : 'Avg AHT', ar ? 'متوسط RT' : 'Avg RT'].map(h => (
                               <th key={h} className="px-2 py-2 text-start font-semibold" style={{ color: textSec }}>{h}</th>
                             ))}
                           </tr>

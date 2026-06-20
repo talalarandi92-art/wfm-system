@@ -139,12 +139,13 @@ interface SaveResult {
 }
 
 // ─── Shift Cell ───────────────────────────────────────────────────────────────
-function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSelected }: {
+function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSelected, ar }: {
   day: DayEntry | undefined;
   date: string;
   emp: Employee;
   colWidth: number;
   isSelected?: boolean;
+  ar: boolean;
   onCellClick: (emp: Employee, date: string, day: DayEntry | undefined) => void;
   onHistoryClick?: (emp: Employee, date: string) => void;
 }) {
@@ -209,10 +210,10 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
 
         {/* Indicators */}
         {day.lateMinutes > 0 && (
-          <span className="absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-rose-500" title={`Late ${day.lateMinutes}m`} />
+          <span className="absolute top-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-rose-500" title={`${ar ? 'تأخير' : 'Late'} ${day.lateMinutes}m`} />
         )}
         {day.otMinutes > 0 && (
-          <span className="absolute bottom-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" title={`OT ${day.otMinutes}m`} />
+          <span className="absolute bottom-0.5 end-0.5 w-1.5 h-1.5 rounded-full bg-amber-400" title={`${ar ? 'أوفرتايم' : 'OT'} ${day.otMinutes}m`} />
         )}
         {day.isWfh && !isOff && (
           <span className="absolute top-0.5 start-0.5 text-[7px] leading-none">🏠</span>
@@ -222,7 +223,7 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
           <span
             className="absolute bottom-0.5 start-0.5 w-2 h-2 rounded-full bg-blue-400 cursor-pointer
                        hover:scale-150 transition-transform duration-150 z-10"
-            title={`Edited ${day.editCount}x — click for history`}
+            title={ar ? `عُدِّل ${day.editCount} مرة — اضغط لعرض السجل` : `Edited ${day.editCount}x — click for history`}
             onClick={e => {
               e.stopPropagation();
               onHistoryClick?.(emp, date);
@@ -2033,7 +2034,7 @@ export default function SchedulePage() {
                                   <p className="text-[9px] text-slate-500 truncate">
                                     #{emp.employeeNo}
                                     {emp.employmentType === 'intern' && (
-                                      <span className="ms-1 text-amber-400">intern</span>
+                                      <span className="ms-1 text-amber-400">{ar ? 'متدرب' : 'intern'}</span>
                                     )}
                                   </p>
                                 </div>
@@ -2047,6 +2048,7 @@ export default function SchedulePage() {
                                 emp={emp}
                                 day={emp.days[d]}
                                 colWidth={colWidth}
+                                ar={ar}
                                 isSelected={selectedCell?.empId === emp.employeeId && selectedCell?.date === d}
                               onCellClick={(e, date, day) => {
                                 if (weekStatus?.status === 'locked') return;

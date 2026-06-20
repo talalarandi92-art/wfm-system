@@ -255,7 +255,7 @@ export default function OutagesPage() {
       await apiClient.post(`/outages/${detail.id}/attachments`, fd);
       await refreshDetail();
     } catch (err: any) {
-      alert(err?.response?.data?.message ?? 'Upload failed');
+      alert(err?.response?.data?.message ?? (ar ? 'فشل الرفع' : 'Upload failed'));
     }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = '';

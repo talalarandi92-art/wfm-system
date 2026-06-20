@@ -127,7 +127,7 @@ export default function EmployeesPage() {
       await load(page);
       showToast(ar ? 'تم الحفظ' : 'Saved', true);
     } catch (e: any) {
-      showToast(e?.response?.data?.message ?? 'Error', false);
+      showToast(e?.response?.data?.message ?? (ar ? 'خطأ' : 'Error'), false);
     }
     setSaving(false);
     setEditing(null);

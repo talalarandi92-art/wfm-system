@@ -205,11 +205,11 @@ export default function BreaksPage() {
         setMyBreaks(data);
       }
     } catch {
-      setError('Failed to load data');
+      setError(ar ? 'تعذّر تحميل البيانات' : 'Failed to load data');
     } finally {
       setLoading(false);
     }
-  }, [tab, date, functionId]);
+  }, [tab, date, functionId, ar]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -226,7 +226,7 @@ export default function BreaksPage() {
       await load();
       alert(`✅ ${data.message}${data.warnings?.length ? '\n\n' + (ar ? 'تحذيرات:' : 'Warnings:') + '\n' + data.warnings.join('\n') : ''}`);
     } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'Generation failed');
+      setError(e?.response?.data?.message ?? (ar ? 'فشل التوليد' : 'Generation failed'));
     } finally {
       setGenerating(false);
     }
@@ -279,7 +279,7 @@ export default function BreaksPage() {
       alert(msg);
       load();
     } catch (e: any) {
-      alert(e?.response?.data?.message ?? 'Failed to submit request');
+      alert(e?.response?.data?.message ?? (ar ? 'تعذّر إرسال الطلب' : 'Failed to submit request'));
     } finally {
       setSubmitting(false);
     }
@@ -288,7 +288,7 @@ export default function BreaksPage() {
   const handleApprove = async (id: string) => {
     setActioningId(id);
     try { await apiClient.patch(`/breaks/requests/${id}/approve`, { comment: '' }); load(); }
-    catch (e: any) { alert(e?.response?.data?.message ?? 'Failed to approve'); }
+    catch (e: any) { alert(e?.response?.data?.message ?? (ar ? 'تعذّرت الموافقة' : 'Failed to approve')); }
     finally { setActioningId(null); }
   };
 
@@ -297,7 +297,7 @@ export default function BreaksPage() {
     if (!reason) return;
     setActioningId(id);
     try { await apiClient.patch(`/breaks/requests/${id}/reject`, { reason }); load(); }
-    catch { alert('Failed to reject'); }
+    catch { alert(ar ? 'تعذّر الرفض' : 'Failed to reject'); }
     finally { setActioningId(null); }
   };
 

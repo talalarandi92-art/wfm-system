@@ -258,12 +258,12 @@ const ATTENDANCE_COLS: ColDef[] = [
     header_en: 'Punch',
     header_ar: 'البصمة',
     width: 'w-28',
-    render: (d) => {
+    render: (d, ar) => {
       if (!d.punchIn && !d.systemLogin) {
         if (['off','leave','holiday','sick','absent'].includes(d.concordanceStatus)) {
           return <span className="text-gray-300 dark:text-gray-600 text-xs">—</span>;
         }
-        return <span className="text-red-400 text-xs">No data</span>;
+        return <span className="text-red-400 text-xs">{ar ? 'لا بيانات' : 'No data'}</span>;
       }
       return (
         <div className="space-y-0.5">
@@ -300,7 +300,7 @@ const ATTENDANCE_COLS: ColDef[] = [
     header_en: 'Late ⏱',
     header_ar: 'التأخير',
     width: 'w-24',
-    render: (d) => {
+    render: (d, ar) => {
       const pLate = d.punchLateMinutes ?? 0;
       const sLate = d.systemLateMinutes ?? 0;
       if (!pLate && !sLate) return <span className="text-gray-300 dark:text-gray-600">—</span>;
@@ -317,7 +317,7 @@ const ATTENDANCE_COLS: ColDef[] = [
             </p>
           )}
           {d.isUncompensatedLate && (
-            <p className="text-[10px] text-red-500 font-medium">↑ uncompensated</p>
+            <p className="text-[10px] text-red-500 font-medium">↑ {ar ? 'غير معوّض' : 'uncompensated'}</p>
           )}
         </div>
       );
@@ -641,7 +641,7 @@ export default function ImportPage() {
       setStep(2);
       await loadPreview(data.batchId, 1, 'all');
     } catch (err: any) {
-      setError(err.response?.data?.message ?? err.message ?? 'Upload failed');
+      setError(err.response?.data?.message ?? err.message ?? (ar ? 'فشل الرفع' : 'Upload failed'));
     } finally {
       setLoading(false);
     }
@@ -657,7 +657,7 @@ export default function ImportPage() {
       setPreviewPage(page);
       setFilterMode(filter);
     } catch (err: any) {
-      setError(err.response?.data?.message ?? 'Failed to load preview');
+      setError(err.response?.data?.message ?? (ar ? 'فشل تحميل المعاينة' : 'Failed to load preview'));
     } finally {
       setLoading(false);
     }
@@ -672,7 +672,7 @@ export default function ImportPage() {
       setCommitResult(data);
       setStep(3);
     } catch (err: any) {
-      setError(err.response?.data?.message ?? 'Commit failed');
+      setError(err.response?.data?.message ?? (ar ? 'فشل الاستيراد' : 'Commit failed'));
     } finally {
       setLoading(false);
     }
@@ -827,7 +827,7 @@ export default function ImportPage() {
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
                 {ar ? 'ورقة العمل' : 'Worksheet'}
                 {availableSheets.length > 0 && (
-                  <span className="ms-1 text-blue-500">({availableSheets.length} sheets)</span>
+                  <span className="ms-1 text-blue-500">({availableSheets.length} {ar ? 'ورقة' : 'sheets'})</span>
                 )}
               </label>
               {availableSheets.length > 0 ? (
@@ -895,7 +895,7 @@ export default function ImportPage() {
                   <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
                   {availableSheets.length > 0 && (
                     <p className="text-xs text-blue-600 dark:text-blue-400">
-                      {availableSheets.length} sheets: {availableSheets.slice(0, 4).join(', ')}{availableSheets.length > 4 ? '…' : ''}
+                      {availableSheets.length} {ar ? 'ورقة' : 'sheets'}: {availableSheets.slice(0, 4).join(', ')}{availableSheets.length > 4 ? '…' : ''}
                     </p>
                   )}
                 </div>
@@ -905,7 +905,7 @@ export default function ImportPage() {
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     {ar ? 'اسحب الملف هنا أو انقر للاختيار' : 'Drag & drop or click to select'}
                   </p>
-                  <p className="text-xs text-gray-400">.xlsx / .xls — max 50 MB</p>
+                  <p className="text-xs text-gray-400">{ar ? '.xlsx / .xls — حد أقصى 50 ميجا' : '.xlsx / .xls — max 50 MB'}</p>
                 </div>
               )}
             </div>
@@ -1048,7 +1048,9 @@ export default function ImportPage() {
                               {row.status === 'valid'   && <CheckCircle2  size={9} />}
                               {row.status === 'error'   && <XCircle       size={9} />}
                               {row.status === 'warning' && <AlertTriangle size={9} />}
-                              {row.status}
+                              {ar
+                                ? (row.status === 'valid' ? 'صحيح' : row.status === 'error' ? 'خطأ' : row.status === 'warning' ? 'تحذير' : row.status)
+                                : row.status}
                             </span>
                           </td>
                           {cols.map(c => (
@@ -1066,7 +1068,7 @@ export default function ImportPage() {
                             ) : (
                               row.data.isNoShow ? (
                                 <span className="text-[10px] text-red-500 flex items-center gap-1">
-                                  <Zap size={9} /> no-show
+                                  <Zap size={9} /> {ar ? 'غياب' : 'no-show'}
                                 </span>
                               ) : null
                             )}

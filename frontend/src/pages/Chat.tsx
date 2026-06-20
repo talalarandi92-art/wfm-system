@@ -948,7 +948,7 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
   // ── Computed ──────────────────────────────────────────────────────────────
   const typingUsers = Object.entries(typing)
     .filter(([uid, t]) => t && uid !== currentUserId)
-    .map(([uid]) => users.find(u => u.id === uid)?.name ?? 'Someone');
+    .map(([uid]) => users.find(u => u.id === uid)?.name ?? (ar ? 'شخص ما' : 'Someone'));
 
   const filteredChannels = channels.filter(ch =>
     ch.name.toLowerCase().includes(search.toLowerCase()) ||
