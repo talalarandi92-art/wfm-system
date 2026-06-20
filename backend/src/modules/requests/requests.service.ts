@@ -1378,6 +1378,7 @@ export class RequestsService {
       requesterName: req.requester_name,
       targetName: req.target_name,
       swapNote: 'تبادل الشيفت لا يؤثر على إجمالي عدد الموظفين، لكنه قد يؤثر على التوقيت',
+      swapNoteEn: 'The shift swap does not change total headcount, but it may affect timing.',
       requesterDate: {
         date: reqDate,
         hcCount: parseInt(reqDateHc[0]?.hc ?? '0'),

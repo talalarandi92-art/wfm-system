@@ -226,6 +226,7 @@ interface HcImpactData {
   // Swap-specific
   targetName?: string;
   swapNote?: string;
+  swapNoteEn?: string;
   validationSummary?: { restCheckPassed: boolean; genderCheckPassed: boolean; coverageCheckPassed: boolean };
 }
 
@@ -420,7 +421,7 @@ function HcImpactPanel({ requestId, dark, ar = true }: { requestId: string; dark
       {/* Swap: validation summary */}
       {data.swapNote && (
         <div className="px-3 pb-3 space-y-2">
-          <div className="text-xs text-slate-400">{data.swapNote}</div>
+          <div className="text-xs text-slate-400">{ar ? fixEncoding(data.swapNote) : (data.swapNoteEn ?? fixEncoding(data.swapNote))}</div>
           {data.validationSummary && (
             <div className="flex gap-4">
               <ValidationBadge passed={data.validationSummary.restCheckPassed} labelAr="قاعدة الراحة" labelEn="Rest Rule" ar={ar} />
@@ -1448,7 +1449,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                       </div>
                     )}
                     {(hcImpact.warnings ?? []).map((w: string, i: number) => (
-                      <div key={i} className="text-[11px]" style={{ color: '#fbbf24' }}>{w}</div>
+                      <div key={i} className="text-[11px]" style={{ color: '#fbbf24' }}>{fixEncoding(w)}</div>
                     ))}
                   </div>
                 );
