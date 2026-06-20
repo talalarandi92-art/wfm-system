@@ -107,14 +107,26 @@ export class AutoModeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async apply(tid: string, req: any, decision: 'approve' | 'reject' | 'hold', reason: string, reasonCode: string, metrics: any, actor: string | null) {
-    // Record the decision (hold included, but only act on approve/reject).
+    const params = [tid, req.id, req.type, decision, reason, reasonCode, req.function_name, req.pdate ?? null, JSON.stringify(metrics ?? {})];
+    if (decision === 'hold') {
+      // One current hold per request — refresh it instead of piling up a new row each tick.
+      await this.ds.query(
+        `INSERT INTO automode_decisions (tenant_id, request_id, request_type, decision, reason, reason_code, function_name, scope_date, metrics)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+         ON CONFLICT (request_id) WHERE (decision = 'hold')
+         DO UPDATE SET reason = EXCLUDED.reason, reason_code = EXCLUDED.reason_code,
+                       function_name = EXCLUDED.function_name, metrics = EXCLUDED.metrics, decided_at = NOW()`,
+        params,
+      ).catch(() => {});
+      return;
+    }
+    // approve / reject — record once (idempotent on request_id).
     await this.ds.query(
       `INSERT INTO automode_decisions (tenant_id, request_id, request_type, decision, reason, reason_code, function_name, scope_date, metrics)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
        ON CONFLICT (request_id) WHERE (decision IN ('approve','reject')) DO NOTHING`,
-      [tid, req.id, req.type, decision, reason, reasonCode, req.function_name, req.pdate ?? null, JSON.stringify(metrics ?? {})],
+      params,
     ).catch(() => {});
-    if (decision === 'hold') return;
 
     if (decision === 'approve') {
       await this.ds.query(
