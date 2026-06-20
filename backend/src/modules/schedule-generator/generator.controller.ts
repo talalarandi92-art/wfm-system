@@ -97,7 +97,10 @@ export class GeneratorController {
     return this.svc.generate(req.user.tenantId, body.weekStart, body.functionIds, body.options)
       .then((result) =>
         this.svc.saveDraft(req.user.tenantId, result, req.user.userId, body.label)
-          .then((versionId) => ({ ...result, versionId })),
+          .then(async (versionId) => {
+            await this.svc.logFemaleOverride(req.user.tenantId, req.user.userId ?? null, body.options);
+            return { ...result, versionId };
+          }),
       );
   }
 

@@ -586,6 +586,20 @@ export class GeneratorService {
     return result;
   }
 
+  /** Audit a female late/N override when a schedule generated with it is saved. */
+  async logFemaleOverride(tenantId: string, userId: string | null, options?: Partial<GeneratorOptions>) {
+    if (!options) return;
+    const flags: string[] = [];
+    if (options.allowFemaleN) flags.push('allowFemaleN');
+    if (options.femaleLateFunctionIds?.length) flags.push(`femaleLateFunctionIds=[${options.femaleLateFunctionIds.join(',')}]`);
+    if (!flags.length) return;
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, notes)
+       VALUES ($1,$2,'schedule.female_late_override','schedule-generator','schedule',NULL,$3)`,
+      [tenantId, userId ?? null, `Female late/N override used at generation: ${flags.join('; ')}`],
+    ).catch(() => {});
+  }
+
   // ── Main Generate ────────────────────────────────────────────────────────────
   async generate(
     tenantId: string,

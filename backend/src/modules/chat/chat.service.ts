@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { ChatChannel } from './entities/chat-channel.entity';
@@ -104,6 +104,10 @@ export class ChatService {
     attachmentName?: string,
     attachmentSize?: number,
   ) {
+    // Authorize: only members may post to a channel (mirrors getMessages).
+    const isMember = await this.memberRepo.findOne({ where: { channelId, userId: senderId } });
+    if (!isMember) throw new ForbiddenException('Not a member of this channel');
+
     const msgType = attachmentUrl ? (attachmentType === 'image' ? 'image' :
                     attachmentType === 'video' ? 'video' :
                     attachmentType === 'audio' ? 'audio' : 'file') : 'text';

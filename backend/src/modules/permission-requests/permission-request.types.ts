@@ -30,8 +30,9 @@ export const PERMISSION_TYPE_LABELS: Record<PermissionType, { ar: string; en: st
 
 export const PERMISSION_RULES = {
   MIN_DURATION_MINUTES: 30,
-  MAX_DURATION_MINUTES: 180,   // 3 hours
+  MAX_DURATION_MINUTES: 180,    // 3 hours per request
   MAX_PER_WEEK: 3,
+  MAX_MINUTES_PER_WEEK: 360,    // 6 hours total per cycle/week
 } as const;
 
 export class CreatePermissionRequestDto {

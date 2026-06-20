@@ -123,6 +123,7 @@ export interface VoiceInputs {
 export interface ChatInputs {
   intervalMinutes: number;
   concurrency: number;       // 4 for chat/WA
+  targetSL?: number;         // 0.80 default — share answered within targetResponseSec
   targetResponseSec: number;
   defaultAht: number;        // seconds
   shrinkage: number;
@@ -397,7 +398,7 @@ export class CapacityService {
       // Each agent contributes 1+(c−1)·0.75 effective servers (context-switch cost).
       const effPerAgent = effectiveServersPerAgent(concurrency);
       const effServersNeeded = findMinAgents(
-        workload, 0.8, inputs.targetResponseSec, aht, inputs.occupancyTarget);
+        workload, inputs.targetSL ?? 0.8, inputs.targetResponseSec, aht, inputs.occupancyTarget);
 
       let rawAgents = Math.ceil(effServersNeeded / effPerAgent);
       rawAgents = Math.ceil(rawAgents / inputs.internFactor);

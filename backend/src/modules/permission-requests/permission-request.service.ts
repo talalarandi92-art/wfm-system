@@ -288,6 +288,25 @@ export class PermissionRequestService implements OnModuleInit {
       );
     }
 
+    // Cumulative duration cap: 6 hours of permission per week/cycle.
+    const weekMinsRows = await this.ds.query(
+      `SELECT COALESCE(SUM(rp.duration_minutes),0) AS mins
+       FROM requests r
+       JOIN request_permissions rp ON rp.request_id = r.id
+       JOIN request_types rt ON rt.id = r.request_type_id
+       WHERE r.tenant_id = $1 AND r.employee_id = $2 AND rt.code = 'permission'
+         AND rp.permission_date BETWEEN $3::date AND $4::date
+         AND r.status NOT IN ('rejected','cancelled')`,
+      [tenantId, dto.employeeId, weekSatStr, weekFriStr],
+    );
+    const usedMins = parseInt(weekMinsRows[0]?.mins ?? '0', 10);
+    if (usedMins + durationMinutes > PERMISSION_RULES.MAX_MINUTES_PER_WEEK) {
+      throw new BadRequestException(
+        `تجاوز رصيد الاستئذان الأسبوعي (${PERMISSION_RULES.MAX_MINUTES_PER_WEEK / 60} ساعات). ` +
+        `المستخدم استخدم ${usedMins} دقيقة، وهذا الطلب ${durationMinutes} دقيقة.`,
+      );
+    }
+
     // Resolve permission request_type id
     const rtRows = await this.ds.query(
       `SELECT id FROM request_types WHERE tenant_id = $1 AND code = 'permission' LIMIT 1`,
