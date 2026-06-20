@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { AnalystService } from './analyst.service';
 
@@ -15,6 +16,7 @@ class FeedbackDto {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'analyst', version: '1' })
+@RequirePermissions('hc.view')
 export class AnalystController {
   constructor(private readonly svc: AnalystService) {}
 

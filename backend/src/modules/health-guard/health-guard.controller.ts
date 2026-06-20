@@ -1,6 +1,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { HealthGuardService } from './health-guard.service';
 
@@ -12,6 +13,7 @@ import { HealthGuardService } from './health-guard.service';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'health-guard', version: '1' })
+@RequirePermissions('hc.view')
 export class HealthGuardController {
   constructor(private readonly svc: HealthGuardService) {}
 

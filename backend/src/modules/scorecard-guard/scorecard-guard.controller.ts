@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { ScorecardGuardService } from './scorecard-guard.service';
 
@@ -8,6 +9,7 @@ import { ScorecardGuardService } from './scorecard-guard.service';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'scorecard-guard', version: '1' })
+@RequirePermissions('hc.view')
 export class ScorecardGuardController {
   constructor(private readonly svc: ScorecardGuardService) {}
 

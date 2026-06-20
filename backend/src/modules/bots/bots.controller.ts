@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { HealthGuardService } from '@modules/health-guard/health-guard.service';
 import { AnalystService } from '@modules/analyst/analyst.service';
@@ -22,6 +23,7 @@ import { ResearcherService } from '@modules/researcher/researcher.service';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'bots', version: '1' })
+@RequirePermissions('hc.view')
 export class BotsController {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,

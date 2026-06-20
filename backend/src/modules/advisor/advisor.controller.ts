@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { AdvisorService } from './advisor.service';
 
@@ -14,6 +15,7 @@ class AskDto {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'advisor', version: '1' })
+@RequirePermissions('hc.view')
 export class AdvisorController {
   constructor(private readonly svc: AdvisorService) {}
 

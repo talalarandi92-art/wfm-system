@@ -3,6 +3,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 /**
@@ -17,6 +18,7 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'attrition', version: '1' })
+@RequirePermissions('reports.view')
 export class AttritionController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 

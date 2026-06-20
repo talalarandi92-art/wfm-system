@@ -1,6 +1,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { KNOWLEDGE } from '@modules/expert/expert.knowledge';
 import { CATALOG } from '@modules/researcher/researcher.catalog';
 import { PROV_EXPERT, PROV_RESEARCH, DEFAULT_EXPERT, DEFAULT_RESEARCH } from './provenance';
@@ -15,6 +16,7 @@ import { PROV_EXPERT, PROV_RESEARCH, DEFAULT_EXPERT, DEFAULT_RESEARCH } from './
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'knowledge-ledger', version: '1' })
+@RequirePermissions('hc.view')
 export class KnowledgeLedgerController {
   @Get()
   @ApiOperation({ summary: 'Every knowledge/expertise item with what / benefit / source / date' })

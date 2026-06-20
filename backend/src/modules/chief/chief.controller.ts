@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { ChiefService } from './chief.service';
 
@@ -8,6 +9,7 @@ import { ChiefService } from './chief.service';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'chief', version: '1' })
+@RequirePermissions('hc.view')
 export class ChiefController {
   constructor(private readonly svc: ChiefService) {}
 

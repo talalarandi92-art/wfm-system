@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { SecurityGuardService, Lang } from './security-guard.service';
 
@@ -8,6 +9,7 @@ import { SecurityGuardService, Lang } from './security-guard.service';
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'security-guard', version: '1' })
+@RequirePermissions('hc.view')
 export class SecurityGuardController {
   constructor(private readonly svc: SecurityGuardService) {}
 

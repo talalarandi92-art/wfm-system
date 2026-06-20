@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsString, MaxLength } from 'class-validator';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { ExpertService } from './expert.service';
 
@@ -11,6 +12,7 @@ class AskDto { @IsString() @MaxLength(600) question!: string; }
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'expert', version: '1' })
+@RequirePermissions('hc.view')
 export class ExpertController {
   constructor(private readonly svc: ExpertService) {}
 

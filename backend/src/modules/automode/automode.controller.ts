@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { AutoModeService } from './automode.service';
 
@@ -16,6 +17,7 @@ class SettingsDto {
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller({ path: 'automode', version: '1' })
+@RequirePermissions('hc.view')
 export class AutoModeController {
   constructor(private readonly svc: AutoModeService) {}
 
