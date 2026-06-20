@@ -18,4 +18,10 @@ export class MeController {
   overview(@CurrentUser() user: any) {
     return this.me.getOverview(user.tenantId, user.employeeId ?? null);
   }
+
+  @Get('attendance')
+  @ApiOperation({ summary: 'Own attendance detail — punch/system times, late, early-out, OT, permissions, leave balance (self only)' })
+  attendance(@CurrentUser() user: any) {
+    return this.me.getAttendanceDetail(user.tenantId, user.employeeId ?? null);
+  }
 }

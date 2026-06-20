@@ -30,6 +30,26 @@ interface ShiftRate {
 interface Adherence { days: number; avgAdherence: number | null; avgConformance: number | null; recent: any[] }
 interface Score { periodName: string; netPoints: number | null; functionRank: number | null; functionName: string; qualityPct: number | null; fcrPct: number | null }
 interface Overview { linked: boolean; shiftRate: ShiftRate | null; adherence: Adherence | null; score: Score | null; schedule: any[] }
+interface AttDetailDay {
+  date: string; marker: string; isWfh: boolean; shiftCode: string | null;
+  scheduledStart: string | null; scheduledEnd: string | null;
+  punchIn: string | null; punchOut: string | null; systemLogin: string | null; systemLogout: string | null;
+  punchLate: number; systemLate: number; punchEarlyOut: number; systemEarlyOut: number; ot: number;
+  missingPunch: boolean; missingSystem: boolean; absenceReason: string | null;
+}
+interface LeaveLine { leaveType: string; entitlement: number; taken: number; pending: number; remaining: number }
+interface PermInfo { total: number; approved: number; pending: number; items: any[] }
+interface MyAttendance {
+  linked: boolean;
+  recent: AttDetailDay[];
+  permissions: PermInfo | null;
+  leaveBalance: LeaveLine[];
+  ops: { hasContactData: boolean; contacts: number; activeDays: number; surveys: number; positive: number; negative: number; telephony: { available: boolean; note: string } } | null;
+}
+const LEAVE_AR: Record<string, string> = {
+  annual: 'إجازة سنوية', sick: 'إجازة مرضية', emergency: 'إجازة طارئة',
+  death: 'إجازة وفاة', comp_off: 'يوم تعويضي', annual_leave: 'إجازة سنوية', sick_leave: 'إجازة مرضية',
+};
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtD = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
@@ -90,6 +110,7 @@ export default function AgentHome() {
   const [requests, setRequests]   = useState<MyRequest[]>([]);
   const [notifs, setNotifs]       = useState<MyNotif[]>([]);
   const [overview, setOverview]   = useState<Overview | null>(null);
+  const [myAtt, setMyAtt]         = useState<MyAttendance | null>(null);
   const [loading, setLoading]     = useState(true);
 
   useEffect(() => {
@@ -98,12 +119,14 @@ export default function AgentHome() {
       employeeId ? apiClient.get(`/requests?employeeId=${employeeId}`) : Promise.resolve({ data: [] }),
       apiClient.get('/notifications').catch(() => ({ data: [] })),
       apiClient.get('/me/overview').catch(() => ({ data: null })),
+      apiClient.get('/me/attendance').catch(() => ({ data: null })),
     ];
-    Promise.all(calls).then(([att, reqs, nts, ov]: any[]) => {
+    Promise.all(calls).then(([att, reqs, nts, ov, mine]: any[]) => {
       if (att?.data) { setSummary(att.data.summary); setRecent(att.data.recentDays ?? []); }
       setRequests(Array.isArray(reqs?.data) ? reqs.data.slice(0, 5) : (reqs?.data?.data ?? []).slice(0, 5));
       setNotifs((Array.isArray(nts?.data) ? nts.data : []).slice(0, 5));
       setOverview(ov?.data ?? null);
+      setMyAtt(mine?.data ?? null);
     }).catch(() => {}).finally(() => setLoading(false));
   }, [employeeId]);
 
@@ -343,6 +366,117 @@ export default function AgentHome() {
           </div>
         </div>
       </div>
+
+      {/* ── Leave balance + Permissions (self only) ── */}
+      {myAtt?.linked && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Leave balance */}
+          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+              <Plane size={15} className="text-indigo-400" /> {ar ? 'رصيد إجازاتي' : 'My Leave Balance'}
+            </h2>
+            {myAtt.leaveBalance.length > 0 ? (
+              <div className="space-y-2">
+                {myAtt.leaveBalance.map(l => (
+                  <div key={l.leaveType} className="flex items-center justify-between px-2.5 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <span className="text-xs text-slate-200">{ar ? (LEAVE_AR[l.leaveType] ?? l.leaveType) : l.leaveType.replace(/_/g, ' ')}</span>
+                    <div className="flex items-center gap-3 text-[10px]">
+                      <span className="text-slate-500">{ar ? 'مستحق' : 'Entitled'} <b className="text-white">{l.entitlement}</b></span>
+                      <span className="text-amber-400">{ar ? 'مأخوذ' : 'Taken'} <b>{l.taken}</b></span>
+                      {l.pending > 0 && <span className="text-purple-400">{ar ? 'معلّق' : 'Pending'} <b>{l.pending}</b></span>}
+                      <span className="font-bold px-2 py-0.5 rounded-md" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
+                        {ar ? 'متبقٍ' : 'Left'} {l.remaining}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-600 text-center py-4">
+                {ar ? 'لم تُحمَّل استحقاقات الإجازات بعد' : 'No leave entitlements loaded yet'}
+              </p>
+            )}
+          </div>
+
+          {/* Permissions this year + own ops contacts */}
+          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+              <Clock size={15} className="text-amber-400" /> {ar ? 'استئذاناتي (السنة)' : 'My Permissions (YTD)'}
+            </h2>
+            {myAtt.permissions ? (
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <div className="text-center px-2 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <p className="text-xl font-bold text-white">{myAtt.permissions.total}</p>
+                  <p className="text-[9px] text-slate-500">{ar ? 'الإجمالي' : 'Total'}</p>
+                </div>
+                <div className="text-center px-2 py-2 rounded-lg" style={{ background: 'rgba(34,197,94,0.08)' }}>
+                  <p className="text-xl font-bold" style={{ color: '#22c55e' }}>{myAtt.permissions.approved}</p>
+                  <p className="text-[9px] text-slate-500">{ar ? 'موافق' : 'Approved'}</p>
+                </div>
+                <div className="text-center px-2 py-2 rounded-lg" style={{ background: 'rgba(245,158,11,0.08)' }}>
+                  <p className="text-xl font-bold" style={{ color: '#f59e0b' }}>{myAtt.permissions.pending}</p>
+                  <p className="text-[9px] text-slate-500">{ar ? 'معلّق' : 'Pending'}</p>
+                </div>
+              </div>
+            ) : <p className="text-xs text-slate-600 text-center py-2">{ar ? 'لا استئذانات' : 'No permissions'}</p>}
+            {/* Own operational contacts (Sprinklr) — honest about telephony */}
+            {myAtt.ops && (
+              <div className="pt-2 border-t border-white/5">
+                {myAtt.ops.hasContactData ? (
+                  <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                    <span>{ar ? 'تواصلاتي (الشهر)' : 'My contacts (mo)'}: <b className="text-white">{myAtt.ops.contacts}</b></span>
+                    <span className="text-emerald-400">+{myAtt.ops.positive}</span>
+                    <span className="text-red-400">−{myAtt.ops.negative}</span>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-slate-600">{ar ? 'AHT / ACW / Hold / Idle — بانتظار تكامل Ameyo' : myAtt.ops.telephony.note}</p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Punch & system times (detailed, self only) ── */}
+      {myAtt?.linked && myAtt.recent.length > 0 && (
+        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+            <Clock size={15} className="text-cyan-400" /> {ar ? 'بصمتي والسيستم (تفصيلي)' : 'My Punch & System Log'}
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="text-slate-500 text-[9px] uppercase">
+                  <th className="text-start font-semibold py-1.5 px-2">{ar ? 'التاريخ' : 'Date'}</th>
+                  <th className="text-start font-semibold py-1.5 px-2">{ar ? 'وردية' : 'Shift'}</th>
+                  <th className="text-center font-semibold py-1.5 px-2">{ar ? 'بصمة دخول' : 'Punch In'}</th>
+                  <th className="text-center font-semibold py-1.5 px-2">{ar ? 'بصمة خروج' : 'Punch Out'}</th>
+                  <th className="text-center font-semibold py-1.5 px-2">{ar ? 'فتح سيستم' : 'Sys Open'}</th>
+                  <th className="text-center font-semibold py-1.5 px-2">{ar ? 'إغلاق سيستم' : 'Sys Close'}</th>
+                  <th className="text-center font-semibold py-1.5 px-2">{ar ? 'تأخير' : 'Late'}</th>
+                  <th className="text-center font-semibold py-1.5 px-2">{ar ? 'خروج مبكر' : 'Early'}</th>
+                  <th className="text-center font-semibold py-1.5 px-2">OT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {myAtt.recent.slice(0, 14).map((d, i) => (
+                  <tr key={i} className="border-t border-white/5">
+                    <td className="py-1.5 px-2 text-slate-300">{fmtD(d.date)}</td>
+                    <td className="py-1.5 px-2 font-bold" style={{ color: MARKER_COLOR[d.marker] ?? '#fff' }}>{d.shiftCode || (ar ? (MARKER_AR[d.marker] ?? d.marker) : d.marker)}</td>
+                    <td className="py-1.5 px-2 text-center text-white">{d.punchIn ?? (d.missingPunch ? <span className="text-red-400">{ar ? 'ناقص' : 'miss'}</span> : '—')}</td>
+                    <td className="py-1.5 px-2 text-center text-white">{d.punchOut ?? '—'}</td>
+                    <td className="py-1.5 px-2 text-center text-slate-300">{d.systemLogin ?? (d.missingSystem ? <span className="text-red-400">{ar ? 'ناقص' : 'miss'}</span> : '—')}</td>
+                    <td className="py-1.5 px-2 text-center text-slate-300">{d.systemLogout ?? '—'}</td>
+                    <td className="py-1.5 px-2 text-center">{d.punchLate > 0 ? <span className="text-amber-400">{d.punchLate}{ar ? 'د' : 'm'}</span> : '—'}</td>
+                    <td className="py-1.5 px-2 text-center">{d.punchEarlyOut > 0 ? <span className="text-orange-400">{d.punchEarlyOut}{ar ? 'د' : 'm'}</span> : '—'}</td>
+                    <td className="py-1.5 px-2 text-center">{d.ot > 0 ? <span className="text-cyan-400">{Math.round(d.ot / 60 * 10) / 10}h</span> : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ── Quick actions ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
