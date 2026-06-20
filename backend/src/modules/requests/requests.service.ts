@@ -92,7 +92,7 @@ export class RequestsService {
       employeeName: r.employee_name,
       gender: r.gender,
       functionId: r.function_id,
-      functionName: r.function_name ?? 'ØºÙŠØ± Ù…Ø­Ø¯Ø¯',
+      functionName: r.function_name ?? 'غير محدد',
       date: dateStr,
       scheduledStart: r.scheduled_start,
       scheduledEnd: r.scheduled_end,
@@ -129,12 +129,12 @@ export class RequestsService {
     // Gender rule: female can't take midnight shift (after swap)
     if (requesterInfo.gender === 'female' && targetInfo.isMidnightShift) {
       result.genderCheckPassed = false;
-      result.genderWarning = `${requesterInfo.employeeName} (Ø£Ù†Ø«Ù‰) Ù„Ø§ ÙŠÙ…ÙƒÙ†Ù‡Ø§ Ø£Ø®Ø° Ø´ÙŠÙØª Ù…Ù†ØªØµÙ Ø§Ù„Ù„ÙŠÙ„`;
+      result.genderWarning = `${requesterInfo.employeeName} (أنثى) لا يمكنها أخذ شيفت منتصف الليل`;
     }
     if (targetInfo.gender === 'female' && requesterInfo.isMidnightShift) {
       result.genderCheckPassed = false;
       result.genderWarning = (result.genderWarning ? result.genderWarning + ' | ' : '')
-        + `${targetInfo.employeeName} (Ø£Ù†Ø«Ù‰) Ù„Ø§ ÙŠÙ…ÙƒÙ†Ù‡Ø§ Ø£Ø®Ø° Ø´ÙŠÙØª Ù…Ù†ØªØµÙ Ø§Ù„Ù„ÙŠÙ„`;
+        + `${targetInfo.employeeName} (أنثى) لا يمكنها أخذ شيفت منتصف الليل`;
     }
 
     // Rest check â€” after swap, requester gets target's shift times
@@ -151,14 +151,14 @@ export class RequestsService {
       const rest = this.restMinutes(reqPrevEnd, newReqStart);
       if (rest < 600) {
         result.restCheckPassed = false;
-        result.restWarning = `${requesterInfo.employeeName}: Ø±Ø§Ø­Ø© Ù‚Ø¨Ù„ Ø§Ù„Ø´ÙŠÙØª Ø§Ù„Ø¬Ø¯ÙŠØ¯ ${Math.round(rest / 60)}Ø³ (Ø§Ù„Ø­Ø¯ 10Ø³)`;
+        result.restWarning = `${requesterInfo.employeeName}: راحة قبل الشيفت الجديد ${Math.round(rest / 60)}س (الحد 10س)`;
       }
     }
     if (newReqEnd && reqNextStart) {
       const rest = this.restMinutes(newReqEnd, reqNextStart);
       if (rest < 600) {
         result.restCheckPassed = false;
-        result.restWarning = (result.restWarning ?? '') + ` | ${requesterInfo.employeeName}: Ø±Ø§Ø­Ø© Ø¨Ø¹Ø¯ Ø§Ù„Ø´ÙŠÙØª ${Math.round(rest / 60)}Ø³`;
+        result.restWarning = (result.restWarning ?? '') + ` | ${requesterInfo.employeeName}: راحة بعد الشيفت ${Math.round(rest / 60)}س`;
       }
     }
 
@@ -170,14 +170,14 @@ export class RequestsService {
       const rest = this.restMinutes(tgtPrevEnd, newTgtStart);
       if (rest < 600) {
         result.restCheckPassed = false;
-        result.restWarning = (result.restWarning ?? '') + ` | ${targetInfo.employeeName}: Ø±Ø§Ø­Ø© Ù‚Ø¨Ù„ Ø§Ù„Ø´ÙŠÙØª Ø§Ù„Ø¬Ø¯ÙŠØ¯ ${Math.round(rest / 60)}Ø³`;
+        result.restWarning = (result.restWarning ?? '') + ` | ${targetInfo.employeeName}: راحة قبل الشيفت الجديد ${Math.round(rest / 60)}س`;
       }
     }
     if (newTgtEnd && tgtNextStart) {
       const rest = this.restMinutes(newTgtEnd, tgtNextStart);
       if (rest < 600) {
         result.restCheckPassed = false;
-        result.restWarning = (result.restWarning ?? '') + ` | ${targetInfo.employeeName}: Ø±Ø§Ø­Ø© Ø¨Ø¹Ø¯ Ø§Ù„Ø´ÙŠÙØª ${Math.round(rest / 60)}Ø³`;
+        result.restWarning = (result.restWarning ?? '') + ` | ${targetInfo.employeeName}: راحة بعد الشيفت ${Math.round(rest / 60)}س`;
       }
     }
 
@@ -186,7 +186,7 @@ export class RequestsService {
     const tgtDateHc = await this.getDateHc(tenantId, targetInfo.functionId, targetInfo.date);
     if (reqDateHc <= 1 || tgtDateHc <= 1) {
       result.coverageCheckPassed = false;
-      result.coverageWarning = 'ØªØ­Ø°ÙŠØ±: Ù‚Ø¯ ÙŠØªØ£Ø«Ø± Ø§Ù„ØªØºØ·ÙŠØ© ÙÙŠ Ø£Ø­Ø¯ Ø§Ù„ØªÙˆØ§Ø±ÙŠØ® Ø¨Ø³Ø¨Ø¨ Ù…Ø­Ø¯ÙˆØ¯ÙŠØ© Ø§Ù„Ù…ÙˆØ¸ÙÙŠÙ†';
+      result.coverageWarning = 'تحذير: قد يتأثر التغطية في أحد التواريخ بسبب محدودية الموظفين';
     }
 
     return result;
@@ -509,10 +509,10 @@ export class RequestsService {
     const targetInfo    = await this.getShiftInfo(tenantId, dto.targetEmployeeId, dto.targetDate);
 
     if (!requesterInfo?.scheduledStart) {
-      throw new BadRequestException(`Ù„Ø§ ÙŠÙˆØ¬Ø¯ Ø´ÙŠÙØª Ù„Ù„Ù…ÙˆØ¸Ù Ø§Ù„Ø£ÙˆÙ„ ÙÙŠ ${dto.requesterDate}`);
+      throw new BadRequestException(`لا يوجد شيفت للموظف الأول في ${dto.requesterDate}`);
     }
     if (!targetInfo?.scheduledStart) {
-      throw new BadRequestException(`Ù„Ø§ ÙŠÙˆØ¬Ø¯ Ø´ÙŠÙØª Ù„Ù„Ù…ÙˆØ¸Ù Ø§Ù„Ø«Ø§Ù†ÙŠ ÙÙŠ ${dto.targetDate}`);
+      throw new BadRequestException(`لا يوجد شيفت للموظف الثاني في ${dto.targetDate}`);
     }
 
     const validation = await this.validateSwap(tenantId, requesterInfo, targetInfo);
@@ -522,7 +522,7 @@ export class RequestsService {
       `SELECT id, sla_hours FROM request_types WHERE code = $1 AND tenant_id = $2`,
       [typeCode, tenantId],
     );
-    if (!rtRow.length) throw new BadRequestException('Ù†ÙˆØ¹ Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
+    if (!rtRow.length) throw new BadRequestException('نوع الطلب غير موجود');
 
     const reqShiftCodeId = await this.getShiftCodeId(tenantId, requesterInfo.shiftCode);
     const tgtShiftCodeId = await this.getShiftCodeId(tenantId, targetInfo.shiftCode);
@@ -587,7 +587,7 @@ export class RequestsService {
         code: targetInfo.shiftCode,
         name: targetInfo.employeeName,
       },
-      message: 'ØªÙ… Ø¥Ø±Ø³Ø§Ù„ Ø·Ù„Ø¨ Ø§Ù„ØªØ¨Ø§Ø¯Ù„ â€” ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± Ù…ÙˆØ§ÙÙ‚Ø© ' + targetInfo.employeeName,
+      message: 'تم إرسال طلب التبادل — في انتظار موافقة ' + targetInfo.employeeName,
     };
   }
 
@@ -602,11 +602,11 @@ export class RequestsService {
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [requestId, tenantId],
     );
-    if (!rows.length) throw new NotFoundException('Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
+    if (!rows.length) throw new NotFoundException('الطلب غير موجود');
     if (rows[0].target_employee_id !== targetEmpId)
-      throw new BadRequestException('Ø£Ù†Øª Ù„Ø³Øª Ø§Ù„Ù…ÙˆØ¸Ù Ø§Ù„Ù…Ø³ØªÙ‡Ø¯Ù ÙÙŠ Ù‡Ø°Ø§ Ø§Ù„Ø·Ù„Ø¨');
+      throw new BadRequestException('أنت لست الموظف المستهدف في هذا الطلب');
     if (rows[0].status !== 'peer_pending')
-      throw new BadRequestException('Ø§Ù„Ø·Ù„Ø¨ Ù„Ù… ÙŠØ¹Ø¯ ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± Ù…ÙˆØ§ÙÙ‚Ø© Ø§Ù„Ø²Ù…ÙŠÙ„');
+      throw new BadRequestException('الطلب لم يعد في انتظار موافقة الزميل');
   }
 
   async peerAccept(tenantId: string, requestId: string, dto: PeerRespondDto) {
@@ -618,7 +618,7 @@ export class RequestsService {
       `UPDATE requests SET status = 'pending', updated_at = NOW() WHERE id = $1 AND tenant_id = $2`,
       [requestId, tenantId],
     );
-    return { success: true, message: 'ÙˆØ§ÙÙ‚Øª Ø¹Ù„Ù‰ Ø§Ù„ØªØ¨Ø§Ø¯Ù„ â€” Ø§Ù„Ø·Ù„Ø¨ Ø§Ù„Ø¢Ù† Ø¨Ø§Ù†ØªØ¸Ø§Ø± WFM' };
+    return { success: true, message: 'وافقت على التبادل — الطلب الآن بانتظار WFM' };
   }
 
   async peerReject(tenantId: string, requestId: string, dto: PeerRespondDto) {
@@ -627,15 +627,15 @@ export class RequestsService {
       `UPDATE request_shift_swaps
        SET peer_rejected_at = NOW(), peer_rejection_reason = $2
        WHERE request_id = $1`,
-      [requestId, dto.reason ?? 'Ø±ÙØ¶ Ø§Ù„Ù…ÙˆØ¸Ù'],
+      [requestId, dto.reason ?? 'رفض الموظف'],
     );
     await this.ds.query(
       `UPDATE requests SET status = 'rejected', rejected_at = NOW(),
               rejection_reason = $2, updated_at = NOW()
        WHERE id = $1 AND tenant_id = $3`,
-      [requestId, dto.reason ?? 'Ø±ÙØ¶ Ø§Ù„Ù…ÙˆØ¸Ù Ø§Ù„Ø«Ø§Ù†ÙŠ', tenantId],
+      [requestId, dto.reason ?? 'رفض الموظف الثاني', tenantId],
     );
-    return { success: true, message: 'ØªÙ… Ø±ÙØ¶ Ø·Ù„Ø¨ Ø§Ù„ØªØ¨Ø§Ø¯Ù„' };
+    return { success: true, message: 'تم رفض طلب التبادل' };
   }
 
   /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -649,15 +649,15 @@ export class RequestsService {
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [requestId, tenantId],
     );
-    if (!rows.length) throw new NotFoundException('Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
+    if (!rows.length) throw new NotFoundException('الطلب غير موجود');
     const req = rows[0];
 
     const isSwap = req.type_code === 'shift_swap' || req.type_code === 'off_swap';
     if (isSwap && req.status === 'peer_pending') {
-      throw new BadRequestException('Ù„Ù… ÙŠÙˆØ§ÙÙ‚ Ø§Ù„Ù…ÙˆØ¸Ù Ø§Ù„Ø«Ø§Ù†ÙŠ Ø¨Ø¹Ø¯ Ø¹Ù„Ù‰ Ø§Ù„ØªØ¨Ø§Ø¯Ù„');
+      throw new BadRequestException('لم يوافق الموظف الثاني بعد على التبادل');
     }
     if (!['pending', 'peer_pending'].includes(req.status)) {
-      throw new BadRequestException('Ø§Ù„Ø·Ù„Ø¨ Ù„ÙŠØ³ ÙÙŠ Ø§Ù†ØªØ¸Ø§Ø± Ø§Ù„Ù…ÙˆØ§ÙÙ‚Ø©');
+      throw new BadRequestException('الطلب ليس في انتظار الموافقة');
     }
 
     const approverId = await this.resolveUserIdOrNull(tenantId, dto.approverId);
@@ -682,14 +682,14 @@ export class RequestsService {
       [tenantId, approverId, requestId, `Approved ${req.type_code}`],
     ).catch(() => {});
 
-    return { success: true, message: 'ØªÙ…Øª Ø§Ù„Ù…ÙˆØ§ÙÙ‚Ø© Ø¹Ù„Ù‰ Ø§Ù„Ø·Ù„Ø¨' };
+    return { success: true, message: 'تمت الموافقة على الطلب' };
   }
 
   async reject(tenantId: string, requestId: string, dto: ApproveRejectDto) {
     const rows = await this.ds.query(
       `SELECT id FROM requests WHERE id = $1 AND tenant_id = $2`, [requestId, tenantId],
     );
-    if (!rows.length) throw new NotFoundException('Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
+    if (!rows.length) throw new NotFoundException('الطلب غير موجود');
 
     const rejecterId = await this.resolveUserIdOrNull(tenantId, dto.approverId);
 
@@ -699,14 +699,14 @@ export class RequestsService {
            rejected_by = $2, rejection_reason = $3,
            current_approver_id = NULL, updated_at = NOW()
        WHERE id = $1 AND tenant_id = $4`,
-      [requestId, rejecterId, dto.reason ?? 'Ù…Ø±ÙÙˆØ¶', tenantId],
+      [requestId, rejecterId, dto.reason ?? 'مرفوض', tenantId],
     );
     await this.ds.query(
       `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, notes)
        VALUES ($1,$2,'request.rejected','requests','request',$3,$4)`,
       [tenantId, rejecterId, requestId, dto.reason ?? 'rejected'],
     ).catch(() => {});
-    return { success: true, message: 'ØªÙ… Ø±ÙØ¶ Ø§Ù„Ø·Ù„Ø¨' };
+    return { success: true, message: 'تم رفض الطلب' };
   }
 
   /** Cancel a request â€” only by the requesting employee, only while still pending */
@@ -715,14 +715,14 @@ export class RequestsService {
       `SELECT id, status, employee_id FROM requests WHERE id = $1 AND tenant_id = $2`,
       [requestId, tenantId],
     );
-    if (!rows.length) throw new NotFoundException('Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
+    if (!rows.length) throw new NotFoundException('الطلب غير موجود');
     const req = rows[0];
 
     if (req.employee_id !== employeeId) {
-      throw new BadRequestException('Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø¥Ù„ØºØ§Ø¡ Ø·Ù„Ø¨ Ù…ÙˆØ¸Ù Ø¢Ø®Ø±');
+      throw new BadRequestException('لا يمكن إلغاء طلب موظف آخر');
     }
     if (!['pending', 'peer_pending'].includes(req.status)) {
-      throw new BadRequestException('Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø¥Ù„ØºØ§Ø¡ Ø·Ù„Ø¨ ØªÙ…Øª Ù…Ø¹Ø§Ù„Ø¬ØªÙ‡');
+      throw new BadRequestException('لا يمكن إلغاء طلب تمت معالجته');
     }
 
     await this.ds.query(
@@ -731,7 +731,7 @@ export class RequestsService {
        WHERE id = $1 AND tenant_id = $2`,
       [requestId, tenantId],
     );
-    return { success: true, message: 'ØªÙ… Ø¥Ù„ØºØ§Ø¡ Ø§Ù„Ø·Ù„Ø¨' };
+    return { success: true, message: 'تم إلغاء الطلب' };
   }
 
   private async resolveUserIdOrNull(tenantId: string, userId: string | undefined): Promise<string | null> {
@@ -927,13 +927,13 @@ export class RequestsService {
       `SELECT id FROM employees WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
       [dto.employeeId, tenantId],
     );
-    if (!emp.length) throw new BadRequestException('Ø§Ù„Ù…ÙˆØ¸Ù ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯ Ø£Ùˆ ØºÙŠØ± Ù†Ø´Ø·');
+    if (!emp.length) throw new BadRequestException('الموظف غير موجود أو غير نشط');
 
     const rtRow = await this.ds.query(
       `SELECT id, sla_hours, requires_attachment FROM request_types WHERE code = $1 AND tenant_id = $2`,
       [dto.leaveType, tenantId],
     );
-    if (!rtRow.length) throw new BadRequestException(`Ù†ÙˆØ¹ Ø§Ù„Ø¥Ø¬Ø§Ø²Ø© '${dto.leaveType}' ØºÙŠØ± Ù…Ø¯Ø¹ÙˆÙ…`);
+    if (!rtRow.length) throw new BadRequestException(`نوع الإجازة '${dto.leaveType}' غير مدعوم`);
 
     const start = new Date(dto.startDate);
     const end   = new Date(dto.endDate);
@@ -941,9 +941,9 @@ export class RequestsService {
     if (dto.isHalfDay) durationDays = 0.5;
 
     if (dto.leaveType === 'death_leave' && durationDays > 3)
-      throw new BadRequestException('Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„ÙˆÙØ§Ø© ØªÙƒÙˆÙ† 3 Ø£ÙŠØ§Ù… ÙƒØ­Ø¯ Ø£Ù‚ØµÙ‰');
+      throw new BadRequestException('إجازة الوفاة تكون 3 أيام كحد أقصى');
     if (dto.leaveType === 'comp_off' && durationDays > 1)
-      throw new BadRequestException('Ø§Ù„ÙŠÙˆÙ… Ø§Ù„ØªØ¹ÙˆÙŠØ¶ÙŠ ÙŠÙˆÙ… ÙˆØ§Ø­Ø¯ ÙÙ‚Ø·');
+      throw new BadRequestException('اليوم التعويضي يوم واحد فقط');
 
     // Block over-requesting against the annual entitlement (only when one is set).
     await this.leaveBalances.assertCanRequest(
@@ -989,14 +989,14 @@ export class RequestsService {
     }
 
     const arabicNames: Record<string, string> = {
-      annual_leave: 'Ø§Ù„Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„Ø³Ù†ÙˆÙŠØ©', sick_leave: 'Ø§Ù„Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„Ù…Ø±Ø¶ÙŠØ©',
-      death_leave: 'Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„ÙˆÙØ§Ø©', comp_off: 'Ø§Ù„ÙŠÙˆÙ… Ø§Ù„ØªØ¹ÙˆÙŠØ¶ÙŠ', wfh: 'Ø§Ù„Ø¹Ù…Ù„ Ù…Ù† Ø§Ù„Ù…Ù†Ø²Ù„',
+      annual_leave: 'الإجازة السنوية', sick_leave: 'الإجازة المرضية',
+      death_leave: 'إجازة الوفاة', comp_off: 'اليوم التعويضي', wfh: 'العمل من المنزل',
     };
 
     return {
       id: requestId, status: 'pending', durationDays,
       campaignWarning: blackout?.name ?? null,
-      message: `ØªÙ… ØªÙ‚Ø¯ÙŠÙ… Ø·Ù„Ø¨ ${arabicNames[dto.leaveType] ?? dto.leaveType} Ø¨Ù†Ø¬Ø§Ø­`,
+      message: `تم تقديم طلب ${arabicNames[dto.leaveType] ?? dto.leaveType} بنجاح`,
     };
   }
 
@@ -1216,7 +1216,7 @@ export class RequestsService {
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [requestId, tenantId],
     );
-    if (!rows.length) throw new NotFoundException('Ø§Ù„Ø·Ù„Ø¨ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
+    if (!rows.length) throw new NotFoundException('الطلب غير موجود');
     return rows[0];
   }
 
@@ -1377,11 +1377,11 @@ export class RequestsService {
       type: req.type_code,
       requesterName: req.requester_name,
       targetName: req.target_name,
-      swapNote: 'ØªØ¨Ø§Ø¯Ù„ Ø§Ù„Ø´ÙŠÙØª Ù„Ø§ ÙŠØ¤Ø«Ø± Ø¹Ù„Ù‰ Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø¹Ø¯Ø¯ Ø§Ù„Ù…ÙˆØ¸ÙÙŠÙ†ØŒ Ù„ÙƒÙ†Ù‡ Ù‚Ø¯ ÙŠØ¤Ø«Ø± Ø¹Ù„Ù‰ Ø§Ù„ØªÙˆÙ‚ÙŠØª',
+      swapNote: 'تبادل الشيفت لا يؤثر على إجمالي عدد الموظفين، لكنه قد يؤثر على التوقيت',
       requesterDate: {
         date: reqDate,
         hcCount: parseInt(reqDateHc[0]?.hc ?? '0'),
-        requesterShift: req.req_shift_code ?? `${req.peer_accepted_at ? 'Ù…Ø¹ØªÙ…Ø¯' : 'Ù‚ÙŠØ¯ Ø§Ù„Ø§Ù†ØªØ¸Ø§Ø±'}`,
+        requesterShift: req.req_shift_code ?? `${req.peer_accepted_at ? 'معتمد' : 'قيد الانتظار'}`,
         risk: 'ok',
       },
       targetDate: {
