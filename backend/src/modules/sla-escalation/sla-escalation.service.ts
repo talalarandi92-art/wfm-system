@@ -28,6 +28,53 @@ export class SlaEscalationService implements OnModuleInit, OnModuleDestroy {
 
   private run() {
     this.escalateOverdue().catch(e => this.logger.warn(`SLA escalation pass failed: ${e.message}`));
+    this.escalateOverdueTechReports().catch(e => this.logger.warn(`Tech-report SLA pass failed: ${e.message}`));
+  }
+
+  /** Reviewers (RTA/WFM/Ops/Admin) for a tenant — notification recipients. */
+  private async reviewersFor(tid: string): Promise<string[]> {
+    const rows = await this.ds.query(
+      `SELECT DISTINCT u.id FROM users u
+         JOIN user_roles ur ON ur.user_id = u.id
+         JOIN roles r ON r.id = ur.role_id
+        WHERE u.tenant_id = $1 AND r.code IN ('rta','wfm_analyst','wfm_supervisor','operations_manager','platform_admin')`,
+      [tid],
+    ).catch(() => []);
+    return rows.map((x: any) => x.id);
+  }
+
+  /** Escalate technical issues whose 48h SLA has passed while still open. Idempotent via sla_escalated_at. */
+  async escalateOverdueTechReports(): Promise<number> {
+    const overdue = await this.ds.query(
+      `SELECT id, tenant_id, title, COALESCE(reporter_name,'—') AS reporter
+         FROM agent_tech_reports
+        WHERE status NOT IN ('resolved','rejected','escalated_to_outage')
+          AND sla_due_at IS NOT NULL AND sla_due_at < NOW()
+          AND sla_escalated_at IS NULL
+        LIMIT 500`,
+    ).catch(() => []);
+    if (!overdue.length) return 0;
+    let count = 0;
+    for (const t of overdue) {
+      await this.ds.query(`UPDATE agent_tech_reports SET sla_escalated_at = NOW(), updated_at = NOW() WHERE id = $1`, [t.id]).catch(() => {});
+      const reviewers = await this.reviewersFor(t.tenant_id);
+      const body = `مشكلة تقنية «${t.title}» (المُبلِّغ ${String(t.reporter).trim()}) تجاوزت SLA (48 ساعة) — تحتاج تحقّق/تصعيد عاجل`;
+      for (const uid of reviewers) {
+        await this.ds.query(
+          `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id)
+           VALUES ($1,$2,'tech_issue.sla_escalation','Tech issue past SLA','تصعيد SLA لمشكلة تقنية',$3,$3,'tech_issue',$4)`,
+          [t.tenant_id, uid, body, t.id],
+        ).catch(() => {});
+      }
+      await this.ds.query(
+        `INSERT INTO audit_logs (tenant_id, actor_id, actor_email, action, module, entity_type, entity_id, notes)
+         VALUES ($1, NULL, 'system', 'tech_issue.sla_escalated', 'technical-issues', 'tech_issue', $2, 'Auto-escalated on SLA breach')`,
+        [t.tenant_id, t.id],
+      ).catch(() => {});
+      count++;
+    }
+    if (count > 0) this.logger.log(`SLA escalation: ${count} overdue tech report(s) escalated`);
+    return count;
   }
 
   /** Escalate every overdue, not-yet-escalated, still-open request. Returns count. */

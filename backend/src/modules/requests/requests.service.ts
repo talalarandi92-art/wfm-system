@@ -771,6 +771,22 @@ export class RequestsService {
 
     const swapType = s.swap_type === 'off' ? 'off_swap' : 'shift_swap';
 
+    // Re-validate against the CURRENT schedule — conditions may have changed
+    // between submission and final approval. Block ONLY on a NEWLY-introduced
+    // hard violation (a rule that PASSED at submission but fails now); a rule that
+    // was already overridden at submission stays overridden.
+    const rInfo = await this.getShiftInfo(tenantId, s.requester_employee_id, s.requester_date);
+    const tInfo = await this.getShiftInfo(tenantId, s.target_employee_id, s.target_date);
+    if (rInfo && tInfo) {
+      const recheck = await this.validateSwap(tenantId, rInfo, tInfo);
+      if (s.gender_check_passed && !recheck.genderCheckPassed) {
+        throw new BadRequestException(`تعذّر تطبيق التبديل — تغيّرت الظروف وظهرت مخالفة قاعدة الجنس الآن: ${recheck.genderWarning}`);
+      }
+      if (s.rest_check_passed && !recheck.restCheckPassed) {
+        throw new BadRequestException(`تعذّر تطبيق التبديل — تغيّرت الظروف وظهرت مخالفة قاعدة الراحة الآن: ${recheck.restWarning}`);
+      }
+    }
+
     // Approver attribution for the version-history entries
     let approverEmail: string | null = null;
     if (approverUserId) {

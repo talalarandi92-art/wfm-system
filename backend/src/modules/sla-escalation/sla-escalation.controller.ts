@@ -16,9 +16,10 @@ export class SlaEscalationController {
   @Post('escalate-overdue')
   @RequirePermissions('rta.override')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Escalate all overdue (SLA-breached) pending requests now' })
+  @ApiOperation({ summary: 'Escalate all overdue (SLA-breached) pending requests + tech issues now' })
   async escalateNow() {
     const escalated = await this.svc.escalateOverdue();
-    return { ok: true, escalated };
+    const techEscalated = await this.svc.escalateOverdueTechReports();
+    return { ok: true, escalated, techEscalated };
   }
 }
