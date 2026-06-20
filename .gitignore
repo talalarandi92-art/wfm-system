@@ -41,7 +41,11 @@ logs/
 *.log
 
 # --- Test coverage ---
-coverage/
+# Anchored to repo root + build dirs so it never swallows the
+# src/modules/coverage source module (Jest output only).
+/coverage/
+/backend/coverage/
+/frontend/coverage/
 .nyc_output/
 
 # --- Uploads / user data (never commit real files) ---
