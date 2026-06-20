@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 
 /**
  * Ameyo bridge ingest — receives live-monitoring snapshots scraped by the Ameyo
@@ -52,6 +53,7 @@ export class AmeyoController {
 
   @Get('live')
   @UseGuards(JwtAuthGuard)
+  @RequirePermissions('rta.view')   // live telephony wallboard — RTA/WFM, not agents
   @ApiOperation({ summary: 'Latest Ameyo snapshot' })
   async live(@Request() req: any) {
     const [row] = await this.ds.query(

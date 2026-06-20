@@ -11,7 +11,7 @@ import { CreateGroupDto, AssignMembersDto } from './rotation.types';
 @ApiTags('Schedule Rotation')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@RequirePermissions('schedule.view')   // read for management + RTA; write ops gated by schedule.edit below
+@RequirePermissions('hc.view')   // org-wide rotation/shift-rate planning (WFM/RTA/TL); not an agent self-view
 @Controller('schedule-rotation')
 export class RotationController {
   constructor(private readonly svc: RotationService) {}

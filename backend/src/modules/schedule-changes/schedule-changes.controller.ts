@@ -5,6 +5,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 /**
@@ -15,12 +16,14 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 @ApiTags('Schedule Changes')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('requests.view_own')   // agents submit + see own; team/all view & approval relaxed/raised per method
 @Controller({ path: 'schedule-changes', version: '1' })
 export class ScheduleChangesController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
   /* ── Create ───────────────────────────────────────────────────────────── */
   @Post()
+  @RequirePermissions('requests.create')
   @ApiOperation({ summary: 'Submit a schedule change request' })
   async create(@CurrentUser() user: any, @Body() body: any) {
     const tid = user.tenantId;
@@ -75,6 +78,13 @@ export class ScheduleChangesController {
   ) {
     const params: any[] = [user.tenantId];
     const conds: string[] = [];
+    // Self-scope: only team/all viewers see everyone; agents see their own rows.
+    const perms = user.permissionCodes ?? user.permissions ?? [];
+    const canSeeAll = perms.includes('requests.view_team') || perms.includes('requests.view_all');
+    if (!canSeeAll) {
+      params.push(user.employeeId ?? '00000000-0000-0000-0000-000000000000');
+      conds.push(`r.employee_id = $${params.length}`);
+    }
     if (status) { params.push(status); conds.push(`r.status = $${params.length}`); }
     if (from)   { params.push(from);   conds.push(`sc.change_date >= $${params.length}`); }
     if (to)     { params.push(to);     conds.push(`sc.change_date <= $${params.length}`); }
@@ -113,6 +123,7 @@ export class ScheduleChangesController {
 
   /* ── Approve + apply to attendance_records (scheduled shift) ───────────── */
   @Post(':id/approve')
+  @RequirePermissions('requests.approve_l1')
   @ApiOperation({ summary: 'Approve a schedule change and apply it' })
   async approve(@Param('id') id: string, @CurrentUser() user: any) {
     const tid = user.tenantId;
@@ -174,6 +185,7 @@ export class ScheduleChangesController {
 
   /* ── Reject ───────────────────────────────────────────────────────────── */
   @Post(':id/reject')
+  @RequirePermissions('requests.approve_l1')
   @ApiOperation({ summary: 'Reject a schedule change' })
   async reject(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
     await this.ds.query(

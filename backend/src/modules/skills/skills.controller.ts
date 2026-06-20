@@ -6,11 +6,13 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 @ApiTags('Skills')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('hc.view')   // cross-skill matrix/gaps are WFM planning, not agent self-views
 @Controller({ path: 'skills', version: '1' })
 export class SkillsController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}

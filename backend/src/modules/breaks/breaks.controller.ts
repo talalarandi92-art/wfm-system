@@ -4,11 +4,13 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { BreaksService } from './breaks.service';
 
 @ApiTags('Breaks')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('hc.view')   // WFM break planning by default; agent-facing methods relax below
 @Controller('breaks')
 export class BreaksController {
   constructor(private readonly breaksService: BreaksService) {}
@@ -49,6 +51,7 @@ export class BreaksController {
 
   // ── My breaks (agent self-view) ───────────────────────────────────────────────
   @Get('my-breaks')
+  @RequirePermissions('attendance.view_own')
   @ApiOperation({ summary: 'Get my break schedule (agent self-view)' })
   getMyBreaks(@Request() req: any, @Query('date') date: string) {
     if (!req.user.employeeId) return [];
@@ -101,6 +104,7 @@ export class BreaksController {
 
   // ── Break requests: submit ────────────────────────────────────────────────────
   @Post('requests')
+  @RequirePermissions('requests.create')
   @ApiOperation({ summary: 'Submit a break change request' })
   @HttpCode(HttpStatus.CREATED)
   submitRequest(
@@ -172,6 +176,7 @@ export class BreaksController {
 
   // ── Break types ───────────────────────────────────────────────────────────────
   @Get('types')
+  @RequirePermissions('schedule.view')   // reference list, also used by agent break UI
   @ApiOperation({ summary: 'List break types' })
   getBreakTypes(@Request() req: any) {
     return this.breaksService.getBreakTypes(req.user.tenantId);
@@ -179,6 +184,7 @@ export class BreaksController {
 
   // ── Prayer times ──────────────────────────────────────────────────────────────
   @Get('prayer-times')
+  @RequirePermissions('schedule.view')   // reference, visible to all staff
   @ApiOperation({ summary: 'Get prayer times for a date' })
   getPrayerTimes(@Request() req: any, @Query('date') date: string) {
     return this.breaksService.getPrayerTimes(req.user.tenantId, date);

@@ -6,6 +6,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 @ApiTags('Calendar')
@@ -83,6 +84,7 @@ export class CalendarController {
 
   /* ── Create event ────────────────────────────────────────────────────── */
   @Post('events')
+  @RequirePermissions('schedule.edit')   // creating org/company events is a management action
   @ApiOperation({ summary: 'Create a calendar event' })
   async createEvent(@CurrentUser() user: any, @Body() body: any) {
     const tid = user.tenantId;
@@ -188,6 +190,7 @@ export class CalendarController {
 
   /* ── Update event status ─────────────────────────────────────────────── */
   @Patch('events/:id')
+  @RequirePermissions('schedule.edit')
   @ApiOperation({ summary: 'Update a calendar event' })
   async updateEvent(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
     const allowed = ['title', 'start_at', 'end_at', 'location', 'description', 'status', 'color'];
@@ -208,6 +211,7 @@ export class CalendarController {
 
   /* ── Delete event ────────────────────────────────────────────────────── */
   @Delete('events/:id')
+  @RequirePermissions('schedule.edit')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a calendar event' })
   async deleteEvent(@Param('id') id: string, @CurrentUser() user: any) {
@@ -255,6 +259,13 @@ export class CalendarController {
     const tid = user.tenantId;
     const from_ = from ?? new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
     const to_   = to   ?? new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    // Self-scope: agents (no coaching/team-scorecard view) see only their own sessions.
+    const perms = user.permissionCodes ?? user.permissions ?? [];
+    const canSeeAll = perms.includes('coaching.view') || perms.includes('scorecard.view_team') || perms.includes('scorecard.view_all');
+    if (!canSeeAll) {
+      if (!user.employeeId) return [];
+      employeeId = user.employeeId;
+    }
     const params: any[] = [tid, from_, to_];
     const filters: string[] = [];
     if (employeeId) { params.push(employeeId); filters.push(`cs.employee_id = $${params.length}`); }
@@ -301,6 +312,7 @@ export class CalendarController {
 
   /* ── Cross-skill gap suggestions ─────────────────────────────────────── */
   @Get('cross-skill/gaps')
+  @RequirePermissions('hc.view')   // WFM cross-skill coverage analysis
   @ApiOperation({ summary: 'Detect cross-skill coverage gaps and suggest agents' })
   async crossSkillGaps(
     @CurrentUser() user: any,

@@ -1,7 +1,7 @@
 import {
   Controller, Get, Post, Patch, Delete,
   Param, Query, Body, UseGuards, UseInterceptors, UploadedFile,
-  BadRequestException, UnauthorizedException, Res,
+  BadRequestException, UnauthorizedException, ForbiddenException, Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -90,6 +90,12 @@ export class TechnicalIssuesController {
     let p = 2;
     if (status)   { wheres.push(`ti.status = $${p++}`);   params.push(status); }
     if (severity) { wheres.push(`ti.severity = $${p++}`); params.push(severity); }
+    // Self-scope: agents (no tech_issues.view) see only the reports they filed.
+    const perms = user?.permissionCodes ?? user?.permissions ?? [];
+    if (!perms.includes('tech_issues.view')) {
+      wheres.push(`ti.reporter_id = $${p++}`);
+      params.push(user?.userId ?? user?.sub ?? '00000000-0000-0000-0000-000000000000');
+    }
 
     const where = wheres.join(' AND ');
     const [rows, cntRows] = await Promise.all([
@@ -109,6 +115,7 @@ export class TechnicalIssuesController {
 
   // ── Create (with optional first attachment) ───────────────────────────────
   @Post()
+  @RequirePermissions('tech_issues.create')
   @UseInterceptors(FileInterceptor('file', { storage, fileFilter, limits: { fileSize: 100 * 1024 * 1024 } }))
   async create(
     @CurrentUser() user: any,
@@ -161,6 +168,11 @@ export class TechnicalIssuesController {
       `SELECT * FROM agent_tech_reports WHERE id = $1 AND tenant_id = $2`, [id, tid],
     );
     if (!issue) throw new BadRequestException('Issue not found');
+    // Non-viewers (agents) may only open their own report.
+    const perms = user?.permissionCodes ?? user?.permissions ?? [];
+    if (!perms.includes('tech_issues.view') && issue.reporter_id !== (user?.userId ?? user?.sub)) {
+      throw new ForbiddenException('Not allowed to view this report');
+    }
 
     const attachments = await this.ds.query(
       `SELECT * FROM agent_tech_report_attachments WHERE report_id = $1 ORDER BY created_at ASC`, [id],
@@ -309,6 +321,7 @@ export class TechnicalIssuesController {
 
   // ── Resolve ────────────────────────────────────────────────────────────────
   @Patch(':id/resolve')
+  @RequirePermissions('tech_issues.resolve')
   async resolve(
     @CurrentUser() user: any,
     @Param('id') id: string,
@@ -335,6 +348,10 @@ export class TechnicalIssuesController {
       `SELECT * FROM agent_tech_reports WHERE id = $1 AND tenant_id = $2`, [id, tid],
     );
     if (!issue) throw new BadRequestException('Issue not found');
+    const perms = user?.permissionCodes ?? user?.permissions ?? [];
+    if (!perms.includes('tech_issues.view') && issue.reporter_id !== (user?.userId ?? user?.sub)) {
+      throw new ForbiddenException('Not allowed to view this report');
+    }
 
     const attachments = await this.ds.query(
       `SELECT * FROM agent_tech_report_attachments WHERE report_id = $1 ORDER BY created_at ASC`, [id],

@@ -5,6 +5,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 /**
@@ -15,6 +16,7 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 @ApiTags('Attendance Corrections')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('requests.view_own')   // agents submit + see own; team view & approval per method
 @Controller({ path: 'attendance-corrections', version: '1' })
 export class AttendanceCorrectionsController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
@@ -24,6 +26,7 @@ export class AttendanceCorrectionsController {
 
   /* ── Create ───────────────────────────────────────────────────────────── */
   @Post()
+  @RequirePermissions('requests.create')
   @ApiOperation({ summary: 'Submit an attendance correction request' })
   async create(@CurrentUser() user: any, @Body() body: any) {
     const tid = user.tenantId;
@@ -71,6 +74,13 @@ export class AttendanceCorrectionsController {
   ) {
     const params: any[] = [user.tenantId];
     const conds: string[] = [];
+    // Self-scope: only team/all viewers see everyone; agents see their own rows.
+    const perms = user.permissionCodes ?? user.permissions ?? [];
+    const canSeeAll = perms.includes('requests.view_team') || perms.includes('requests.view_all');
+    if (!canSeeAll) {
+      params.push(user.employeeId ?? '00000000-0000-0000-0000-000000000000');
+      conds.push(`r.employee_id = $${params.length}`);
+    }
     if (status) { params.push(status); conds.push(`r.status = $${params.length}`); }
     if (from)   { params.push(from);   conds.push(`ac.attendance_date >= $${params.length}`); }
     if (to)     { params.push(to);     conds.push(`ac.attendance_date <= $${params.length}`); }
@@ -113,6 +123,7 @@ export class AttendanceCorrectionsController {
 
   /* ── Approve + apply to attendance_records ────────────────────────────── */
   @Post(':id/approve')
+  @RequirePermissions('requests.approve_l1')
   @ApiOperation({ summary: 'Approve a correction and apply it to attendance' })
   async approve(@Param('id') id: string, @CurrentUser() user: any) {
     const tid = user.tenantId;
@@ -168,6 +179,7 @@ export class AttendanceCorrectionsController {
 
   /* ── Reject ───────────────────────────────────────────────────────────── */
   @Post(':id/reject')
+  @RequirePermissions('requests.approve_l1')
   @ApiOperation({ summary: 'Reject a correction' })
   async reject(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
     await this.ds.query(

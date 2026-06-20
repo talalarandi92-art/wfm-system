@@ -3,11 +3,13 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 @ApiTags('Dashboard')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('reports.view')   // org-wide KPI dashboard — WFM/TL/RTA, not agents
 @Controller({ path: 'dashboard', version: '1' })
 export class DashboardController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}

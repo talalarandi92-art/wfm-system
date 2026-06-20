@@ -1,12 +1,14 @@
 import { Controller, Get, Post, Param, Query, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { CoachingService } from './coaching.service';
 
 @ApiTags('Coaching')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('coaching.view')   // coaching management (flags/sessions) = TL/WFM; agents see own coaching via /calendar/coaching
 @Controller({ path: 'coaching', version: '1' })
 export class CoachingController {
   constructor(private readonly svc: CoachingService) {}
@@ -20,6 +22,7 @@ export class CoachingController {
 
   /** Run the trigger scan for this tenant now. */
   @Post('scan')
+  @RequirePermissions('coaching.create')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Scan attendance for coaching triggers now' })
   async scan(@CurrentUser() user: any) {
@@ -28,6 +31,7 @@ export class CoachingController {
   }
 
   @Post('flags/:id/address')
+  @RequirePermissions('coaching.edit')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a flag as addressed (coached)' })
   address(@Param('id') id: string, @CurrentUser() user: any) {
@@ -35,6 +39,7 @@ export class CoachingController {
   }
 
   @Post('flags/:id/dismiss')
+  @RequirePermissions('coaching.edit')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Dismiss a flag' })
   dismiss(@Param('id') id: string, @CurrentUser() user: any, @Body() _body: any) {
@@ -42,6 +47,7 @@ export class CoachingController {
   }
 
   @Post('flags/:id/schedule-session')
+  @RequirePermissions('coaching.edit')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Schedule a 1:1 coaching session from a flag' })
   scheduleSession(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {

@@ -28,6 +28,7 @@ export class PermissionRequestController {
   }
 
   @Get()
+  @RequirePermissions('requests.view_team')   // WFM permission-impact queue; agents see own via /me/attendance
   @ApiOperation({ summary: 'List permission requests' })
   list(
     @CurrentUser() user: any,
@@ -51,12 +52,14 @@ export class PermissionRequestController {
   }
 
   @Get('employees')
+  @RequirePermissions('requests.view_team')   // employee selector — supervisors only
   @ApiOperation({ summary: 'Get active employees for selector' })
   employees(@CurrentUser() user: any) {
     return this.svc.getEmployees(this.tid(user));
   }
 
   @Get('weekly-usage')
+  @RequirePermissions('requests.view_team')   // any-employee quota lookup — supervisors only
   @ApiOperation({ summary: 'Get weekly permission quota usage for an employee' })
   weeklyUsage(
     @CurrentUser() user: any,
