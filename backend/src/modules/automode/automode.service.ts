@@ -93,25 +93,26 @@ export class AutoModeService implements OnModuleInit, OnModuleDestroy {
       const v = req.function_id ? await verdictFor(date, req.function_id) : null;
       let decision: 'approve' | 'reject' | 'hold' = 'hold';
       let reason = 'لا توجد قراءة تغطية كافية — تُرك للمراجعة البشرية.';
+      let reasonCode = 'hold_no_coverage';
       if (v) {
-        if (v.verdict === 'approve' && s.auto_approve) { decision = 'approve'; reason = `فائض آمن بالقسم ${req.function_name} (هامش ${v.gap})`; }
-        else if (v.verdict === 'danger' && s.auto_reject) { decision = 'reject'; reason = `نقص تغطية بالقسم ${req.function_name} (${-v.gap} عند ${pad(v.hour)})`; }
-        else reason = `تغطية ${v.verdict} بالقسم ${req.function_name} — تُرك للمراجعة.`;
+        if (v.verdict === 'approve' && s.auto_approve) { decision = 'approve'; reason = `فائض آمن بالقسم ${req.function_name} (هامش ${v.gap})`; reasonCode = 'approve_surplus'; }
+        else if (v.verdict === 'danger' && s.auto_reject) { decision = 'reject'; reason = `نقص تغطية بالقسم ${req.function_name} (${-v.gap} عند ${pad(v.hour)})`; reasonCode = 'reject_shortfall'; }
+        else { reason = `تغطية ${v.verdict} بالقسم ${req.function_name} — تُرك للمراجعة.`; reasonCode = 'hold_verdict'; }
       }
-      await this.apply(tid, req, decision, reason, v, s.updated_by);
+      await this.apply(tid, req, decision, reason, reasonCode, v, s.updated_by);
       if (decision !== 'hold') acted++;
     }
     if (acted) this.log.log(`tenant ${tid}: auto-decided ${acted} request(s)`);
     return { acted };
   }
 
-  private async apply(tid: string, req: any, decision: 'approve' | 'reject' | 'hold', reason: string, metrics: any, actor: string | null) {
+  private async apply(tid: string, req: any, decision: 'approve' | 'reject' | 'hold', reason: string, reasonCode: string, metrics: any, actor: string | null) {
     // Record the decision (hold included, but only act on approve/reject).
     await this.ds.query(
-      `INSERT INTO automode_decisions (tenant_id, request_id, request_type, decision, reason, function_name, scope_date, metrics)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+      `INSERT INTO automode_decisions (tenant_id, request_id, request_type, decision, reason, reason_code, function_name, scope_date, metrics)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
        ON CONFLICT (request_id) WHERE (decision IN ('approve','reject')) DO NOTHING`,
-      [tid, req.id, req.type, decision, reason, req.function_name, req.pdate ?? null, JSON.stringify(metrics ?? {})],
+      [tid, req.id, req.type, decision, reason, reasonCode, req.function_name, req.pdate ?? null, JSON.stringify(metrics ?? {})],
     ).catch(() => {});
     if (decision === 'hold') return;
 
@@ -166,15 +167,18 @@ export class AutoModeService implements OnModuleInit, OnModuleDestroy {
     // Why is it holding everything? Surface the dominant hold reason so the
     // Auto Mode panel reads as "working but conservative", not "dead at 0/0".
     const [topHold] = await this.ds.query(
-      `SELECT reason, COUNT(*)::int n FROM automode_decisions
+      `SELECT reason, COALESCE(reason_code,'hold_no_coverage') reason_code, function_name, COUNT(*)::int n
+         FROM automode_decisions
          WHERE tenant_id = $1 AND decision='hold' AND decided_at > NOW() - INTERVAL '24 hours'
-         GROUP BY reason ORDER BY n DESC LIMIT 1`, [tid]).catch(() => [{}]);
+         GROUP BY reason, reason_code, function_name ORDER BY n DESC LIMIT 1`, [tid]).catch(() => [{}]);
     return {
       enabled: s.enabled, autoApprove: s.auto_approve, autoReject: s.auto_reject,
       allowedTypes: s.allowed_types,
       approved: c?.approved ?? 0, rejected: c?.rejected ?? 0,
       held: c?.held ?? 0, last24: c?.last24 ?? 0,
+      // Language-neutral so the UI can render bilingually; topHoldReason kept for back-compat.
       topHoldReason: topHold?.reason ?? null, topHoldCount: topHold?.n ?? 0,
+      topHoldCode: topHold?.reason_code ?? null, topHoldFunction: topHold?.function_name ?? null,
     };
   }
 }

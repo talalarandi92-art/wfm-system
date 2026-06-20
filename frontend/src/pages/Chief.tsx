@@ -16,7 +16,7 @@ interface Briefing {
   date: string; posture: Sev; directive: string; llm: boolean; executiveBrief: string;
   domains: Domain[]; priorities: Priority[];
   learning: { learnedSamples: number; decisionsLogged: number };
-  autoMode: { enabled: boolean; autoApprove: boolean; autoReject: boolean; allowedTypes: string[]; approved: number; rejected: number; held?: number; last24: number; topHoldReason?: string | null; topHoldCount?: number } | null;
+  autoMode: { enabled: boolean; autoApprove: boolean; autoReject: boolean; allowedTypes: string[]; approved: number; rejected: number; held?: number; last24: number; topHoldReason?: string | null; topHoldCount?: number; topHoldCode?: string | null; topHoldFunction?: string | null } | null;
   selfTest: { passed: number; total: number; probes: { name: string; ok: boolean }[] } | null;
   lastReport: any;
 }
@@ -228,9 +228,21 @@ export default function ChiefPage() {
                 <div className="flex items-start gap-2 text-[11px] px-3 py-2 rounded-xl mb-2" style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)', color: '#fcd34d' }}>
                   <Info size={13} className="mt-0.5 flex-shrink-0" />
                   <span>
-                    {ar
-                      ? `الوضع التلقائي شغّال ويقيّم الطلبات، لكنه يحجبها كلها للمراجعة لأن التغطية غير آمنة حالياً — لا يوافق إلا عند وجود فائض آمن. ${data.autoMode.topHoldReason ? 'أكثر سبب: ' + data.autoMode.topHoldReason : ''}`
-                      : `Auto Mode is running and evaluating requests, but holding them all for review because coverage isn't safe right now — it only approves when there's a safe surplus. ${data.autoMode.topHoldReason ? 'Top reason: ' + data.autoMode.topHoldReason : ''}`}
+                    {(() => {
+                      const fn = data.autoMode!.topHoldFunction ?? '';
+                      const codeText = (() => {
+                        switch (data.autoMode!.topHoldCode) {
+                          case 'hold_no_coverage': return ar ? 'لا توجد قراءة تغطية كافية' : 'no sufficient coverage reading';
+                          case 'hold_verdict':     return ar ? `التغطية غير آمنة${fn ? ' بالقسم ' + fn : ''}` : `coverage not safe${fn ? ' in ' + fn : ''}`;
+                          case 'reject_shortfall': return ar ? `نقص تغطية${fn ? ' بالقسم ' + fn : ''}` : `coverage shortfall${fn ? ' in ' + fn : ''}`;
+                          default: return data.autoMode!.topHoldReason ?? '';
+                        }
+                      })();
+                      const lead = ar
+                        ? 'الوضع التلقائي شغّال ويقيّم الطلبات، لكنه يحجبها كلها للمراجعة لأن التغطية غير آمنة حالياً — لا يوافق إلا عند وجود فائض آمن.'
+                        : "Auto Mode is running and evaluating requests, but holding them all for review because coverage isn't safe right now — it only approves when there's a safe surplus.";
+                      return `${lead}${codeText ? (ar ? ' أكثر سبب: ' : ' Top reason: ') + codeText : ''}`;
+                    })()}
                   </span>
                 </div>
               )}
