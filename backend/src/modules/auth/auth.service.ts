@@ -340,4 +340,43 @@ export class AuthService {
       },
     };
   }
+
+  /**
+   * Self-service password change: verify the current password, enforce the
+   * strength policy, rotate the hash, clear the must-change flag, and invalidate
+   * any active refresh token so other sessions are forced to re-authenticate.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string, ip?: string, userAgent?: string) {
+    const user = await this.usersRepo
+      .createQueryBuilder('u')
+      .addSelect('u.passwordHash')
+      .where('u.id = :id', { id: userId })
+      .getOne();
+    if (!user) throw new UnauthorizedException('User not found');
+
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) throw new UnauthorizedException('Current password is incorrect');
+
+    if (!newPassword || newPassword.length < 10)
+      throw new ForbiddenException('Password must be at least 10 characters.');
+    if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword))
+      throw new ForbiddenException('Password must include lowercase, uppercase, and a digit.');
+    if (await bcrypt.compare(newPassword, user.passwordHash))
+      throw new ForbiddenException('New password must differ from the current one.');
+
+    const rounds = this.config.get<number>('BCRYPT_ROUNDS', 12);
+    const hash = await bcrypt.hash(newPassword, rounds);
+    await this.usersRepo.update(userId, {
+      passwordHash: hash,
+      mustChangePassword: false,
+      passwordChangedAt: new Date(),
+      refreshTokenHash: null,
+    } as any);
+
+    await this.writeAudit({
+      tenantId: user.tenantId, actorId: user.id, actorEmail: user.email,
+      action: 'auth.password_changed', entityId: user.id, ip, userAgent,
+    });
+    return { message: 'Password changed. Please sign in again on other devices.' };
+  }
 }

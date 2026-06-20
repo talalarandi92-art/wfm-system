@@ -9,6 +9,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { Public } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
@@ -55,6 +56,17 @@ export class AuthController {
       (user as any).email ?? user.email,
       (user as any).jti,  // JTI attached by JwtStrategy.validate() for blacklisting
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Change own password — verifies current, enforces policy, rotates sessions' })
+  changePassword(@CurrentUser() user: User, @Body() dto: ChangePasswordDto, @Req() req: Request) {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip;
+    return this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword, ip, req.headers['user-agent']);
   }
 
   @UseGuards(JwtAuthGuard)
