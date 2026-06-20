@@ -71,8 +71,8 @@ apiClient.interceptors.response.use(
 );
 
 export const authApi = {
-  login: (email: string, password: string) =>
-    apiClient.post('/auth/login', { email, password }),
+  login: (email: string, password: string, mfaCode?: string) =>
+    apiClient.post('/auth/login', { email, password, ...(mfaCode ? { mfaCode } : {}) }),
   logout: () => apiClient.post('/auth/logout'),
   me: () => apiClient.get('/auth/me'),
 };

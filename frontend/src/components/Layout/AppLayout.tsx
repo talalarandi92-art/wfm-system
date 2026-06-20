@@ -94,6 +94,35 @@ export default function AppLayout() {
     } finally { setPwBusy(false); }
   };
 
+  // ── MFA (two-factor) ───────────────────────────────────────────────────────
+  const [mfaOpen, setMfaOpen]   = useState(false);
+  const [mfaOn, setMfaOn]       = useState<boolean>(!!(user as any)?.mfaEnabled);
+  const [mfaSecret, setMfaSecret] = useState('');
+  const [mfaUri, setMfaUri]     = useState('');
+  const [mfaCode, setMfaCode]   = useState('');
+  const [mfaPw, setMfaPw]       = useState('');
+  const [mfaMsg, setMfaMsg]     = useState<{ ok: boolean; text: string } | null>(null);
+  const [mfaBusy, setMfaBusy]   = useState(false);
+  const openMfa = () => { setMfaOpen(true); setMenuOpen(false); setMfaMsg(null); setMfaSecret(''); setMfaUri(''); setMfaCode(''); setMfaPw(''); };
+  const mfaSetup = async () => {
+    setMfaBusy(true); setMfaMsg(null);
+    try { const { data } = await apiClient.post('/auth/mfa/setup'); setMfaSecret(data.secret); setMfaUri(data.otpauthUrl); }
+    catch (e: any) { setMfaMsg({ ok: false, text: e?.response?.data?.message || 'Error' }); }
+    finally { setMfaBusy(false); }
+  };
+  const mfaEnable = async () => {
+    setMfaBusy(true); setMfaMsg(null);
+    try { await apiClient.post('/auth/mfa/enable', { token: mfaCode }); setMfaOn(true); setMfaSecret(''); setMfaUri(''); setMfaCode(''); setMfaMsg({ ok: true, text: ar ? 'تم تفعيل المصادقة الثنائية' : 'Two-factor enabled' }); }
+    catch (e: any) { setMfaMsg({ ok: false, text: e?.response?.data?.message || (ar ? 'رمز غير صحيح' : 'Invalid code') }); }
+    finally { setMfaBusy(false); }
+  };
+  const mfaDisable = async () => {
+    setMfaBusy(true); setMfaMsg(null);
+    try { await apiClient.post('/auth/mfa/disable', { password: mfaPw, token: mfaCode }); setMfaOn(false); setMfaCode(''); setMfaPw(''); setMfaMsg({ ok: true, text: ar ? 'تم تعطيل المصادقة الثنائية' : 'Two-factor disabled' }); }
+    catch (e: any) { setMfaMsg({ ok: false, text: e?.response?.data?.message || (ar ? 'تحقق غير صحيح' : 'Verification failed') }); }
+    finally { setMfaBusy(false); }
+  };
+
   // ── Notifications ──────────────────────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifs, setNotifs]       = useState<any[]>([]);
@@ -358,6 +387,20 @@ export default function AppLayout() {
                       {ar ? 'تغيير كلمة المرور' : 'Change password'}
                     </button>
 
+                    {/* Two-factor */}
+                    <button
+                      onClick={openMfa}
+                      className="w-full flex items-center justify-between gap-3 px-4 py-2.5 text-sm
+                                 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white
+                                 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors duration-150 rounded-xl mx-0.5"
+                    >
+                      <span className="flex items-center gap-3"><KeyRound size={15} />{ar ? 'المصادقة الثنائية' : 'Two-factor (MFA)'}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full"
+                        style={{ background: mfaOn ? 'rgba(34,197,94,0.15)' : 'rgba(100,116,139,0.15)', color: mfaOn ? '#22c55e' : '#94a3b8' }}>
+                        {mfaOn ? (ar ? 'مُفعّل' : 'ON') : (ar ? 'متوقّف' : 'OFF')}
+                      </span>
+                    </button>
+
                     {/* Logout */}
                     <button
                       onClick={() => { logout(); setMenuOpen(false); }}
@@ -407,6 +450,49 @@ export default function AppLayout() {
               <button onClick={submitPw} disabled={pwBusy || !pwCur || !pwNew} className="btn-primary w-full text-sm justify-center">
                 {pwBusy ? '…' : (ar ? 'تغيير' : 'Change password')}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Two-factor (MFA) modal */}
+        {mfaOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            style={{ background: 'rgba(2,6,23,0.6)', backdropFilter: 'blur(4px)' }} onClick={() => setMfaOpen(false)}>
+            <div className="w-full max-w-sm rounded-2xl p-5" onClick={e => e.stopPropagation()}
+              style={{ background: dark ? '#0c1628' : '#fff', border: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` }}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-sm font-bold" style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>
+                  <KeyRound size={16} style={{ color: '#818cf8' }} /> {ar ? 'المصادقة الثنائية (MFA)' : 'Two-factor (MFA)'}
+                </div>
+                <button onClick={() => setMfaOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+              </div>
+
+              {mfaOn ? (
+                <>
+                  <p className="text-xs mb-3" style={{ color: '#94a3b8' }}>{ar ? 'لإيقاف المصادقة الثنائية أدخل كلمة المرور ورمزاً حالياً.' : 'To disable, enter your password and a current code.'}</p>
+                  <input type="password" value={mfaPw} onChange={e => setMfaPw(e.target.value)} placeholder={ar ? 'كلمة المرور' : 'Password'}
+                    className="w-full mb-2.5 rounded-xl px-3 py-2.5 text-sm outline-none" style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, color: dark ? '#e2e8f0' : '#0f172a' }} />
+                  <input value={mfaCode} onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="123456"
+                    className="w-full mb-3 rounded-xl px-3 py-2.5 text-center tracking-[0.3em] outline-none" style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, color: dark ? '#e2e8f0' : '#0f172a' }} />
+                  {mfaMsg && <p className="text-xs mb-3 font-medium" style={{ color: mfaMsg.ok ? '#22c55e' : '#ef4444' }}>{mfaMsg.text}</p>}
+                  <button onClick={mfaDisable} disabled={mfaBusy || !mfaPw || mfaCode.length !== 6} className="btn-danger w-full text-sm justify-center">{ar ? 'إيقاف' : 'Disable'}</button>
+                </>
+              ) : !mfaSecret ? (
+                <>
+                  <p className="text-xs mb-3" style={{ color: '#94a3b8' }}>{ar ? 'فعّل طبقة حماية إضافية بتطبيق مصادقة (Google Authenticator، Authy…).' : 'Add an extra layer with an authenticator app (Google Authenticator, Authy…).'}</p>
+                  {mfaMsg && <p className="text-xs mb-3 font-medium" style={{ color: mfaMsg.ok ? '#22c55e' : '#ef4444' }}>{mfaMsg.text}</p>}
+                  <button onClick={mfaSetup} disabled={mfaBusy} className="btn-primary w-full text-sm justify-center">{ar ? 'تفعيل المصادقة الثنائية' : 'Enable two-factor'}</button>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs mb-2" style={{ color: '#94a3b8' }}>{ar ? 'أضف هذا المفتاح في تطبيق المصادقة، ثم أدخل الرمز:' : 'Add this key to your authenticator app, then enter the code:'}</p>
+                  <div className="rounded-xl px-3 py-2 mb-2 text-center font-mono text-xs break-all" style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.25)' }}>{mfaSecret}</div>
+                  <input value={mfaCode} onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder="123456" autoFocus
+                    className="w-full mb-3 rounded-xl px-3 py-2.5 text-center tracking-[0.3em] outline-none" style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, color: dark ? '#e2e8f0' : '#0f172a' }} />
+                  {mfaMsg && <p className="text-xs mb-3 font-medium" style={{ color: mfaMsg.ok ? '#22c55e' : '#ef4444' }}>{mfaMsg.text}</p>}
+                  <button onClick={mfaEnable} disabled={mfaBusy || mfaCode.length !== 6} className="btn-primary w-full text-sm justify-center">{ar ? 'تحقّق وفعّل' : 'Verify & enable'}</button>
+                </>
+              )}
             </div>
           </div>
         )}

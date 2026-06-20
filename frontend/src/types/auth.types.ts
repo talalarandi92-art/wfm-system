@@ -33,7 +33,7 @@ export interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, mfaCode?: string) => Promise<{ mfaRequired?: boolean }>;
   logout: () => void;
   setTokens: (access: string, refresh: string, user: AuthUser) => void;
   hasPermission: (code: string) => boolean;

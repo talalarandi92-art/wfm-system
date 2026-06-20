@@ -25,12 +25,19 @@ export default function Login() {
   const [showPass, setShowPass] = useState(false);
   const [error,    setError]    = useState('');
   const [focused,  setFocused]  = useState<'email' | 'pass' | null>(null);
+  const [mfaStep,  setMfaStep]  = useState(false);
+  const [mfaCode,  setMfaCode]  = useState('');
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     try {
-      await login(email, password);
+      const r = await login(email, password, mfaStep ? mfaCode : undefined);
+      if (r?.mfaRequired) {
+        setMfaStep(true);
+        if (mfaStep) setError(ar ? 'رمز غير صحيح' : 'Invalid code');
+        return;
+      }
       if (remember) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ email, password }));
       } else {
@@ -39,6 +46,7 @@ export default function Login() {
       navigate('/dashboard');
     } catch (err: any) {
       const s = err?.response?.status;
+      if (mfaStep && s === 401) { setError(ar ? 'رمز غير صحيح' : 'Invalid code'); return; }
       setError(s === 401 || s === 403 ? t(lang, 'invalidCredentials') : t(lang, 'serverError'));
     }
   };
@@ -246,6 +254,22 @@ export default function Login() {
               </div>
             </div>
 
+            {/* MFA code (shown after password when the account has MFA) */}
+            {mfaStep && (
+              <div className="anim-scaleIn">
+                <label className="block text-xs mb-1.5 text-slate-400">
+                  {ar ? 'رمز المصادقة الثنائية (٦ أرقام)' : 'Two-factor code (6 digits)'}
+                </label>
+                <input
+                  value={mfaCode}
+                  onChange={e => setMfaCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric" maxLength={6} autoFocus placeholder="123456"
+                  className="w-full rounded-xl px-4 py-3 text-center tracking-[0.4em] text-lg font-semibold outline-none"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(99,102,241,0.4)', color: '#e2e8f0' }}
+                />
+              </div>
+            )}
+
             {/* Remember Me */}
             <label
               className="flex items-center gap-2.5 cursor-pointer select-none group w-fit"
@@ -290,7 +314,7 @@ export default function Login() {
             {/* Submit */}
             <button
               type="submit"
-              disabled={isLoading || !email || !password}
+              disabled={isLoading || !email || !password || (mfaStep && mfaCode.length !== 6)}
               className="group w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl
                          font-semibold text-sm text-white mt-2
                          transition-all duration-200 hover:-translate-y-px active:translate-y-0

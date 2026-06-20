@@ -9,10 +9,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: false,
 
-  login: async (email, password) => {
+  login: async (email, password, mfaCode) => {
     set({ isLoading: true });
     try {
-      const { data } = await authApi.login(email, password);
+      const { data } = await authApi.login(email, password, mfaCode);
+      if (data?.mfaRequired) {
+        set({ isLoading: false });
+        return { mfaRequired: true };
+      }
       localStorage.setItem('access_token', data.accessToken);
       localStorage.setItem('refresh_token', data.refreshToken);
       set({
@@ -22,6 +26,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true,
         isLoading: false,
       });
+      return {};
     } catch (err) {
       set({ isLoading: false });
       throw err;

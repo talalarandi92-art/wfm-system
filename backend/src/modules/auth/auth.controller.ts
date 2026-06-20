@@ -110,6 +110,7 @@ export class AuthController {
       lastName: user.lastName,
       tenantId: user.tenantId,
       mustChangePassword: user.mustChangePassword,
+      mfaEnabled: user.mfaEnabled ?? false,
       roles: user.roles?.map(r => r.code) ?? [],
       permissions: user.permissionCodes,
       employeeId: user.employeeId ?? null,
