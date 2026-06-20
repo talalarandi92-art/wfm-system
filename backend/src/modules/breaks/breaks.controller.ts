@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Body, Param, Query,
-  Request, UseGuards, HttpCode, HttpStatus,
+  Request, UseGuards, HttpCode, HttpStatus, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
@@ -93,7 +93,10 @@ export class BreaksController {
     @Query('month') month: string,
     @Query('functionId') functionId?: string,
   ) {
-    return this.breaksService.getFairness(req.user.tenantId, +year, +month, functionId);
+    const y = parseInt(year, 10), m = parseInt(month, 10);
+    if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12)
+      throw new BadRequestException('Query params "year" and "month" (1-12) are required.');
+    return this.breaksService.getFairness(req.user.tenantId, y, m, functionId);
   }
 
   // ── Break requests: submit ────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
@@ -20,6 +20,13 @@ export class ForecastingService {
   private shift(date: string, days: number): string {
     return new Date(new Date(`${date}T00:00:00Z`).getTime() + days * 86400000)
       .toISOString().slice(0, 10);
+  }
+
+  /** Validate a required YYYY-MM-DD range — clean 400 instead of an Invalid-Date 500. */
+  private assertRange(from?: string, to?: string) {
+    const ok = (d?: string) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d));
+    if (!ok(from) || !ok(to)) throw new BadRequestException('Query params "from" and "to" (YYYY-MM-DD) are required.');
+    if (from! > to!) throw new BadRequestException('"from" must not be after "to".');
   }
 
   /** Distinct channels present in the contact history. */
@@ -76,6 +83,7 @@ export class ForecastingService {
     from: string; to: string; channel?: string; historyWeeks?: number;
     targetSL?: number; targetSec?: number; shrinkage?: number;
   }) {
+    this.assertRange(opts.from, opts.to);
     const historyWeeks = Math.min(Math.max(opts.historyWeeks ?? 8, 2), 52);
     const histFrom = this.shift(opts.from, -historyWeeks * 7);
     const histTo = this.shift(opts.from, -1);
@@ -137,6 +145,7 @@ export class ForecastingService {
   async backtest(tenantId: string, opts: {
     from: string; to: string; channel?: string; historyWeeks?: number;
   }) {
+    this.assertRange(opts.from, opts.to);
     const historyWeeks = Math.min(Math.max(opts.historyWeeks ?? 8, 2), 52);
     const histFrom = this.shift(opts.from, -historyWeeks * 7);
     const histTo = this.shift(opts.from, -1);
