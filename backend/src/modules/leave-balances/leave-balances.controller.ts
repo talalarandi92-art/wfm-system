@@ -59,4 +59,14 @@ export class LeaveBalancesController {
   }) {
     return this.svc.setEntitlement(this.tid(user), user?.id ?? user?.sub ?? null, body);
   }
+
+  @Post('entitlement/bulk')
+  @RequirePermissions('requests.approve_l1')
+  @ApiOperation({ summary: 'Bulk set entitlements from pasted/imported rows (matched by employee_no)' })
+  bulk(@CurrentUser() user: any, @Body() body: {
+    year?: number;
+    rows: Array<{ employeeNo: string; annual_leave?: number; comp_off?: number; sick_leave?: number }>;
+  }) {
+    return this.svc.bulkSetEntitlements(this.tid(user), user?.id ?? user?.sub ?? null, body?.year ?? new Date().getFullYear(), Array.isArray(body?.rows) ? body.rows : []);
+  }
 }

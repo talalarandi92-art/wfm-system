@@ -125,6 +125,43 @@ export class LeaveBalancesService {
   }
 
   /**
+   * Bulk set entitlements from pasted/imported rows. Each row carries an
+   * employee_no and any subset of the balance-bearing types. Matches by
+   * employee_no (the canonical key — never by name); rows that don't match an
+   * active employee are returned as `unmatched` so the caller can fix them.
+   */
+  async bulkSetEntitlements(
+    tenantId: string,
+    userId: string | null,
+    year: number,
+    rows: Array<{ employeeNo: string; annual_leave?: number; comp_off?: number; sick_leave?: number }>,
+  ) {
+    const y = this.year(year);
+    // Map employee_no → id once.
+    const emps = await this.ds.query(
+      `SELECT id, employee_no FROM employees WHERE tenant_id = $1 AND status = 'active'`, [tenantId]);
+    const byNo = new Map<string, string>();
+    for (const e of emps) if (e.employee_no) byNo.set(String(e.employee_no).trim(), e.id);
+
+    const unmatched: string[] = [];
+    let applied = 0, employeesTouched = 0;
+    for (const row of rows) {
+      const no = String(row.employeeNo ?? '').trim();
+      const empId = byNo.get(no);
+      if (!empId) { if (no) unmatched.push(no); continue; }
+      let touched = false;
+      for (const t of BALANCE_LEAVE_TYPES) {
+        const v = (row as any)[t];
+        if (v === undefined || v === null || v === '' || !Number.isFinite(Number(v)) || Number(v) < 0) continue;
+        await this.setEntitlement(tenantId, userId, { employeeId: empId, leaveType: t, year: y, days: Number(v) });
+        applied++; touched = true;
+      }
+      if (touched) employeesTouched++;
+    }
+    return { applied, employeesTouched, unmatched, year: y };
+  }
+
+  /**
    * Guard used at leave-request creation. Only blocks when an entitlement has
    * actually been configured for this (employee, type, year) — otherwise it is a
    * no-op so the existing flow is unchanged until balances are set up.

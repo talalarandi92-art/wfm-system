@@ -67,6 +67,10 @@ export default function SettingsPage() {
   const [leaveFilter, setLeaveFilter] = useState('');
   const [entEdits, setEntEdits] = useState<Record<string, string>>({});  // `${empId}|${type}` → days
   const [entSaving, setEntSaving] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ applied: number; employeesTouched: number; unmatched: string[] } | null>(null);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -102,6 +106,27 @@ export default function SettingsPage() {
     else if (view === 'functions') loadFuncs();
     else if (view === 'leaves') loadLeaves(leaveYear);
   }, [view, leaveYear]);
+
+  // Parse pasted rows: "employee_no [annual] [comp] [sick]" (tab / comma / space separated).
+  const parseBulkRows = (text: string) =>
+    text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+      const parts = line.split(/[\t,;]+|\s{1,}/).map(s => s.trim()).filter(Boolean);
+      const [employeeNo, a, c, s] = parts;
+      const num = (v: string) => (v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : undefined);
+      return { employeeNo, annual_leave: num(a), comp_off: num(c), sick_leave: num(s) };
+    }).filter(r => r.employeeNo);
+
+  const submitBulk = async () => {
+    const rows = parseBulkRows(bulkText);
+    if (!rows.length) return;
+    setBulkBusy(true); setBulkResult(null);
+    try {
+      const { data } = await apiClient.post('/leave-balances/entitlement/bulk', { year: leaveYear, rows });
+      setBulkResult(data);
+      await loadLeaves(leaveYear);
+    } catch {}
+    setBulkBusy(false);
+  };
 
   const saveEntitlement = async (employeeId: string, leaveType: string, daysRaw: string) => {
     const days = parseFloat(daysRaw);
@@ -362,7 +387,44 @@ export default function SettingsPage() {
             <span className="text-xs" style={{ color: '#475569' }}>
               {filteredLeaves.length} / {leaves.length} {ar ? 'موظف' : 'employees'}
             </span>
+            <button onClick={() => { setBulkOpen(o => !o); setBulkResult(null); }}
+              className="text-xs font-semibold px-3 py-2 rounded-xl ms-auto"
+              style={{ background: 'rgba(34,211,238,0.12)', color: '#22d3ee', border: '1px solid rgba(34,211,238,0.25)' }}>
+              {ar ? 'لصق جماعي من Excel' : 'Bulk paste from Excel'}
+            </button>
           </div>
+
+          {/* Bulk paste panel */}
+          {bulkOpen && (
+            <div className="rounded-2xl p-4 mb-4" style={{ ...cardStyle(dark), border: '1px solid rgba(34,211,238,0.2)' }}>
+              <p className="text-xs mb-2" style={{ color: tsColor(dark) }}>
+                {ar ? 'الصق صفوفاً: رقم الموظف ثم السنوية ثم التعويضية ثم المرضية (افصل بـTab أو فاصلة). أعمدة الإجازات اختيارية.'
+                    : 'Paste rows: employee_no, annual, comp-off, sick (Tab/comma separated). Leave columns optional.'}
+              </p>
+              <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} rows={6}
+                placeholder={'10234\t30\t5\t15\n10235\t30'}
+                className="w-full text-xs rounded-xl px-3 py-2 outline-none font-mono"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }} />
+              <div className="flex items-center gap-3 mt-2">
+                <button onClick={submitBulk} disabled={bulkBusy || !bulkText.trim()}
+                  className="text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
+                  style={{ background: '#22d3ee', color: '#0a0f1e' }}>
+                  {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                  {ar ? `تطبيق (${parseBulkRows(bulkText).length} صف)` : `Apply (${parseBulkRows(bulkText).length} rows)`}
+                </button>
+                {bulkResult && (
+                  <span className="text-xs" style={{ color: tsColor(dark) }}>
+                    <Check size={12} className="inline" style={{ color: '#34d399' }} />{' '}
+                    {ar ? `${bulkResult.applied} استحقاق لـ${bulkResult.employeesTouched} موظف`
+                        : `${bulkResult.applied} entitlements · ${bulkResult.employeesTouched} employees`}
+                    {bulkResult.unmatched.length > 0 && (
+                      <span style={{ color: '#f87171' }}> · {ar ? 'غير مطابق' : 'unmatched'}: {bulkResult.unmatched.slice(0, 8).join(', ')}{bulkResult.unmatched.length > 8 ? '…' : ''}</span>
+                    )}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="rounded-2xl overflow-x-auto" style={{ ...cardStyle(dark) }}>
             <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
