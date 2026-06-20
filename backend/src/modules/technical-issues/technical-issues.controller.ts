@@ -216,13 +216,14 @@ export class TechnicalIssuesController {
   ) {
     const tid = this.tid(user);
     const [row] = await this.ds.query(
-      `SELECT stored_name FROM agent_tech_report_attachments WHERE id = $1 AND report_id = $2`, [aid, id],
+      `SELECT stored_name FROM agent_tech_report_attachments WHERE id = $1 AND report_id = $2 AND tenant_id = $3`,
+      [aid, id, tid],
     );
     if (!row) throw new BadRequestException('Attachment not found');
 
     const filePath = join(UPLOAD_DIR, row.stored_name);
     if (existsSync(filePath)) unlinkSync(filePath);
-    await this.ds.query(`DELETE FROM agent_tech_report_attachments WHERE id = $1`, [aid]);
+    await this.ds.query(`DELETE FROM agent_tech_report_attachments WHERE id = $1 AND tenant_id = $2`, [aid, tid]);
     return { ok: true };
   }
 
