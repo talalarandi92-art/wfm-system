@@ -10,12 +10,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // Dev proxy → our WFM backend. Set VITE_API_PORT to switch (defaults 3001
+      // so the dev frontend uses OUR backend, not the old Enterprise-Lab on 3000).
       '/api': {
-        target: 'http://localhost:3000',
+        target: `http://localhost:${process.env.VITE_API_PORT ?? 3001}`,
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://localhost:3000',
+        target: `http://localhost:${process.env.VITE_API_PORT ?? 3001}`,
         changeOrigin: true,
       },
     },
