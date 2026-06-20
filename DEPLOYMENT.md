@@ -61,11 +61,13 @@ service in compose renews it automatically every 12h.
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-On first start the Postgres container auto-runs every file in `database/migrations/`
-(schema + seed + all feature migrations 001–022). Watch progress:
+A dedicated `migrate` service runs **all** pending SQL migrations (tracked in a
+`schema_migrations` table, idempotent) and must finish before the backend starts.
+This applies the full schema + seed + every feature migration on a fresh volume,
+**and** new migrations on an existing one. Watch progress:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs -f backend
+docker compose -f docker-compose.prod.yml logs -f migrate backend
 ```
 
 Visit `https://your-domain.com` and log in with `SEED_ADMIN_EMAIL` /
@@ -79,12 +81,12 @@ docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 Existing data is preserved (Postgres/Redis/uploads live in named volumes).
-New SQL migrations are **not** auto-applied on an existing database — apply them
-manually:
+New SQL migrations **are applied automatically** on every `up` by the `migrate`
+service (it re-runs only the not-yet-applied files, tracked in `schema_migrations`),
+so no manual psql step is needed. To run them on demand:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec -T postgres \
-  psql -U wfm_user -d wfm_db < database/migrations/0XX_new_migration.sql
+docker compose -f docker-compose.prod.yml run --rm migrate
 ```
 
 ## 6. Backups

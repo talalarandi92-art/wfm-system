@@ -27,8 +27,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Schema + seed auto-run on first start (empty volume only)
-      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+      # NOTE: schema is applied by the dedicated `migrate` service (tracked +
+      # idempotent), NOT the init-dir mount — so new migrations also apply on an
+      # existing volume, and nothing double-runs on a fresh one.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -55,7 +56,31 @@ services:
       start_period: 10s
     networks: [wfm_network]
 
+  # One-shot DB migration runner — applies pending SQL migrations (tracked in
+  # schema_migrations) before the backend starts. Reuses the backend image;
+  # mounts the runner + SQL (not baked into the slim runtime image).
+  migrate:
+    image: wfm-backend:prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: wfm_migrate
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    working_dir: /app
+    command: ["node", "scripts/migrate.js"]
+    volumes:
+      - ./backend/scripts:/app/scripts:ro
+      - ./database/migrations:/database/migrations:ro
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [wfm_network]
+    restart: "no"
+
   backend:
+    image: wfm-backend:prod
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -74,6 +99,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+      migrate:  { condition: service_completed_successfully }
     networks: [wfm_network]
 
   frontend:
