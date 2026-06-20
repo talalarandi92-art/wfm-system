@@ -21,5 +21,8 @@ export class ResearcherController {
 
   @Get('digest')
   @ApiOperation({ summary: 'Top improvement opportunities (live gaps; LLM-synthesized when keyed)' })
-  digest(@Request() req: any) { return this.svc.digest(req.user.tenantId); }
+  digest(@Request() req: any) {
+    const lang = req.query?.lang === 'en' ? 'en' : 'ar';
+    return this.svc.digest(req.user.tenantId, lang);
+  }
 }

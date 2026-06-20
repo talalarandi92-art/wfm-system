@@ -58,19 +58,26 @@ export class ResearcherService {
     };
   }
 
-  async digest(tenantId: string) {
+  async digest(tenantId: string, lang: 'ar' | 'en' = 'ar') {
+    const ar = lang !== 'en';
     const resolved = await this.resolve(tenantId);
     const gaps = resolved.filter(i => i.status !== 'have');
     if (this.llm.isConfigured()) {
-      const corpus = gaps.map(g => `- ${g.titleAr}: ${g.summaryAr} (لدينا: ${g.status})`).join('\n');
-      const text = await this.llm.chat(
-        'أنت باحث WFM يرصد أحدث الممارسات ويربطها بمنصّة العميل. اكتب موجزاً بحثياً قصيراً بأهم 3 فرص تطوير مرتّبة بالأولوية بالعربي.',
-        [{ role: 'user', content: `الفجوات مقابل أفضل الممارسات:\n${corpus}` }], 700);
+      const corpus = ar
+        ? gaps.map(g => `- ${g.titleAr}: ${g.summaryAr} (لدينا: ${g.status})`).join('\n')
+        : gaps.map(g => `- ${g.titleEn}: ${g.summaryEn} (we have: ${g.status})`).join('\n');
+      const system = ar
+        ? 'أنت باحث WFM يرصد أحدث الممارسات ويربطها بمنصّة العميل. اكتب موجزاً بحثياً قصيراً بأهم 3 فرص تطوير مرتّبة بالأولوية بالعربي.'
+        : 'You are a WFM researcher scouting the latest practices and mapping them to the client platform. Write a short research brief of the top 3 prioritized improvement opportunities in English.';
+      const userMsg = ar ? `الفجوات مقابل أفضل الممارسات:\n${corpus}` : `Gaps vs best practice:\n${corpus}`;
+      const text = await this.llm.chat(system, [{ role: 'user', content: userMsg }], 700);
       if (text) return { llm: true, digest: text, gaps: gaps.length };
     }
     return {
       llm: false,
-      digest: gaps.slice(0, 5).map(g => `🔬 ${g.titleAr}\n${g.summaryAr}\n↳ ${g.actionAr}`).join('\n\n'),
+      digest: gaps.slice(0, 5).map(g => ar
+        ? `🔬 ${g.titleAr}\n${g.summaryAr}\n↳ ${g.actionAr}`
+        : `🔬 ${g.titleEn}\n${g.summaryEn}\n↳ ${g.actionEn}`).join('\n\n'),
       gaps: gaps.length,
     };
   }

@@ -5,7 +5,7 @@ import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 import { BackToChief } from '@/components/BackToChief';
 
-interface Item { id: string; category: string; titleAr: string; summaryAr: string; status: 'have' | 'partial' | 'missing'; actionAr: string }
+interface Item { id: string; category: string; titleAr: string; titleEn: string; summaryAr: string; summaryEn: string; status: 'have' | 'partial' | 'missing'; actionAr: string; actionEn: string }
 interface Feed { total: number; gaps: number; items: Item[]; byCategory: { category: string; items: Item[] }[] }
 
 const ST = {
@@ -13,6 +13,15 @@ const ST = {
   partial: { color: '#f59e0b', Icon: AlertCircle, ar: 'جزئي', en: 'Partial' },
   missing: { color: '#ef4444', Icon: XCircle, ar: 'ناقص', en: 'Missing' },
 } as const;
+
+const CAT_LABEL: Record<string, { ar: string; en: string }> = {
+  forecasting: { ar: 'التنبؤ', en: 'Forecasting' },
+  rta:         { ar: 'المراقبة اللحظية', en: 'RTA' },
+  automation:  { ar: 'الأتمتة', en: 'Automation' },
+  quality:     { ar: 'الجودة', en: 'Quality' },
+  wellbeing:   { ar: 'رفاهية الموظف', en: 'Wellbeing' },
+  analytics:   { ar: 'التحليلات', en: 'Analytics' },
+};
 
 export default function ResearcherPage() {
   const { lang, dark } = useUiStore();
@@ -27,11 +36,14 @@ export default function ResearcherPage() {
   const load = useCallback(async () => {
     setL(true);
     try {
-      const [{ data: f }, { data: d }] = await Promise.all([apiClient.get<Feed>('/researcher/feed'), apiClient.get('/researcher/digest')]);
+      const [{ data: f }, { data: d }] = await Promise.all([
+        apiClient.get<Feed>('/researcher/feed'),
+        apiClient.get(`/researcher/digest?lang=${ar ? 'ar' : 'en'}`),
+      ]);
       setFeed(f); setDigest(d.digest); setDigestLlm(d.llm);
     } catch { setFeed(null); }
     setL(false);
-  }, []);
+  }, [ar]);
   useEffect(() => { load(); }, [load]);
 
   return (
@@ -65,7 +77,7 @@ export default function ResearcherPage() {
           {/* By category */}
           {feed.byCategory.map(cat => (
             <div key={cat.category}>
-              <h2 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#64748b' }}>{cat.category}</h2>
+              <h2 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#64748b' }}>{CAT_LABEL[cat.category] ? (ar ? CAT_LABEL[cat.category].ar : CAT_LABEL[cat.category].en) : cat.category}</h2>
               <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>
                 {cat.items.map(it => {
                   const s = ST[it.status];
@@ -73,11 +85,11 @@ export default function ResearcherPage() {
                     <div key={it.id} className="rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${s.color}22` }}>
                       <div className="flex items-center gap-2 mb-1">
                         <s.Icon size={13} style={{ color: s.color, flexShrink: 0 }} />
-                        <span className="text-xs font-bold" style={{ color: tp(dark) }}>{it.titleAr}</span>
+                        <span className="text-xs font-bold" style={{ color: tp(dark) }}>{ar ? it.titleAr : it.titleEn}</span>
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded ms-auto" style={{ background: `${s.color}1a`, color: s.color }}>{ar ? s.ar : s.en}</span>
                       </div>
-                      <p className="text-[11px] leading-snug" style={{ color: '#94a3b8' }}>{it.summaryAr}</p>
-                      {it.status !== 'have' && <p className="text-[11px] mt-1.5 font-semibold" style={{ color: s.color }}>↳ {it.actionAr}</p>}
+                      <p className="text-[11px] leading-snug" style={{ color: '#94a3b8' }}>{ar ? it.summaryAr : it.summaryEn}</p>
+                      {it.status !== 'have' && <p className="text-[11px] mt-1.5 font-semibold" style={{ color: s.color }}>↳ {ar ? it.actionAr : it.actionEn}</p>}
                     </div>
                   );
                 })}
