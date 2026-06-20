@@ -159,6 +159,55 @@ export class SkillsController {
     return { success: true };
   }
 
+  /* ── Bulk assign skills from pasted/imported rows ────────────────────── */
+  @Post('assign/bulk')
+  @ApiOperation({ summary: 'Bulk assign skills from rows {employeeNo, skillCode, proficiency?, expiresAt?} (matched by employee_no + code)' })
+  async assignBulk(
+    @CurrentUser() user: any,
+    @Body() body: { rows: Array<{ employeeNo: string; skillCode: string; proficiency?: string; expiresAt?: string }> },
+  ) {
+    const tid = user.tenantId;
+    const rows = Array.isArray(body?.rows) ? body.rows : [];
+    const PROF = new Set(['beginner', 'intermediate', 'advanced', 'expert']);
+
+    // Resolve lookup maps once.
+    const emps = await this.ds.query(
+      `SELECT id, employee_no FROM employees WHERE tenant_id=$1 AND status='active'`, [tid]);
+    const byNo = new Map<string, string>();
+    for (const e of emps) if (e.employee_no) byNo.set(String(e.employee_no).trim(), e.id);
+    const skills = await this.ds.query(
+      `SELECT id, code, is_active FROM skills WHERE tenant_id=$1`, [tid]);
+    const byCode = new Map<string, string>();        // UPPER(code) → id (active preferred)
+    for (const s of skills) {
+      const k = String(s.code).trim().toUpperCase();
+      if (!byCode.has(k) || s.is_active) byCode.set(k, s.id);
+    }
+
+    const unmatchedEmployees = new Set<string>(), unmatchedSkills = new Set<string>();
+    let applied = 0; const touched = new Set<string>();
+    for (const row of rows) {
+      const no = String(row.employeeNo ?? '').trim();
+      const code = String(row.skillCode ?? '').trim().toUpperCase();
+      const empId = byNo.get(no);
+      const skillId = byCode.get(code);
+      if (!empId) { if (no) unmatchedEmployees.add(no); continue; }
+      if (!skillId) { if (code) unmatchedSkills.add(row.skillCode); continue; }
+      const prof = PROF.has(String(row.proficiency)) ? row.proficiency : 'intermediate';
+      await this.ds.query(
+        `INSERT INTO employee_skills (tenant_id, employee_id, skill_id, proficiency, status, expires_at)
+         VALUES ($1,$2,$3,$4,'active',$5)
+         ON CONFLICT (employee_id, skill_id)
+         DO UPDATE SET proficiency=$4, status='active', expires_at=$5, updated_at=NOW()`,
+        [tid, empId, skillId, prof, row.expiresAt || null],
+      ).catch(() => {});
+      applied++; touched.add(empId);
+    }
+    return {
+      applied, employeesTouched: touched.size,
+      unmatchedEmployees: [...unmatchedEmployees], unmatchedSkills: [...unmatchedSkills],
+    };
+  }
+
   /* ── Remove skill from employee ──────────────────────────────────────── */
   @Delete('employee/:empId/:skillId')
   @HttpCode(HttpStatus.NO_CONTENT)

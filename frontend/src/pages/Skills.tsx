@@ -61,12 +61,15 @@ function ChannelBadge({ type, ar }: { type: string | null | undefined; ar: boole
 }
 
 /* ─── Proficiency stars ──────────────────────────────────────────────────── */
-function ProficiencyStars({ value }: { value: number }) {
+// proficiency is an enum (beginner/intermediate/advanced/expert) — map to stars.
+const PROF_STARS: Record<string, number> = { beginner: 2, intermediate: 3, advanced: 4, expert: 5 };
+function ProficiencyStars({ value }: { value: number | string }) {
+  const n = typeof value === 'number' ? value : (PROF_STARS[String(value)] ?? 3);
   return (
     <div className="flex gap-0.5">
       {[1,2,3,4,5].map(i => (
-        <Star key={i} size={9} fill={i <= value ? '#fbbf24' : 'transparent'}
-          style={{ color: i <= value ? '#fbbf24' : '#334155' }} />
+        <Star key={i} size={9} fill={i <= n ? '#fbbf24' : 'transparent'}
+          style={{ color: i <= n ? '#fbbf24' : '#334155' }} />
       ))}
     </div>
   );
@@ -92,6 +95,10 @@ export default function SkillsPage() {
   const [dispatching, setDispatching] = useState(false);
   const [dispatchDone, setDispatchDone] = useState(false);
   const [expandedEmp, setExpandedEmp] = useState<string | null>(null);
+  const [bulkOpen, setBulkOpen]   = useState(false);
+  const [bulkText, setBulkText]   = useState('');
+  const [bulkBusy, setBulkBusy]   = useState(false);
+  const [bulkResult, setBulkResult] = useState<{ applied: number; employeesTouched: number; unmatchedEmployees: string[]; unmatchedSkills: string[] } | null>(null);
 
   const textPri  = dark ? '#e2e8f0' : '#0f172a';
   const textSec  = dark ? '#64748b' : '#94a3b8';
@@ -165,6 +172,22 @@ export default function SkillsPage() {
       setDispatchDone(true);
     } catch { /* ignore */ }
     setDispatching(false);
+  };
+
+  /* ── Bulk assign skills (paste from Excel) ───────────────────────────── */
+  const submitBulkAssign = async () => {
+    const rows = bulkText.split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+      const [employeeNo, skillCode, proficiency, expiresAt] = line.split(/[\t,;]+|\s{2,}/).map(s => s.trim());
+      return { employeeNo, skillCode, proficiency: proficiency || undefined, expiresAt: expiresAt || undefined };
+    }).filter(r => r.employeeNo && r.skillCode);
+    if (!rows.length) return;
+    setBulkBusy(true); setBulkResult(null);
+    try {
+      const { data } = await apiClient.post('/skills/assign/bulk', { rows });
+      setBulkResult(data);
+      await loadMatrix();
+    } catch { /* ignore */ }
+    setBulkBusy(false);
   };
 
   /* ── Filtered matrix ─────────────────────────────────────────────────── */
@@ -244,7 +267,42 @@ export default function SkillsPage() {
             <span className="text-xs self-center" style={{ color: textSec }}>
               {filtered.length} {ar ? 'موظف' : 'employees'}
             </span>
+            <button onClick={() => { setBulkOpen(o => !o); setBulkResult(null); }}
+              className="text-xs font-semibold px-3 py-2 rounded-xl ms-auto flex items-center gap-1.5"
+              style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.25)' }}>
+              <Plus size={13} /> {ar ? 'إسناد مهارات (لصق من Excel)' : 'Bulk assign (paste from Excel)'}
+            </button>
           </div>
+
+          {/* Bulk assign panel */}
+          {bulkOpen && (
+            <div className="rounded-2xl p-4 mb-4" style={{ background: surface, border: '1px solid rgba(251,146,60,0.2)' }}>
+              <p className="text-xs mb-2" style={{ color: textSec }}>
+                {ar ? 'الصق صفوفاً: رقم الموظف، كود المهارة، المستوى (beginner/intermediate/advanced/expert اختياري)، تاريخ الانتهاء (اختياري).'
+                    : 'Paste rows: employee_no, skill_code, proficiency (beginner/intermediate/advanced/expert — optional), expiry date (optional).'}
+              </p>
+              <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} rows={6}
+                placeholder={'13758\tCHAT\tadvanced\n13759\tEMAIL'}
+                className="w-full text-xs rounded-xl px-3 py-2 outline-none font-mono"
+                style={{ background: inputBg, border: `1px solid ${border}`, color: textPri }} />
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <button onClick={submitBulkAssign} disabled={bulkBusy || !bulkText.trim()}
+                  className="text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
+                  style={{ background: '#fb923c', color: '#0a0f1e' }}>
+                  {bulkBusy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                  {ar ? 'تطبيق الإسناد' : 'Apply assignments'}
+                </button>
+                {bulkResult && (
+                  <span className="text-xs" style={{ color: textSec }}>
+                    <Check size={12} className="inline" style={{ color: '#22c55e' }} />{' '}
+                    {ar ? `${bulkResult.applied} مهارة لـ${bulkResult.employeesTouched} موظف` : `${bulkResult.applied} skills · ${bulkResult.employeesTouched} employees`}
+                    {bulkResult.unmatchedEmployees.length > 0 && <span style={{ color: '#f87171' }}> · {ar ? 'موظف غير مطابق' : 'unmatched emp'}: {bulkResult.unmatchedEmployees.slice(0, 6).join(', ')}</span>}
+                    {bulkResult.unmatchedSkills.length > 0 && <span style={{ color: '#f87171' }}> · {ar ? 'مهارة غير مطابقة' : 'unmatched skill'}: {[...new Set(bulkResult.unmatchedSkills)].slice(0, 6).join(', ')}</span>}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           {loading ? (
             <div className="flex items-center justify-center py-24">
