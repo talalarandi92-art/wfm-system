@@ -22,14 +22,16 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 
-// Minimal .env loader (no dependency) — does not override real env vars.
+// Minimal .env loader (no dependency) — checks backend/.env then repo-root .env;
+// does not override real env vars.
 (function loadEnv() {
-  const envPath = path.join(__dirname, '..', '.env');
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m && process.env[m[1]] === undefined) {
-      process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  for (const envPath of [path.join(__dirname, '..', '.env'), path.join(__dirname, '..', '..', '.env')]) {
+    if (!fs.existsSync(envPath)) continue;
+    for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (m && process.env[m[1]] === undefined) {
+        process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+      }
     }
   }
 })();
