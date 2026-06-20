@@ -286,8 +286,8 @@ export default function AppLayout() {
                           style={{ background: n.isRead ? 'transparent' : (dark ? 'rgba(99,102,241,0.08)' : 'rgba(99,102,241,0.05)') }}>
                           {!n.isRead && <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 flex-shrink-0" />}
                           <div className={`min-w-0 flex-1 ${n.isRead ? 'ps-3.5' : ''}`}>
-                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">{n.title}</p>
-                            {n.body && <p className="text-[11px] text-slate-500 line-clamp-2">{n.body}</p>}
+                            <p className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">{ar ? (n.titleAr || n.title) : (n.title || n.titleAr)}</p>
+                            {(n.body || n.bodyAr) && <p className="text-[11px] text-slate-500 line-clamp-2">{ar ? (n.bodyAr || n.body) : (n.body || n.bodyAr)}</p>}
                             <p className="text-[9px] text-slate-400 mt-0.5">{fmtNotifTime(n.createdAt)}</p>
                           </div>
                         </button>

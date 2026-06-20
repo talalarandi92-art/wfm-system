@@ -495,9 +495,9 @@ export class RequestsService {
     ).catch(() => []);
     for (const rv of reviewers) {
       await this.ds.query(
-        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
-         VALUES ($1, $2, 'request.campaign_blackout', $3, $4, 'request', $5)`,
-        [tenantId, rv.id, 'طلب خلال فترة حملة', body, requestId],
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id)
+         VALUES ($1, $2, 'request.campaign_blackout', $3, $4, $5, $5, 'request', $6)`,
+        [tenantId, rv.id, 'Request during a campaign window', 'طلب خلال فترة حملة', body, requestId],
       ).catch(() => {});
     }
   }

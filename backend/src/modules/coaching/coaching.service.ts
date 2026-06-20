@@ -95,8 +95,8 @@ export class CoachingService implements OnModuleInit, OnModuleDestroy {
     ).catch(() => [{ name: '' }]);
     for (const rv of reviewers) {
       await this.ds.query(
-        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
-         VALUES ($1,$2,'coaching.flag','كوتشينج مطلوب', $3, 'employee', $4)`,
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id)
+         VALUES ($1,$2,'coaching.flag','Coaching needed','كوتشينج مطلوب', $3, $3, 'employee', $4)`,
         [tenantId, rv.id, `${String(emp?.name).trim()} — ${detail}`, employeeId],
       ).catch(() => {});
     }
@@ -177,9 +177,9 @@ export class CoachingService implements OnModuleInit, OnModuleDestroy {
     if (eu) {
       const whenStr = when.toLocaleString('ar-KW', { dateStyle: 'short', timeStyle: 'short' });
       await this.ds.query(
-        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
-         VALUES ($1,$2,'coaching.session','جلسة كوتشينج مجدولة', $3, 'coaching_session', $4)`,
-        [tenantId, eu.id, `لديك جلسة كوتشينج — ${whenStr}`, session.id],
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id)
+         VALUES ($1,$2,'coaching.session','Coaching session scheduled','جلسة كوتشينج مجدولة', $3, $4, 'coaching_session', $5)`,
+        [tenantId, eu.id, `You have a coaching session — ${whenStr}`, `لديك جلسة كوتشينج — ${whenStr}`, session.id],
       ).catch(() => {});
     }
 

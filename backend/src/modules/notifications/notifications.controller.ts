@@ -22,7 +22,7 @@ export class NotificationsController {
     const limit = parseInt(limitQ ?? '50', 10);
     const unreadOnly = unread === 'true';
     const rows = await this.ds.query(
-      `SELECT id, notification_type, title, body, entity_type, entity_id,
+      `SELECT id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id,
               is_read, created_at
        FROM notifications
        WHERE tenant_id=$1 AND recipient_id=$2
@@ -35,7 +35,9 @@ export class NotificationsController {
       id:               r.id,
       type:             r.notification_type,
       title:            r.title,
+      titleAr:          r.title_ar,
       body:             r.body,
+      bodyAr:           r.body_ar,
       entityType:       r.entity_type,
       entityId:         r.entity_id,
       isRead:           r.is_read,

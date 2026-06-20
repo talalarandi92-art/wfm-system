@@ -911,7 +911,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
           swapType: selectedType === 'off_swap' ? 'off' : 'shift',
           notes: form.notes,
         });
-        setSuccess(res.data.message ?? (ar ? 'تم إرسال طلب التبادل' : 'Swap request submitted'));
+        setSuccess(ar ? 'تم إرسال طلب التبادل' : 'Swap request submitted');
       } else if (isLeaveType) {
         if (!form.startDate || !form.endDate) { setError(ar ? 'اختر تاريخ البداية والنهاية' : 'Select start and end dates'); setLoading(false); return; }
         if (selectedType === 'university_exam' && !attachFile) {
@@ -929,7 +929,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
           try { await uploadAttachment(res.data.id); }
           catch { setError(ar ? 'تم تقديم الطلب لكن فشل رفع الصورة' : 'Request submitted but image upload failed'); }
         }
-        setSuccess(res.data.message ?? (ar ? 'تم تقديم الطلب بنجاح' : 'Request submitted'));
+        setSuccess(ar ? 'تم تقديم الطلب بنجاح' : 'Request submitted');
       } else if (selectedType === 'break') {
         if (!form.breakStartTime || !form.breakEndTime) {
           setError(ar ? 'حدد من الساعة وإلى الساعة' : 'Set from and to times'); setLoading(false); return;
@@ -947,7 +947,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
           reason: form.reason ?? '',
           notes: form.notes ?? '',
         });
-        setSuccess(res.data?.message ?? (ar ? 'تم تقديم طلب البريك بنجاح' : 'Break request submitted'));
+        setSuccess(ar ? 'تم تقديم طلب البريك بنجاح' : 'Break request submitted');
       } else if (selectedType === 'permission') {
         if (!form.permissionDate || !form.startTime || !form.endTime) {
           setError(ar ? 'اكمل بيانات الاستئذان (التاريخ، من، إلى)' : 'Fill in date, from and to times'); setLoading(false); return;
@@ -995,7 +995,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
           reason: form.reason ?? '',
           notes: form.notes ?? '',
         });
-        setSuccess(res.data?.message ?? (ar ? 'تم تقديم طلب الأوفر تايم بنجاح' : 'Overtime request submitted'));
+        setSuccess(ar ? 'تم تقديم طلب الأوفر تايم بنجاح' : 'Overtime request submitted');
       }
 
       // Reset

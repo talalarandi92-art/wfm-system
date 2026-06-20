@@ -160,9 +160,12 @@ export class CalendarController {
       const label = body.eventType === 'coaching' ? 'كوتشينج' : 'اجتماع';
       for (const rv of reviewers) {
         await this.ds.query(
-          `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
-           VALUES ($1,$2,'calendar.review', $3, $4, 'calendar_event', $5)`,
-          [tid, rv.id, `راجع تغطية: ${label} مطلوب`, `${body.title} — ${when}. تأكد أن التغطية غير متأثرة.`, event.id],
+          `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id)
+           VALUES ($1,$2,'calendar.review', $3, $4, $5, $6, 'calendar_event', $7)`,
+          [tid, rv.id,
+           `Review coverage: ${label} required`, `راجع تغطية: ${label} مطلوب`,
+           `${body.title} — ${when}. Ensure coverage is unaffected.`, `${body.title} — ${when}. تأكد أن التغطية غير متأثرة.`,
+           event.id],
         ).catch(() => {});
       }
     }

@@ -217,9 +217,9 @@ export class PermissionRequestService implements OnModuleInit {
     ).catch(() => []);
     for (const rv of reviewers) {
       await this.ds.query(
-        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, body, entity_type, entity_id)
-         VALUES ($1, $2, 'request.campaign_exception', $3, $4, 'request', $5)`,
-        [tenantId, rv.id, 'استئذان استثنائي خلال حملة', body, requestId],
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id)
+         VALUES ($1, $2, 'request.campaign_exception', $3, $4, $5, $5, 'request', $6)`,
+        [tenantId, rv.id, 'Exception permission during a campaign', 'استئذان استثنائي خلال حملة', body, requestId],
       ).catch(() => {});
     }
   }

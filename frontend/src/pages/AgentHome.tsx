@@ -21,7 +21,7 @@ interface RecentDay {
   punch_late_minutes: number; ot_minutes: number; is_missing_punch: boolean; shift_code: string | null;
 }
 interface MyRequest { id: string; type: string; status: string; submitted_at: string; notes?: string }
-interface MyNotif { id: string; type: string; title: string; body: string; isRead: boolean; createdAt: string }
+interface MyNotif { id: string; type: string; title: string; titleAr?: string; body: string; bodyAr?: string; isRead: boolean; createdAt: string }
 interface ShiftRate {
   working: number; morning: number; evening: number; night: number; midnight: number;
   morningPct: number; eveningPct: number; nightPct: number; midnightPct: number;
@@ -509,8 +509,8 @@ export default function AgentHome() {
                 style={{ background: n.isRead ? 'rgba(255,255,255,0.02)' : 'rgba(99,102,241,0.08)' }}>
                 {!n.isRead && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs text-white truncate">{n.title}</p>
-                  {n.body && <p className="text-[10px] text-slate-500 truncate">{n.body}</p>}
+                  <p className="text-xs text-white truncate">{ar ? (n.titleAr || n.title) : (n.title || n.titleAr)}</p>
+                  {(n.body || n.bodyAr) && <p className="text-[10px] text-slate-500 truncate">{ar ? (n.bodyAr || n.body) : (n.body || n.bodyAr)}</p>}
                 </div>
                 <span className="text-[9px] text-slate-600 flex-shrink-0">{fmtDT(n.createdAt)}</span>
               </div>
