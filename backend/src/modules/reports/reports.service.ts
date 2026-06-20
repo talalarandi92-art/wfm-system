@@ -731,7 +731,7 @@ export class ReportsService {
               ${USER_NAME('vb')} AS validated_by,
               ${USER_NAME('eb')} AS escalated_to,
               ${USER_NAME('sb')} AS resolved_by
-         FROM technical_issues ti
+         FROM agent_tech_reports ti
          LEFT JOIN functions f ON f.id = ti.function_id
          LEFT JOIN users rp ON rp.id = ti.reported_by
          LEFT JOIN users vb ON vb.id = ti.validated_by

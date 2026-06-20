@@ -54,18 +54,22 @@ export class TechnicalIssuesController {
         COUNT(*) FILTER (WHERE status = 'resolved')          AS resolved,
         COUNT(*) FILTER (WHERE status = 'rejected')          AS rejected,
         COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS last24h,
-        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')   AS last7d
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')   AS last7d,
+        COUNT(*) FILTER (WHERE sla_due_at < NOW() AND status NOT IN ('resolved','rejected')) AS sla_breached,
+        COUNT(*) FILTER (WHERE is_cx_issue)                              AS cx_issues
       FROM agent_tech_reports WHERE tenant_id = $1
     `, [tid]);
     return {
-      total:     +rows.total,
-      pending:   +rows.pending,
-      validated: +rows.validated,
-      escalated: +rows.escalated,
-      resolved:  +rows.resolved,
-      rejected:  +rows.rejected,
-      last24h:   +rows.last24h,
-      last7d:    +rows.last7d,
+      total:       +rows.total,
+      pending:     +rows.pending,
+      validated:   +rows.validated,
+      escalated:   +rows.escalated,
+      resolved:    +rows.resolved,
+      rejected:    +rows.rejected,
+      last24h:     +rows.last24h,
+      last7d:      +rows.last7d,
+      slaBreached: +rows.sla_breached,
+      cxIssues:    +rows.cx_issues,
     };
   }
 
@@ -117,13 +121,25 @@ export class TechnicalIssuesController {
     const { title, description, severity = 'medium', functionName, channel } = body;
     if (!title?.trim()) throw new BadRequestException('Title is required');
 
+    // Repeat / systemic-CX detection: how many same-titled issues for the same
+    // function in the last 30 days. 20+ of the same reason → flag as a CX issue.
+    const [rep] = await this.ds.query(`
+      SELECT COUNT(*)::int AS cnt FROM agent_tech_reports
+       WHERE tenant_id = $1 AND LOWER(TRIM(title)) = LOWER(TRIM($2))
+         AND COALESCE(function_name,'') = COALESCE($3,'')
+         AND status <> 'rejected' AND created_at >= NOW() - INTERVAL '30 days'
+    `, [tid, title.trim(), functionName || null]);
+    const priorCount = rep?.cnt ?? 0;
+    const isCx = priorCount + 1 >= 20;
+
     const [issue] = await this.ds.query(`
       INSERT INTO agent_tech_reports
-        (tenant_id, title, description, severity, function_name, channel, reporter_id, reporter_name)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        (tenant_id, title, description, severity, function_name, channel, reporter_id, reporter_name,
+         sla_due_at, repeat_count, is_cx_issue)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW() + INTERVAL '48 hours', $9, $10)
       RETURNING *
     `, [tid, title.trim(), description || null, severity, functionName || null, channel || null,
-        actor || null, user?.name || user?.email || null]);
+        actor || null, user?.name || user?.email || null, priorCount, isCx]);
 
     if (file) {
       await this.ds.query(`
@@ -341,6 +357,10 @@ export class TechnicalIssuesController {
       outageId: r.outage_id, escalatedAt: r.escalated_at,
       resolutionNotes: r.resolution_notes, resolvedAt: r.resolved_at,
       repeatCount: +r.repeat_count,
+      isCxIssue: r.is_cx_issue ?? false,
+      slaDueAt: r.sla_due_at,
+      slaTargetMinutes: r.sla_target_minutes != null ? +r.sla_target_minutes : null,
+      slaBreached: r.sla_due_at ? (new Date(r.sla_due_at) < new Date() && !['resolved','rejected'].includes(r.status)) : false,
       attachmentsCount: +(r.attachments_count ?? 0),
       createdAt: r.created_at, updatedAt: r.updated_at,
     };
