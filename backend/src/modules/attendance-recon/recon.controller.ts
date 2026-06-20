@@ -21,6 +21,15 @@ const SCHEDULE = process.env.RECON_SCHEDULE_FILE || 'C:/Users/t.bassam/Desktop/W
 export class ReconController {
   constructor(private readonly svc: ReconService, private readonly ingestion: RosterIngestionService) {}
 
+  /** File-based recon reads server-side source workbooks; fail clean (400) if absent. */
+  private assertSources() {
+    if (!fs.existsSync(SCHEDULE) || !fs.existsSync(SRC_DIR)) {
+      throw new BadRequestException(
+        'Reconciliation source files are not available on the server. Configure RECON_SOURCE_DIR and RECON_SCHEDULE_FILE, or use the DB-backed /attendance-recon/dashboard (run /ingest first).',
+      );
+    }
+  }
+
   // ── DB-backed roster (scales to years): parse once via /ingest, then query fast ──
   @Post('ingest')
   @RequirePermissions('attendance.view_team')
@@ -55,6 +64,7 @@ export class ReconController {
     @Query('presence') presence?: string,
     @Query('limit') limit?: string,
   ) {
+    this.assertSources();
     const result = this.svc.run(SRC_DIR, SCHEDULE);
     let rows = result.rows;
     if (from) rows = rows.filter(r => r.date >= from);
@@ -187,6 +197,7 @@ export class ReconController {
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Compare computed figures vs the analyst manual values (accuracy proof)' })
   compare(@Query('from') from?: string, @Query('to') to?: string) {
+    this.assertSources();
     const result = this.svc.run(SRC_DIR, SCHEDULE);
     let rows = result.rows;
     if (from) rows = rows.filter(r => r.date >= from);
