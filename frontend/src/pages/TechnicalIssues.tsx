@@ -21,6 +21,8 @@ interface TI {
   outageId: string | null; escalatedAt: string | null;
   resolutionNotes: string | null; resolvedAt: string | null;
   attachmentsCount: number; createdAt: string;
+  repeatCount?: number; isCxIssue?: boolean;
+  slaDueAt?: string | null; slaBreached?: boolean;
 }
 
 interface TIDetail extends TI {
@@ -37,6 +39,7 @@ interface Stats {
   total: number; pending: number; validated: number;
   escalated: number; resolved: number; rejected: number;
   last24h: number; last7d: number;
+  slaBreached?: number; cxIssues?: number;
 }
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -236,11 +239,13 @@ export default function TechnicalIssuesPage() {
 
       {/* Stats row */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
             { l: ar?'قيد المراجعة':'Pending RTA', v: stats.pending,   c:'#f87171' },
             { l: ar?'تم التحقق':'Validated',       v: stats.validated, c:'#fb923c' },
             { l: ar?'تحوّل لعطل':'Escalated',      v: stats.escalated, c:'#818cf8' },
+            { l: ar?'تجاوز SLA':'SLA breached',    v: stats.slaBreached ?? 0, c:'#ef4444' },
+            { l: ar?'قضايا CX':'CX issues',        v: stats.cxIssues ?? 0,    c:'#a855f7' },
             { l: ar?'آخر 24 ساعة':'Last 24h',      v: stats.last24h,   c:'#fbbf24' },
           ].map(s => (
             <div key={s.l} className="rounded-2xl p-4 flex items-center gap-3"
@@ -309,6 +314,18 @@ export default function TechnicalIssuesPage() {
                         <span className="text-[10px] px-2 py-0.5 rounded-full animate-pulse"
                           style={{ background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.3)', color:'#f87171' }}>
                           {ar?'يحتاج RTA':'Needs RTA'}
+                        </span>
+                      )}
+                      {ti.isCxIssue && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                          style={{ background:'rgba(168,85,247,0.15)', border:'1px solid rgba(168,85,247,0.35)', color:'#c084fc' }}>
+                          {ar?`قضية CX${ti.repeatCount?` ×${ti.repeatCount}`:''}`:`CX${ti.repeatCount?` ×${ti.repeatCount}`:''}`}
+                        </span>
+                      )}
+                      {ti.slaBreached && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                          style={{ background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.4)', color:'#ef4444' }}>
+                          {ar?'تجاوز SLA':'SLA breached'}
                         </span>
                       )}
                     </div>
