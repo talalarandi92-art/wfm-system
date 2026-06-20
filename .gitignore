@@ -109,3 +109,16 @@ nice-upload-root.zip
 
 # Local repo backups (kept outside the repo)
 _backups/
+
+# --- Real operational data & PII (kept locally / in "WFM System - DATA", never on GitHub) ---
+My work/
+DESCKTOP/
+OLD LAP/
+*.xlsx
+*.xls
+*.csv
+*.pdf
+*.bundle
+# runtime artefacts
+uploads/
+*.log
