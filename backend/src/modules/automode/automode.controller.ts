@@ -25,6 +25,7 @@ export class AutoModeController {
   settings(@CurrentUser() u: any) { return this.svc.getSettings(u.tenantId); }
 
   @Post('settings')
+  @RequirePermissions('settings.edit')   // changing Auto Mode config is an admin-only setting
   @ApiOperation({ summary: 'Update Auto Mode switches (off by default; reject opt-in)' })
   save(@CurrentUser() u: any, @Body() dto: SettingsDto) { return this.svc.saveSettings(u.tenantId, u.id ?? u.sub, dto); }
 
