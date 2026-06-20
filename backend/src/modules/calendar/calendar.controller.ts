@@ -311,17 +311,21 @@ export class CalendarController {
     const checkDate = date ?? new Date().toISOString().slice(0, 10);
     const checkHour = hour ? parseInt(hour, 10) : new Date().getHours();
 
-    // Get HC by function from schedule for this date/hour
+    // Get HC by function from the schedule (attendance_records) for this date/hour.
+    // Uses the scheduled time window directly (cross-midnight aware) — the same
+    // live source as /coverage/hourly. (Was querying a non-existent schedule_records.)
     const scheduled = await this.ds.query(
-      `SELECT fn.name AS function_name, COUNT(DISTINCT sr.employee_id) AS scheduled_hc
-       FROM schedule_records sr
-       JOIN employees e ON e.id = sr.employee_id
+      `SELECT fn.name AS function_name, COUNT(DISTINCT ar.employee_id) AS scheduled_hc
+       FROM attendance_records ar
+       JOIN employees e ON e.id = ar.employee_id
        JOIN functions fn ON fn.id = e.function_id
-       JOIN shift_codes sc ON sc.code = sr.shift_code
-       WHERE sr.tenant_id = $1 AND sr.schedule_date = $2
-         AND sc.start_time <= $3::time
-         AND (sc.end_time > $3::time OR sc.cross_midnight = TRUE)
-         AND sr.shift_code NOT IN ('OFF','L','H','SL','A')
+       WHERE ar.tenant_id = $1 AND ar.attendance_date = $2
+         AND ar.scheduled_start IS NOT NULL
+         AND ar.attendance_marker NOT IN ('off','leave','holiday','sick','absent','comp')
+         AND (
+           (ar.scheduled_end >  ar.scheduled_start AND $3::time >= ar.scheduled_start AND $3::time < ar.scheduled_end)
+           OR (ar.scheduled_end <= ar.scheduled_start AND ($3::time >= ar.scheduled_start OR $3::time < ar.scheduled_end))
+         )
        GROUP BY fn.name`,
       [tid, checkDate, `${String(checkHour).padStart(2,'0')}:00`],
     );

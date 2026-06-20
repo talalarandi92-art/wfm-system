@@ -722,21 +722,17 @@ export class ReportsService {
    * ═══════════════════════════════════════════════════════════════════════ */
   async techIssuesDetailed(tid: string, from: string, to: string) {
     const rows = await this.ds.query(
-      `SELECT ti.id, ti.title, ti.issue_reason, ti.channel, ti.sku, ti.original_case_id,
-              ti.status, ti.repeated_count, ti.is_cx_issue,
+      // Columns are denormalized on agent_tech_reports (reporter_name etc.), so no
+      // user/function joins. Fields the table doesn't carry (sku, original_case_id,
+      // escalated_to, resolved_by) are simply absent → the mapper falls back to ''.
+      `SELECT ti.id, ti.title, ti.description AS issue_reason, ti.channel,
+              ti.status, ti.repeat_count AS repeated_count, ti.is_cx_issue,
               ti.created_at, ti.validated_at, ti.escalated_at, ti.resolved_at,
-              ti.sla_due_at, ti.resolution,
-              f.name AS function_name,
-              ${USER_NAME('rp')} AS reported_by,
-              ${USER_NAME('vb')} AS validated_by,
-              ${USER_NAME('eb')} AS escalated_to,
-              ${USER_NAME('sb')} AS resolved_by
+              ti.sla_due_at, ti.resolution_notes AS resolution,
+              ti.function_name,
+              ti.reporter_name      AS reported_by,
+              ti.validated_by_name  AS validated_by
          FROM agent_tech_reports ti
-         LEFT JOIN functions f ON f.id = ti.function_id
-         LEFT JOIN users rp ON rp.id = ti.reported_by
-         LEFT JOIN users vb ON vb.id = ti.validated_by
-         LEFT JOIN users eb ON eb.id = ti.escalated_to
-         LEFT JOIN users sb ON sb.id = ti.resolved_by
         WHERE ti.tenant_id = $1 AND ti.created_at::date BETWEEN $2 AND $3
         ORDER BY ti.created_at DESC
         LIMIT 10000`,
