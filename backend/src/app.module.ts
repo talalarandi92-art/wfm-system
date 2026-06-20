@@ -93,7 +93,11 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
         logging:      config.get('NODE_ENV') === 'development' ? ['error', 'warn'] : ['error'],
         // SSL only when explicitly enabled (managed DB / external host). A containerized
         // Postgres on the same Docker network does not use SSL — POSTGRES_SSL stays false.
-        ssl:          config.get('POSTGRES_SSL') === 'true' ? { rejectUnauthorized: false } : false,
+        // When SSL is on we VALIDATE the server certificate by default; only set
+        // POSTGRES_SSL_INSECURE=true to accept a self-signed cert (avoids silent MITM exposure).
+        ssl:          config.get('POSTGRES_SSL') === 'true'
+                        ? { rejectUnauthorized: config.get('POSTGRES_SSL_INSECURE') !== 'true' }
+                        : false,
         extra: {
           max: 20,             // Connection pool max
           idleTimeoutMillis: 30000,
