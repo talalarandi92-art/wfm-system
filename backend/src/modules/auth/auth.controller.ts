@@ -10,6 +10,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { MfaTokenDto, MfaDisableDto } from './dto/mfa.dto';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { Public } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
@@ -29,7 +30,7 @@ export class AuthController {
   login(@Body() dto: LoginDto, @Req() req: Request) {
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip;
     const userAgent = req.headers['user-agent'];
-    return this.authService.login(dto.email, dto.password, undefined, ip, userAgent);
+    return this.authService.login(dto.email, dto.password, undefined, ip, userAgent, dto.mfaCode);
   }
 
   @Public()
@@ -67,6 +68,33 @@ export class AuthController {
   changePassword(@CurrentUser() user: User, @Body() dto: ChangePasswordDto, @Req() req: Request) {
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ?? req.ip;
     return this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword, ip, req.headers['user-agent']);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('mfa/setup')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Begin TOTP MFA enrolment — returns secret + otpauth URL for a QR' })
+  mfaSetup(@CurrentUser() user: User) {
+    return this.authService.setupMfa(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('mfa/enable')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Verify the first TOTP code and turn MFA on' })
+  mfaEnable(@CurrentUser() user: User, @Body() dto: MfaTokenDto) {
+    return this.authService.enableMfa(user.id, dto.token);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('mfa/disable')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Disable MFA — requires password and a current code' })
+  mfaDisable(@CurrentUser() user: User, @Body() dto: MfaDisableDto) {
+    return this.authService.disableMfa(user.id, dto.password, dto.token);
   }
 
   @UseGuards(JwtAuthGuard)

@@ -56,6 +56,12 @@ export class User {
   @Column({ name: 'refresh_token_expires_at', type: 'timestamptz', nullable: true, select: false })
   refreshTokenExpiresAt: Date | null;
 
+  @Column({ name: 'mfa_enabled', default: false })
+  mfaEnabled: boolean;
+
+  @Column({ name: 'mfa_secret', type: 'text', nullable: true, select: false })
+  mfaSecret: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

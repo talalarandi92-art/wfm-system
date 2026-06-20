@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { authenticator } from 'otplib';
 import { randomUUID } from 'crypto';
 import { User } from '@database/entities/user.entity';
 import { JwtPayload } from './strategies/jwt.strategy';
@@ -86,12 +87,14 @@ export class AuthService {
     tenantId?: string,
     ip?: string,
     userAgent?: string,
+    mfaCode?: string,
   ) {
     // Load password hash (select: false field needs explicit select)
     const user = await this.usersRepo
       .createQueryBuilder('u')
       .addSelect('u.passwordHash')
       .addSelect('u.refreshTokenHash')
+      .addSelect('u.mfaSecret')
       .leftJoinAndSelect('u.roles', 'role')
       .leftJoinAndSelect('role.permissions', 'permission')
       .where('LOWER(u.email) = LOWER(:email)', { email })
@@ -174,6 +177,22 @@ export class AuthService {
       }
 
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Second factor (opt-in). Password is correct here; gate token issuance on a
+    // valid TOTP code when the account has MFA enabled. Accounts without MFA are
+    // unaffected.
+    if (user.mfaEnabled) {
+      if (!mfaCode) {
+        return { mfaRequired: true } as any;
+      }
+      if (!user.mfaSecret || !authenticator.verify({ token: String(mfaCode).trim(), secret: user.mfaSecret })) {
+        await this.writeAudit({
+          tenantId: user.tenantId, actorId: user.id, actorEmail: user.email,
+          action: 'auth.mfa_failed', entityId: user.id, ip, userAgent,
+        });
+        throw new UnauthorizedException('Invalid authentication code');
+      }
     }
 
     // Successful login
@@ -378,5 +397,44 @@ export class AuthService {
       action: 'auth.password_changed', entityId: user.id, ip, userAgent,
     });
     return { message: 'Password changed. Please sign in again on other devices.' };
+  }
+
+  /* ── TOTP multi-factor authentication (opt-in) ────────────────────────────── */
+
+  /** Generate (or regenerate) a TOTP secret and return the otpauth URL for a QR. */
+  async setupMfa(userId: string) {
+    const user = await this.usersRepo.findOne({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('User not found');
+    if (user.mfaEnabled) throw new ForbiddenException('MFA is already enabled. Disable it first to re-enrol.');
+    const secret = authenticator.generateSecret();
+    await this.usersRepo.update(userId, { mfaSecret: secret } as any);
+    const otpauthUrl = authenticator.keyuri(user.email, 'Boutiqaat WFM', secret);
+    return { secret, otpauthUrl };
+  }
+
+  /** Verify the first code and turn MFA on. */
+  async enableMfa(userId: string, token: string) {
+    const user = await this.usersRepo.createQueryBuilder('u')
+      .addSelect('u.mfaSecret').where('u.id = :id', { id: userId }).getOne();
+    if (!user?.mfaSecret) throw new ForbiddenException('Start MFA setup first.');
+    if (!authenticator.verify({ token: (token || '').trim(), secret: user.mfaSecret }))
+      throw new UnauthorizedException('Invalid code.');
+    await this.usersRepo.update(userId, { mfaEnabled: true } as any);
+    await this.writeAudit({ tenantId: user.tenantId, actorId: user.id, actorEmail: user.email, action: 'auth.mfa_enabled', entityId: user.id });
+    return { enabled: true };
+  }
+
+  /** Disable MFA — requires the password AND a current code. */
+  async disableMfa(userId: string, password: string, token: string) {
+    const user = await this.usersRepo.createQueryBuilder('u')
+      .addSelect('u.passwordHash').addSelect('u.mfaSecret').where('u.id = :id', { id: userId }).getOne();
+    if (!user) throw new UnauthorizedException('User not found');
+    if (!user.mfaEnabled) return { enabled: false };
+    if (!(await bcrypt.compare(password, user.passwordHash))) throw new UnauthorizedException('Password is incorrect');
+    if (!user.mfaSecret || !authenticator.verify({ token: (token || '').trim(), secret: user.mfaSecret }))
+      throw new UnauthorizedException('Invalid code.');
+    await this.usersRepo.update(userId, { mfaEnabled: false, mfaSecret: null } as any);
+    await this.writeAudit({ tenantId: user.tenantId, actorId: user.id, actorEmail: user.email, action: 'auth.mfa_disabled', entityId: user.id });
+    return { enabled: false };
   }
 }
