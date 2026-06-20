@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Moon, Sun, Globe, LogOut, ChevronDown, Search, X, CheckCheck } from 'lucide-react';
+import { Bell, Moon, Sun, Globe, LogOut, ChevronDown, Search, X, CheckCheck, KeyRound } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import { useAuthStore } from '@/store/auth.store';
@@ -75,6 +75,24 @@ export default function AppLayout() {
   const navigate           = useNavigate();
   const ar                 = lang === 'ar';
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pwOpen, setPwOpen]   = useState(false);
+  const [pwCur, setPwCur]     = useState('');
+  const [pwNew, setPwNew]     = useState('');
+  const [pwConf, setPwConf]   = useState('');
+  const [pwMsg, setPwMsg]     = useState<{ ok: boolean; text: string } | null>(null);
+  const [pwBusy, setPwBusy]   = useState(false);
+  const submitPw = async () => {
+    setPwMsg(null);
+    if (pwNew !== pwConf) { setPwMsg({ ok: false, text: ar ? 'كلمتا المرور غير متطابقتين' : 'Passwords do not match' }); return; }
+    setPwBusy(true);
+    try {
+      await apiClient.post('/auth/change-password', { currentPassword: pwCur, newPassword: pwNew });
+      setPwMsg({ ok: true, text: ar ? 'تم تغيير كلمة المرور' : 'Password changed' });
+      setPwCur(''); setPwNew(''); setPwConf('');
+    } catch (e: any) {
+      setPwMsg({ ok: false, text: e?.response?.data?.message || (ar ? 'فشل التغيير' : 'Change failed') });
+    } finally { setPwBusy(false); }
+  };
 
   // ── Notifications ──────────────────────────────────────────────────────────
   const [notifOpen, setNotifOpen] = useState(false);
@@ -329,6 +347,17 @@ export default function AppLayout() {
                       </div>
                     </div>
 
+                    {/* Change password */}
+                    <button
+                      onClick={() => { setPwOpen(true); setMenuOpen(false); setPwMsg(null); }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 text-sm
+                                 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white
+                                 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors duration-150 rounded-xl mx-0.5"
+                    >
+                      <KeyRound size={15} />
+                      {ar ? 'تغيير كلمة المرور' : 'Change password'}
+                    </button>
+
                     {/* Logout */}
                     <button
                       onClick={() => { logout(); setMenuOpen(false); }}
@@ -345,6 +374,42 @@ export default function AppLayout() {
             </div>
           </div>
         </header>
+
+        {/* Change-password modal */}
+        {pwOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+            style={{ background: 'rgba(2,6,23,0.6)', backdropFilter: 'blur(4px)' }}
+            onClick={() => setPwOpen(false)}>
+            <div className="w-full max-w-sm rounded-2xl p-5"
+              onClick={e => e.stopPropagation()}
+              style={{ background: dark ? '#0c1628' : '#fff', border: `1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` }}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-sm font-bold" style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>
+                  <KeyRound size={16} style={{ color: '#818cf8' }} /> {ar ? 'تغيير كلمة المرور' : 'Change password'}
+                </div>
+                <button onClick={() => setPwOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+              </div>
+              {[
+                { v: pwCur, set: setPwCur, ph: ar ? 'كلمة المرور الحالية' : 'Current password' },
+                { v: pwNew, set: setPwNew, ph: ar ? 'كلمة المرور الجديدة' : 'New password' },
+                { v: pwConf, set: setPwConf, ph: ar ? 'تأكيد كلمة المرور الجديدة' : 'Confirm new password' },
+              ].map((f, i) => (
+                <input key={i} type="password" value={f.v} onChange={e => f.set(e.target.value)} placeholder={f.ph}
+                  className="w-full mb-2.5 rounded-xl px-3 py-2.5 text-sm outline-none"
+                  style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, color: dark ? '#e2e8f0' : '#0f172a' }} />
+              ))}
+              <p className="text-[11px] mb-3" style={{ color: '#94a3b8' }}>
+                {ar ? '10 أحرف على الأقل، مع حرف صغير وكبير ورقم.' : 'At least 10 chars with lowercase, uppercase, and a digit.'}
+              </p>
+              {pwMsg && (
+                <p className="text-xs mb-3 font-medium" style={{ color: pwMsg.ok ? '#22c55e' : '#ef4444' }}>{pwMsg.text}</p>
+              )}
+              <button onClick={submitPw} disabled={pwBusy || !pwCur || !pwNew} className="btn-primary w-full text-sm justify-center">
+                {pwBusy ? '…' : (ar ? 'تغيير' : 'Change password')}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Page content — keyed by route for a soft enter transition ──── */}
         <main className="flex-1 p-6">
