@@ -817,6 +817,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
   const [weeklyUsage, setWeeklyUsage] = useState<{ used: number; remaining: number; max: number; weekStart: string; weekEnd: string } | null>(null);
   const [hcImpact, setHcImpact] = useState<any>(null);
   const [hcLoading, setHcLoading] = useState(false);
+  const [leaveBal, setLeaveBal] = useState<any>(null);
   const [attachFile, setAttachFile] = useState<File | null>(null);
 
   // Upload an attachment (schedule/appointment image) to a just-created request.
@@ -869,6 +870,14 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
     }, 450);
     return () => clearTimeout(timer);
   }, [selectedType, selectedEmp, form.permissionDate, form.startTime, form.endTime]);
+
+  // Leave balance for the selected employee + balance-bearing leave type.
+  useEffect(() => {
+    const BAL = ['annual_leave', 'comp_off', 'sick_leave'];
+    if (!isLeaveType || !selectedEmp || !BAL.includes(selectedType ?? '')) { setLeaveBal(null); return; }
+    apiClient.get('/leave-balances/one', { params: { employeeId: selectedEmp.id, leaveType: selectedType } })
+      .then(r => setLeaveBal(r.data)).catch(() => setLeaveBal(null));
+  }, [isLeaveType, selectedEmp, selectedType]);
 
   // When requester + date changes for swaps, fetch candidates
   useEffect(() => {
@@ -1199,6 +1208,18 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                   <input type="date" value={form.endDate ?? ''} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} style={inputStyle} />
                 </div>
               </div>
+              {leaveBal && leaveBal.configured && (
+                <div className="rounded-xl p-3 flex items-center justify-between flex-wrap gap-2"
+                  style={{ background: leaveBal.remaining <= 0 ? 'rgba(239,68,68,0.08)' : 'rgba(14,165,233,0.08)',
+                           border: `1px solid ${leaveBal.remaining <= 0 ? 'rgba(239,68,68,0.3)' : 'rgba(14,165,233,0.25)'}` }}>
+                  <span className="text-xs font-bold" style={{ color: leaveBal.remaining <= 0 ? '#ef4444' : '#38bdf8' }}>
+                    {ar ? 'الرصيد المتبقّي' : 'Balance remaining'}: {leaveBal.remaining} / {leaveBal.entitlement} {ar ? 'يوم' : 'd'}
+                  </span>
+                  <span className="text-[11px]" style={{ color: '#94a3b8' }}>
+                    {ar ? 'مأخوذ' : 'taken'} {leaveBal.taken} · {ar ? 'معلّق' : 'pending'} {leaveBal.pending}
+                  </span>
+                </div>
+              )}
               {selectedType === 'sick_leave' && (
                 <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
                   <AlertCircle size={14} className="text-amber-400" />

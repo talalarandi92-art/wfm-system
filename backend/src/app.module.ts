@@ -17,6 +17,7 @@ import { PermissionRequestModule } from '@modules/permission-requests/permission
 import { RequestsModule }          from '@modules/requests/requests.module';
 import { CapacityModule }          from '@modules/capacity/capacity.module';
 import { ForecastingModule }       from '@modules/forecasting/forecasting.module';
+import { LeaveBalancesModule }     from '@modules/leave-balances/leave-balances.module';
 import { EmployeeMergeModule }     from '@modules/employee-merge/employee-merge.module';
 import { EmployeesModule }         from '@modules/employees/employees.module';
 import { DashboardModule }         from '@modules/dashboard/dashboard.module';
@@ -128,6 +129,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     RequestsModule,
     CapacityModule,
     ForecastingModule,
+    LeaveBalancesModule,
     EmployeeMergeModule,
     EmployeesModule,
     DashboardModule,

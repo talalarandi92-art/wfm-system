@@ -1,6 +1,7 @@
 ﻿import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { v4 as uuid } from 'uuid';
+import { LeaveBalancesService } from '@modules/leave-balances/leave-balances.service';
 import {
   CreateShiftSwapDto,
   CreateLeaveDto,
@@ -24,7 +25,10 @@ import {
 
 @Injectable()
 export class RequestsService {
-  constructor(private readonly ds: DataSource) {}
+  constructor(
+    private readonly ds: DataSource,
+    private readonly leaveBalances: LeaveBalancesService,
+  ) {}
 
   /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    *  TIME HELPERS
@@ -940,6 +944,10 @@ export class RequestsService {
       throw new BadRequestException('Ø¥Ø¬Ø§Ø²Ø© Ø§Ù„ÙˆÙØ§Ø© ØªÙƒÙˆÙ† 3 Ø£ÙŠØ§Ù… ÙƒØ­Ø¯ Ø£Ù‚ØµÙ‰');
     if (dto.leaveType === 'comp_off' && durationDays > 1)
       throw new BadRequestException('Ø§Ù„ÙŠÙˆÙ… Ø§Ù„ØªØ¹ÙˆÙŠØ¶ÙŠ ÙŠÙˆÙ… ÙˆØ§Ø­Ø¯ ÙÙ‚Ø·');
+
+    // Block over-requesting against the annual entitlement (only when one is set).
+    await this.leaveBalances.assertCanRequest(
+      tenantId, dto.employeeId, dto.leaveType, durationDays, start.getFullYear());
 
     const requestId = uuid();
 
