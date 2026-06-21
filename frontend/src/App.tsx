@@ -18,6 +18,7 @@ import AnalyticsHub            from '@/pages/AnalyticsHub';
 import ProductivityPage        from '@/pages/Productivity';
 import RosterPage              from '@/pages/Roster';
 import RosterDashboardPage     from '@/pages/RosterDashboard';
+import ReportBuilderPage       from '@/pages/ReportBuilder';
 import SettingsPage            from '@/pages/Settings';
 import CalendarPage            from '@/pages/Calendar';
 import SkillsPage              from '@/pages/Skills';
@@ -110,6 +111,7 @@ export default function App() {
           <Route path="productivity" element={<ProductivityPage />} />
           <Route path="roster" element={<RosterPage />} />
           <Route path="roster-dashboard" element={<RosterDashboardPage />} />
+          <Route path="report-builder" element={<ReportBuilderPage />} />
           <Route path="campaigns" element={<Navigate to="/schedule?tab=campaigns" replace />} />
           <Route path="attendance-corrections" element={<Navigate to="/attendance?tab=corrections" replace />} />
           <Route path="schedule-changes" element={<Navigate to="/schedule?tab=changes" replace />} />

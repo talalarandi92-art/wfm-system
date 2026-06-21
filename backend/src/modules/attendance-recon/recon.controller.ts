@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Post, Put, Query, Req, Res, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Put, Query, Req, Res, StreamableFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import * as ExcelJS from 'exceljs';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import * as fs from 'fs';
@@ -158,6 +159,98 @@ export class ReconController {
       distributions: { byShift, byFunction, byTeamManager, byPresence },
       filterOptions: { functions: functions.map((r:any)=>r.v), shifts: shifts.map((r:any)=>r.v), teamManagers: teamManagers.map((r:any)=>r.v), teams: teams.map((r:any)=>r.v), days: days.map((r:any)=>r.v) },
     };
+  }
+
+  /** Custom Report Builder — pick fields OR (groupBy + KPIs), any filters, date
+   *  range; returns {columns, rows}. format=xlsx streams an Excel file. */
+  @Get('report-builder')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Custom report builder: choose fields/KPIs/groupBy/filters; JSON or xlsx' })
+  async reportBuilder(@Req() req: any, @Res({ passthrough: true }) res: any, @Query() q: any) {
+    const t = req.user.tenantId;
+    // detail field map (key → {col, label, kind})
+    const F: Record<string, { col: string; label: string; time?: boolean }> = {
+      date:{col:'work_date::text',label:'Date'}, day:{col:'day_name',label:'Day'}, week:{col:'week_number',label:'Week'},
+      month:{col:'month_name',label:'Month'}, agent:{col:'name',label:'Agent'}, agentId:{col:'employee_no',label:'Agent ID'},
+      function:{col:'function_name',label:'Function'}, teamLeader:{col:'team_manager',label:'Team Leader'}, group:{col:'team_group',label:'Group'},
+      gender:{col:'gender',label:'Gender'}, location:{col:'location',label:'Location'},
+      shiftCode:{col:'shift_code',label:'Shift'}, originalShift:{col:'original_shift_code',label:'Original Shift'},
+      shiftStart:{col:'shift_start_min',label:'Shift Start',time:true}, shiftEnd:{col:'shift_end_min',label:'Shift End',time:true},
+      attendanceStatus:{col:'attendance_status',label:'Attendance Status'}, hrStatus:{col:'hr_code',label:'HR Code'},
+      punchIn:{col:'punch_in_min',label:'Punch In',time:true}, punchOut:{col:'punch_out_min',label:'Punch Out',time:true},
+      sysLogin:{col:'sys_login_min',label:'Sys Login',time:true}, sysLogout:{col:'sys_logout_min',label:'Sys Logout',time:true},
+      systemSource:{col:'login_src',label:'Sys Source'}, workedMin:{col:'worked_min',label:'Worked (min)'},
+      lateMin:{col:'sys_late_min',label:'Late (min)'}, lateCategory:{col:'late_category',label:'Late Category'}, earlyMin:{col:'sys_early_min',label:'Early Out (min)'},
+      otBefore:{col:'ot_before_min',label:'OT Before'}, otAfter:{col:'ot_after_min',label:'OT After'}, otTotal:{col:'ot_min',label:'OT Total'},
+      offdayOt:{col:'offday_ot_min',label:'OFF-day OT'}, holidayOt:{col:'holiday_ot_min',label:'Holiday OT'},
+      conformance:{col:'adherence_pct',label:'Conformance %'}, permission:{col:'permission_type',label:'Permission'},
+      permissionDuration:{col:'permission_duration',label:'Permission Dur'}, dataQuality:{col:'data_quality',label:'Data Quality'}, crossesMidnight:{col:'crosses_midnight',label:'X-Midnight'},
+    };
+    // KPI map (key → {agg, label})
+    const K: Record<string, { agg: string; label: string }> = {
+      scheduledDays:{agg:'COUNT(*)',label:'Scheduled Days'}, workedDays:{agg:`COUNT(*) FILTER (WHERE presence IN ('office','wfh'))`,label:'Worked Days'},
+      offDays:{agg:`COUNT(*) FILTER (WHERE presence='off')`,label:'OFF Days'}, holidayDays:{agg:`COUNT(*) FILTER (WHERE presence='holiday')`,label:'Holiday Days'},
+      leaveDays:{agg:`COUNT(*) FILTER (WHERE presence='leave')`,label:'Leave Days'}, sickDays:{agg:`COUNT(*) FILTER (WHERE presence='sick')`,label:'Sick Days'},
+      absenceDays:{agg:`COUNT(*) FILTER (WHERE presence='absent')`,label:'Absence Days'}, wfhDays:{agg:`COUNT(*) FILTER (WHERE presence='wfh')`,label:'WFH Days'},
+      officeDays:{agg:`COUNT(*) FILTER (WHERE presence='office')`,label:'Office Days'},
+      permissionCount:{agg:`COUNT(*) FILTER (WHERE permission_type IS NOT NULL)`,label:'Permissions'}, compDays:{agg:`COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)`,label:'COMP Days'},
+      lateMin:{agg:'SUM(sys_late_min)',label:'Late (min)'}, lateDays:{agg:'COUNT(*) FILTER (WHERE sys_late_min>0)',label:'Late Days'},
+      earlyMin:{agg:'SUM(sys_early_min)',label:'Early Out (min)'}, otMin:{agg:'SUM(ot_min)',label:'OT (min)'},
+      otBefore:{agg:'SUM(ot_before_min)',label:'OT Before (min)'}, otAfter:{agg:'SUM(ot_after_min)',label:'OT After (min)'},
+      offdayOt:{agg:'SUM(offday_ot_min)',label:'OFF-day OT'}, holidayOt:{agg:'SUM(holiday_ot_min)',label:'Holiday OT'},
+      avgLate:{agg:'ROUND(AVG(sys_late_min) FILTER (WHERE sys_late_min>0))',label:'Avg Late'}, avgWorked:{agg:'ROUND(AVG(worked_min) FILTER (WHERE worked_min>0))',label:'Avg Worked (min)'},
+      conformance:{agg:'ROUND(AVG(adherence_pct),1)',label:'Conformance %'}, missingPunch:{agg:'COUNT(*) FILTER (WHERE missing_punch)',label:'Missing Punch'},
+      missingSystem:{agg:'COUNT(*) FILTER (WHERE missing_system)',label:'Missing System'}, mismatch:{agg:'COUNT(*) FILTER (WHERE mismatch IS NOT NULL)',label:'Mismatch'},
+      agents:{agg:'COUNT(DISTINCT employee_no)',label:'Agents'},
+    };
+    const G: Record<string, { col: string; label: string }> = {
+      day:{col:'day_name',label:'Day'}, week:{col:'week_number',label:'Week'}, month:{col:'month_name',label:'Month'}, date:{col:'work_date::text',label:'Date'},
+      agent:{col:'name',label:'Agent'}, function:{col:'function_name',label:'Function'}, teamLeader:{col:'team_manager',label:'Team Leader'},
+      group:{col:'team_group',label:'Group'}, shift:{col:'shift_code',label:'Shift'}, status:{col:'attendance_status',label:'Attendance Status'}, lateCategory:{col:'late_category',label:'Late Category'},
+    };
+
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const p: any[] = [t, q.from || range?.a, q.to || range?.b];
+    let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3`;
+    const FILT: Record<string, string> = { function:'function_name', teamLeader:'team_manager', group:'team_group', shift:'shift_code',
+      attendanceStatus:'attendance_status', hrStatus:'hr_code', presence:'presence', lateCategory:'late_category', systemSource:'login_src',
+      day:'day_name', month:'month_name', dataQuality:'data_quality' };
+    for (const [k, col] of Object.entries(FILT)) if (q[k]) { p.push(q[k]); w += ` AND ${col}=$${p.length}`; }
+    if (q.week) { p.push(Number(q.week)); w += ` AND week_number=$${p.length}`; }
+    for (const b of ['wfh','sick','absent']) if (q[b]==='1') w += ` AND presence='${b}'`;
+    if (q.permission==='1') w += ` AND permission_type IS NOT NULL`;
+    if (q.comp==='1') w += ` AND (comp_off IS NOT NULL OR comp_worked_min>0)`;
+    if (q.search) { p.push(`%${String(q.search).toLowerCase()}%`); w += ` AND (lower(name) LIKE $${p.length} OR employee_no ILIKE $${p.length})`; }
+
+    const timeFn = (m: number|null) => m==null?'':`${String(Math.floor((((m%1440)+1440)%1440)/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+    let columns: { key: string; label: string }[] = []; let rows: any[] = [];
+
+    if (q.groupBy && G[q.groupBy]) {
+      const g = G[q.groupBy];
+      const kpis = String(q.kpis||'scheduledDays,workedDays,lateMin,otMin,conformance').split(',').filter(k=>K[k]);
+      columns = [{ key:'group', label:g.label }, ...kpis.map(k=>({ key:k, label:K[k].label }))];
+      const sel = [`${g.col} AS group`, ...kpis.map(k=>`${K[k].agg} AS "${k}"`)].join(', ');
+      rows = await this.ds.query(`SELECT ${sel} FROM roster_days WHERE ${w} GROUP BY ${g.col} ORDER BY 2 DESC NULLS LAST LIMIT 500`, p);
+    } else {
+      const fields = String(q.fields||'date,agent,function,shiftCode,attendanceStatus,lateMin,otBefore,otAfter,conformance').split(',').filter(k=>F[k]);
+      columns = fields.map(k=>({ key:k, label:F[k].label }));
+      const sel = fields.map(k=>`${F[k].col} AS "${k}"`).join(', ');
+      const lim = q.format==='xlsx' ? 50000 : 1000;
+      const raw = await this.ds.query(`SELECT ${sel} FROM roster_days WHERE ${w} ORDER BY work_date DESC, name LIMIT ${lim}`, p);
+      rows = raw.map((r: any) => { const o:any={}; for (const k of fields) o[k] = F[k].time ? timeFn(r[k]) : r[k]; return o; });
+    }
+
+    if (q.format === 'xlsx') {
+      const wb = new ExcelJS.Workbook(); const ws = wb.addWorksheet('Custom Report');
+      ws.columns = columns.map(c => ({ header: c.label, key: c.key, width: 16 }));
+      ws.getRow(1).font = { bold:true, color:{argb:'FFFFFFFF'} }; ws.getRow(1).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF4F46E5'} };
+      ws.views = [{ state:'frozen', ySplit:1 }]; rows.forEach(r => ws.addRow(r));
+      res.set('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.set('Content-Disposition', `attachment; filename="custom-report.xlsx"`);
+      return new StreamableFile(Buffer.from(await wb.xlsx.writeBuffer()));
+    }
+    return { from: p[1], to: p[2], mode: q.groupBy?'summary':'detail', count: rows.length, columns, rows,
+      catalog: { fields: Object.entries(F).map(([k,v])=>({key:k,label:v.label})), kpis: Object.entries(K).map(([k,v])=>({key:k,label:v.label})), groups: Object.entries(G).map(([k,v])=>({key:k,label:v.label})) } };
   }
 
   /** Save a manager note for a roster day (survives roster_days re-imports). */
