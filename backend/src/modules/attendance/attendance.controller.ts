@@ -89,6 +89,27 @@ export class AttendanceController {
     return this.svc.getAttrition(user.tenantId);
   }
 
+  /** Peak/holiday OT event calendar (demand signal for forecasting) */
+  @Get('peak-events')
+  @ApiOperation({ summary: 'Peak/holiday OT events: date range, headcount, OT hours' })
+  @ApiQuery({ name: 'year', required: false })
+  peakEvents(@CurrentUser() user: any, @Query('year') year?: string) {
+    return this.svc.getPeakEvents(user.tenantId, year ? Number(year) : undefined);
+  }
+
+  /** Approved OT by month + top OT employees */
+  @Get('ot-monthly')
+  @ApiOperation({ summary: 'Approved overtime by month (trend) + top OT employees' })
+  @ApiQuery({ name: 'year', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  otMonthly(
+    @CurrentUser() user: any,
+    @Query('year') year?: string,
+    @Query('limit', new DefaultValuePipe('20')) limit?: string,
+  ) {
+    return this.svc.getOtMonthly(user.tenantId, year ? Number(year) : undefined, Number(limit));
+  }
+
   /** Breakdown by function */
   @Get('by-function')
   @ApiOperation({ summary: 'Attendance metrics grouped by function' })

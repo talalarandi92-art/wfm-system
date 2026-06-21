@@ -278,6 +278,45 @@ export class AttendanceService {
     };
   }
 
+  // ── 2b. Overtime: peak-event calendar + monthly OT trend ────────────────────
+
+  /** Peak/holiday OT events (from the real Overtime workbooks) — a demand calendar. */
+  async getPeakEvents(tenantId: string, year?: number) {
+    const events = await this.ds.query(
+      `SELECT event_name, year, start_date::text AS start_date, end_date::text AS end_date,
+              headcount, ot_hours::float AS ot_hours, source_file
+         FROM peak_events
+        WHERE tenant_id = $1 ${year ? 'AND year = $2' : ''}
+        ORDER BY start_date DESC NULLS LAST, event_name`,
+      year ? [tenantId, year] : [tenantId],
+    );
+    const byYear = await this.ds.query(
+      `SELECT year, COUNT(*)::int AS events, COALESCE(SUM(headcount),0)::int AS slots,
+              ROUND(COALESCE(SUM(ot_hours),0))::int AS ot_hours
+         FROM peak_events WHERE tenant_id = $1 GROUP BY year ORDER BY year`,
+      [tenantId],
+    );
+    return { byYear, events };
+  }
+
+  /** Approved OT hours by month (trend) + top OT employees, from consolidated OT files. */
+  async getOtMonthly(tenantId: string, year?: number, limit = 20) {
+    const trend = await this.ds.query(
+      `SELECT year, month, ROUND(SUM(ot_hours))::int AS ot_hours,
+              COUNT(DISTINCT name)::int AS employees
+         FROM ot_monthly WHERE tenant_id = $1 ${year ? 'AND year = $2' : ''}
+        GROUP BY year, month ORDER BY year, month`,
+      year ? [tenantId, year] : [tenantId],
+    );
+    const top = await this.ds.query(
+      `SELECT name, employee_no, ROUND(SUM(ot_hours))::int AS ot_hours
+         FROM ot_monthly WHERE tenant_id = $1 ${year ? 'AND year = $2' : ''}
+        GROUP BY name, employee_no ORDER BY SUM(ot_hours) DESC LIMIT ${Number(limit) || 20}`,
+      year ? [tenantId, year] : [tenantId],
+    );
+    return { trend, top };
+  }
+
   // ── 3. Function Breakdown ───────────────────────────────────────────────────
 
   async getByFunction(tenantId: string, period: PeriodType, from?: string, to?: string) {
