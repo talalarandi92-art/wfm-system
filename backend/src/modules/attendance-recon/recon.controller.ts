@@ -81,6 +81,85 @@ export class ReconController {
     return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, rows };
   }
 
+  /** Highly-dynamic agent dashboard over roster_days: KPIs + rankings by every
+   *  metric + distributions, with filters (date range, function, shift, team
+   *  leader, team, presence, day, search). */
+  @Get('roster-dashboard')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Dynamic roster dashboard: KPIs, rankings, distributions, filters' })
+  async rosterDashboard(
+    @Req() req: any,
+    @Query('from') from?: string, @Query('to') to?: string, @Query('functionName') functionName?: string,
+    @Query('shift') shift?: string, @Query('teamManager') teamManager?: string, @Query('team') team?: string,
+    @Query('presence') presence?: string, @Query('day') day?: string, @Query('search') search?: string,
+    @Query('limit') limit = '10',
+  ) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || (range?.b ? `${range.b.slice(0,7)}-01` : range?.a), dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo];
+    let w = `r.tenant_id=$1 AND r.work_date BETWEEN $2 AND $3`;
+    const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
+    if (functionName) w += ` AND ${add('r.function_name=$$', functionName)}`;
+    if (shift)        w += ` AND ${add('upper(r.shift_code) LIKE upper($$)', shift + '%')}`;
+    if (teamManager)  w += ` AND ${add('r.team_manager=$$', teamManager)}`;
+    if (team)         w += ` AND ${add('r.team_group=$$', team)}`;
+    if (presence)     w += ` AND ${add('r.presence=$$', presence)}`;
+    if (day)          w += ` AND ${add('r.day_name=$$', day)}`;
+    if (search)       { p.push(`%${search.toLowerCase()}%`); w += ` AND (lower(r.name) LIKE $${p.length} OR r.employee_no ILIKE $${p.length})`; }
+    const lim = Math.min(Number(limit) || 10, 50);
+
+    const summary = (await this.ds.query(`
+      SELECT COUNT(*)::int records, COUNT(DISTINCT employee_no)::int agents, COUNT(DISTINCT work_date)::int days,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             COUNT(*) FILTER (WHERE presence='office')::int office, COUNT(*) FILTER (WHERE presence='wfh')::int wfh,
+             COUNT(*) FILTER (WHERE presence='off')::int off, COUNT(*) FILTER (WHERE presence='leave')::int leave,
+             COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
+             COUNT(*) FILTER (WHERE sys_late_min>0)::int late_days, COALESCE(SUM(sys_late_min),0)::int late_min,
+             COUNT(*) FILTER (WHERE sys_early_min>0)::int early_days, COALESCE(SUM(sys_early_min),0)::int early_min,
+             COALESCE(SUM(ot_before_min),0)::int ot_before, COALESCE(SUM(ot_after_min),0)::int ot_after,
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+             ROUND(AVG(adherence_pct),1) conformance
+        FROM roster_days r WHERE ${w}`, p))[0];
+
+    const rank = (sel: string, order: string) => this.ds.query(
+      `SELECT name, employee_no, function_name, team_manager, ${sel} v FROM roster_days r WHERE ${w}
+        GROUP BY name, employee_no, function_name, team_manager HAVING ${order.split(' ')[0]}<>0 ORDER BY ${order} LIMIT ${lim}`, p)
+      .catch(() => this.ds.query(`SELECT name, employee_no, function_name, team_manager, ${sel} v FROM roster_days r WHERE ${w} GROUP BY name, employee_no, function_name, team_manager ORDER BY ${order} LIMIT ${lim}`, p));
+
+    const [mostLate, mostEarly, otAfter, otBefore, mostAbsent, mostSick, lowestConf, mostPerm] = await Promise.all([
+      rank(`SUM(sys_late_min)::int`, `SUM(sys_late_min) DESC`),
+      rank(`SUM(sys_early_min)::int`, `SUM(sys_early_min) DESC`),
+      rank(`SUM(ot_after_min)::int`, `SUM(ot_after_min) DESC`),
+      rank(`SUM(ot_before_min)::int`, `SUM(ot_before_min) DESC`),
+      rank(`COUNT(*) FILTER (WHERE presence='absent')::int`, `COUNT(*) FILTER (WHERE presence='absent') DESC`),
+      rank(`COUNT(*) FILTER (WHERE presence='sick')::int`, `COUNT(*) FILTER (WHERE presence='sick') DESC`),
+      this.ds.query(`SELECT name, employee_no, function_name, team_manager, ROUND(AVG(adherence_pct),1) v FROM roster_days r WHERE ${w} AND adherence_pct IS NOT NULL GROUP BY name, employee_no, function_name, team_manager HAVING COUNT(*) FILTER (WHERE adherence_pct IS NOT NULL)>=2 ORDER BY AVG(adherence_pct) ASC LIMIT ${lim}`, p),
+      rank(`COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int`, `COUNT(*) FILTER (WHERE permission_type IS NOT NULL) DESC`),
+    ]);
+
+    const dist = async (col: string) => this.ds.query(
+      `SELECT COALESCE(${col},'—') k, COUNT(*)::int n, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+              ROUND(AVG(adherence_pct),1) conformance, COALESCE(SUM(sys_late_min),0)::int late, COALESCE(SUM(ot_after_min),0)::int ot_after
+         FROM roster_days r WHERE ${w} GROUP BY ${col} ORDER BY n DESC`, p);
+    const [byShift, byFunction, byTeamManager, byPresence] = await Promise.all([
+      dist('shift_code'), dist('function_name'), dist('team_manager'), dist('presence'),
+    ]);
+
+    // filter dropdown options
+    const opts = (col: string) => this.ds.query(`SELECT DISTINCT ${col} v FROM roster_days WHERE tenant_id=$1 AND ${col} IS NOT NULL ORDER BY 1`, [t]);
+    const [functions, shifts, teamManagers, teams, days] = await Promise.all([
+      opts('function_name'), opts('shift_code'), opts('team_manager'), opts('team_group'), opts('day_name'),
+    ]);
+
+    return {
+      from: dFrom, to: dTo, range, summary,
+      rankings: { mostLate, mostEarly, otAfter, otBefore, mostAbsent, mostSick, lowestConformance: lowestConf, mostPermissions: mostPerm },
+      distributions: { byShift, byFunction, byTeamManager, byPresence },
+      filterOptions: { functions: functions.map((r:any)=>r.v), shifts: shifts.map((r:any)=>r.v), teamManagers: teamManagers.map((r:any)=>r.v), teams: teams.map((r:any)=>r.v), days: days.map((r:any)=>r.v) },
+    };
+  }
+
   /** Save a manager note for a roster day (survives roster_days re-imports). */
   @Put('roster-v2/note')
   @RequirePermissions('attendance.view_team')
