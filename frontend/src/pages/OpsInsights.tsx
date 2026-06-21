@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
-  Phone, MessageSquare, Clock, Coffee, ShoppingCart, CalendarRange,
-  TrendingUp, Activity, Headphones, RotateCcw, Globe, Layers,
+  Phone, Clock, Coffee, ShoppingCart, CalendarRange,
+  TrendingUp, Activity, Headphones, RotateCcw, Globe, Layers, Award,
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -49,11 +49,12 @@ function Section({ title, children }: { title: string; children: any }) {
 const hms = (s: number) => { s = Math.round(s); const m = Math.floor(s / 60), ss = s % 60; return m >= 60 ? `${Math.floor(m/60)}h${m%60}m` : `${m}m ${ss}s`; };
 const k = (n: number) => n >= 1000 ? `${(n/1000).toFixed(n >= 10000 ? 0 : 1)}k` : `${n}`;
 
-type Sub = 'volume' | 'productivity' | 'shrinkage' | 'orders' | 'peaks' | 'overtime';
+type Sub = 'volume' | 'productivity' | 'shrinkage' | 'scorecard' | 'orders' | 'peaks' | 'overtime';
 const SUBS: { key: Sub; icon: any; ar: string; en: string }[] = [
   { key: 'volume',       icon: Phone,        ar: 'حجم التواصل + CPO', en: 'Volume & CPO' },
   { key: 'productivity', icon: Headphones,   ar: 'الإنتاجية',          en: 'Productivity' },
   { key: 'shrinkage',    icon: Coffee,       ar: 'الـShrinkage',       en: 'Shrinkage' },
+  { key: 'scorecard',    icon: Award,        ar: 'السكوركارد',         en: 'Scorecard' },
   { key: 'orders',       icon: ShoppingCart, ar: 'الطلبات',            en: 'Orders' },
   { key: 'peaks',        icon: CalendarRange,ar: 'أيام الذروة',        en: 'Peak Events' },
   { key: 'overtime',     icon: Clock,        ar: 'الأوفر تايم',        en: 'Overtime' },
@@ -71,6 +72,7 @@ export default function OpsInsightsPage() {
     const ep: Record<Sub, string> = {
       volume: '/ops-analytics/volume', productivity: '/ops-analytics/productivity',
       shrinkage: '/ops-analytics/shrinkage', orders: '/ops-analytics/orders',
+      scorecard: '/ops-analytics/scorecards',
       peaks: '/attendance/peak-events', overtime: '/attendance/ot-monthly',
     };
     if (data[sub]) return;
@@ -174,6 +176,43 @@ export default function OpsInsightsPage() {
                 ))}
               </div>
             </Section>
+          </div>
+        );
+      })()}
+
+      {/* ── SCORECARD ── */}
+      {sub === 'scorecard' && d && !d.error && (() => {
+        const maxT = Math.max(...(d.trend||[]).map((t:any)=>t.avg_net),1);
+        const maxF = Math.max(...(d.byFunction||[]).map((f:any)=>f.avg_net),1);
+        const grade = (n:number) => n>=90?'#22c55e':n>=75?'#06b6d4':n>=60?'#f59e0b':'#f43f5e';
+        return (
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <KpiCard icon={Award} label={ar?'الشهر':'Period'} value={`${MONTHS[d.period?.month]} ${d.period?.year}`} sub={`${(d.top||[]).length+(d.bottom||[]).length}+ ${ar?'موظف':'agents'}`} color="#8b5cf6" />
+              <KpiCard icon={TrendingUp} label={ar?'متوسط النقاط':'Avg Net Points'} value={(d.trend||[]).slice(-1)[0]?.avg_net ?? '—'} color="#22c55e" />
+              <KpiCard icon={Layers} label={ar?'أشهر مغطّاة':'Months'} value={(d.trend||[]).length} color="#06b6d4" />
+              <KpiCard icon={Activity} label={ar?'أفضل فنكشن':'Top function'} value={(d.byFunction||[])[0]?.avg_net ?? '—'} sub={(d.byFunction||[])[0]?.function_name} color="#f59e0b" />
+            </div>
+            <Section title={ar?'اتجاه النقاط شهريًا':'Monthly Net-Points trend'}>
+              <div className="space-y-2">
+                {(d.trend||[]).map((t:any)=>(
+                  <HBar key={`${t.year}-${t.month}`} label={`${MONTHS[t.month]} ${t.year} · ${t.agents}👥`} value={t.avg_net} max={maxT} color={grade(t.avg_net)} />
+                ))}
+              </div>
+            </Section>
+            <div className="grid md:grid-cols-2 gap-4">
+              <Section title={ar?'أعلى الموظفين':'Top agents'}>
+                <div className="space-y-2">{(d.top||[]).map((a:any)=>(
+                  <HBar key={a.employee_no} label={`${a.name} · ${a.function_name||''}`} value={a.avg_net} max={120} color={grade(a.avg_net)} />
+                ))}</div>
+              </Section>
+              <Section title={ar?'حسب الفنكشن':'By function'}>
+                <div className="space-y-2">{(d.byFunction||[]).map((f:any)=>(
+                  <HBar key={f.function_name} label={`${f.function_name} · ${f.agents}👥`} value={f.avg_net} max={maxF} color={grade(f.avg_net)} />
+                ))}</div>
+              </Section>
+            </div>
+            <p className="text-[11px] text-slate-500">{d.note}</p>
           </div>
         );
       })()}

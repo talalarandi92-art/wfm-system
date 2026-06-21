@@ -276,6 +276,39 @@ export class OpsController {
     return { range: range[0], from: dFrom, to: dTo, totalHours: Math.round(totalH * 10) / 10, categories, byReason, daily };
   }
 
+  /* ── Scorecard monthly (real Score Card workbooks) ──────────────────────── */
+
+  /** Monthly Net-Points trend + top/bottom agents + by-function averages. */
+  @Get('scorecards')
+  @ApiOperation({ summary: 'Scorecard monthly: Net-Points trend, top/bottom agents, by function' })
+  async scorecards(@CurrentUser() user: any, @Query('year') year?: string, @Query('month') month?: string) {
+    const t = user.tenantId;
+    const trend = await this.ds.query(
+      `SELECT year, month, COUNT(*)::int agents, ROUND(AVG(avg_net_points),1)::float avg_net
+         FROM scorecard_monthly WHERE tenant_id=$1 GROUP BY year, month ORDER BY year, month`, [t]);
+    // default to the latest month present
+    const latest = trend[trend.length - 1];
+    const y = year ? Number(year) : latest?.year;
+    const m = month ? Number(month) : latest?.month;
+    const p = [t, y, m];
+    const periodAgents = await this.ds.query(
+      `SELECT employee_no, name, function_name, team_manager, avg_net_points::float avg_net,
+              best_net::float best_net, worst_net::float worst_net, weeks_scored
+         FROM scorecard_monthly WHERE tenant_id=$1 AND year=$2 AND month=$3
+        ORDER BY avg_net_points DESC`, p);
+    const byFunction = await this.ds.query(
+      `SELECT function_name, COUNT(*)::int agents, ROUND(AVG(avg_net_points),1)::float avg_net
+         FROM scorecard_monthly WHERE tenant_id=$1 AND year=$2 AND month=$3 AND function_name IS NOT NULL
+        GROUP BY function_name ORDER BY avg_net DESC`, p);
+    return {
+      trend, period: { year: y, month: m },
+      top: periodAgents.slice(0, 12),
+      bottom: periodAgents.slice(-8).reverse(),
+      byFunction,
+      note: 'avg_net = mean of weekly Net Points per agent (precise per-KPI scoring lives in the scorecard module)',
+    };
+  }
+
   /* ── Analytics ──────────────────────────────────────────────────────────── */
 
   /** Summary cards: totals, channels, survey funnel, sentiment split */
