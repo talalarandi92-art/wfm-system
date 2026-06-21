@@ -64,6 +64,17 @@ interface MarkerRow {
   count: number;
   percentage: number;
 }
+interface TardyEmp {
+  employeeId: string; employeeNo: string; name: string; functionName: string | null;
+  workingDays: number; tardyLate: number; tardyLateMinutes: number; permittedLate: number;
+  tardyEarly: number; tardyEarlyMinutes: number; permittedEarly: number;
+  conformingDays: number; conformancePct: number | null;
+}
+interface TardyData {
+  totals: { employees: number; workingDays: number; tardyLate: number; permittedLate: number; tardyEarly: number; permittedEarly: number; conformancePct: number | null };
+  employees: TardyEmp[];
+}
+interface ByHourRow { hour: number; shiftCode: string | null; scheduled: number; present: number; tardyLate: number; tardyEarly: number }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +141,18 @@ function StatCard({
   );
 }
 
+// Compact metric box for the tardiness totals row.
+function StatBox({ label, value, color, dark }: {
+  label: string; value: string | number; color: string; dark: boolean; tp?: any; ts?: any;
+}) {
+  return (
+    <div style={{ ...cardStyle(dark), padding: 14 }}>
+      <p style={{ color: ts(dark), fontSize: 10, marginBottom: 4 }}>{label}</p>
+      <p style={{ color, fontSize: 22, fontWeight: 700, lineHeight: 1 }}>{value}</p>
+    </div>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function AttendanceDashboard() {
@@ -138,12 +161,14 @@ export default function AttendanceDashboard() {
   const ar = lang === 'ar';
 
   const [period, setPeriod] = useState<Period>('month');
-  const [activeTab, setActiveTab] = useState<'overview' | 'late' | 'function' | 'wfh' | 'missing'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'late' | 'function' | 'wfh' | 'missing' | 'tardiness'>('overview');
 
   const [summary,   setSummary]   = useState<Summary | null>(null);
   const [topLate,   setTopLate]   = useState<TopLateRow[]>([]);
   const [byFunc,    setByFunc]    = useState<FunctionRow[]>([]);
   const [markers,   setMarkers]   = useState<MarkerRow[]>([]);
+  const [tardy,     setTardy]     = useState<TardyData | null>(null);
+  const [byHour,    setByHour]    = useState<ByHourRow[]>([]);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
 
@@ -157,16 +182,20 @@ export default function AttendanceDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [sumRes, lateRes, funcRes, markRes] = await Promise.all([
+      const [sumRes, lateRes, funcRes, markRes, tardyRes, byHourRes] = await Promise.all([
         apiClient.get(`/attendance/summary?period=${p}`),
         apiClient.get(`/attendance/top-late?period=${p}&limit=15`),
         apiClient.get(`/attendance/by-function?period=${p}`),
         apiClient.get(`/attendance/markers?period=${p}`),
+        apiClient.get(`/attendance/tardiness?period=${p}`).catch(() => ({ data: null })),
+        apiClient.get(`/attendance/tardiness/by-hour?period=${p}`).catch(() => ({ data: { rows: [] } })),
       ]);
       setSummary(sumRes.data);
       setTopLate(lateRes.data);
       setByFunc(funcRes.data);
       setMarkers(markRes.data);
+      setTardy(tardyRes.data);
+      setByHour(byHourRes.data?.rows ?? []);
     } catch (e: any) {
       setError(e?.response?.data?.message ?? (ar ? 'فشل تحميل البيانات' : 'Failed to load data'));
     } finally {
@@ -291,10 +320,11 @@ export default function AttendanceDashboard() {
       {/* ── Tabs ─────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${divider}`, gap: 4, marginBottom: 16 }}>
         {[
-          { key: 'overview',  en: 'By Function',   ar: 'حسب القسم'      },
-          { key: 'late',      en: 'Top Late',       ar: 'الأكثر تأخراً'  },
-          { key: 'wfh',       en: 'WFH vs Office',  ar: 'بيت / مكتب'   },
-          { key: 'missing',   en: 'Missing Punch',  ar: 'بصمة ناقصة' },
+          { key: 'overview',   en: 'By Function',   ar: 'حسب القسم'      },
+          { key: 'late',       en: 'Top Late',       ar: 'الأكثر تأخراً'  },
+          { key: 'tardiness',  en: 'Tardiness & Conformance', ar: 'التأخير والكونفورمانس' },
+          { key: 'wfh',        en: 'WFH vs Office',  ar: 'بيت / مكتب'   },
+          { key: 'missing',    en: 'Missing Punch',  ar: 'بصمة ناقصة' },
         ].map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key as any)}
             style={{
@@ -505,6 +535,103 @@ export default function AttendanceDashboard() {
             </h3>
           </div>
           <MissingTable period={period} ar={ar} dark={dark} divider={divider} tp={tp} ts={ts} rowHover={rowHover} thStyle={thStyle} thCenter={thCenter} tdStyle={tdStyle} tdCenter={tdCenter} />
+        </div>
+      )}
+
+      {/* ── Tardiness & Conformance ──────────────────────────────────────── */}
+      {activeTab === 'tardiness' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Totals */}
+          {tardy?.totals && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12 }}>
+              <StatBox label={ar ? 'كونفورمانس الحضور' : 'Attendance Conformance'} value={`${tardy.totals.conformancePct ?? '—'}%`} color="#22c55e" dark={dark} tp={tp} ts={ts} />
+              <StatBox label={ar ? 'تأخير دخول (غير مصرّح)' : 'Late-in (tardy)'} value={tardy.totals.tardyLate} color="#f87171" dark={dark} tp={tp} ts={ts} />
+              <StatBox label={ar ? 'تأخير باستئذان' : 'Late-in (permitted)'} value={tardy.totals.permittedLate} color="#22c55e" dark={dark} tp={tp} ts={ts} />
+              <StatBox label={ar ? 'خروج مبكر (غير مصرّح)' : 'Early-out (tardy)'} value={tardy.totals.tardyEarly} color="#f87171" dark={dark} tp={tp} ts={ts} />
+              <StatBox label={ar ? 'خروج مبكر باستئذان' : 'Early-out (permitted)'} value={tardy.totals.permittedEarly} color="#22c55e" dark={dark} tp={tp} ts={ts} />
+            </div>
+          )}
+
+          {/* Per-employee table */}
+          <div style={{ ...cardStyle(dark), overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${divider}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={15} style={{ color: '#f87171' }} />
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: tp(dark) }}>
+                {ar ? 'التأخير لكل موظف + الكونفورمانس' : 'Per-employee tardiness + conformance'}
+              </h3>
+              <span style={{ fontSize: 11, color: ts(dark), marginInlineStart: 'auto' }}>{ar ? 'التأخير غير المصرّح فقط يخفّض الكونفورمانس' : 'Only unauthorized tardiness lowers conformance'}</span>
+            </div>
+            <div style={{ overflowX: 'auto', maxHeight: 460 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ background: theadBg, position: 'sticky', top: 0 }}>
+                  <tr>
+                    <th style={thStyle}>{ar ? 'الموظف' : 'Employee'}</th>
+                    <th style={thStyle}>{ar ? 'القسم' : 'Function'}</th>
+                    <th style={thCenter}>{ar ? 'أيام عمل' : 'Days'}</th>
+                    <th style={thCenter}>{ar ? 'تأخير' : 'Tardy late'}</th>
+                    <th style={thCenter}>{ar ? 'باستئذان' : 'Permit late'}</th>
+                    <th style={thCenter}>{ar ? 'خروج مبكر' : 'Tardy early'}</th>
+                    <th style={thCenter}>{ar ? 'باستئذان' : 'Permit early'}</th>
+                    <th style={thCenter}>{ar ? 'كونفورمانس' : 'Conformance'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(tardy?.employees ?? []).map(e => (
+                    <tr key={e.employeeId} style={{ borderTop: `1px solid ${divider}` }}>
+                      <td style={tdStyle}>{e.name || '—'} <span style={{ color: ts(dark), fontSize: 10 }}>#{e.employeeNo}</span></td>
+                      <td style={tdStyle}>{e.functionName ?? '—'}</td>
+                      <td style={tdCenter}>{e.workingDays}</td>
+                      <td style={{ ...tdCenter, color: e.tardyLate > 0 ? '#f87171' : ts(dark) }}>{e.tardyLate || '—'}</td>
+                      <td style={{ ...tdCenter, color: e.permittedLate > 0 ? '#22c55e' : ts(dark) }}>{e.permittedLate || '—'}</td>
+                      <td style={{ ...tdCenter, color: e.tardyEarly > 0 ? '#f87171' : ts(dark) }}>{e.tardyEarly || '—'}</td>
+                      <td style={{ ...tdCenter, color: e.permittedEarly > 0 ? '#22c55e' : ts(dark) }}>{e.permittedEarly || '—'}</td>
+                      <td style={{ ...tdCenter, fontWeight: 700, color: (e.conformancePct ?? 100) >= 90 ? '#22c55e' : (e.conformancePct ?? 0) >= 75 ? '#f59e0b' : '#f87171' }}>{e.conformancePct ?? '—'}%</td>
+                    </tr>
+                  ))}
+                  {(!tardy || tardy.employees.length === 0) && (
+                    <tr><td colSpan={8} style={{ ...tdCenter, padding: 24, color: ts(dark) }}>{ar ? 'لا بيانات' : 'No data'}</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* By hour (HC tracker) */}
+          <div style={{ ...cardStyle(dark), overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${divider}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Clock size={15} style={{ color: '#818cf8' }} />
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: tp(dark) }}>
+                {ar ? 'حسب ساعة بداية الشفت — مجدول / حاضر / متأخر' : 'By shift-start hour — scheduled / present / tardy'}
+              </h3>
+            </div>
+            <div style={{ overflowX: 'auto', maxHeight: 360 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ background: theadBg, position: 'sticky', top: 0 }}>
+                  <tr>
+                    <th style={thStyle}>{ar ? 'الساعة' : 'Hour'}</th>
+                    <th style={thStyle}>{ar ? 'الشفت' : 'Shift'}</th>
+                    <th style={thCenter}>{ar ? 'مجدول' : 'Scheduled'}</th>
+                    <th style={thCenter}>{ar ? 'حاضر' : 'Present'}</th>
+                    <th style={thCenter}>{ar ? 'تأخير دخول' : 'Tardy late'}</th>
+                    <th style={thCenter}>{ar ? 'خروج مبكر' : 'Tardy early'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {byHour.map((h, i) => (
+                    <tr key={i} style={{ borderTop: `1px solid ${divider}` }}>
+                      <td style={tdStyle}>{String(h.hour).padStart(2, '0')}:00</td>
+                      <td style={tdStyle}>{h.shiftCode ?? '—'}</td>
+                      <td style={tdCenter}>{h.scheduled}</td>
+                      <td style={tdCenter}>{h.present}</td>
+                      <td style={{ ...tdCenter, color: h.tardyLate > 0 ? '#f87171' : ts(dark) }}>{h.tardyLate || '—'}</td>
+                      <td style={{ ...tdCenter, color: h.tardyEarly > 0 ? '#f87171' : ts(dark) }}>{h.tardyEarly || '—'}</td>
+                    </tr>
+                  ))}
+                  {byHour.length === 0 && <tr><td colSpan={6} style={{ ...tdCenter, padding: 24, color: ts(dark) }}>{ar ? 'لا بيانات' : 'No data'}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
