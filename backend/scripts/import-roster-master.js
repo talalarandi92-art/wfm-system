@@ -45,6 +45,8 @@ function parseCode(c0) {
   if (U==='A') return { status:'absent', base:null, code:c };
   if (U==='S'||U==='SL') return { status:'sick', base:null, code:c };
   if (U==='RES'||U==='TER') return { status:'left', code:c };
+  if (U==='DL') return { status:'leave', code:'DL' };               // Death/bereavement leave (documented in assumptions)
+  if (U==='TRANSFER') return { status:'off', code:'Transfer' };     // agent transfer marker — flagged as data quality
   if (U==='P') return { status:'present', base:null, code:'P' };   // P = Present (shift unspecified) — user convention
   if (/^WFH/i.test(c)) { const base = c.replace(/^WFH[-\s]?/i,''); return { status:'wfh', base: base||null, code:c }; }
   if (/S$/.test(c) && c.length>1) return { status:'sick', base:c.slice(0,-1), code:c };
@@ -68,11 +70,31 @@ function resolveShift(base, TIMING) {
   return { ss, se, is7h, is20: /20/.test(base) };
 }
 
+// Saturday-start business week number of the year
+function weekNum(iso) {
+  const d = new Date(iso + 'T00:00:00Z'); const sinceSat = (d.getUTCDay()+1)%7;
+  const ws = new Date(d); ws.setUTCDate(d.getUTCDate()-sinceSat);
+  const jan1 = new Date(Date.UTC(d.getUTCFullYear(),0,1)); const fws = new Date(jan1); fws.setUTCDate(jan1.getUTCDate()-((jan1.getUTCDay()+1)%7));
+  return Math.floor((ws-fws)/(7*86400000))+1;
+}
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function lateCat(m, noShow) { if (noShow) return 'No show'; if (m<=0) return 'On time'; if (m<=5) return 'Late 1-5'; if (m<=15) return 'Late 6-15'; if (m<=20) return 'Late 16-20'; if (m<=29) return 'Late 21-29'; if (m<=59) return 'Late 30-59'; return 'Late 60+'; }
+function attStatus(presence, pcStatus, code) {
+  const U = String(code).toUpperCase();
+  if (U==='DL') return 'Death Leave'; if (U==='UPL') return 'Unpaid Leave'; if (U==='TRANSFER') return 'Transfer';
+  if (pcStatus==='sick') return 'Sick Leave'; if (pcStatus==='absent') return 'Absence';
+  if (pcStatus==='holiday') return 'Holiday'; if (pcStatus==='leave') return 'Annual Leave';
+  if (pcStatus==='comp' || String(code).toUpperCase()==='COMP') return 'COMP'; if (pcStatus==='off') return 'OFF';
+  if (pcStatus==='left') return 'Left';
+  if (presence==='office') return 'Present (Office)'; if (presence==='wfh') return 'WFH';
+  if (presence==='absent') return 'Absence'; return 'Present';
+}
+
 (async () => {
   const c = new Client({ host: process.env.POSTGRES_HOST, port: +process.env.POSTGRES_PORT, database: process.env.POSTGRES_DB, user: process.env.POSTGRES_USER, password: process.env.POSTGRES_PASSWORD });
   await c.connect();
   const tid = (await c.query(`SELECT id FROM tenants LIMIT 1`)).rows[0].id;
-  for (const mig of ['053_roster_days.sql','054_roster_days_adherence.sql','055_roster_team_notes.sql','056_roster_master_fields.sql'])
+  for (const mig of ['053_roster_days.sql','054_roster_days_adherence.sql','055_roster_team_notes.sql','056_roster_master_fields.sql','057_roster_master_full.sql'])
     await c.query(fs.readFileSync(path.join(__dirname, '..', '..', 'database', 'migrations', mig), 'utf8'));
   const empGender = new Map((await c.query(`SELECT employee_no, gender FROM employees`)).rows.map(r=>[String(r.employee_no), r.gender]));
   const sm = (await c.query(`SELECT m.sprinklr_agent_id, lower(m.agent_email) email, e.employee_no FROM sprinklr_agent_map m JOIN employees e ON e.id=m.employee_id WHERE m.employee_id IS NOT NULL`)).rows;
@@ -190,18 +212,43 @@ function resolveShift(base, TIMING) {
       let attCode=code, hrCode;
       if (pc.status==='sick') { attCode = code.length>1?code:(letter?`${letter}S`:'SL'); hrCode='SL'; }
       else if (pc.status==='absent') { attCode = code.length>1?code:(letter?`${letter}A`:'A'); hrCode='A'; }
-      else if (pc.status==='off') hrCode='OFF';
-      else if (pc.status==='leave') hrCode='L';
+      else if (pc.status==='off') hrCode = String(code).toUpperCase()==='TRANSFER' ? 'Transfer' : 'OFF';
+      else if (pc.status==='leave') hrCode = ['DL','UPL'].includes(String(code).toUpperCase()) ? String(code).toUpperCase() : 'L';
       else if (pc.status==='holiday') hrCode='H';
       else if (pc.status==='wfh') hrCode='WFH';
       else if (presence==='absent') { attCode = letter?`${letter}A`:'A'; hrCode='A'; }
       else hrCode = code;   // working shift present → shift code
 
-      // mismatch: only genuine office anomalies (WFH no-punch is normal → not flagged)
+      // ── full-WFM fields ──
+      const crossMidnight = se!=null && se>1440;
+      // OT on non-working days (worked despite OFF/Holiday/COMP)
+      const nonWorkWorkedMin = (presence==='off'||presence==='holiday'||pc.status==='comp') && (pin!=null||li!=null) ? (workedMin||0) : 0;
+      const offdayOt = (pc.status==='off') ? nonWorkWorkedMin : 0;
+      const holidayOt = (pc.status==='holiday') ? nonWorkWorkedMin : 0;
+      const compWorked = (pc.status==='comp' || String(code).toUpperCase()==='COMP') ? nonWorkWorkedMin : 0;
+      // late category (no-show = scheduled working but zero login/punch)
+      const noShow = (pc.status==='work'||pc.status==='present') && !/wfh/i.test(rec.location||'') && pin==null && li==null;
+      const lateCategory = worked ? lateCat(effLate, false) : (noShow ? 'No show' : null);
+      const wfhLocFlag = /wfh/i.test(rec.location||'');
+      const missingPunch = (presence==='office') && pin==null;
+      const missingSystem = worked && !wfhLocFlag && li==null && pin!=null;   // punched but no system (office)
+      const workedSys = (li!=null&&outMin!=null&&lo!=null) ? ((lo<li?lo+1440:lo)-li) : null;
+      // original shift behind sick/absent
+      const origCode = (pc.status==='sick'||pc.status==='absent') ? (pc.base||null) : (pc.status==='work'? code : null);
+      const weekN = weekNum(iso), monthN = MONTHS[+iso.slice(5,7)-1];
+      const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(iso+'T00:00:00Z').getUTCDay()];
+      const attendanceStatus = attStatus(presence, pc.status, code);
+
+      // mismatch + data-quality
       let mismatch=null;
-      if (pc.status==='work' && !pc.base?.match(/wfh/i)) {
-        if (pin!=null&&li!=null&&Math.abs(pin-li)>30) mismatch='punch<>system';
-      }
+      if (pc.status==='work' && !pc.base?.match(/wfh/i)) { if (pin!=null&&li!=null&&Math.abs(pin-li)>30) mismatch='punch<>system'; }
+      let dq=null;
+      if (String(code).toUpperCase()==='TRANSFER') dq='transfer-marker';
+      else if (pc.status==='work' && pc.base && !shift?.ss) dq='unknown-shift-code';
+      else if (noShow) dq='scheduled-no-show';
+      else if (missingPunch) dq='missing-punch';
+      else if (missingSystem) dq='missing-system';
+      else if (mismatch) dq='punch-system-mismatch';
 
       rows.push([tid, rec.no, rec.name||null, rec.func||null, iso, null,
         p?.status||null, presence, pin, pout, li, lo, src.join('+')||null,
@@ -209,13 +256,14 @@ function resolveShift(base, TIMING) {
         st.mgr||null, rec.team||null, st.gender||empGender.get(rec.no)||null, workedMin,
         code||null, ss, se, sysLate, sysEarly, adherence, mismatch,
         rec.location||null, pc.base||null, null, null, otBefore, otAfter, shift?.is7h||false, shift?.is20||false,
-        attCode, hrCode, odPerm?odPerm.type:(odComp?odComp.type:null), odPerm?odPerm.duration:(odComp?odComp.duration:null), odPerm?odPerm.status:(odComp?odComp.status:null), null]);
+        attCode, hrCode, odPerm?odPerm.type:(odComp?odComp.type:null), odPerm?odPerm.duration:(odComp?odComp.duration:null), odPerm?odPerm.status:(odComp?odComp.status:null), null,
+        weekN, monthN, attendanceStatus, origCode, (origCode?ss:null), (origCode?se:null), offdayOt, holidayOt, compWorked, crossMidnight, lateCategory, missingPunch, missingSystem, workedSys, dq]);
     }
   }
 
   await c.query('BEGIN');
   await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [tid, FROM, TO]);
-  const CINS=['tenant_id','employee_no','name','function_name','work_date','day_name','status','presence','punch_in_min','punch_out_min','sys_login_min','sys_logout_min','login_src','late_min','early_min','ot_min','permission','comp_off','sick','conforming','team_manager','team_group','gender','worked_min','shift_code','shift_start_min','shift_end_min','sys_late_min','sys_early_min','adherence_pct','mismatch','location','shift_category','shift_start2_min','shift_end2_min','ot_before_min','ot_after_min','is_7h','is_20','attendance_code','hr_code','permission_type','permission_duration','permission_status','campaign'];
+  const CINS=['tenant_id','employee_no','name','function_name','work_date','day_name','status','presence','punch_in_min','punch_out_min','sys_login_min','sys_logout_min','login_src','late_min','early_min','ot_min','permission','comp_off','sick','conforming','team_manager','team_group','gender','worked_min','shift_code','shift_start_min','shift_end_min','sys_late_min','sys_early_min','adherence_pct','mismatch','location','shift_category','shift_start2_min','shift_end2_min','ot_before_min','ot_after_min','is_7h','is_20','attendance_code','hr_code','permission_type','permission_duration','permission_status','campaign','week_number','month_name','attendance_status','original_shift_code','original_shift_start_min','original_shift_end_min','offday_ot_min','holiday_ot_min','comp_worked_min','crosses_midnight','late_category','missing_punch','missing_system','worked_min_system','data_quality'];
   const N=CINS.length;
   for(let i=0;i<rows.length;i+=300){ const ch=rows.slice(i,i+300); const ph=ch.map((_,j)=>`(${Array.from({length:N},(_,k)=>`$${j*N+k+1}`).join(',')})`).join(','); await c.query(`INSERT INTO roster_days (${CINS.join(',')}) VALUES ${ph}`, ch.flat()); }
   await c.query('COMMIT');
@@ -226,5 +274,31 @@ function resolveShift(base, TIMING) {
   console.log(`adherence ${a.adh}% | shift-resolved ${a.sh} | punched ${a.pun} | system ${a.sys} | sys-late ${a.lt} | early ${a.er} | OT-before ${a.otb} | OT-after ${a.ota}`);
   if (unknownCodes.size) console.log('⚠ UNKNOWN/unresolved working codes:', [...unknownCodes.entries()].map(([k,n])=>`${k}:${n}`).join(' '));
   else console.log('✓ all working codes resolved to a shift');
+
+  // ── per-7-day-block validation log (Saturday-anchored weeks within the range) ──
+  const wks = await c.query(`
+    WITH wk AS (
+      SELECT *, (work_date - ((EXTRACT(DOW FROM work_date)::int + 1) % 7))::date AS ws FROM roster_days
+       WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3)
+    SELECT ws AS week_start, (ws+6) AS week_end,
+           COUNT(DISTINCT employee_no)::int agents, COUNT(*)::int scheduled,
+           COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+           COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND (punch_in_min IS NOT NULL OR sys_login_min IS NOT NULL))::int matched,
+           COUNT(*) FILTER (WHERE mismatch IS NOT NULL)::int mismatches,
+           COUNT(*) FILTER (WHERE missing_punch)::int missing_punch, COUNT(*) FILTER (WHERE missing_system)::int missing_system,
+           COUNT(*) FILTER (WHERE presence='wfh')::int wfh, COUNT(*) FILTER (WHERE presence='absent')::int absent,
+           COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+           COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)::int comp,
+           COUNT(*) FILTER (WHERE ot_before_min>0 OR ot_after_min>0 OR offday_ot_min>0 OR holiday_ot_min>0)::int ot_days,
+           COUNT(*) FILTER (WHERE sys_late_min>0)::int tardy_days,
+           COUNT(*) FILTER (WHERE data_quality IS NOT NULL)::int data_quality_issues
+      FROM wk GROUP BY ws ORDER BY ws`, [tid, FROM, TO]);
+  for (const r of wks.rows) {
+    await c.query(`INSERT INTO roster_validation_log (tenant_id,week_start,week_end,agents,scheduled,worked,matched,mismatches,missing_punch,missing_system,wfh,absent,sick,permissions,comp,ot_days,tardy_days,hr_mismatch,data_quality_issues,unknown_codes)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,0,$18,$19)
+      ON CONFLICT (tenant_id,week_start) DO UPDATE SET week_end=EXCLUDED.week_end,agents=EXCLUDED.agents,scheduled=EXCLUDED.scheduled,worked=EXCLUDED.worked,matched=EXCLUDED.matched,mismatches=EXCLUDED.mismatches,missing_punch=EXCLUDED.missing_punch,missing_system=EXCLUDED.missing_system,wfh=EXCLUDED.wfh,absent=EXCLUDED.absent,sick=EXCLUDED.sick,permissions=EXCLUDED.permissions,comp=EXCLUDED.comp,ot_days=EXCLUDED.ot_days,tardy_days=EXCLUDED.tardy_days,data_quality_issues=EXCLUDED.data_quality_issues,unknown_codes=EXCLUDED.unknown_codes`,
+      [tid, r.week_start, r.week_end, r.agents, r.scheduled, r.worked, r.matched, r.mismatches, r.missing_punch, r.missing_system, r.wfh, r.absent, r.sick, r.permissions, r.comp, r.ot_days, r.tardy_days, r.data_quality_issues, unknownCodes.size?[...unknownCodes.keys()].join(','):null]);
+  }
+  console.log(`validation log: ${wks.rows.length} week-blocks`);
   await c.end();
 })().catch(e => { console.error('ERR', e.message, e.stack); process.exit(1); });
