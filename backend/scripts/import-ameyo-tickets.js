@@ -24,18 +24,33 @@ const FILE = process.argv[2];
 const IMPORT_TAG = 'import:ameyo-tickets';
 const CHUNK = 1000;
 
-function normChannel(c) {
+// Normalize the Ameyo channel string into {channel, missed, direction} without
+// losing the original distinction (MISSED chats are NOT handled contacts).
+function classifyChannel(c) {
   const s = String(c || '').toUpperCase();
-  if (s.includes('VOICE')) return 'voice';
-  if (s.includes('MAIL')) return 'email';
-  if (s.includes('CHAT')) return 'chat';
-  if (s.includes('MANUAL') || s.includes('MESSAGE')) return 'social';
-  return s ? s.toLowerCase() : null;
+  let channel = null;
+  if (s.includes('VOICE')) channel = 'voice';
+  else if (s.includes('MAIL')) channel = 'email';
+  else if (s.includes('CHAT')) channel = 'chat';
+  else if (s.includes('MANUAL') || s.includes('MESSAGE')) channel = 'social';
+  else if (s) channel = s.toLowerCase();
+  const missed = s.includes('MISSED');
+  const direction = s.startsWith('OUTGOING') ? 'outbound' : s.startsWith('INCOMING') ? 'inbound' : null;
+  return { channel, missed, direction, raw: c ? String(c).trim() : null };
 }
+// Date cell is a pure date (00:00:00Z) → ISO date is correct.
 const ymd = (d) => {
   if (d instanceof Date) return d.toISOString().slice(0, 10);
   const s = String(d || '').trim(); const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : null;
 };
+// Time-only cells are anchored to 1899 (exceljs applies historical TZ); the
+// stored UTC hour + 3 (modern Kuwait) = the true local clock hour. Verified
+// against the rendered text on real rows.
+function localHour(t) {
+  if (!(t instanceof Date)) return null;
+  if (t.getUTCFullYear() > 1901) return null; // not a time-only cell
+  return (t.getUTCHours() + 3) % 24;
+}
 
 (async () => {
   if (!FILE || !fs.existsSync(FILE)) { console.error('File not found:', FILE); process.exit(1); }
@@ -48,29 +63,36 @@ const ymd = (d) => {
 
   // Parse rows
   const rows = [];
-  let minD = null, maxD = null;
+  let minD = null, maxD = null, missedCount = 0, droppedCount = 0;
   for (let r = 2; r <= ws.rowCount; r++) {
     const v = ws.getRow(r).values;
     const agent = v[1] ? String(v[1]).trim() : null;
     const date = ymd(v[3]);
     if (!date) continue;
-    const channel = normChannel(v[5]);
+    const hour = localHour(v[4]);
+    const ch = classifyChannel(v[5]);
     const reason = v[16] ? String(v[16]).trim() : null;
+    const status = v[7] ? String(v[7]).trim() : null;
+    const dropped = reason === 'Drop Contact';
+    // Handled = a real agent-served contact: not a missed channel and not a dropped contact.
+    const handled = !ch.missed && !dropped;
+    if (ch.missed) missedCount++; if (dropped) droppedCount++;
     if (!minD || date < minD) minD = date;
     if (!maxD || date > maxD) maxD = date;
     rows.push({
-      date, channel, reason, agent,
+      date, hour, channel: ch.channel, reason, agent,
       raw: {
         ticketId: v[2] != null ? String(v[2]) : null,
-        status: v[7] ? String(v[7]).trim() : null,
-        category: v[17] ? String(v[17]).trim() : null,
+        status, category: v[17] ? String(v[17]).trim() : null,
         department: v[15] ? String(v[15]).trim() : null,
         feedback1: v[11] != null ? String(v[11]) : null,
         feedback2: v[12] != null ? String(v[12]) : null,
+        channelRaw: ch.raw, direction: ch.direction,
+        missed: ch.missed, dropped, handled,
       },
     });
   }
-  console.log(`Parsed ${rows.length} ticket rows (${minD} → ${maxD}).`);
+  console.log(`Parsed ${rows.length} ticket rows (${minD} → ${maxD}); of which ${missedCount} missed, ${droppedCount} dropped → ${rows.length - missedCount - droppedCount} handled.`);
 
   await c.query('BEGIN');
   // idempotent cleanup of prior import
@@ -82,17 +104,21 @@ const ymd = (d) => {
     [tenantId, path.basename(FILE), minD, maxD, rows.length, IMPORT_TAG])).rows;
 
   let inserted = 0;
+  const COLS = 9;
   for (let i = 0; i < rows.length; i += CHUNK) {
     const slice = rows.slice(i, i + CHUNK);
     const vals = [], params = [];
     slice.forEach((r, j) => {
-      const b = j * 7;
-      vals.push(`($${b+1},$${b+2},$${b+3}::date,$${b+3}::date::timestamptz,$${b+4},$${b+5},$${b+6},$${b+7}::jsonb)`);
-      params.push(tenantId, batch.id, r.date, r.channel, r.reason, r.agent, JSON.stringify(r.raw));
+      const b = j * COLS;
+      vals.push(`($${b+1},$${b+2},$${b+3}::date,$${b+4},$${b+5}::timestamptz,$${b+6},$${b+7},$${b+8},$${b+9}::jsonb)`);
+      const ts = r.hour != null
+        ? `${r.date}T${String(r.hour).padStart(2, '0')}:00:00+03:00`
+        : `${r.date}T00:00:00+03:00`;
+      params.push(tenantId, batch.id, r.date, r.hour, ts, r.channel, r.reason, r.agent, JSON.stringify(r.raw));
     });
-    // columns: tenant_id, batch_id, contact_date, contact_ts, channel, contact_reason, agent_login, raw
+    // columns: tenant_id, batch_id, contact_date, contact_hour, contact_ts, channel, contact_reason, agent_login, raw
     await c.query(
-      `INSERT INTO ops_contacts (tenant_id, batch_id, contact_date, contact_ts, channel, contact_reason, agent_login, raw) VALUES ${vals.join(',')}`,
+      `INSERT INTO ops_contacts (tenant_id, batch_id, contact_date, contact_hour, contact_ts, channel, contact_reason, agent_login, raw) VALUES ${vals.join(',')}`,
       params,
     );
     inserted += slice.length;
@@ -100,7 +126,9 @@ const ymd = (d) => {
   await c.query('COMMIT');
   console.log(`Done. Inserted ${inserted} contacts into ops_contacts (batch ${batch.id}).`);
 
-  const ch = await c.query(`SELECT channel, COUNT(*) n FROM ops_contacts WHERE batch_id=$1 GROUP BY channel ORDER BY n DESC`, [batch.id]);
-  console.log('By channel:', ch.rows.map(x => `${x.channel}:${x.n}`).join(', '));
+  const ch = await c.query(`SELECT channel, COUNT(*) total, COUNT(*) FILTER (WHERE (raw->>'handled')::boolean) handled FROM ops_contacts WHERE batch_id=$1 GROUP BY channel ORDER BY total DESC`, [batch.id]);
+  console.log('By channel (total / handled):', ch.rows.map(x => `${x.channel}:${x.total}/${x.handled}`).join(', '));
+  const hrs = await c.query(`SELECT COUNT(*) FILTER (WHERE contact_hour IS NOT NULL) with_hour, COUNT(*) total FROM ops_contacts WHERE batch_id=$1`, [batch.id]);
+  console.log(`Hour extracted: ${hrs.rows[0].with_hour}/${hrs.rows[0].total}`);
   await c.end();
 })().catch(e => { console.error('ERR', e.message); process.exit(1); });
