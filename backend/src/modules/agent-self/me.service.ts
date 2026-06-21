@@ -172,10 +172,26 @@ export class MeService {
          COUNT(*) FILTER (WHERE is_missing_punch)                                 AS missing_punch,
          COUNT(*) FILTER (WHERE is_missing_system)                                AS missing_system,
          COUNT(*) FILTER (WHERE COALESCE(ot_minutes,0) > 0)                       AS ot_count,
-         COALESCE(SUM(ot_minutes), 0)                                             AS ot_minutes
-       FROM attendance_records
-       WHERE tenant_id = $1 AND employee_id = $2
-         AND attendance_date >= ${sinceExpr}`,
+         COALESCE(SUM(ot_minutes), 0)                                             AS ot_minutes,
+         -- Tardiness vs authorized permission: a late-in / early-out is TARDY only
+         -- when NOT covered by an approved permission of the matching type that day.
+         COUNT(*) FILTER (WHERE COALESCE(punch_late_minutes,0) > 0 AND NOT perm.perm_late)         AS tardy_late_count,
+         COALESCE(SUM(punch_late_minutes) FILTER (WHERE NOT perm.perm_late), 0)                    AS tardy_late_minutes,
+         COUNT(*) FILTER (WHERE COALESCE(punch_late_minutes,0) > 0 AND perm.perm_late)             AS permitted_late_count,
+         COUNT(*) FILTER (WHERE (COALESCE(punch_early_out_minutes,0) > 0 OR COALESCE(system_early_out_minutes,0) > 0) AND NOT perm.perm_early) AS tardy_early_count,
+         COALESCE(SUM(GREATEST(COALESCE(punch_early_out_minutes,0), COALESCE(system_early_out_minutes,0))) FILTER (WHERE NOT perm.perm_early), 0) AS tardy_early_minutes,
+         COUNT(*) FILTER (WHERE (COALESCE(punch_early_out_minutes,0) > 0 OR COALESCE(system_early_out_minutes,0) > 0) AND perm.perm_early)        AS permitted_early_count
+       FROM attendance_records ar
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(bool_or(rp.permission_type = 'late_in'), FALSE)   AS perm_late,
+                COALESCE(bool_or(rp.permission_type IN ('early_out','temp_out')), FALSE) AS perm_early
+           FROM request_permissions rp
+           JOIN requests rq ON rq.id = rp.request_id
+          WHERE rq.tenant_id = ar.tenant_id AND rq.employee_id = ar.employee_id
+            AND rq.status = 'approved' AND rp.permission_date = ar.attendance_date
+       ) perm ON TRUE
+       WHERE ar.tenant_id = $1 AND ar.employee_id = $2
+         AND ar.attendance_date >= ${sinceExpr}`,
       [tenantId, employeeId],
     );
     const n = (v: any) => parseInt(v ?? '0', 10);
@@ -189,6 +205,11 @@ export class MeService {
       systemEarlyCount: n(r.system_early_count), systemEarlyMinutes: n(r.system_early_minutes),
       missingPunch: n(r.missing_punch), missingSystem: n(r.missing_system),
       otCount: n(r.ot_count), otMinutes: n(r.ot_minutes),
+      // Tardiness (unauthorized) vs authorized-by-permission
+      tardyLateCount: n(r.tardy_late_count), tardyLateMinutes: n(r.tardy_late_minutes),
+      permittedLateCount: n(r.permitted_late_count),
+      tardyEarlyCount: n(r.tardy_early_count), tardyEarlyMinutes: n(r.tardy_early_minutes),
+      permittedEarlyCount: n(r.permitted_early_count),
     };
   }
 
@@ -201,9 +222,19 @@ export class MeService {
               ar.punch_in, ar.punch_out, ar.system_login, ar.system_logout,
               ar.punch_late_minutes, ar.system_late_minutes,
               ar.punch_early_out_minutes, ar.system_early_out_minutes,
-              ar.ot_minutes, ar.is_missing_punch, ar.is_missing_system, ar.absence_reason
+              ar.ot_minutes, ar.is_missing_punch, ar.is_missing_system, ar.absence_reason,
+              COALESCE(perm.perm_late, FALSE)  AS perm_late,
+              COALESCE(perm.perm_early, FALSE) AS perm_early
        FROM attendance_records ar
        LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
+       LEFT JOIN LATERAL (
+         SELECT bool_or(rp.permission_type = 'late_in')   AS perm_late,
+                bool_or(rp.permission_type IN ('early_out','temp_out')) AS perm_early
+           FROM request_permissions rp
+           JOIN requests rq ON rq.id = rp.request_id
+          WHERE rq.tenant_id = ar.tenant_id AND rq.employee_id = ar.employee_id
+            AND rq.status = 'approved' AND rp.permission_date = ar.attendance_date
+       ) perm ON TRUE
        WHERE ar.tenant_id = $1 AND ar.employee_id = $2
          AND ar.attendance_date >= CURRENT_DATE - INTERVAL '31 days'
          AND ar.attendance_date <= CURRENT_DATE
@@ -212,20 +243,29 @@ export class MeService {
     );
     const hm = (v: any) => (v ? String(v).slice(0, 5) : null);
     const n = (v: any) => (v === null || v === undefined ? 0 : parseInt(v, 10));
-    return rows.map((r: any) => ({
-      date: r.date,
-      marker: r.attendance_marker,
-      isWfh: r.is_wfh,
-      shiftCode: r.shift_code,
-      scheduledStart: hm(r.scheduled_start), scheduledEnd: hm(r.scheduled_end),
-      punchIn: hm(r.punch_in), punchOut: hm(r.punch_out),
-      systemLogin: hm(r.system_login), systemLogout: hm(r.system_logout),
-      punchLate: n(r.punch_late_minutes), systemLate: n(r.system_late_minutes),
-      punchEarlyOut: n(r.punch_early_out_minutes), systemEarlyOut: n(r.system_early_out_minutes),
-      ot: n(r.ot_minutes),
-      missingPunch: r.is_missing_punch, missingSystem: r.is_missing_system,
-      absenceReason: r.absence_reason,
-    }));
+    return rows.map((r: any) => {
+      const lateMin  = n(r.punch_late_minutes);
+      const earlyMin = Math.max(n(r.punch_early_out_minutes), n(r.system_early_out_minutes));
+      return {
+        date: r.date,
+        marker: r.attendance_marker,
+        isWfh: r.is_wfh,
+        shiftCode: r.shift_code,
+        scheduledStart: hm(r.scheduled_start), scheduledEnd: hm(r.scheduled_end),
+        punchIn: hm(r.punch_in), punchOut: hm(r.punch_out),
+        systemLogin: hm(r.system_login), systemLogout: hm(r.system_logout),
+        punchLate: lateMin, systemLate: n(r.system_late_minutes),
+        punchEarlyOut: n(r.punch_early_out_minutes), systemEarlyOut: n(r.system_early_out_minutes),
+        ot: n(r.ot_minutes),
+        missingPunch: r.is_missing_punch, missingSystem: r.is_missing_system,
+        absenceReason: r.absence_reason,
+        // Authorized by an approved permission that day, or an unauthorized tardiness?
+        latePermitted:  r.perm_late,
+        earlyPermitted: r.perm_early,
+        lateIsTardy:  lateMin  > 0 && !r.perm_late,
+        earlyIsTardy: earlyMin > 0 && !r.perm_early,
+      };
+    });
   }
 
   /** The agent's own permission/early-leave requests this year, with type + status. */

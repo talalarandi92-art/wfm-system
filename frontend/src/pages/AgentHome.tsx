@@ -36,11 +36,18 @@ interface AttDetailDay {
   punchIn: string | null; punchOut: string | null; systemLogin: string | null; systemLogout: string | null;
   punchLate: number; systemLate: number; punchEarlyOut: number; systemEarlyOut: number; ot: number;
   missingPunch: boolean; missingSystem: boolean; absenceReason: string | null;
+  latePermitted?: boolean; earlyPermitted?: boolean; lateIsTardy?: boolean; earlyIsTardy?: boolean;
+}
+interface AttSummary2 {
+  tardyLateCount: number; tardyLateMinutes: number; permittedLateCount: number;
+  tardyEarlyCount: number; tardyEarlyMinutes: number; permittedEarlyCount: number;
 }
 interface LeaveLine { leaveType: string; entitlement: number; taken: number; pending: number; remaining: number }
 interface PermInfo { total: number; approved: number; pending: number; items: any[] }
 interface MyAttendance {
   linked: boolean;
+  monthly: AttSummary2 | null;
+  ytd: AttSummary2 | null;
   recent: AttDetailDay[];
   permissions: PermInfo | null;
   leaveBalance: LeaveLine[];
@@ -437,6 +444,39 @@ export default function AgentHome() {
         </div>
       )}
 
+      {/* ── Tardiness vs authorized permission (this month) ── */}
+      {myAtt?.linked && myAtt.monthly && (
+        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+            <AlertCircle size={15} className="text-red-400" /> {ar ? 'التأخير مقابل الاستئذان (هذا الشهر)' : 'Tardiness vs Permission (this month)'}
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="text-center px-2 py-2.5 rounded-xl" style={{ background: 'rgba(248,113,113,0.08)' }}>
+              <p className="text-xl font-bold" style={{ color: '#f87171' }}>{myAtt.monthly.tardyLateCount}</p>
+              <p className="text-[9px] text-slate-500">{ar ? 'تأخير دخول (غير مصرّح)' : 'Late-in (tardy)'}</p>
+              {myAtt.monthly.tardyLateMinutes > 0 && <p className="text-[9px] text-red-300">{myAtt.monthly.tardyLateMinutes}{ar ? ' دقيقة' : ' min'}</p>}
+            </div>
+            <div className="text-center px-2 py-2.5 rounded-xl" style={{ background: 'rgba(34,197,94,0.08)' }}>
+              <p className="text-xl font-bold" style={{ color: '#22c55e' }}>{myAtt.monthly.permittedLateCount}</p>
+              <p className="text-[9px] text-slate-500">{ar ? 'تأخير باستئذان' : 'Late-in (permitted)'}</p>
+            </div>
+            <div className="text-center px-2 py-2.5 rounded-xl" style={{ background: 'rgba(248,113,113,0.08)' }}>
+              <p className="text-xl font-bold" style={{ color: '#f87171' }}>{myAtt.monthly.tardyEarlyCount}</p>
+              <p className="text-[9px] text-slate-500">{ar ? 'خروج مبكر (غير مصرّح)' : 'Early-out (tardy)'}</p>
+              {myAtt.monthly.tardyEarlyMinutes > 0 && <p className="text-[9px] text-red-300">{myAtt.monthly.tardyEarlyMinutes}{ar ? ' دقيقة' : ' min'}</p>}
+            </div>
+            <div className="text-center px-2 py-2.5 rounded-xl" style={{ background: 'rgba(34,197,94,0.08)' }}>
+              <p className="text-xl font-bold" style={{ color: '#22c55e' }}>{myAtt.monthly.permittedEarlyCount}</p>
+              <p className="text-[9px] text-slate-500">{ar ? 'خروج مبكر باستئذان' : 'Early-out (permitted)'}</p>
+            </div>
+          </div>
+          <p className="text-[10px] mt-2" style={{ color: '#475569' }}>
+            {ar ? 'التأخير = دخول متأخر أو خروج/إغلاق سيستم مبكر بدون استئذان معتمد لنفس اليوم.'
+                : 'Tardiness = late arrival or early departure/system-close without an approved permission that day.'}
+          </p>
+        </div>
+      )}
+
       {/* ── Punch & system times (detailed, self only) ── */}
       {myAtt?.linked && myAtt.recent.length > 0 && (
         <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
@@ -467,8 +507,26 @@ export default function AgentHome() {
                     <td className="py-1.5 px-2 text-center text-white">{d.punchOut ?? '—'}</td>
                     <td className="py-1.5 px-2 text-center text-slate-300">{d.systemLogin ?? (d.missingSystem ? <span className="text-red-400">{ar ? 'ناقص' : 'miss'}</span> : '—')}</td>
                     <td className="py-1.5 px-2 text-center text-slate-300">{d.systemLogout ?? '—'}</td>
-                    <td className="py-1.5 px-2 text-center">{d.punchLate > 0 ? <span className="text-amber-400">{d.punchLate}{ar ? 'د' : 'm'}</span> : '—'}</td>
-                    <td className="py-1.5 px-2 text-center">{d.punchEarlyOut > 0 ? <span className="text-orange-400">{d.punchEarlyOut}{ar ? 'د' : 'm'}</span> : '—'}</td>
+                    <td className="py-1.5 px-2 text-center">
+                      {d.punchLate > 0 ? (
+                        <span className="inline-flex items-center gap-1" style={{ color: d.lateIsTardy ? '#f87171' : '#22c55e' }}>
+                          {d.punchLate}{ar ? 'د' : 'm'}
+                          <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: d.lateIsTardy ? 'rgba(248,113,113,0.15)' : 'rgba(34,197,94,0.15)' }}>
+                            {d.lateIsTardy ? (ar ? 'تأخير' : 'tardy') : (ar ? 'استئذان' : 'permit')}
+                          </span>
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-center">
+                      {(d.punchEarlyOut > 0 || d.systemEarlyOut > 0) ? (
+                        <span className="inline-flex items-center gap-1" style={{ color: d.earlyIsTardy ? '#f87171' : '#22c55e' }}>
+                          {Math.max(d.punchEarlyOut, d.systemEarlyOut)}{ar ? 'د' : 'm'}
+                          <span className="text-[8px] px-1 py-0.5 rounded" style={{ background: d.earlyIsTardy ? 'rgba(248,113,113,0.15)' : 'rgba(34,197,94,0.15)' }}>
+                            {d.earlyIsTardy ? (ar ? 'تأخير' : 'tardy') : (ar ? 'استئذان' : 'permit')}
+                          </span>
+                        </span>
+                      ) : '—'}
+                    </td>
                     <td className="py-1.5 px-2 text-center">{d.ot > 0 ? <span className="text-cyan-400">{Math.round(d.ot / 60 * 10) / 10}h</span> : '—'}</td>
                   </tr>
                 ))}
