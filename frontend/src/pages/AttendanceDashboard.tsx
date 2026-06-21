@@ -7,6 +7,7 @@ import {
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { card as cardStyle, tp, ts, useInjectDsStyles } from '@/components/ds';
+import { conformanceGrade } from '@/utils/format';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -544,7 +545,7 @@ export default function AttendanceDashboard() {
           {/* Totals */}
           {tardy?.totals && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12 }}>
-              <StatBox label={ar ? 'كونفورمانس الحضور' : 'Attendance Conformance'} value={`${tardy.totals.conformancePct ?? '—'}%`} color="#22c55e" dark={dark} tp={tp} ts={ts} />
+              <StatBox label={`${ar ? 'سكور الكونفورمانس' : 'Conformance Score'} · ${conformanceGrade(tardy.totals.conformancePct).grade}`} value={`${tardy.totals.conformancePct ?? '—'}%`} color={conformanceGrade(tardy.totals.conformancePct).color} dark={dark} tp={tp} ts={ts} />
               <StatBox label={ar ? 'تأخير دخول (غير مصرّح)' : 'Late-in (tardy)'} value={tardy.totals.tardyLate} color="#f87171" dark={dark} tp={tp} ts={ts} />
               <StatBox label={ar ? 'تأخير باستئذان' : 'Late-in (permitted)'} value={tardy.totals.permittedLate} color="#22c55e" dark={dark} tp={tp} ts={ts} />
               <StatBox label={ar ? 'خروج مبكر (غير مصرّح)' : 'Early-out (tardy)'} value={tardy.totals.tardyEarly} color="#f87171" dark={dark} tp={tp} ts={ts} />
@@ -585,7 +586,7 @@ export default function AttendanceDashboard() {
                       <td style={{ ...tdCenter, color: e.permittedLate > 0 ? '#22c55e' : ts(dark) }}>{e.permittedLate || '—'}</td>
                       <td style={{ ...tdCenter, color: e.tardyEarly > 0 ? '#f87171' : ts(dark) }}>{e.tardyEarly || '—'}</td>
                       <td style={{ ...tdCenter, color: e.permittedEarly > 0 ? '#22c55e' : ts(dark) }}>{e.permittedEarly || '—'}</td>
-                      <td style={{ ...tdCenter, fontWeight: 700, color: (e.conformancePct ?? 100) >= 90 ? '#22c55e' : (e.conformancePct ?? 0) >= 75 ? '#f59e0b' : '#f87171' }}>{e.conformancePct ?? '—'}%</td>
+                      <td style={{ ...tdCenter, fontWeight: 700, color: conformanceGrade(e.conformancePct).color }}>{e.conformancePct ?? '—'}% <span style={{ fontSize: 10, opacity: 0.85 }}>{conformanceGrade(e.conformancePct).grade}</span></td>
                     </tr>
                   ))}
                   {(!tardy || tardy.employees.length === 0) && (

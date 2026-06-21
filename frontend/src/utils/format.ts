@@ -241,3 +241,17 @@ export function fixEncoding(s?: string | null): string {
   } catch {}
   return s;
 }
+
+/**
+ * Conformance score → letter grade + bilingual label + colour.
+ * Bands are sensible defaults (tunable): A+≥98, A≥95, B≥90, C≥80, D≥70, else E.
+ */
+export function conformanceGrade(pct: number | null | undefined): { grade: string; ar: string; en: string; color: string } {
+  if (pct == null) return { grade: '—', ar: 'لا بيانات', en: 'No data', color: '#64748b' };
+  if (pct >= 98) return { grade: 'A+', ar: 'ممتاز', en: 'Excellent', color: '#22c55e' };
+  if (pct >= 95) return { grade: 'A',  ar: 'ممتاز', en: 'Excellent', color: '#22c55e' };
+  if (pct >= 90) return { grade: 'B',  ar: 'جيد جداً', en: 'Very good', color: '#84cc16' };
+  if (pct >= 80) return { grade: 'C',  ar: 'جيد', en: 'Good', color: '#f59e0b' };
+  if (pct >= 70) return { grade: 'D',  ar: 'مقبول', en: 'Fair', color: '#fb923c' };
+  return { grade: 'E', ar: 'يحتاج تحسين', en: 'Needs improvement', color: '#ef4444' };
+}

@@ -8,6 +8,7 @@ import {
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
+import { conformanceGrade } from '@/utils/format';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface AttSummary {
@@ -41,6 +42,7 @@ interface AttDetailDay {
 interface AttSummary2 {
   tardyLateCount: number; tardyLateMinutes: number; permittedLateCount: number;
   tardyEarlyCount: number; tardyEarlyMinutes: number; permittedEarlyCount: number;
+  conformingDays?: number; conformancePct?: number | null;
 }
 interface LeaveLine { leaveType: string; entitlement: number; taken: number; pending: number; remaining: number }
 interface PermInfo { total: number; approved: number; pending: number; items: any[] }
@@ -447,9 +449,22 @@ export default function AgentHome() {
       {/* ── Tardiness vs authorized permission (this month) ── */}
       {myAtt?.linked && myAtt.monthly && (
         <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-          <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
-            <AlertCircle size={15} className="text-red-400" /> {ar ? 'التأخير مقابل الاستئذان (هذا الشهر)' : 'Tardiness vs Permission (this month)'}
-          </h2>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <AlertCircle size={15} className="text-red-400" /> {ar ? 'التأخير مقابل الاستئذان (هذا الشهر)' : 'Tardiness vs Permission (this month)'}
+            </h2>
+            {myAtt.monthly.conformancePct != null && (() => {
+              const g = conformanceGrade(myAtt.monthly.conformancePct);
+              return (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl" style={{ background: `${g.color}1a`, border: `1px solid ${g.color}40` }}>
+                  <span className="text-[10px] text-slate-400">{ar ? 'سكور الكونفورمانس' : 'Conformance score'}</span>
+                  <span className="text-lg font-bold" style={{ color: g.color }}>{myAtt.monthly.conformancePct}%</span>
+                  <span className="text-[11px] font-bold px-1.5 py-0.5 rounded" style={{ background: g.color, color: '#0a0f1e' }}>{g.grade}</span>
+                  <span className="text-[10px]" style={{ color: g.color }}>{ar ? g.ar : g.en}</span>
+                </div>
+              );
+            })()}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="text-center px-2 py-2.5 rounded-xl" style={{ background: 'rgba(248,113,113,0.08)' }}>
               <p className="text-xl font-bold" style={{ color: '#f87171' }}>{myAtt.monthly.tardyLateCount}</p>

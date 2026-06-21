@@ -3,6 +3,7 @@ import { BarChart3, Users, Clock, LogOut, UserX, Activity, ShieldCheck, AlertTri
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { conformanceGrade } from '@/utils/format';
 
 const WD_AR: Record<string, string> = { Sat: 'السبت', Sun: 'الأحد', Mon: 'الإثنين', Tue: 'الثلاثاء', Wed: 'الأربعاء', Thu: 'الخميس', Fri: 'الجمعة' };
 const fmt = (n: number) => (n ?? 0).toLocaleString();
@@ -270,8 +271,8 @@ export default function RosterDashboardPage() {
   );
 
   function Cbadge({ v }: { v: number }) {
-    const c = v >= 85 ? '#22c55e' : v >= 70 ? '#f59e0b' : '#ef4444';
-    return <span className="px-1.5 py-0.5 rounded font-bold" style={{ background: c + '22', color: c }}>{v}%</span>;
+    const g = conformanceGrade(v);
+    return <span className="px-1.5 py-0.5 rounded font-bold" style={{ background: g.color + '22', color: g.color }}>{v}% <span style={{ fontSize: 9, opacity: 0.85 }}>{g.grade}</span></span>;
   }
 }
 

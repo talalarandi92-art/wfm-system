@@ -180,7 +180,11 @@ export class MeService {
          COUNT(*) FILTER (WHERE COALESCE(punch_late_minutes,0) > 0 AND perm.perm_late)             AS permitted_late_count,
          COUNT(*) FILTER (WHERE (COALESCE(punch_early_out_minutes,0) > 0 OR COALESCE(system_early_out_minutes,0) > 0) AND NOT perm.perm_early) AS tardy_early_count,
          COALESCE(SUM(GREATEST(COALESCE(punch_early_out_minutes,0), COALESCE(system_early_out_minutes,0))) FILTER (WHERE NOT perm.perm_early), 0) AS tardy_early_minutes,
-         COUNT(*) FILTER (WHERE (COALESCE(punch_early_out_minutes,0) > 0 OR COALESCE(system_early_out_minutes,0) > 0) AND perm.perm_early)        AS permitted_early_count
+         COUNT(*) FILTER (WHERE (COALESCE(punch_early_out_minutes,0) > 0 OR COALESCE(system_early_out_minutes,0) > 0) AND perm.perm_early)        AS permitted_early_count,
+         -- Conforming day = present with NO unauthorized tardiness → conformance score.
+         COUNT(*) FILTER (WHERE attendance_marker='present'
+                            AND NOT (COALESCE(punch_late_minutes,0) > 0 AND NOT perm.perm_late)
+                            AND NOT ((COALESCE(punch_early_out_minutes,0) > 0 OR COALESCE(system_early_out_minutes,0) > 0) AND NOT perm.perm_early)) AS conforming_days
        FROM attendance_records ar
        LEFT JOIN LATERAL (
          SELECT COALESCE(bool_or(rp.permission_type = 'late_in'), FALSE)   AS perm_late,
@@ -210,6 +214,9 @@ export class MeService {
       permittedLateCount: n(r.permitted_late_count),
       tardyEarlyCount: n(r.tardy_early_count), tardyEarlyMinutes: n(r.tardy_early_minutes),
       permittedEarlyCount: n(r.permitted_early_count),
+      conformingDays: n(r.conforming_days),
+      // Conformance score = conforming present-days ÷ present-days (×100).
+      conformancePct: n(r.working_days) ? Math.round((n(r.conforming_days) / n(r.working_days)) * 1000) / 10 : null,
     };
   }
 
