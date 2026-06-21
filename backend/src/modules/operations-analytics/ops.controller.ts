@@ -236,6 +236,46 @@ export class OpsController {
              daily, top };
   }
 
+  /* ── Shrinkage (AUX / break states from Ameyo sessions) ─────────────────── */
+
+  /** Shrinkage by reason + grouped category + daily trend. */
+  @Get('shrinkage')
+  @ApiOperation({ summary: 'AUX/break shrinkage by reason + category groups + trend' })
+  async shrinkage(@CurrentUser() user: any, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = user.tenantId;
+    const range = await this.ds.query(
+      `SELECT MIN(aux_date)::text a, MAX(aux_date)::text b FROM shrinkage_aux_daily WHERE tenant_id=$1`, [t]);
+    const dFrom = from || range[0]?.a, dTo = to || range[0]?.b;
+    const p = [t, dFrom, dTo];
+
+    const byReason = await this.ds.query(
+      `SELECT reason, ROUND(SUM(seconds)/3600.0,1) hours, SUM(sessions)::int sessions
+         FROM shrinkage_aux_daily WHERE tenant_id=$1 AND aux_date BETWEEN $2 AND $3
+        GROUP BY reason ORDER BY SUM(seconds) DESC`, p);
+    const daily = await this.ds.query(
+      `SELECT aux_date::text date, ROUND(SUM(seconds)/3600.0,1) hours
+         FROM shrinkage_aux_daily WHERE tenant_id=$1 AND aux_date BETWEEN $2 AND $3
+        GROUP BY aux_date ORDER BY aux_date`, p);
+
+    const groupOf = (r: string): string => {
+      const s = r.toLowerCase();
+      if (/short break|long break|prayer/.test(s)) return 'break';
+      if (/meeting|training/.test(s)) return 'meeting_training';
+      if (/working in/.test(s)) return 'cross_channel';
+      if (/acw/.test(s)) return 'acw';
+      if (/erroneous|unavailable|system/.test(s)) return 'system_unavailable';
+      return 'other';
+    };
+    const groups: Record<string, number> = {};
+    let totalH = 0;
+    for (const r of byReason) { const g = groupOf(r.reason); groups[g] = (groups[g] || 0) + Number(r.hours); totalH += Number(r.hours); }
+    const categories = Object.entries(groups).map(([group, hours]) => ({
+      group, hours: Math.round(hours * 10) / 10, pct: totalH ? Math.round((hours / totalH) * 1000) / 10 : 0,
+    })).sort((a, b) => b.hours - a.hours);
+
+    return { range: range[0], from: dFrom, to: dTo, totalHours: Math.round(totalH * 10) / 10, categories, byReason, daily };
+  }
+
   /* ── Analytics ──────────────────────────────────────────────────────────── */
 
   /** Summary cards: totals, channels, survey funnel, sentiment split */
