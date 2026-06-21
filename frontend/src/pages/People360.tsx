@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import {
   Search, Users, Building2, Download, ChevronDown, ChevronRight, X,
   CalendarDays, Activity, Award, Coffee, Clock,
@@ -167,8 +167,8 @@ export default function People360Page() {
               </thead>
               <tbody>
                 {data.rows.map((r: Row) => (
-                  <>
-                    <tr key={r.id} onClick={() => openDetail(r.id)} className="cursor-pointer hover:bg-white/5 border-t border-white/5">
+                  <Fragment key={r.id}>
+                    <tr onClick={() => openDetail(r.id)} className="cursor-pointer hover:bg-white/5 border-t border-white/5">
                       <td className="px-3 py-2 min-w-[180px]">
                         <div className="flex items-center gap-1.5">
                           {openId===r.id ? <ChevronDown size={13} className="text-indigo-400" /> : <ChevronRight size={13} className="text-slate-600" />}
@@ -190,7 +190,7 @@ export default function People360Page() {
                         {detail && !detail.error && <DetailPanel d={detail} ar={ar} />}
                       </td></tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
