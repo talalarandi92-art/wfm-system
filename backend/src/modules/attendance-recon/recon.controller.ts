@@ -4,6 +4,8 @@ import type { Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { ReconService } from './recon.service';
@@ -19,7 +21,57 @@ const SCHEDULE = process.env.RECON_SCHEDULE_FILE || 'C:/Users/t.bassam/Desktop/W
 @Controller('attendance-recon')
 @UseGuards(JwtAuthGuard)
 export class ReconController {
-  constructor(private readonly svc: ReconService, private readonly ingestion: RosterIngestionService) {}
+  constructor(
+    private readonly svc: ReconService,
+    private readonly ingestion: RosterIngestionService,
+    @InjectDataSource() private readonly ds: DataSource,
+  ) {}
+
+  /** Correct combined roster from roster_days (FingerPrint + Ameyo+Sprinklr +
+   *  Odoo permission/comp/sick). Summary + paginated rows + filters. */
+  @Get('roster-v2')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Correct combined daily roster (roster_days): summary + filtered, paginated rows' })
+  async rosterV2(
+    @Req() req: any,
+    @Query('from') from?: string, @Query('to') to?: string, @Query('q') q?: string,
+    @Query('functionId') functionId?: string, @Query('presence') presence?: string,
+    @Query('sort') sort?: string, @Query('limit') limit = '40', @Query('offset') offset = '0',
+  ) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || (range?.b ? `${range.b.slice(0,7)}-01` : range?.a), dTo = to || range?.b;
+    const params: any[] = [t, dFrom, dTo];
+    let where = `r.tenant_id=$1 AND r.work_date BETWEEN $2 AND $3`;
+    if (q) { params.push(`%${q.toLowerCase()}%`); where += ` AND (lower(r.name) LIKE $${params.length} OR r.employee_no ILIKE $${params.length})`; }
+    if (presence) { params.push(presence); where += ` AND r.presence=$${params.length}`; }
+    if (functionId) { params.push(functionId); where += ` AND r.function_name=(SELECT name FROM functions WHERE id=$${params.length})`; }
+
+    const summary = (await this.ds.query(
+      `SELECT COUNT(*)::int days,
+              COUNT(*) FILTER (WHERE presence='office')::int office,
+              COUNT(*) FILTER (WHERE presence='wfh')::int wfh,
+              COUNT(*) FILTER (WHERE presence='off')::int off,
+              COUNT(*) FILTER (WHERE presence='leave')::int leave,
+              COUNT(*) FILTER (WHERE presence='absent')::int absent,
+              COUNT(*) FILTER (WHERE late_min>0)::int late_days,
+              ROUND(SUM(ot_min)/60.0)::int ot_hours,
+              COUNT(*) FILTER (WHERE permission IS NOT NULL)::int permissions,
+              ROUND(100.0*COUNT(*) FILTER (WHERE conforming) / NULLIF(COUNT(*) FILTER (WHERE conforming IS NOT NULL),0),1) conformance_pct
+         FROM roster_days r WHERE ${where}`, params))[0];
+
+    const sortMap: Record<string,string> = { date_desc:'work_date DESC, name', date_asc:'work_date ASC, name',
+      late:'late_min DESC', ot:'ot_min DESC', name:'name ASC, work_date DESC' };
+    const order = sortMap[sort||'date_desc'] || sortMap.date_desc;
+    const lim = Math.min(Number(limit)||40, 200), off = Number(offset)||0;
+    const rows = await this.ds.query(
+      `SELECT employee_no, name, function_name, work_date::text date, day_name, status, presence,
+              punch_in_min, punch_out_min, sys_login_min, sys_logout_min, login_src,
+              late_min, early_min, ot_min, permission, comp_off, sick, conforming
+         FROM roster_days r WHERE ${where} ORDER BY ${order} LIMIT ${lim} OFFSET ${off}`, params);
+
+    return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, rows };
+  }
 
   /** File-based recon reads server-side source workbooks; fail clean (400) if absent. */
   private assertSources() {

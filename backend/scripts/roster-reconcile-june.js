@@ -30,8 +30,9 @@ const hm = (d) => d ? `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.get
 const fpTime = x => (x instanceof Date) ? hm(x) : '';
 // Sprinklr Date — already Kuwait LOCAL (verified: punch-in 08:54 ≈ Sprinklr login 08:56)
 const sprkLocal = x => (x instanceof Date) ? new Date(x.getTime()) : null;
-// Ameyo serial → Kuwait local Date (UTC+3; verified below)
-const AMEYO_KW = KW;
+// Ameyo serial → Kuwait local Date. Ameyo session export is already LOCAL
+// (verified: voice agent punch 07:04 ≈ Ameyo login 07:06), same as Sprinklr.
+const AMEYO_KW = 0;
 const ameyoLocal = n => { if (typeof n !== 'number' || !(n > 20000 && n < 80000)) return null; return new Date(Date.UTC(1899,11,30) + n*86400000 + AMEYO_KW); };
 const isoDate = d => d ? d.toISOString().slice(0,10) : null;
 const bracketNo = s => { const m = String(s||'').match(/\[\s*(\d{3,6})\s*\]/); return m ? m[1] : null; };
