@@ -16,10 +16,13 @@ export class CoachingService implements OnModuleInit, OnModuleDestroy {
   private static readonly THRESHOLD = 3;   // occurrences in window → flag
   private static readonly WINDOW    = 30;  // days
 
+  // Late / early-out only count when NOT covered by an approved permission that
+  // day (authorized permissions must not trigger coaching). `perm` is the
+  // LATERAL join added in scan().
   private static readonly TRIGGERS = [
-    { type: 'repeated_late',      col: 'CASE WHEN punch_late_minutes > 0 THEN 1 ELSE 0 END',      ar: 'تأخّر متكرر' },
-    { type: 'repeated_early_out', col: 'CASE WHEN punch_early_out_minutes > 0 THEN 1 ELSE 0 END', ar: 'خروج مبكر متكرر' },
-    { type: 'missing_punch',      col: 'CASE WHEN is_missing_punch THEN 1 ELSE 0 END',            ar: 'بصمات ناقصة متكررة' },
+    { type: 'repeated_late',      col: 'CASE WHEN ar.punch_late_minutes > 0 AND NOT COALESCE(perm.perm_late, FALSE) THEN 1 ELSE 0 END',      ar: 'تأخّر متكرر' },
+    { type: 'repeated_early_out', col: 'CASE WHEN ar.punch_early_out_minutes > 0 AND NOT COALESCE(perm.perm_early, FALSE) THEN 1 ELSE 0 END', ar: 'خروج مبكر متكرر' },
+    { type: 'missing_punch',      col: 'CASE WHEN ar.is_missing_punch THEN 1 ELSE 0 END',            ar: 'بصمات ناقصة متكررة' },
   ];
 
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
@@ -45,13 +48,20 @@ export class CoachingService implements OnModuleInit, OnModuleDestroy {
   /** Scan one tenant; upsert flags for employees crossing the threshold. Returns flags touched. */
   async scan(tenantId: string): Promise<number> {
     const agg = await this.ds.query(
-      `SELECT employee_id,
+      `SELECT ar.employee_id,
               SUM(${CoachingService.TRIGGERS[0].col}) AS repeated_late,
               SUM(${CoachingService.TRIGGERS[1].col}) AS repeated_early_out,
               SUM(${CoachingService.TRIGGERS[2].col}) AS missing_punch
-         FROM attendance_records
-        WHERE tenant_id = $1 AND attendance_date >= CURRENT_DATE - ($2 || ' days')::interval
-        GROUP BY employee_id`,
+         FROM attendance_records ar
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(bool_or(rp.permission_type = 'late_in'), FALSE) AS perm_late,
+                  COALESCE(bool_or(rp.permission_type IN ('early_out','temp_out')), FALSE) AS perm_early
+             FROM request_permissions rp JOIN requests rq ON rq.id = rp.request_id
+            WHERE rq.tenant_id = ar.tenant_id AND rq.employee_id = ar.employee_id
+              AND rq.status = 'approved' AND rp.permission_date = ar.attendance_date
+         ) perm ON TRUE
+        WHERE ar.tenant_id = $1 AND ar.attendance_date >= CURRENT_DATE - ($2 || ' days')::interval
+        GROUP BY ar.employee_id`,
       [tenantId, CoachingService.WINDOW],
     ).catch(() => []);
 
