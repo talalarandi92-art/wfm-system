@@ -54,20 +54,24 @@ export class ReconController {
               COUNT(*) FILTER (WHERE presence='off')::int off,
               COUNT(*) FILTER (WHERE presence='leave')::int leave,
               COUNT(*) FILTER (WHERE presence='absent')::int absent,
-              COUNT(*) FILTER (WHERE late_min>0)::int late_days,
+              COUNT(*) FILTER (WHERE sys_late_min>0)::int late_days,
+              COUNT(*) FILTER (WHERE sys_early_min>0)::int early_days,
+              COUNT(*) FILTER (WHERE mismatch IS NOT NULL)::int mismatches,
               ROUND(SUM(ot_min)/60.0)::int ot_hours,
               COUNT(*) FILTER (WHERE permission IS NOT NULL)::int permissions,
-              ROUND(100.0*COUNT(*) FILTER (WHERE conforming) / NULLIF(COUNT(*) FILTER (WHERE conforming IS NOT NULL),0),1) conformance_pct
+              ROUND(AVG(adherence_pct),1) conformance_pct
          FROM roster_days r WHERE ${where}`, params))[0];
 
     const sortMap: Record<string,string> = { date_desc:'work_date DESC, name', date_asc:'work_date ASC, name',
-      late:'late_min DESC', ot:'ot_min DESC', name:'name ASC, work_date DESC' };
+      late:'sys_late_min DESC', early:'sys_early_min DESC', ot:'ot_min DESC', name:'name ASC, work_date DESC',
+      adherence:'adherence_pct ASC NULLS LAST', mismatch:'(mismatch IS NOT NULL) DESC, work_date DESC' };
     const order = sortMap[sort||'date_desc'] || sortMap.date_desc;
     const lim = Math.min(Number(limit)||40, 200), off = Number(offset)||0;
     const rows = await this.ds.query(
       `SELECT employee_no, name, function_name, work_date::text date, day_name, status, presence,
               punch_in_min, punch_out_min, sys_login_min, sys_logout_min, login_src,
-              late_min, early_min, ot_min, permission, comp_off, sick, conforming
+              late_min, early_min, ot_min, permission, comp_off, sick, conforming,
+              shift_code, shift_start_min, shift_end_min, sys_late_min, sys_early_min, adherence_pct, mismatch
          FROM roster_days r WHERE ${where} ORDER BY ${order} LIMIT ${lim} OFFSET ${off}`, params);
 
     return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, rows };

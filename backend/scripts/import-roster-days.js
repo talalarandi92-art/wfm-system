@@ -136,6 +136,43 @@ const bracketNo = s => { const m = String(s||'').match(/\[\s*(\d{3,6})\s*\]/); r
     await c.query(`INSERT INTO roster_days (tenant_id,employee_no,name,function_name,work_date,day_name,status,presence,punch_in_min,punch_out_min,sys_login_min,sys_logout_min,login_src,late_min,early_min,ot_min,permission,comp_off,sick,conforming) VALUES ${ph}`, chunk.flat());
   }
   await c.query('COMMIT');
+
+  // ── 6. adherence enrichment: scheduled shift + system late/early + conformance % ──
+  await c.query(fs.readFileSync(path.join(__dirname, '..', '..', 'database', 'migrations', '054_roster_days_adherence.sql'), 'utf8'));
+  // pull scheduled shift times (time-of-day → minutes; +1440 when crossing midnight)
+  await c.query(`
+    UPDATE roster_days r SET
+      shift_code = sc.code,
+      shift_start_min = (EXTRACT(HOUR FROM ar.scheduled_start)*60 + EXTRACT(MINUTE FROM ar.scheduled_start))::int,
+      shift_end_min = CASE WHEN ar.scheduled_end <= ar.scheduled_start
+                           THEN (EXTRACT(HOUR FROM ar.scheduled_end)*60 + EXTRACT(MINUTE FROM ar.scheduled_end))::int + 1440
+                           ELSE (EXTRACT(HOUR FROM ar.scheduled_end)*60 + EXTRACT(MINUTE FROM ar.scheduled_end))::int END
+    FROM attendance_records ar
+    JOIN employees e ON e.id = ar.employee_id
+    LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
+    WHERE ar.tenant_id = r.tenant_id AND e.employee_no = r.employee_no
+      AND ar.attendance_date = r.work_date AND ar.scheduled_start IS NOT NULL`, []);
+  // system late / early-out vs shift + adherence % (prefer system times, fall back to punch)
+  await c.query(`
+    UPDATE roster_days SET
+      sys_late_min = GREATEST(0, COALESCE(sys_login_min, punch_in_min) - shift_start_min),
+      sys_early_min = GREATEST(0, shift_end_min - (
+        COALESCE(sys_logout_min + CASE WHEN sys_logout_min < sys_login_min THEN 1440 ELSE 0 END,
+                 punch_out_min  + CASE WHEN punch_out_min < punch_in_min THEN 1440 ELSE 0 END))),
+      mismatch = CASE
+        WHEN sys_login_min IS NULL AND punch_in_min IS NOT NULL THEN 'no-system'
+        WHEN punch_in_min IS NULL AND sys_login_min IS NOT NULL THEN 'no-punch'
+        WHEN sys_login_min IS NOT NULL AND punch_in_min IS NOT NULL AND ABS(sys_login_min - punch_in_min) > 30 THEN 'punch<>system'
+        ELSE NULL END
+    WHERE shift_start_min IS NOT NULL AND presence IN ('office','wfh','present')
+      AND COALESCE(sys_login_min, punch_in_min) IS NOT NULL`, []);
+  await c.query(`
+    UPDATE roster_days SET
+      adherence_pct = GREATEST(0, ROUND(100.0 * ((shift_end_min - shift_start_min) - LEAST(shift_end_min - shift_start_min, sys_late_min + sys_early_min)) / NULLIF(shift_end_min - shift_start_min, 0), 1))
+    WHERE shift_start_min IS NOT NULL AND shift_end_min > shift_start_min AND presence IN ('office','wfh','present')`, []);
+  const adh = (await c.query(`SELECT ROUND(AVG(adherence_pct),1) a, COUNT(*) FILTER (WHERE sys_late_min>0) lt, COUNT(*) FILTER (WHERE sys_early_min>0) er, COUNT(*) FILTER (WHERE mismatch IS NOT NULL) mm FROM roster_days WHERE tenant_id=$1 AND adherence_pct IS NOT NULL`, [tid])).rows[0];
+  console.log(`adherence: avg ${adh.a}% | sys-late days ${adh.lt} | early-logout days ${adh.er} | mismatches ${adh.mm}`);
+
   const sum = (await c.query(`SELECT presence, COUNT(*) n FROM roster_days WHERE tenant_id=$1 GROUP BY presence ORDER BY n DESC`, [tid])).rows;
   const withLogin = (await c.query(`SELECT COUNT(*) n FROM roster_days WHERE tenant_id=$1 AND sys_login_min IS NOT NULL`, [tid])).rows[0].n;
   const withPunch = (await c.query(`SELECT COUNT(*) n FROM roster_days WHERE tenant_id=$1 AND punch_in_min IS NOT NULL`, [tid])).rows[0].n;
