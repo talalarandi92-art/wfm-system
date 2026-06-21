@@ -32,7 +32,8 @@ const bracketNo = s => { const m = String(s||'').match(/\[\s*(\d{3,6})\s*\]/); r
   await c.connect();
   const tid = (await c.query(`SELECT id FROM tenants LIMIT 1`)).rows[0].id;
   await c.query(fs.readFileSync(path.join(__dirname, '..', '..', 'database', 'migrations', '053_roster_days.sql'), 'utf8'));
-  const emps = (await c.query(`SELECT e.employee_no, TRIM(e.first_name_en||' '||COALESCE(e.last_name_en,'')) name, f.name fn FROM employees e LEFT JOIN functions f ON f.id=e.function_id`)).rows;
+  await c.query(fs.readFileSync(path.join(__dirname, '..', '..', 'database', 'migrations', '055_roster_team_notes.sql'), 'utf8'));
+  const emps = (await c.query(`SELECT e.employee_no, TRIM(e.first_name_en||' '||COALESCE(e.last_name_en,'')) name, e.gender, f.name fn FROM employees e LEFT JOIN functions f ON f.id=e.function_id`)).rows;
   const empByNo = new Map(emps.map(e => [String(e.employee_no), e]));
   const sm = (await c.query(`SELECT m.sprinklr_agent_id, lower(m.agent_email) email, e.employee_no FROM sprinklr_agent_map m JOIN employees e ON e.id=m.employee_id WHERE m.employee_id IS NOT NULL`)).rows;
   const loginToNo = new Map(), sprkIdToNo = new Map();
@@ -52,6 +53,26 @@ const bracketNo = s => { const m = String(s||'').match(/\[\s*(\d{3,6})\s*\]/); r
       status: str(cv(row.getCell(10).value)).trim() });
   }
   console.log(`FingerPrint spine: ${spine.size}`);
+
+  // 1b. schedule map: ID → {team, teamMgr} (gender comes from employees). Stream the
+  // schedule "Shifts" sheet (cols: ID=5, Team=7, Team Manager=9, Gender=10).
+  const schedMap = new Map();
+  for (const sf of ['CC Schedule 2026..xlsx', 'CC Schedule 2025..xlsx']) {
+    if (!fs.existsSync(path.join(DIR, sf))) continue;
+    const rd = new ExcelJS.stream.xlsx.WorkbookReader(path.join(DIR, sf), {});
+    for await (const wsh of rd) {
+      if (wsh.name !== 'Shifts') continue; let r = 0; let col = { id:5, team:7, mgr:9, gen:10 };
+      for await (const row of wsh) { r++;
+        if (r === 1) { const h = row.values.map(x => String(cv(x)).trim()); const fi=(n)=>{const i=h.indexOf(n);return i>0?i:null;};
+          col = { id: fi('ID')||5, team: fi('Team')||7, mgr: fi('Team Manager')||9, gen: fi('Gender')||10 }; continue; }
+        const no = String(cv(row.values[col.id])).replace(/\D/g,''); if (!no) continue;
+        const team = String(cv(row.values[col.team])||'').trim(), mgr = String(cv(row.values[col.mgr])||'').trim(), gen = String(cv(row.values[col.gen])||'').trim();
+        const e = schedMap.get(no) || {}; if (team) e.team = team; if (mgr) e.mgr = mgr; if (gen) e.gen = gen; schedMap.set(no, e);
+      }
+      break;
+    }
+  }
+  console.log(`schedule team/mgr map: ${schedMap.size}`);
 
   // 2. system login/logout combine
   const sys = new Map();
@@ -118,22 +139,26 @@ const bracketNo = s => { const m = String(s||'').match(/\[\s*(\d{3,6})\s*\]/); r
   await c.query('BEGIN');
   await c.query(`DELETE FROM roster_days WHERE tenant_id=$1`, [tid]);
   const rows = [];
+  const workedMin = (inM, outM) => { if (inM == null || outM == null) return null; let o = outM; if (o < inM) o += 1440; return o - inM; };
   for (const [k, sp] of spine) {
-    const s = sys.get(k); const e = empByNo.get(sp.no) || {};
+    const s = sys.get(k); const e = empByNo.get(sp.no) || {}; const sch = schedMap.get(sp.no) || {};
     const perm = perms.get(k) || null, comp = comps.get(k) || null, sick = sicks.get(k) || null;
     const presence = presenceOf(sp, !!s);
     const worked = presence === 'office' || presence === 'wfh';
     const authorized = !!perm || !!comp;
     const conforming = worked ? ((sp.late === 0 || authorized) && (sp.early === 0 || authorized)) : null;
+    const liMin = s?.li!=null?minOf(s.li):null, loMin = s?.lo!=null?minOf(s.lo):null;
+    const wmin = workedMin(sp.punchIn, sp.punchOut) ?? workedMin(liMin, loMin);
     rows.push([tid, sp.no, e.name||null, e.fn||null, sp.iso, sp.day||null, sp.status||null, presence,
-      sp.punchIn, sp.punchOut, s?.li!=null?minOf(s.li):null, s?.lo!=null?minOf(s.lo):null, s?[...s.src].join('+'):null,
-      sp.late||0, sp.early||0, sp.ot||0, perm, comp, sick, conforming]);
+      sp.punchIn, sp.punchOut, liMin, loMin, s?[...s.src].join('+'):null,
+      sp.late||0, sp.early||0, sp.ot||0, perm, comp, sick, conforming,
+      sch.mgr||null, sch.team||null, sch.gen||e.gender||null, wmin]);
   }
-  const COLS = 20;
+  const COLS = 24;
   for (let i = 0; i < rows.length; i += 500) {
     const chunk = rows.slice(i, i + 500);
     const ph = chunk.map((_, j) => `(${Array.from({length:COLS},(_,k)=>`$${j*COLS+k+1}`).join(',')})`).join(',');
-    await c.query(`INSERT INTO roster_days (tenant_id,employee_no,name,function_name,work_date,day_name,status,presence,punch_in_min,punch_out_min,sys_login_min,sys_logout_min,login_src,late_min,early_min,ot_min,permission,comp_off,sick,conforming) VALUES ${ph}`, chunk.flat());
+    await c.query(`INSERT INTO roster_days (tenant_id,employee_no,name,function_name,work_date,day_name,status,presence,punch_in_min,punch_out_min,sys_login_min,sys_logout_min,login_src,late_min,early_min,ot_min,permission,comp_off,sick,conforming,team_manager,team_group,gender,worked_min) VALUES ${ph}`, chunk.flat());
   }
   await c.query('COMMIT');
 

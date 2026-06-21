@@ -58,23 +58,64 @@ export class ReconController {
               COUNT(*) FILTER (WHERE sys_early_min>0)::int early_days,
               COUNT(*) FILTER (WHERE mismatch IS NOT NULL)::int mismatches,
               ROUND(SUM(ot_min)/60.0)::int ot_hours,
+              ROUND(SUM(worked_min)/60.0)::int worked_hours,
               COUNT(*) FILTER (WHERE permission IS NOT NULL)::int permissions,
               ROUND(AVG(adherence_pct),1) conformance_pct
          FROM roster_days r WHERE ${where}`, params))[0];
 
-    const sortMap: Record<string,string> = { date_desc:'work_date DESC, name', date_asc:'work_date ASC, name',
-      late:'sys_late_min DESC', early:'sys_early_min DESC', ot:'ot_min DESC', name:'name ASC, work_date DESC',
-      adherence:'adherence_pct ASC NULLS LAST', mismatch:'(mismatch IS NOT NULL) DESC, work_date DESC' };
+    const sortMap: Record<string,string> = { date_desc:'r.work_date DESC, r.name', date_asc:'r.work_date ASC, r.name',
+      late:'r.sys_late_min DESC', early:'r.sys_early_min DESC', ot:'r.ot_min DESC', name:'r.name ASC, r.work_date DESC',
+      adherence:'r.adherence_pct ASC NULLS LAST', mismatch:'(r.mismatch IS NOT NULL) DESC, r.work_date DESC' };
     const order = sortMap[sort||'date_desc'] || sortMap.date_desc;
     const lim = Math.min(Number(limit)||40, 200), off = Number(offset)||0;
     const rows = await this.ds.query(
-      `SELECT employee_no, name, function_name, work_date::text date, day_name, status, presence,
-              punch_in_min, punch_out_min, sys_login_min, sys_logout_min, login_src,
-              late_min, early_min, ot_min, permission, comp_off, sick, conforming,
-              shift_code, shift_start_min, shift_end_min, sys_late_min, sys_early_min, adherence_pct, mismatch
-         FROM roster_days r WHERE ${where} ORDER BY ${order} LIMIT ${lim} OFFSET ${off}`, params);
+      `SELECT r.employee_no, r.name, r.function_name, r.work_date::text date, r.day_name, r.status, r.presence,
+              r.punch_in_min, r.punch_out_min, r.sys_login_min, r.sys_logout_min, r.login_src,
+              r.late_min, r.early_min, r.ot_min, r.permission, r.comp_off, r.sick, r.conforming,
+              r.shift_code, r.shift_start_min, r.shift_end_min, r.sys_late_min, r.sys_early_min, r.adherence_pct, r.mismatch,
+              r.team_manager, r.team_group, r.gender, r.worked_min, n.note
+         FROM roster_days r
+         LEFT JOIN roster_notes n ON n.tenant_id=r.tenant_id AND n.employee_no=r.employee_no AND n.work_date=r.work_date
+        WHERE ${where} ORDER BY ${order} LIMIT ${lim} OFFSET ${off}`, params);
 
     return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, rows };
+  }
+
+  /** Save a manager note for a roster day (survives roster_days re-imports). */
+  @Put('roster-v2/note')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Set/clear a manager note on a roster day' })
+  async rosterNote(@Req() req: any, @Body() b: { employeeNo: string; date: string; note: string }) {
+    await this.ds.query(
+      `INSERT INTO roster_notes (tenant_id, employee_no, work_date, note, updated_at)
+       VALUES ($1,$2,$3,$4,now())
+       ON CONFLICT (tenant_id, employee_no, work_date) DO UPDATE SET note=EXCLUDED.note, updated_at=now()`,
+      [req.user.tenantId, b.employeeNo, b.date, b.note || null]);
+    return { ok: true };
+  }
+
+  /** HR matrix: employee rows × date columns → presence/status code, as CSV. */
+  @Get('roster-v2/hr-matrix')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'HR matrix (employee × date → status) CSV for the window' })
+  async rosterHrMatrix(@Req() req: any, @Res() res: Response, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || (range?.b ? `${range.b.slice(0,7)}-01` : range?.a), dTo = to || range?.b;
+    const data = await this.ds.query(
+      `SELECT employee_no, name, function_name, work_date::text date,
+              CASE presence WHEN 'office' THEN COALESCE(shift_code,'P') WHEN 'wfh' THEN 'WFH'
+                   WHEN 'off' THEN 'OFF' WHEN 'leave' THEN 'L' WHEN 'absent' THEN 'A' ELSE 'P' END code
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 ORDER BY name, work_date`, [t, dFrom, dTo]);
+    const dates: string[] = []; { const d = new Date(dFrom + 'T00:00:00Z'), end = new Date(dTo + 'T00:00:00Z');
+      for (; d <= end; d.setUTCDate(d.getUTCDate()+1)) dates.push(d.toISOString().slice(0,10)); }
+    const byEmp = new Map<string, any>();
+    for (const r of data) { let e = byEmp.get(r.employee_no); if (!e) { e = { no: r.employee_no, name: r.name, fn: r.function_name, days: {} }; byEmp.set(r.employee_no, e); } e.days[r.date] = r.code; }
+    const head = ['Employee No', 'Name', 'Function', ...dates.map(d => d.slice(5))];
+    const lines = [...byEmp.values()].map(e => [e.no, `"${e.name}"`, `"${e.fn||''}"`, ...dates.map(d => e.days[d] || '')].join(','));
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="hr-matrix_${dFrom}_${dTo}.csv"`);
+    res.send('﻿' + [head.join(','), ...lines].join('\n'));
   }
 
   /** File-based recon reads server-side source workbooks; fail clean (400) if absent. */
