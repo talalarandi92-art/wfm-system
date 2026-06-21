@@ -118,6 +118,68 @@ export class OpsController {
     return { periods: periods.map((p: any) => p.period_label), period: sel, total, dimensions };
   }
 
+  /* ── Contact volume (real Ameyo interval data) ──────────────────────────── */
+
+  /** Daily contact volume + AHT + SLA + intraday profile, with a CPO snapshot. */
+  @Get('volume')
+  @ApiOperation({ summary: 'Contact volume by day/channel, AHT, abandon%, intraday profile, CPO' })
+  async volume(
+    @CurrentUser() user: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('channel') channel?: string,
+  ) {
+    const t = user.tenantId;
+    const range = await this.ds.query(
+      `SELECT MIN(vol_date)::text a, MAX(vol_date)::text b FROM contact_volume_daily WHERE tenant_id=$1`, [t]);
+    const dTo = to || range[0]?.b;
+    const dFrom = from || range[0]?.a;
+    const params: any[] = [t, dFrom, dTo];
+    const chFilter = channel ? `AND channel = $4` : '';
+    if (channel) params.push(channel);
+
+    const byChannel = await this.ds.query(
+      `SELECT channel, SUM(offered)::int offered, SUM(handled)::int handled, SUM(abandoned)::int abandoned,
+              SUM(in_target)::int in_target, SUM(talk_seconds)::bigint talk_seconds
+         FROM contact_volume_daily WHERE tenant_id=$1 AND vol_date BETWEEN $2 AND $3 ${chFilter}
+        GROUP BY channel ORDER BY offered DESC`, params);
+    const daily = await this.ds.query(
+      `SELECT vol_date::text date, SUM(offered)::int offered, SUM(handled)::int handled, SUM(abandoned)::int abandoned
+         FROM contact_volume_daily WHERE tenant_id=$1 AND vol_date BETWEEN $2 AND $3 ${chFilter}
+        GROUP BY vol_date ORDER BY vol_date`, params);
+    const profile = await this.ds.query(
+      `SELECT interval_idx, SUM(offered)::bigint offered FROM contact_volume_profile
+        WHERE tenant_id=$1 ${channel ? 'AND channel=$2' : ''} GROUP BY interval_idx ORDER BY interval_idx`,
+      channel ? [t, channel] : [t]);
+
+    const totals = byChannel.reduce((a: any, c: any) => ({
+      offered: a.offered + Number(c.offered), handled: a.handled + Number(c.handled),
+      abandoned: a.abandoned + Number(c.abandoned), talk: a.talk + Number(c.talk_seconds),
+    }), { offered: 0, handled: 0, abandoned: 0, talk: 0 });
+    const ahtSec = totals.handled ? Math.round(totals.talk / totals.handled) : 0;
+    const abandonPct = totals.offered ? Math.round((totals.abandoned / totals.offered) * 1000) / 10 : 0;
+
+    // CPO snapshot: contacts in the orders window ÷ orders in that window.
+    const ordersRow = await this.ds.query(
+      `SELECT period_label, count FROM order_aggregates WHERE tenant_id=$1 AND dimension='_total' ORDER BY period_label DESC LIMIT 1`, [t]);
+    let cpo: any = null;
+    if (ordersRow[0]) {
+      const m = String(ordersRow[0].period_label).match(/(\d{4})-(\d{2}).*?\((\d+)-(\d+)\)/);
+      if (m) {
+        const [, y, mo, d1, d2] = m;
+        const wFrom = `${y}-${mo}-${String(d1).padStart(2,'0')}`, wTo = `${y}-${mo}-${String(d2).padStart(2,'0')}`;
+        const cv = await this.ds.query(
+          `SELECT SUM(offered)::int c FROM contact_volume_daily WHERE tenant_id=$1 AND vol_date BETWEEN $2 AND $3`, [t, wFrom, wTo]);
+        const contacts = Number(cv[0]?.c || 0), orders = Number(ordersRow[0].count);
+        cpo = { window: ordersRow[0].period_label, contacts, orders,
+                cpo: orders ? Math.round((contacts / orders) * 1000) / 1000 : null,
+                note: 'voice contacts only — add chat/social channels for full CPO' };
+      }
+    }
+    return { range: range[0], from: dFrom, to: dTo, byChannel,
+             totals: { ...totals, ahtSec, abandonPct }, daily, profile, cpo };
+  }
+
   /* ── Analytics ──────────────────────────────────────────────────────────── */
 
   /** Summary cards: totals, channels, survey funnel, sentiment split */
