@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import * as ExcelJS from 'exceljs';
 
 /**
  * People / Function 360 — merges EVERY ingested source per employee (and per
@@ -69,6 +70,13 @@ export class PeopleInsightsService {
           FROM scorecard_monthly
          WHERE tenant_id=$1 AND make_date(year, month, 1) BETWEEN date_trunc('month',$2::date) AND $3
          GROUP BY employee_no
+      ),
+      fcr AS (
+        SELECT employee_id, ROUND(100.0*SUM(resolved_yes)/NULLIF(SUM(total),0),1) AS fcr_pct, SUM(total)::int AS fcr_total
+          FROM survey_fcr_monthly
+         WHERE tenant_id=$1 AND employee_id IS NOT NULL
+           AND year_month::date BETWEEN date_trunc('month',$2::date) AND $3
+         GROUP BY employee_id
       )`;
   }
 
@@ -123,13 +131,15 @@ export class PeopleInsightsService {
              CASE WHEN prod.staffed>0 THEN ROUND(100.0*(prod.talk+prod.acw)/prod.staffed,1) ELSE NULL END AS occupancy,
              CASE WHEN prod.staffed>0 THEN ROUND(100.0*prod.brk/prod.staffed,1) ELSE NULL END AS break_pct,
              ROUND(prod.staffed/3600.0,1)      AS staffed_h,
-             sc.avg_net, sc.sc_months
+             sc.avg_net, sc.sc_months,
+             fcr.fcr_pct::float AS fcr_pct, fcr.fcr_total
         FROM employees e
         LEFT JOIN functions f ON f.id=e.function_id
         LEFT JOIN employees tm ON tm.id=e.direct_manager_id
         LEFT JOIN att  ON att.employee_id=e.id
         LEFT JOIN prod ON prod.employee_no=e.employee_no
         LEFT JOIN sc   ON sc.employee_no=e.employee_no
+        LEFT JOIN fcr  ON fcr.employee_id=e.id
        WHERE ${where}
        ORDER BY ${order}
        LIMIT ${limit} OFFSET ${offset}
@@ -158,17 +168,68 @@ export class PeopleInsightsService {
              CASE WHEN SUM(prod.calls)>0 THEN ROUND(SUM(prod.talk+prod.acw)/SUM(prod.calls)) ELSE NULL END AS aht_sec,
              CASE WHEN SUM(prod.staffed)>0 THEN ROUND(100.0*SUM(prod.talk+prod.acw)/SUM(prod.staffed),1) ELSE NULL END AS occupancy,
              CASE WHEN SUM(att.working_days)>0 THEN ROUND(100.0*SUM(att.conforming_days)/SUM(att.working_days),1) ELSE NULL END AS conformance_pct,
-             ROUND(AVG(sc.avg_net),1) AS avg_net
+             ROUND(AVG(sc.avg_net),1) AS avg_net,
+             CASE WHEN SUM(fcr.fcr_total)>0 THEN ROUND(AVG(fcr.fcr_pct),1) ELSE NULL END AS fcr_pct
         FROM employees e
         LEFT JOIN functions f ON f.id=e.function_id
         LEFT JOIN att  ON att.employee_id=e.id
         LEFT JOIN prod ON prod.employee_no=e.employee_no
         LEFT JOIN sc   ON sc.employee_no=e.employee_no
+        LEFT JOIN fcr  ON fcr.employee_id=e.id
        WHERE e.tenant_id=$1
        GROUP BY f.name
        ORDER BY employees DESC
     `, [tenantId, w.from, w.to]);
     return { from: w.from, to: w.to, functions: rows };
+  }
+
+  /** Build a styled .xlsx of the filtered people list (People 360 + Functions). */
+  async exportPeople(tenantId: string, opts: { from?: string; to?: string; functionId?: string; search?: string; sort?: string }) {
+    const list = await this.people(tenantId, { ...opts, limit: 1000 });
+    const funcs = await this.functions360(tenantId, opts.from, opts.to);
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'WFM System';
+
+    const ws = wb.addWorksheet('Employees 360');
+    const cols = [
+      ['Employee No', 'employee_no', 12], ['Name', 'name', 26], ['Function', 'function_name', 20],
+      ['Type', 'employment_type', 12], ['Work Days', 'working_days', 10], ['Office', 'office_days', 9],
+      ['WFH', 'wfh_days', 8], ['Sick', 'sick_days', 8], ['Leave', 'leave_days', 8], ['Absence', 'absence_days', 9],
+      ['Off', 'off_days', 7], ['Late', 'late_count', 8], ['Late Min', 'late_minutes', 9], ['Early Out', 'early_count', 9],
+      ['Miss Punch', 'missing_punch', 10], ['Miss System', 'missing_system', 11], ['OT Hours', 'ot_hours', 9],
+      ['Conformance %', 'conformance_pct', 13], ['Calls', 'calls', 9], ['AHT (s)', 'aht_sec', 9],
+      ['Occupancy %', 'occupancy', 11], ['Break %', 'break_pct', 9], ['FCR %', 'fcr_pct', 9], ['Score', 'avg_net', 8],
+    ] as [string, string, number][];
+    ws.columns = cols.map(([h, k, w]) => ({ header: h, key: k, width: w }));
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+    ws.getRow(1).alignment = { horizontal: 'center' };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    ws.autoFilter = { from: 'A1', to: 'X1' };
+    for (const r of list.rows) ws.addRow(r);
+
+    const fs2 = wb.addWorksheet('By Function');
+    fs2.columns = [
+      { header: 'Function', key: 'function_name', width: 22 }, { header: 'Employees', key: 'employees', width: 11 },
+      { header: 'Work Days', key: 'working_days', width: 11 }, { header: 'Sick', key: 'sick_days', width: 8 },
+      { header: 'Leave', key: 'leave_days', width: 8 }, { header: 'Absence', key: 'absence_days', width: 9 },
+      { header: 'Late', key: 'late_count', width: 8 }, { header: 'OT Hours', key: 'ot_hours', width: 10 },
+      { header: 'Calls', key: 'calls', width: 9 }, { header: 'AHT (s)', key: 'aht_sec', width: 9 },
+      { header: 'Occupancy %', key: 'occupancy', width: 12 }, { header: 'Conformance %', key: 'conformance_pct', width: 13 },
+      { header: 'FCR %', key: 'fcr_pct', width: 9 }, { header: 'Score', key: 'avg_net', width: 8 },
+    ];
+    fs2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    fs2.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0EA5A4' } };
+    fs2.views = [{ state: 'frozen', ySplit: 1 }];
+    for (const r of funcs.functions) fs2.addRow(r);
+
+    const meta = wb.addWorksheet('Info');
+    meta.addRow(['People 360 export']);
+    meta.addRow(['Period', `${list.from} → ${list.to}`]);
+    meta.addRow(['Employees', list.total]);
+    meta.addRow(['Filter', opts.search || opts.functionId || 'all']);
+
+    return wb.xlsx.writeBuffer();
   }
 
   /** Full 360 detail for one employee incl. daily attendance + monthly trends. */

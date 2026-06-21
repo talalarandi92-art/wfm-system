@@ -47,6 +47,21 @@ export class OpsController {
     return this.people.people(user.tenantId, { from, to, functionId, search, sort, limit: Number(limit), offset: Number(offset) });
   }
 
+  /** Excel export of the filtered People 360 + by-function. */
+  @Get('people/export')
+  @RequirePermissions('reports.export')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @ApiOperation({ summary: 'Export People 360 (filtered) to .xlsx' })
+  async peopleExport(
+    @CurrentUser() user: any, @Res({ passthrough: true }) res: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('functionId') functionId?: string, @Query('search') search?: string, @Query('sort') sort?: string,
+  ) {
+    const buf = await this.people.exportPeople(user.tenantId, { from, to, functionId, search, sort });
+    res.set('Content-Disposition', `attachment; filename="people-360_${from || 'all'}_${to || ''}.xlsx"`);
+    return new StreamableFile(Buffer.from(buf));
+  }
+
   /** Full 360 detail for one employee. */
   @Get('people/:id')
   @ApiOperation({ summary: 'Full 360 for one employee incl. daily attendance + score/productivity trend' })

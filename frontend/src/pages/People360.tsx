@@ -21,6 +21,7 @@ interface Row {
   early_count: number; missing_punch: number; missing_system: number; ot_hours: number;
   conformance_pct: number | null; calls: number; aht_sec: number | null; occupancy: number | null;
   break_pct: number | null; staffed_h: number | null; avg_net: number | null; sc_months: number | null;
+  fcr_pct: number | null; fcr_total: number | null;
 }
 
 /* ─── column defs for the employee table ──────────────────────────────────── */
@@ -35,10 +36,13 @@ const COLS: { key: keyof Row; ar: string; en: string; fmt?: (v: any, r: Row) => 
   { key: 'late_count',   ar: 'تأخير',    en: 'Late',   color: r => r.late_count>0?'#f59e0b':'' },
   { key: 'early_count',  ar: 'خروج مبكر',en: 'Early' },
   { key: 'missing_punch',ar: 'بصمة ناقصة',en: 'Miss P' },
+  { key: 'missing_system',ar: 'سيستم ناقص',en: 'Miss S' },
   { key: 'ot_hours',     ar: 'OT س',     en: 'OT h',   fmt: v => v?Number(v).toFixed(1):'—' },
   { key: 'calls',        ar: 'مكالمات',  en: 'Calls' },
   { key: 'aht_sec',      ar: 'AHT',      en: 'AHT',    fmt: v => hms(v) },
   { key: 'occupancy',    ar: 'إشغال',    en: 'Occ',    fmt: v => pct(v) },
+  { key: 'break_pct',    ar: 'بريك%',    en: 'Break',  fmt: v => pct(v) },
+  { key: 'fcr_pct',      ar: 'FCR',      en: 'FCR',    fmt: v => pct(v), color: r => r.fcr_pct==null?'':cf(r.fcr_pct>=70?96:r.fcr_pct>=60?88:70) },
   { key: 'conformance_pct', ar: 'كونفورمانس', en: 'Conf', fmt: v => pct(v), color: r => cf(r.conformance_pct) },
   { key: 'avg_net',      ar: 'سكور',     en: 'Score',  color: r => r.avg_net==null?'':cf(r.avg_net>=90?96:r.avg_net>=75?88:r.avg_net>=60?72:50) },
 ];
@@ -76,6 +80,8 @@ export default function People360Page() {
     apiClient.get(`/ops-analytics/people/${id}?from=${from}&to=${to}`).then(r => setDetail(r.data)).catch(() => setDetail({ error: true }));
   };
 
+  const qsFilters = () => `from=${from}&to=${to}${functionId?`&functionId=${functionId}`:''}${search?`&search=${encodeURIComponent(search)}`:''}&sort=${sort}`;
+
   const exportCsv = () => {
     const rows: Row[] = data?.rows || [];
     if (!rows.length) return;
@@ -84,6 +90,14 @@ export default function People360Page() {
     const blob = new Blob([[head.join(','), ...lines].join('\n')], { type: 'text/csv' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
     a.download = `people-360_${from}_${to}.csv`; a.click();
+  };
+
+  const exportXlsx = async () => {
+    try {
+      const r = await apiClient.get(`/ops-analytics/people/export?${qsFilters()}`, { responseType: 'blob' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(r.data);
+      a.download = `people-360_${from}_${to}.xlsx`; a.click();
+    } catch { /* ignore */ }
   };
 
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
@@ -130,7 +144,9 @@ export default function People360Page() {
             </select>
           </>
         )}
-        <button onClick={exportCsv} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}>
+        <button onClick={exportXlsx} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}>
+          <Download size={13} />Excel</button>
+        <button onClick={exportCsv} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background:'rgba(148,163,184,0.12)', color:'#94a3b8' }}>
           <Download size={13} />CSV</button>
       </div>
 
@@ -262,6 +278,34 @@ function DetailPanel({ d, ar }: { d: any; ar: boolean }) {
           </div>
         </div>
       )}
+
+      {/* daily productivity chart (calls bars + AHT line) */}
+      {(d.prodTrend||[]).length>0 && (() => {
+        const tr = d.prodTrend;
+        const maxC = Math.max(...tr.map((x:any)=>x.calls), 1);
+        const maxA = Math.max(...tr.map((x:any)=>x.aht_sec), 1);
+        const W = 560, H = 90, n = tr.length, bw = Math.max(2, Math.min(16, W/n - 2));
+        const pts = tr.map((x:any,i:number) => `${(i+0.5)*(W/n)},${H - (x.aht_sec/maxA)*H}`).join(' ');
+        return (
+          <div>
+            <p className="text-[10px] text-slate-500 uppercase font-semibold mb-1">{ar?'الإنتاجية اليومية — مكالمات (أعمدة) و AHT (خط)':'Daily productivity — calls (bars) & AHT (line)'}</p>
+            <svg viewBox={`0 0 ${W} ${H+14}`} className="w-full" style={{ maxHeight: 110 }}>
+              {tr.map((x:any,i:number) => {
+                const h = (x.calls/maxC)*H;
+                return <rect key={i} x={(i+0.5)*(W/n)-bw/2} y={H-h} width={bw} height={h} rx={1.5} fill="#6366f1aa">
+                  <title>{`${x.date}: ${x.calls} calls · AHT ${hms(x.aht_sec)} · ${x.staffed_h}h`}</title></rect>;
+              })}
+              <polyline points={pts} fill="none" stroke="#06b6d4" strokeWidth={1.5} />
+              <text x={2} y={H+12} fontSize={8} fill="#64748b">{tr[0]?.date?.slice(5)}</text>
+              <text x={W-30} y={H+12} fontSize={8} fill="#64748b">{tr[tr.length-1]?.date?.slice(5)}</text>
+            </svg>
+            <div className="flex gap-4 text-[9px] text-slate-500">
+              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{background:'#6366f1'}} />{ar?'مكالمات/يوم':'Calls/day'}</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5" style={{background:'#06b6d4'}} />AHT</span>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* daily attendance strip */}
       <div>
