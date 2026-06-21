@@ -45,6 +45,7 @@ function parseCode(c0) {
   if (U==='A') return { status:'absent', base:null, code:c };
   if (U==='S'||U==='SL') return { status:'sick', base:null, code:c };
   if (U==='RES'||U==='TER') return { status:'left', code:c };
+  if (U==='P') return { status:'present', base:null, code:'P' };   // P = Present (shift unspecified) — user convention
   if (/^WFH/i.test(c)) { const base = c.replace(/^WFH[-\s]?/i,''); return { status:'wfh', base: base||null, code:c }; }
   if (/S$/.test(c) && c.length>1) return { status:'sick', base:c.slice(0,-1), code:c };
   if (/A$/.test(c) && c.length>1 && !/^AM/i.test(c)) return { status:'absent', base:c.slice(0,-1), code:c };
@@ -135,7 +136,7 @@ function resolveShift(base, TIMING) {
   const perms=await annot('Attendance Permissions ODOO.xlsx','perm'), comps=await annot('Compensatory Off (comp.off) ODOO.xlsx','comp'), sicks=await annot('Sick Leaves ODOO.xlsx','sick');
 
   // ── reconcile each (employee, day) ──
-  const rows = [];
+  const rows = []; const unknownCodes = new Map();
   const SHIFT_LETTER = code => { const r=resolveShiftLetter(code); return r; };
   function resolveShiftLetter(code){ const c=String(code||'').toUpperCase().replace(/(S|A)$/,''); if(/^MD/.test(c))return'MD'; if(/^MN/.test(c))return'MN'; if(/^AM/.test(c))return'M'; if(/^WFH-?M/.test(c))return'M'; if(/^WFH-?B/.test(c))return'B'; if(/^WFH-?C/.test(c))return'C'; if(/^WFH-?N/.test(c))return'N'; const m=c.match(/^(EE|E|M|B|C|N)/); return m?(m[1]==='EE'?'E':m[1]):null; }
 
@@ -161,8 +162,10 @@ function resolveShift(base, TIMING) {
       else if (pc.status==='holiday') presence='holiday';
       else if (pc.status==='left') presence='left';
       else if (pc.status==='wfh') presence='wfh';
+      else if (pc.status==='present') { const wfhLoc = /wfh/i.test(rec.location||''); presence = pin!=null ? 'office' : ((li!=null || wfhLoc) ? 'wfh' : 'office'); }   // P = trusted present
       else if (pc.status==='work') { const wfhLoc = /wfh/i.test(rec.location||''); presence = pin!=null ? 'office' : ((li!=null || wfhLoc) ? 'wfh' : 'absent'); }
       else presence='off';
+      if (pc.status==='work' && pc.base && !shift?.ss) unknownCodes.set(pc.base, (unknownCodes.get(pc.base)||0)+1);   // a working code that didn't resolve to a shift
       const worked = presence==='office'||presence==='wfh';
       const hasActual = (pin!=null) || (li!=null);   // do we have any login/punch trace?
 
@@ -221,5 +224,7 @@ function resolveShift(base, TIMING) {
   console.table((await c.query(`SELECT presence, COUNT(*) n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 GROUP BY presence ORDER BY n DESC`,[tid,FROM,TO])).rows);
   const a=(await c.query(`SELECT ROUND(AVG(adherence_pct),1) adh, COUNT(*) FILTER(WHERE punch_in_min IS NOT NULL) pun, COUNT(*) FILTER(WHERE sys_login_min IS NOT NULL) sys, COUNT(*) FILTER(WHERE sys_late_min>0) lt, COUNT(*) FILTER(WHERE sys_early_min>0) er, COUNT(*) FILTER(WHERE ot_before_min>0) otb, COUNT(*) FILTER(WHERE ot_after_min>0) ota, COUNT(*) FILTER(WHERE shift_start_min IS NOT NULL) sh FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`,[tid,FROM,TO])).rows[0];
   console.log(`adherence ${a.adh}% | shift-resolved ${a.sh} | punched ${a.pun} | system ${a.sys} | sys-late ${a.lt} | early ${a.er} | OT-before ${a.otb} | OT-after ${a.ota}`);
+  if (unknownCodes.size) console.log('⚠ UNKNOWN/unresolved working codes:', [...unknownCodes.entries()].map(([k,n])=>`${k}:${n}`).join(' '));
+  else console.log('✓ all working codes resolved to a shift');
   await c.end();
 })().catch(e => { console.error('ERR', e.message, e.stack); process.exit(1); });
