@@ -171,9 +171,12 @@ export class OpsController {
         const cv = await this.ds.query(
           `SELECT SUM(offered)::int c FROM contact_volume_daily WHERE tenant_id=$1 AND vol_date BETWEEN $2 AND $3`, [t, wFrom, wTo]);
         const contacts = Number(cv[0]?.c || 0), orders = Number(ordersRow[0].count);
+        const chRows = await this.ds.query(
+          `SELECT DISTINCT channel FROM contact_volume_daily WHERE tenant_id=$1 AND vol_date BETWEEN $2 AND $3 ORDER BY channel`, [t, wFrom, wTo]);
         cpo = { window: ordersRow[0].period_label, contacts, orders,
                 cpo: orders ? Math.round((contacts / orders) * 1000) / 1000 : null,
-                note: 'voice contacts only — add chat/social channels for full CPO' };
+                channels: chRows.map((r: any) => r.channel),
+                note: 'contacts ÷ orders across all ingested channels in the orders window' };
       }
     }
     return { range: range[0], from: dFrom, to: dTo, byChannel,
