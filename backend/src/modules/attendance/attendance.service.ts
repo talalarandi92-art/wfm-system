@@ -220,6 +220,68 @@ export class AttendanceService {
     };
   }
 
+  // ── Attrition by year (RES = resignation, TER = termination) ────────────────
+  // Leavers are marked by a RES/TER shift code on a date; last working day = the
+  // last 'present' day on/before that. Rate = leavers ÷ that year's headcount.
+  async getAttrition(tenantId: string) {
+    const leavers = await this.ds.query(`
+      WITH ev AS (
+        SELECT DISTINCT ON (ar.employee_id)
+               ar.employee_id, sc.code, ar.attendance_date AS leave_date
+          FROM attendance_records ar
+          JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id AND sc.code IN ('RES','TER')
+         WHERE ar.tenant_id = $1
+         ORDER BY ar.employee_id, ar.attendance_date DESC
+      )
+      SELECT e.employee_no,
+             TRIM(e.first_name_en || ' ' || COALESCE(e.last_name_en,'')) AS name,
+             f.name AS function_name,
+             ev.code,
+             ev.leave_date::text AS leave_date,
+             EXTRACT(YEAR FROM ev.leave_date)::int AS year,
+             (SELECT MAX(ar2.attendance_date)::text FROM attendance_records ar2
+               WHERE ar2.tenant_id = $1 AND ar2.employee_id = ev.employee_id
+                 AND ar2.attendance_marker = 'present' AND ar2.attendance_date <= ev.leave_date) AS last_working_day
+        FROM ev
+        JOIN employees e ON e.id = ev.employee_id
+        LEFT JOIN functions f ON f.id = e.function_id
+       ORDER BY ev.leave_date DESC
+    `, [tenantId]);
+
+    // Headcount per year = distinct employees with any present day that year.
+    const hc = await this.ds.query(`
+      SELECT EXTRACT(YEAR FROM attendance_date)::int AS year, COUNT(DISTINCT employee_id) AS hc
+        FROM attendance_records WHERE tenant_id = $1 AND attendance_marker = 'present'
+       GROUP BY 1`, [tenantId]);
+    const hcByYear = new Map<number, number>(hc.map((r: any) => [Number(r.year), parseInt(r.hc, 10)]));
+
+    const byYearMap = new Map<number, { resignations: number; terminations: number }>();
+    for (const l of leavers) {
+      const y = l.year;
+      if (!byYearMap.has(y)) byYearMap.set(y, { resignations: 0, terminations: 0 });
+      const e = byYearMap.get(y)!;
+      if (l.code === 'TER') e.terminations++; else e.resignations++;
+    }
+    const byYear = [...byYearMap.entries()].sort((a, b) => a[0] - b[0]).map(([year, v]) => {
+      const leaverCount = v.resignations + v.terminations;
+      const headcount: number | null = hcByYear.get(year) ?? null;
+      return {
+        year, resignations: v.resignations, terminations: v.terminations, leavers: leaverCount,
+        headcount,
+        attritionPct: headcount ? Math.round((leaverCount / headcount) * 1000) / 10 : null,
+      };
+    });
+
+    return {
+      byYear,
+      leavers: leavers.map((l: any) => ({
+        employeeNo: l.employee_no, name: l.name, functionName: l.function_name,
+        type: l.code === 'TER' ? 'termination' : 'resignation',
+        leaveDate: l.leave_date, lastWorkingDay: l.last_working_day, year: l.year,
+      })),
+    };
+  }
+
   // ── 3. Function Breakdown ───────────────────────────────────────────────────
 
   async getByFunction(tenantId: string, period: PeriodType, from?: string, to?: string) {

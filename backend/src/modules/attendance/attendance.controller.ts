@@ -82,6 +82,13 @@ export class AttendanceController {
     return this.svc.getTardinessByHour(user.tenantId, period, from, to);
   }
 
+  /** Attrition by year — resignations vs terminations, rate, leaver list */
+  @Get('attrition')
+  @ApiOperation({ summary: 'Attrition by year (RES=resignation, TER=termination): leavers, last working day, rate' })
+  attrition(@CurrentUser() user: any) {
+    return this.svc.getAttrition(user.tenantId);
+  }
+
   /** Breakdown by function */
   @Get('by-function')
   @ApiOperation({ summary: 'Attendance metrics grouped by function' })

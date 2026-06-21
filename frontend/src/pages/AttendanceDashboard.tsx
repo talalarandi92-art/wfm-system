@@ -76,6 +76,9 @@ interface TardyData {
   employees: TardyEmp[];
 }
 interface ByHourRow { hour: number; shiftCode: string | null; scheduled: number; present: number; tardyLate: number; tardyEarly: number }
+interface AttritionYear { year: number; resignations: number; terminations: number; leavers: number; headcount: number | null; attritionPct: number | null }
+interface AttritionLeaver { employeeNo: string; name: string; functionName: string | null; type: string; leaveDate: string; lastWorkingDay: string | null; year: number }
+interface AttritionData { byYear: AttritionYear[]; leavers: AttritionLeaver[] }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -162,7 +165,7 @@ export default function AttendanceDashboard() {
   const ar = lang === 'ar';
 
   const [period, setPeriod] = useState<Period>('month');
-  const [activeTab, setActiveTab] = useState<'overview' | 'late' | 'function' | 'wfh' | 'missing' | 'tardiness'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'late' | 'function' | 'wfh' | 'missing' | 'tardiness' | 'attrition'>('overview');
 
   const [summary,   setSummary]   = useState<Summary | null>(null);
   const [topLate,   setTopLate]   = useState<TopLateRow[]>([]);
@@ -170,6 +173,7 @@ export default function AttendanceDashboard() {
   const [markers,   setMarkers]   = useState<MarkerRow[]>([]);
   const [tardy,     setTardy]     = useState<TardyData | null>(null);
   const [byHour,    setByHour]    = useState<ByHourRow[]>([]);
+  const [attrition, setAttrition] = useState<AttritionData | null>(null);
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState<string | null>(null);
 
@@ -183,13 +187,14 @@ export default function AttendanceDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [sumRes, lateRes, funcRes, markRes, tardyRes, byHourRes] = await Promise.all([
+      const [sumRes, lateRes, funcRes, markRes, tardyRes, byHourRes, attrRes] = await Promise.all([
         apiClient.get(`/attendance/summary?period=${p}`),
         apiClient.get(`/attendance/top-late?period=${p}&limit=15`),
         apiClient.get(`/attendance/by-function?period=${p}`),
         apiClient.get(`/attendance/markers?period=${p}`),
         apiClient.get(`/attendance/tardiness?period=${p}`).catch(() => ({ data: null })),
         apiClient.get(`/attendance/tardiness/by-hour?period=${p}`).catch(() => ({ data: { rows: [] } })),
+        apiClient.get(`/attendance/attrition`).catch(() => ({ data: null })),
       ]);
       setSummary(sumRes.data);
       setTopLate(lateRes.data);
@@ -197,6 +202,7 @@ export default function AttendanceDashboard() {
       setMarkers(markRes.data);
       setTardy(tardyRes.data);
       setByHour(byHourRes.data?.rows ?? []);
+      setAttrition(attrRes.data);
     } catch (e: any) {
       setError(e?.response?.data?.message ?? (ar ? 'فشل تحميل البيانات' : 'Failed to load data'));
     } finally {
@@ -324,6 +330,7 @@ export default function AttendanceDashboard() {
           { key: 'overview',   en: 'By Function',   ar: 'حسب القسم'      },
           { key: 'late',       en: 'Top Late',       ar: 'الأكثر تأخراً'  },
           { key: 'tardiness',  en: 'Tardiness & Conformance', ar: 'التأخير والكونفورمانس' },
+          { key: 'attrition',  en: 'Attrition',      ar: 'الاتريشن' },
           { key: 'wfh',        en: 'WFH vs Office',  ar: 'بيت / مكتب'   },
           { key: 'missing',    en: 'Missing Punch',  ar: 'بصمة ناقصة' },
         ].map(tab => (
@@ -536,6 +543,75 @@ export default function AttendanceDashboard() {
             </h3>
           </div>
           <MissingTable period={period} ar={ar} dark={dark} divider={divider} tp={tp} ts={ts} rowHover={rowHover} thStyle={thStyle} thCenter={thCenter} tdStyle={tdStyle} tdCenter={tdCenter} />
+        </div>
+      )}
+
+      {/* ── Attrition (by year) ──────────────────────────────────────────── */}
+      {activeTab === 'attrition' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ ...cardStyle(dark), overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${divider}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <XCircle size={15} style={{ color: '#f87171' }} />
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: tp(dark) }}>{ar ? 'الاتريشن حسب السنة' : 'Attrition by year'}</h3>
+              <span style={{ fontSize: 11, color: ts(dark), marginInlineStart: 'auto' }}>{ar ? 'RES = استقالة · TER = ترمنيشن · النسبة = المغادرون ÷ الهيدكاونت' : 'RES = resignation · TER = termination · rate = leavers ÷ headcount'}</span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead style={{ background: theadBg }}>
+                <tr>
+                  <th style={thStyle}>{ar ? 'السنة' : 'Year'}</th>
+                  <th style={thCenter}>{ar ? 'استقالة' : 'Resignations'}</th>
+                  <th style={thCenter}>{ar ? 'ترمنيشن' : 'Terminations'}</th>
+                  <th style={thCenter}>{ar ? 'إجمالي المغادرين' : 'Leavers'}</th>
+                  <th style={thCenter}>{ar ? 'الهيدكاونت' : 'Headcount'}</th>
+                  <th style={thCenter}>{ar ? 'نسبة الاتريشن' : 'Attrition %'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(attrition?.byYear ?? []).map(y => (
+                  <tr key={y.year} style={{ borderTop: `1px solid ${divider}` }}>
+                    <td style={{ ...tdStyle, fontWeight: 700 }}>{y.year}</td>
+                    <td style={tdCenter}>{y.resignations}</td>
+                    <td style={{ ...tdCenter, color: y.terminations > 0 ? '#f87171' : ts(dark) }}>{y.terminations}</td>
+                    <td style={{ ...tdCenter, fontWeight: 700 }}>{y.leavers}</td>
+                    <td style={tdCenter}>{y.headcount ?? '—'}</td>
+                    <td style={{ ...tdCenter, fontWeight: 700, color: (y.attritionPct ?? 0) >= 15 ? '#f87171' : (y.attritionPct ?? 0) >= 8 ? '#f59e0b' : '#22c55e' }}>{y.attritionPct ?? '—'}%</td>
+                  </tr>
+                ))}
+                {(!attrition || attrition.byYear.length === 0) && <tr><td colSpan={6} style={{ ...tdCenter, padding: 24, color: ts(dark) }}>{ar ? 'لا بيانات اتريشن' : 'No attrition data'}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ ...cardStyle(dark), overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: `1px solid ${divider}` }}>
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: tp(dark) }}>{ar ? 'المغادرون (آخر يوم عمل + النوع)' : 'Leavers (last working day + type)'}</h3>
+            </div>
+            <div style={{ overflowX: 'auto', maxHeight: 420 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ background: theadBg, position: 'sticky', top: 0 }}>
+                  <tr>
+                    <th style={thStyle}>{ar ? 'الموظف' : 'Employee'}</th>
+                    <th style={thStyle}>{ar ? 'القسم' : 'Function'}</th>
+                    <th style={thStyle}>{ar ? 'النوع' : 'Type'}</th>
+                    <th style={thStyle}>{ar ? 'آخر يوم عمل' : 'Last working day'}</th>
+                    <th style={thStyle}>{ar ? 'تاريخ المغادرة' : 'Leave date'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(attrition?.leavers ?? []).map((l, i) => (
+                    <tr key={i} style={{ borderTop: `1px solid ${divider}` }}>
+                      <td style={tdStyle}>{l.name} <span style={{ color: ts(dark), fontSize: 10 }}>#{l.employeeNo}</span></td>
+                      <td style={tdStyle}>{l.functionName ?? '—'}</td>
+                      <td style={{ ...tdStyle, color: l.type === 'termination' ? '#f87171' : '#f59e0b', fontWeight: 600 }}>{l.type === 'termination' ? (ar ? 'ترمنيشن' : 'Termination') : (ar ? 'استقالة' : 'Resignation')}</td>
+                      <td style={tdStyle}>{l.lastWorkingDay ?? '—'}</td>
+                      <td style={tdStyle}>{l.leaveDate}</td>
+                    </tr>
+                  ))}
+                  {(!attrition || attrition.leavers.length === 0) && <tr><td colSpan={5} style={{ ...tdCenter, padding: 24, color: ts(dark) }}>{ar ? 'لا مغادرين' : 'No leavers'}</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 
