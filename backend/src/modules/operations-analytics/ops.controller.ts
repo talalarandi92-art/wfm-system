@@ -89,6 +89,35 @@ export class OpsController {
     );
   }
 
+  /* ── Orders analytics (order mix, returns/refunds, country/tier) ────────── */
+
+  /** Order dimensional analytics for a labelled window (from order_aggregates). */
+  @Get('orders')
+  @ApiOperation({ summary: 'Order mix: status / type / returns / country / tier / payment' })
+  async orders(@CurrentUser() user: any, @Query('period') period?: string) {
+    const periods = await this.ds.query(
+      `SELECT DISTINCT period_label FROM order_aggregates WHERE tenant_id = $1 ORDER BY period_label DESC`,
+      [user.tenantId],
+    );
+    const sel = period || periods[0]?.period_label;
+    if (!sel) return { periods: [], period: null, total: 0, dimensions: {} };
+    const rows = await this.ds.query(
+      `SELECT dimension, bucket, count FROM order_aggregates
+        WHERE tenant_id = $1 AND period_label = $2 ORDER BY dimension, count DESC`,
+      [user.tenantId, sel],
+    );
+    const total = Number(rows.find((r: any) => r.dimension === '_total')?.count || 0);
+    const dimensions: Record<string, { bucket: string; count: number; pct: number }[]> = {};
+    for (const r of rows) {
+      if (r.dimension === '_total') continue;
+      (dimensions[r.dimension] ||= []).push({
+        bucket: r.bucket, count: Number(r.count),
+        pct: total ? Math.round((Number(r.count) / total) * 1000) / 10 : 0,
+      });
+    }
+    return { periods: periods.map((p: any) => p.period_label), period: sel, total, dimensions };
+  }
+
   /* ── Analytics ──────────────────────────────────────────────────────────── */
 
   /** Summary cards: totals, channels, survey funnel, sentiment split */
