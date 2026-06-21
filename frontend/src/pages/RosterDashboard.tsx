@@ -12,6 +12,7 @@ export default function RosterDashboardPage() {
   const ar = lang === 'ar';
   const nav = useNavigate();
   const [d, setD] = useState<any>(null);
+  const [tardy, setTardy] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState('2026-01-01');
   const [to, setTo] = useState('2026-06-30');
@@ -23,6 +24,10 @@ export default function RosterDashboardPage() {
     const p = new URLSearchParams();
     if (from) p.set('from', from); if (to) p.set('to', to); if (func) p.set('func', func); if (support) p.set('support', '1');
     apiClient.get(`/attendance-recon/dashboard?${p}`).then((r: any) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
+    // Permission-aware tardiness/conformance (DB-based, independent of recon files).
+    const tp2 = new URLSearchParams({ period: 'custom' });
+    if (from) tp2.set('from', from); if (to) tp2.set('to', to);
+    apiClient.get(`/attendance/tardiness?${tp2}`).then((r: any) => setTardy(r.data)).catch(() => setTardy(null));
   }, [from, to, func, support]);
   useEffect(() => { load(); }, [load]);
 
@@ -221,6 +226,46 @@ export default function RosterDashboardPage() {
         </>
         );
       })()}
+
+      {/* Permission-aware tardiness & conformance per employee (DB-based) */}
+      {tardy?.employees?.length > 0 && (
+        <div style={{ ...card, padding: 16, marginTop: 16 }}>
+          <div className="flex items-center gap-2 mb-1">
+            <ShieldCheck size={15} style={{ color: '#22c55e' }} />
+            <p className="text-sm font-bold" style={{ color: txt }}>{ar ? 'التأخير والكونفورمانس لكل موظف (مراعي للاستئذان)' : 'Tardiness & conformance per employee (permission-aware)'}</p>
+            {tardy.totals?.conformancePct != null && (
+              <span className="text-xs font-bold ms-auto px-2 py-0.5 rounded" style={{ background: '#22c55e22', color: '#22c55e' }}>
+                {ar ? 'كونفورمانس عام' : 'Overall'}: {tardy.totals.conformancePct}%
+              </span>
+            )}
+          </div>
+          <p className="text-[10px] mb-3" style={{ color: sub }}>{ar ? 'فقط التأخير غير المصرّح (بلا استئذان معتمد) يخفّض الكونفورمانس.' : 'Only unauthorized tardiness (no approved permission) lowers conformance.'}</p>
+          <div style={{ overflowX: 'auto', maxHeight: 420 }}>
+            <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
+              <thead><tr style={{ borderBottom: `1px solid ${line}`, color: sub }}>
+                <th className="text-start py-2">{ar ? 'الموظف' : 'Employee'}</th>
+                <th className="text-start">{ar ? 'القسم' : 'Function'}</th>
+                <th className="text-center">{ar ? 'أيام' : 'Days'}</th>
+                <th className="text-center">{ar ? 'تأخير' : 'Tardy'}</th>
+                <th className="text-center">{ar ? 'باستئذان' : 'Permit'}</th>
+                <th className="text-center">{ar ? 'كونفورمانس' : 'Conformance'}</th>
+              </tr></thead>
+              <tbody>
+                {tardy.employees.map((e: any) => (
+                  <tr key={e.employeeId} style={{ borderBottom: `1px solid ${line}` }}>
+                    <td className="py-1.5" style={{ color: txt }}>{e.name || '—'} <span style={{ color: sub }}>#{e.employeeNo}</span></td>
+                    <td style={{ color: sub }}>{e.functionName ?? '—'}</td>
+                    <td className="text-center" style={{ color: txt }}>{e.workingDays}</td>
+                    <td className="text-center" style={{ color: (e.tardyLate + e.tardyEarly) > 0 ? '#ef4444' : sub }}>{(e.tardyLate + e.tardyEarly) || '—'}</td>
+                    <td className="text-center" style={{ color: (e.permittedLate + e.permittedEarly) > 0 ? '#22c55e' : sub }}>{(e.permittedLate + e.permittedEarly) || '—'}</td>
+                    <td className="text-center"><Cbadge v={e.conformancePct ?? 100} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 
