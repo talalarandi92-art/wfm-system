@@ -5,7 +5,7 @@ import {
   StreamableFile, Header, Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes, ApiQuery } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { OpsUploadService } from './ops-upload.service';
+import { PeopleInsightsService } from './people-insights.service';
 
 @ApiTags('Operations Analytics')
 @ApiBearerAuth()
@@ -25,7 +26,44 @@ export class OpsController {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly uploadSvc: OpsUploadService,
+    private readonly people: PeopleInsightsService,
   ) {}
+
+  /* ── People / Function 360 (every source merged, filterable) ────────────── */
+
+  /** Filterable per-employee 360: attendance, sick/leave, OT, AHT, score. */
+  @Get('people')
+  @ApiOperation({ summary: 'Per-employee 360 — attendance/sick/leave/OT/AHT/occupancy/score, filterable' })
+  @ApiQuery({ name: 'from', required: false }) @ApiQuery({ name: 'to', required: false })
+  @ApiQuery({ name: 'functionId', required: false }) @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'sort', required: false }) @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'offset', required: false })
+  peopleList(
+    @CurrentUser() user: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('functionId') functionId?: string, @Query('search') search?: string,
+    @Query('sort') sort?: string, @Query('limit') limit?: string, @Query('offset') offset?: string,
+  ) {
+    return this.people.people(user.tenantId, { from, to, functionId, search, sort, limit: Number(limit), offset: Number(offset) });
+  }
+
+  /** Full 360 detail for one employee. */
+  @Get('people/:id')
+  @ApiOperation({ summary: 'Full 360 for one employee incl. daily attendance + score/productivity trend' })
+  personDetail(
+    @CurrentUser() user: any, @Param('id') id: string,
+    @Query('from') from?: string, @Query('to') to?: string,
+  ) {
+    return this.people.person(user.tenantId, id, from, to);
+  }
+
+  /** Per-function 360 rollup. */
+  @Get('functions-360')
+  @ApiOperation({ summary: 'Per-function 360 rollup (attendance/sick/OT/AHT/occupancy/score)' })
+  @ApiQuery({ name: 'from', required: false }) @ApiQuery({ name: 'to', required: false })
+  functions360(@CurrentUser() user: any, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.people.functions360(user.tenantId, from, to);
+  }
 
   /* ── Upload ─────────────────────────────────────────────────────────────── */
 
