@@ -1,7 +1,7 @@
 import {
   Controller, Get, Post, Delete, Param, Query,
   UseGuards, UseInterceptors, UploadedFile, ParseFilePipe,
-  MaxFileSizeValidator, HttpCode, HttpStatus,
+  MaxFileSizeValidator, HttpCode, HttpStatus, DefaultValuePipe,
   StreamableFile, Header, Res,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -181,6 +181,59 @@ export class OpsController {
     }
     return { range: range[0], from: dFrom, to: dTo, byChannel,
              totals: { ...totals, ahtSec, abandonPct }, daily, profile, cpo };
+  }
+
+  /* ── Agent productivity (real Ameyo: AHT / occupancy / AUX) ─────────────── */
+
+  /** Per-agent productivity: staffed / talk / ACW / break, AHT, occupancy. */
+  @Get('productivity')
+  @ApiOperation({ summary: 'Agent productivity (voice): AHT, occupancy, AUX-break, staffed; trend + top agents' })
+  async productivity(
+    @CurrentUser() user: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit', new DefaultValuePipe('25')) limit?: string,
+  ) {
+    const t = user.tenantId;
+    const range = await this.ds.query(
+      `SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM agent_productivity_daily WHERE tenant_id=$1`, [t]);
+    const dFrom = from || range[0]?.a, dTo = to || range[0]?.b;
+    const p = [t, dFrom, dTo];
+
+    const totals = (await this.ds.query(
+      `SELECT SUM(staffed_seconds)::bigint staffed, SUM(talk_seconds)::bigint talk, SUM(acw_seconds)::bigint acw,
+              SUM(break_seconds)::bigint brk, SUM(idle_seconds)::bigint idle, SUM(wrapped_calls)::bigint calls,
+              COUNT(DISTINCT agent_login)::int agents, COUNT(DISTINCT work_date)::int days
+         FROM agent_productivity_daily WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, p))[0];
+    const ah = Number(totals.calls) ? Math.round((Number(totals.talk)+Number(totals.acw))/Number(totals.calls)) : 0;
+    const occ = Number(totals.staffed) ? Math.round((Number(totals.talk)+Number(totals.acw))/Number(totals.staffed)*1000)/10 : 0;
+    const brk = Number(totals.staffed) ? Math.round(Number(totals.brk)/Number(totals.staffed)*1000)/10 : 0;
+
+    const daily = await this.ds.query(
+      `SELECT work_date::text date, ROUND(SUM(staffed_seconds)/3600.0,1) staffed_h,
+              SUM(wrapped_calls)::int calls,
+              CASE WHEN SUM(wrapped_calls)>0 THEN ROUND((SUM(talk_seconds)+SUM(acw_seconds))/SUM(wrapped_calls)) ELSE 0 END aht_s,
+              CASE WHEN SUM(staffed_seconds)>0 THEN ROUND(100.0*(SUM(talk_seconds)+SUM(acw_seconds))/SUM(staffed_seconds),1) ELSE 0 END occupancy
+         FROM agent_productivity_daily WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3
+        GROUP BY work_date ORDER BY work_date`, p);
+
+    const top = await this.ds.query(
+      `SELECT a.agent_login, a.employee_no,
+              TRIM(e.first_name_en||' '||COALESCE(e.last_name_en,'')) AS name,
+              ROUND(SUM(a.staffed_seconds)/3600.0,1) staffed_h, SUM(a.wrapped_calls)::int calls,
+              CASE WHEN SUM(a.wrapped_calls)>0 THEN ROUND((SUM(a.talk_seconds)+SUM(a.acw_seconds))/SUM(a.wrapped_calls)) ELSE 0 END aht_s,
+              CASE WHEN SUM(a.staffed_seconds)>0 THEN ROUND(100.0*(SUM(a.talk_seconds)+SUM(a.acw_seconds))/SUM(a.staffed_seconds),1) ELSE 0 END occupancy,
+              CASE WHEN SUM(a.staffed_seconds)>0 THEN ROUND(100.0*SUM(a.break_seconds)/SUM(a.staffed_seconds),1) ELSE 0 END break_pct
+         FROM agent_productivity_daily a
+         LEFT JOIN employees e ON e.employee_no = a.employee_no
+        WHERE a.tenant_id=$1 AND a.work_date BETWEEN $2 AND $3
+        GROUP BY a.agent_login, a.employee_no, e.first_name_en, e.last_name_en
+        ORDER BY SUM(a.wrapped_calls) DESC LIMIT ${Number(limit)||25}`, p);
+
+    return { range: range[0], from: dFrom, to: dTo,
+             summary: { ...totals, ahtSec: ah, occupancyPct: occ, breakPct: brk,
+                        channel: 'voice (Ameyo inbound/outbound)' },
+             daily, top };
   }
 
   /* ── Analytics ──────────────────────────────────────────────────────────── */
