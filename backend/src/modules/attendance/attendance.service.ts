@@ -119,6 +119,107 @@ export class AttendanceService {
     `, [tenantId, dateFrom, dateTo, limit]);
   }
 
+  // ── Tardiness vs authorized permission (team) ───────────────────────────────
+  // A late-in / early-out is TARDY unless covered by an approved permission of
+  // the matching type that day. Attendance conformance = present days with NO
+  // unauthorized tardiness ÷ present days.
+  private readonly PERM_JOIN = `
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(bool_or(rp.permission_type = 'late_in'), FALSE) AS perm_late,
+             COALESCE(bool_or(rp.permission_type IN ('early_out','temp_out')), FALSE) AS perm_early
+        FROM request_permissions rp JOIN requests rq ON rq.id = rp.request_id
+       WHERE rq.tenant_id = ar.tenant_id AND rq.employee_id = ar.employee_id
+         AND rq.status = 'approved' AND rp.permission_date = ar.attendance_date
+    ) perm ON TRUE`;
+
+  async getTardiness(tenantId: string, period: PeriodType, from?: string, to?: string, limit = 200) {
+    const { from: dateFrom, to: dateTo } = this.periodDates(period, from, to);
+    const TARDY_LATE  = `COALESCE(ar.punch_late_minutes,0) > 0 AND NOT perm.perm_late`;
+    const TARDY_EARLY = `(COALESCE(ar.punch_early_out_minutes,0) > 0 OR COALESCE(ar.system_early_out_minutes,0) > 0) AND NOT perm.perm_early`;
+    const PERMIT_LATE = `COALESCE(ar.punch_late_minutes,0) > 0 AND perm.perm_late`;
+    const PERMIT_EARLY= `(COALESCE(ar.punch_early_out_minutes,0) > 0 OR COALESCE(ar.system_early_out_minutes,0) > 0) AND perm.perm_early`;
+
+    const rows = await this.ds.query(`
+      SELECT e.id AS employee_id, e.employee_no,
+             CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,'')) AS full_name,
+             f.name AS function_name,
+             COUNT(*) FILTER (WHERE ar.attendance_marker='present')                AS working_days,
+             COUNT(*) FILTER (WHERE ${TARDY_LATE})                                 AS tardy_late,
+             COALESCE(SUM(ar.punch_late_minutes) FILTER (WHERE ${TARDY_LATE}),0)   AS tardy_late_minutes,
+             COUNT(*) FILTER (WHERE ${PERMIT_LATE})                                AS permitted_late,
+             COUNT(*) FILTER (WHERE ${TARDY_EARLY})                                AS tardy_early,
+             COALESCE(SUM(GREATEST(COALESCE(ar.punch_early_out_minutes,0),COALESCE(ar.system_early_out_minutes,0))) FILTER (WHERE ${TARDY_EARLY}),0) AS tardy_early_minutes,
+             COUNT(*) FILTER (WHERE ${PERMIT_EARLY})                               AS permitted_early,
+             COUNT(*) FILTER (WHERE ar.attendance_marker='present'
+                                AND NOT (${TARDY_LATE}) AND NOT (${TARDY_EARLY}))  AS conforming_days
+      FROM attendance_records ar
+      JOIN employees e ON e.id = ar.employee_id
+      LEFT JOIN functions f ON f.id = e.function_id
+      ${this.PERM_JOIN}
+      WHERE ar.tenant_id = $1 AND ar.attendance_date BETWEEN $2 AND $3
+      GROUP BY e.id, e.employee_no, e.first_name_en, e.last_name_en, f.name
+      HAVING COUNT(*) FILTER (WHERE ar.attendance_marker='present') > 0
+      ORDER BY (COUNT(*) FILTER (WHERE ${TARDY_LATE}) + COUNT(*) FILTER (WHERE ${TARDY_EARLY})) DESC,
+               CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))
+      LIMIT $4
+    `, [tenantId, dateFrom, dateTo, limit]);
+
+    const n = (v: any) => parseInt(v ?? '0', 10);
+    const employees = rows.map((r: any) => {
+      const working = n(r.working_days), conf = n(r.conforming_days);
+      return {
+        employeeId: r.employee_id, employeeNo: r.employee_no,
+        name: String(r.full_name).trim(), functionName: r.function_name,
+        workingDays: working,
+        tardyLate: n(r.tardy_late), tardyLateMinutes: n(r.tardy_late_minutes), permittedLate: n(r.permitted_late),
+        tardyEarly: n(r.tardy_early), tardyEarlyMinutes: n(r.tardy_early_minutes), permittedEarly: n(r.permitted_early),
+        conformingDays: conf,
+        conformancePct: working ? Math.round((conf / working) * 1000) / 10 : null,
+      };
+    });
+    const sum = (k: string) => employees.reduce((a: number, e: any) => a + (e[k] ?? 0), 0);
+    const totWorking = sum('workingDays'), totConf = sum('conformingDays');
+    return {
+      period: { from: dateFrom, to: dateTo },
+      totals: {
+        employees: employees.length, workingDays: totWorking,
+        tardyLate: sum('tardyLate'), permittedLate: sum('permittedLate'),
+        tardyEarly: sum('tardyEarly'), permittedEarly: sum('permittedEarly'),
+        conformancePct: totWorking ? Math.round((totConf / totWorking) * 1000) / 10 : null,
+      },
+      employees,
+    };
+  }
+
+  /** By scheduled-start hour: how many scheduled, present, and tardy-late at each hour/shift. */
+  async getTardinessByHour(tenantId: string, period: PeriodType, from?: string, to?: string) {
+    const { from: dateFrom, to: dateTo } = this.periodDates(period, from, to);
+    const rows = await this.ds.query(`
+      SELECT EXTRACT(HOUR FROM ar.scheduled_start)::int AS hour,
+             sc.code AS shift_code,
+             COUNT(*)                                                      AS scheduled,
+             COUNT(*) FILTER (WHERE ar.punch_in IS NOT NULL)               AS present,
+             COUNT(*) FILTER (WHERE COALESCE(ar.punch_late_minutes,0) > 0 AND NOT perm.perm_late)  AS tardy_late,
+             COUNT(*) FILTER (WHERE (COALESCE(ar.punch_early_out_minutes,0) > 0 OR COALESCE(ar.system_early_out_minutes,0) > 0) AND NOT perm.perm_early) AS tardy_early
+      FROM attendance_records ar
+      LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
+      ${this.PERM_JOIN}
+      WHERE ar.tenant_id = $1 AND ar.attendance_date BETWEEN $2 AND $3
+        AND ar.attendance_marker = 'present' AND ar.scheduled_start IS NOT NULL
+      GROUP BY EXTRACT(HOUR FROM ar.scheduled_start), sc.code
+      ORDER BY hour, shift_code
+    `, [tenantId, dateFrom, dateTo]);
+    const n = (v: any) => parseInt(v ?? '0', 10);
+    return {
+      period: { from: dateFrom, to: dateTo },
+      rows: rows.map((r: any) => ({
+        hour: n(r.hour), shiftCode: r.shift_code,
+        scheduled: n(r.scheduled), present: n(r.present),
+        tardyLate: n(r.tardy_late), tardyEarly: n(r.tardy_early),
+      })),
+    };
+  }
+
   // ── 3. Function Breakdown ───────────────────────────────────────────────────
 
   async getByFunction(tenantId: string, period: PeriodType, from?: string, to?: string) {

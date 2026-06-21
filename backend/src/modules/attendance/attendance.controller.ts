@@ -52,6 +52,36 @@ export class AttendanceController {
     return this.svc.getTopLate(user.tenantId, period, from, to, Number(limit), type);
   }
 
+  /** Tardiness vs authorized permission per employee + attendance conformance */
+  @Get('tardiness')
+  @ApiOperation({ summary: 'Per-employee tardiness (unauthorized) vs permitted + attendance conformance %' })
+  @ApiQuery({ name: 'period', enum: ['today', 'week', 'month', 'custom'], required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to',   required: false })
+  tardiness(
+    @CurrentUser() user: any,
+    @Query('period', new DefaultValuePipe('month')) period: PeriodType,
+    @Query('from') from?: string,
+    @Query('to')   to?: string,
+  ) {
+    return this.svc.getTardiness(user.tenantId, period, from, to);
+  }
+
+  /** Tardiness by scheduled-start hour / shift (HC tracker view) */
+  @Get('tardiness/by-hour')
+  @ApiOperation({ summary: 'By scheduled-start hour & shift: scheduled / present / tardy' })
+  @ApiQuery({ name: 'period', enum: ['today', 'week', 'month', 'custom'], required: false })
+  @ApiQuery({ name: 'from', required: false })
+  @ApiQuery({ name: 'to',   required: false })
+  tardinessByHour(
+    @CurrentUser() user: any,
+    @Query('period', new DefaultValuePipe('month')) period: PeriodType,
+    @Query('from') from?: string,
+    @Query('to')   to?: string,
+  ) {
+    return this.svc.getTardinessByHour(user.tenantId, period, from, to);
+  }
+
   /** Breakdown by function */
   @Get('by-function')
   @ApiOperation({ summary: 'Attendance metrics grouped by function' })
