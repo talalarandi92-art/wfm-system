@@ -1,5 +1,19 @@
 # WFM PROJECT INSTRUCTIONS — FULL MASTER VERSION
 
+> **Durable knowledge base (read these before UI / roster / reports work — they ship with the repo):**
+> - `docs/knowledge/DESIGN_SYSTEM.md` — the UI "magic": 3 themes (Dark / Light / Aurora-Glass), the
+>   light-mode comfort layer for this dark-first app, the grey/light-grey mix, keep-dark, neon-hover
+>   schedule cells, roster zebra + contrasting detail, per-type request colours, **NO animated
+>   background**, and the contrast-auditor verification method.
+> - `docs/knowledge/REPORTS_AND_ROSTER_ENGINE.md` — the roster/reports engine & rules: canonical
+>   identity (`person_no` + the `sc` CTE join), `roster_days` model, reconciliation rules (presence,
+>   tardiness↔conformance, OT bleed guards, cross-midnight, maternity), scorecard data shape, the
+>   `roster-v2/*` endpoints, the Custom Report/Dashboard Builders, SLA/workflow & data-quality reports,
+>   and the PostgreSQL gotchas.
+>
+> The same two docs (plus architecture / business-rules / data-sources / modules / conventions) live in
+> the invocable **`wfm-system`** skill under `.claude/skills/wfm-system/reference/` for local use.
+
 ## 0. Purpose of This File
 
 This file is the master instruction file for the Boutiqaat Contact Center WFM System.
