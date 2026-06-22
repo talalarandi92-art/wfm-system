@@ -61,14 +61,22 @@ export default function DataQualityPage() {
           <div className="flex items-center gap-2 mb-3"><Users size={15} className="text-amber-400"/><h3 className="text-sm font-bold text-white">{ar?'تدقيق التيم ليدرز':'Team-Leader Verification'}</h3>
             <span className="text-[10px] text-slate-500">{ar?'الليبل اللي ما ينطبق على موظف تيم ليدر نشط = يحتاج تأكيد (ربما ترك العمل)':'a label not matching an active team-leader employee = verify (may have left)'}</span></div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {(d.teamLeaders||[]).map((t:any,i:number)=>(
-              <div key={i} className="flex items-center justify-between gap-2 p-2.5 rounded-xl" style={{ background:t.verified?'rgba(34,197,94,0.07)':'rgba(245,158,11,0.1)', border:`1px solid ${t.verified?'rgba(34,197,94,0.2)':'rgba(245,158,11,0.3)'}` }}>
-                <div className="min-w-0"><p className="text-xs font-semibold text-white truncate">{t.name}</p>
-                  <p className="text-[10px] text-slate-400">{t.reports} {ar?'تابع':'reports'} · {ar?'آخر':'last'} {t.last_seen}</p></div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background:t.verified?'rgba(34,197,94,0.2)':'rgba(245,158,11,0.2)', color:t.verified?'#4ade80':'#fbbf24' }}>
-                  {t.verified?(ar?'حالي ✓':'Current ✓'):(ar?'غير مؤكد':'Unverified')}</span>
-              </div>
-            ))}
+            {(d.teamLeaders||[]).map((t:any,i:number)=>{
+              const S:Record<string,[string,string,string]> = {
+                current:[ar?'حالي ✓':'Current ✓','#4ade80','rgba(34,197,94,'],
+                director:[ar?'مدير':'Director','#60a5fa','rgba(59,130,246,'],
+                left:[ar?'ترك العمل':'Left','#f87171','rgba(239,68,68,'],
+                unverified:[ar?'غير مؤكد':'Unverified','#fbbf24','rgba(245,158,11,'],
+              };
+              const [label,col,rgb] = S[t.status] || S[t.verified?'current':'unverified'];
+              return (
+                <div key={i} className="flex items-center justify-between gap-2 p-2.5 rounded-xl" style={{ background:`${rgb}0.08)`, border:`1px solid ${rgb}0.28)` }}>
+                  <div className="min-w-0"><p className="text-xs font-semibold text-white truncate">{t.name}</p>
+                    <p className="text-[10px] text-slate-400">{t.reports} {ar?'تابع':'reports'} · {ar?'آخر':'last'} {t.last_seen}</p></div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background:`${rgb}0.2)`, color:col }}>{label}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
 

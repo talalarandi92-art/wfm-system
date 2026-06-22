@@ -98,9 +98,9 @@ export default function RosterDashboardPage() {
         <div className="rounded-2xl p-3 flex items-start gap-2.5" style={{ background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)' }}>
           <UserX size={16} className="text-amber-400 flex-shrink-0 mt-0.5"/>
           <div className="text-[11px] text-amber-200/90">
-            <span className="font-bold">{ar?'تنبيه جودة بيانات — تيم ليدرز غير مؤكدين: ':'Data-quality alert — unverified team leaders: '}</span>
-            {d.teamLeaders.filter((t:any)=>!t.verified).map((t:any)=>`${t.name} (${t.reports} ${ar?'تابع':'reports'}, ${ar?'آخر ظهور':'last'} ${t.lastSeen})`).join('  ·  ')}
-            <span className="text-amber-300/70">{ar?' — غير مدرجين بقائمة التيم ليدرز الحاليين. أكّد إن كانوا تركوا العمل.':' — excluded from the current team-leader list. Confirm if they have left.'}</span>
+            <span className="font-bold">{ar?'تنبيه جودة بيانات — تيم ليدرز غير حاليين: ':'Data-quality alert — non-current team leaders: '}</span>
+            {d.teamLeaders.filter((t:any)=>!t.verified).map((t:any)=>`${t.name} (${t.status==='left'?(ar?'ترك العمل':'left'):(ar?'غير مؤكد':'unverified')}, ${ar?'آخر ظهور':'last'} ${t.lastSeen})`).join('  ·  ')}
+            <span className="text-amber-300/70">{ar?' — مستبعدون من قائمة التيم ليدرز الحاليين.':' — excluded from the current team-leader list.'}</span>
           </div>
         </div>
       )}

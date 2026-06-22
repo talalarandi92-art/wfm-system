@@ -183,17 +183,10 @@ export class ReconController {
           AND replace(lower(i.clean_name),' ','') = replace(lower(r.team_manager),' ','')
         WHERE r.tenant_id=$1 AND r.team_manager IS NOT NULL AND r.team_manager<>''
         GROUP BY r.team_manager, i.person_no, i.is_active ORDER BY reports DESC`, [t]);
-    // spelling-variant resolver for known TLs (documented assumption, user-correctable)
-    const TL_ALIAS: Record<string,string> = { 'fatmehassan': 'fatma hasan' };
-    const norm = (s: string) => (s||'').toLowerCase().replace(/\s+/g,'');
-    const tlActive = new Set((await this.ds.query(
-      `SELECT clean_name FROM employee_identity WHERE tenant_id=$1 AND is_canonical AND role_category='Team Leader' AND is_active`, [t]
-    )).map((r:any)=>norm(r.clean_name)));
-    const teamLeaders = tlRows.map((r:any)=>{
-      const verified = !!r.matched_active || tlActive.has(norm(r.name)) || tlActive.has(norm(TL_ALIAS[norm(r.name)]||''));
-      return { name: r.name, reports: r.reports, firstSeen: r.first_seen, lastSeen: r.last_seen, verified, note: verified ? null : 'team label not matched to an active Team-Leader employee — verify if this person left' };
-    });
-    const teamManagers = teamLeaders.filter(x=>x.verified).map(x=>x.name);
+    const { tlActive, tlStatus } = await this.tlResolver(t);
+    const teamLeaders = tlRows.map((r:any)=>{ const s = tlStatus(r.name, r.matched_active);
+      return { name: r.name, reports: r.reports, firstSeen: r.first_seen, lastSeen: r.last_seen, ...s }; });
+    const teamManagers = teamLeaders.filter(x=>x.verified).map(x=>x.name);  void tlActive;
 
     return {
       from: dFrom, to: dTo, range, summary,
@@ -388,16 +381,8 @@ export class ReconController {
            AND replace(lower(i.clean_name),' ','')=replace(lower(r.team_manager),' ','')
         WHERE r.tenant_id=$1 AND r.team_manager IS NOT NULL AND r.team_manager<>''
         GROUP BY r.team_manager ORDER BY reports DESC`, [t]);
-    const TL_ALIAS: Record<string, string> = { 'fatmehassan': 'fatma hasan' };  // documented spelling variant (user-correctable)
-    const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, '');
-    const tlActive = new Set((await this.ds.query(
-      `SELECT clean_name FROM employee_identity WHERE tenant_id=$1 AND is_canonical AND role_category='Team Leader' AND is_active`, [t]
-    )).map((r: any) => norm(r.clean_name)));
-    const teamLeaders = tlRows.map((r: any) => {
-      const verified = !!r.matched || tlActive.has(norm(r.name)) || tlActive.has(norm(TL_ALIAS[norm(r.name)] || ''));
-      return { name: r.name, reports: r.reports, first_seen: r.first_seen, last_seen: r.last_seen, verified,
-               note: verified ? null : 'team label not matched to an active Team-Leader employee — verify if this person left' };
-    });
+    const { tlStatus } = await this.tlResolver(t);
+    const teamLeaders = tlRows.map((r: any) => ({ name: r.name, reports: r.reports, first_seen: r.first_seen, last_seen: r.last_seen, ...tlStatus(r.name, r.matched) }));
     return { headline, duplicates, inactiveIds, orphans, pollution, roleHours, teamLeaders };
   }
 
@@ -532,6 +517,29 @@ export class ReconController {
 
     res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="WFM_Master_${dFrom}_${dTo}.xlsx"` });
     res.end(Buffer.from(await wb.xlsx.writeBuffer()));
+  }
+
+  /** Documented, user-confirmed team-leader resolution (2026-06-22):
+   *  - spelling alias: "Fatme Hassan" → active TL "Fatma Hasan"
+   *  - Aya Ruiz = terminated (left) → excluded from current-TL views
+   *  - Talal Arandi = director/owner (present) → kept as a current management label
+   *  A label is "current" if it maps to an active Team-Leader employee or is the director. */
+  private async tlResolver(t: string) {
+    const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, '');
+    const TL_ALIAS: Record<string, string> = { 'fatmehassan': 'fatma hasan' };
+    const TL_LEFT = new Set(['ayaruiz']);            // user-confirmed terminated
+    const TL_DIRECTOR = new Set(['talalarandi']);    // user-confirmed present (director/owner)
+    const tlActive = new Set((await this.ds.query(
+      `SELECT clean_name FROM employee_identity WHERE tenant_id=$1 AND is_canonical AND role_category='Team Leader' AND is_active`, [t]
+    )).map((r: any) => norm(r.clean_name)));
+    const tlStatus = (name: string, matchedActive?: boolean) => {
+      const n = norm(name);
+      if (TL_LEFT.has(n)) return { verified: false, status: 'left', note: 'left — terminated (confirmed 2026-06-22)' };
+      if (TL_DIRECTOR.has(n)) return { verified: true, status: 'director', note: 'director / management (present)' };
+      const active = !!matchedActive || tlActive.has(n) || tlActive.has(norm(TL_ALIAS[n] || ''));
+      return { verified: active, status: active ? 'current' : 'unverified', note: active ? null : 'team label not matched to an active Team-Leader employee — verify if this person left' };
+    };
+    return { tlActive, tlStatus };
   }
 
   /** File-based recon reads server-side source workbooks; fail clean (400) if absent. */

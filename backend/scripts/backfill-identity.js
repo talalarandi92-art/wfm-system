@@ -25,17 +25,20 @@ for (const p of [path.join(__dirname, '..', '.env'), path.join(__dirname, '..', 
 const TENANT = 'a0000000-0000-0000-0000-000000000001';
 const norm = s => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
-// 8-hour roles excluded from default tardiness KPI (configurable via role_working_hours).
-const EIGHT_HOUR = { 'Team Leader': 1, 'RTA': 1, 'Customer Care': 1, 'Resolution Specialist': 1 };
+// Role category (identity) is SEPARATE from 8h-ness (the tardiness-exclusion flag).
+// User-confirmed (2026-06-22): RTA / Resolution Specialist / Team Leader = 8h (excluded);
+// Customer Care = 9h normal agent BUT keeps its own role label.
+const NAMED_ROLES = { 'Team Leader': 1, 'RTA': 1, 'Customer Care': 1, 'Resolution Specialist': 1 };
+const EIGHT_HOUR = { 'Team Leader': 1, 'RTA': 1, 'Resolution Specialist': 1 };
 function roleOf(fn) {
   const f = (fn || '').trim();
   let cat = 'Agent';
-  if (EIGHT_HOUR[f]) cat = f;
+  if (NAMED_ROLES[f]) cat = f;
   else if (/^Intern/i.test(f)) cat = 'Intern';
   else if (f === 'Offline') cat = 'Back Office';
   else if (f === 'OMT') cat = 'OMT';
   else if (f) cat = 'Agent';
-  const eight = !!EIGHT_HOUR[f];
+  const eight = !!EIGHT_HOUR[f];   // 8h-ness is independent of the role label
   return { cat, hours: eight ? 8 : 9, tardy: !eight };
 }
 
@@ -121,7 +124,7 @@ function roleOf(fn) {
     ['Intern', 9, true, true, true, true, 'Intern agent, 9h, ~70% productivity factor'],
     ['Team Leader', 8, false, true, false, true, '8h supervisor — records only in tardiness KPI'],
     ['RTA', 8, false, true, false, true, '8h real-time analyst — excluded from agent tardiness KPI'],
-    ['Customer Care', 8, false, true, false, true, '8h — excluded from agent tardiness KPI'],
+    ['Customer Care', 9, true, true, true, true, '9h — normal agent (user-confirmed 2026-06-22, NOT 8h)'],
     ['Resolution Specialist', 8, false, true, false, true, '8h — excluded from agent tardiness KPI'],
     ['Back Office', 9, true, true, true, true, 'Offline/back-office; adjust hours here if 8h'],
     ['OMT', 9, true, true, true, true, 'Order management team'],
