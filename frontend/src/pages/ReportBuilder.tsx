@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileSpreadsheet, Table2, LayoutList, Play, CalendarDays, Search, Wrench, Zap } from 'lucide-react';
+import { ArrowLeft, FileSpreadsheet, Table2, LayoutList, Play, CalendarDays, Search, Wrench, Zap, Save, Bookmark, X } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 
@@ -98,6 +98,15 @@ export default function ReportBuilderPage() {
   const PRESET_GROUPS = [...new Set(PRESETS.map(p=>p.grp))];
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
 
+  // user-saved report presets (localStorage) — "build a report your way and keep it"
+  const [views, setViews] = useState<Record<string,any>>(() => { try { return JSON.parse(localStorage.getItem('wfm.reportViews')||'{}'); } catch { return {}; } });
+  const persistViews = (v:Record<string,any>) => { setViews(v); localStorage.setItem('wfm.reportViews', JSON.stringify(v)); };
+  const saveView = () => { const name = window.prompt(ar?'اسم الريبورت:':'Report name:'); if (!name) return;
+    persistViews({ ...views, [name]: { mode, from, to, filters, fields, kpis, groupBy } }); };
+  const loadView = (name:string) => { const v = views[name]; if (!v) return;
+    setMode(v.mode); setFrom(v.from); setTo(v.to); setFields(v.fields||DEFAULT_FIELDS); setKpis(v.kpis||DEFAULT_KPIS); setGroupBy(v.groupBy||'teamLeader'); setFilters(v.filters||{ search:'' }); };
+  const delView = (name:string) => { const v = { ...views }; delete v[name]; persistViews(v); };
+
   const FILTERS: [string,string,string][] = [['function',ar?'الفنكشن':'Function','function_name'],['teamLeader',ar?'التيم ليدر':'Team leader','team_manager'],['group',ar?'الجروب':'Group','team_group'],['shift',ar?'الشفت':'Shift','shift_code'],['attendanceStatus',ar?'الحالة':'Status','attendance_status'],['lateCategory',ar?'فئة التأخير':'Late cat','late_category']];
 
   return (
@@ -107,8 +116,22 @@ export default function ReportBuilderPage() {
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)' }}><Wrench size={19} className="text-white"/></div>
         <div className="flex-1"><h1 className="text-lg font-bold text-white">{ar?'منشئ التقارير المخصّصة':'Custom Report Builder'}</h1>
           <p className="text-xs text-slate-500">{ar?'اختر الأعمدة أو الـKPIs، فلتر، جمّع، وصدّر Excel':'Pick fields or KPIs, filter, group, export Excel'}</p></div>
+        <button onClick={saveView} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><Save size={14}/>{ar?'احفظ':'Save'}</button>
         <button onClick={exportXlsx} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}><FileSpreadsheet size={14}/>{ar?'تصدير Excel':'Export Excel'}</button>
       </div>
+
+      {/* my saved reports */}
+      {Object.keys(views).length>0 && (
+        <div className="flex items-center gap-1.5 flex-wrap text-[11px] px-1">
+          <span className="text-slate-500 flex items-center gap-1"><Bookmark size={12}/>{ar?'ريبوراتي:':'My reports:'}</span>
+          {Object.keys(views).map(n=>(
+            <span key={n} className="flex items-center gap-1 px-2 py-1 rounded-lg text-slate-200" style={{ background:'rgba(99,102,241,0.12)', border:'1px solid rgba(99,102,241,0.25)' }}>
+              <button onClick={()=>loadView(n)}>{n}</button>
+              <button onClick={()=>delView(n)} className="text-slate-500 hover:text-rose-400"><X size={11}/></button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* quick reports — the 36 spec reports as one-click presets */}
       <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.18)' }}>
