@@ -445,6 +445,26 @@ export class ReconController {
     return { count: rows.length, rows };
   }
 
+  /** System Audit — Page/Code/Assistant governance tables + LIVE health signals
+   *  (applied migrations, roster row/date span, data-quality flag counts, recent
+   *  schedule-change audit trail). */
+  @Get('roster-v2/system-audit')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'System audit: page/code/assistant tables + live migrations/health/audit-trail' })
+  async systemAudit(@Req() req: any) {
+    const t = req.user.tenantId;
+    const [pages, code, assistants, migrations, health, dq, recentChanges] = await Promise.all([
+      this.ds.query(`SELECT name, purpose, status, issues, notes FROM page_module_audit WHERE tenant_id=$1 ORDER BY name`, [t]),
+      this.ds.query(`SELECT component, code_type, status, risk, notes FROM code_audit_log WHERE tenant_id=$1 ORDER BY component`, [t]),
+      this.ds.query(`SELECT step_no, assistant, responsibility, input, output, status, notes FROM assistant_workflow_audit WHERE tenant_id=$1 ORDER BY step_no`, [t]),
+      this.ds.query(`SELECT filename FROM schema_migrations ORDER BY filename DESC LIMIT 12`).catch(() => []),
+      this.ds.query(`SELECT COUNT(*)::int rows, COUNT(DISTINCT person_no)::int people, MIN(work_date)::text mn, MAX(work_date)::text mx, COUNT(*) FILTER (WHERE data_quality IS NOT NULL)::int flagged FROM roster_days WHERE tenant_id=$1`, [t]),
+      this.ds.query(`SELECT data_quality issue, COUNT(*)::int n FROM roster_days WHERE tenant_id=$1 AND data_quality IS NOT NULL GROUP BY data_quality ORDER BY n DESC`, [t]),
+      this.ds.query(`SELECT change_type, work_date::text date, person_name, old_shift, new_shift, reverted, created_at FROM schedule_change_log WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 10`).catch(() => []),
+    ]);
+    return { pages, code, assistants, migrations: migrations.map((m: any) => m.filename), health: health[0], dataQuality: dq, recentChanges };
+  }
+
   /** Multi-sheet Excel MASTER export — the connected star-schema workbook:
    *  assumptions, Employee_Master_Clean, Role_Working_Hours, Duplicate/Inactive
    *  audits, Fact_Attendance_Daily, Data_Quality, Weekly_Validation_Log, plus

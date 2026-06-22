@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, ShieldCheck, Clock, Timer, Coffee, UserX, ListChecks, Building2,
-  Wrench, GitCompareArrows, BarChart4, UserSearch, FileSpreadsheet, Table2, AlertTriangle, CalendarDays, Award,
+  Wrench, GitCompareArrows, BarChart4, UserSearch, FileSpreadsheet, Table2, AlertTriangle, CalendarDays, Award, ClipboardCheck,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -52,6 +52,7 @@ export default function WfmOverviewPage() {
     { ic:UserSearch, ar:'ملف الموظف 360', en:'Agent 360', to:'/agent-360', c:'#c4b5fd' },
     { ic:GitCompareArrows, ar:'سجل تغييرات الجدول', en:'Change Log', to:'/schedule-change-log', c:'#818cf8' },
     { ic:ShieldCheck, ar:'جودة البيانات', en:'Data Quality', to:'/data-quality', c:'#fbbf24' },
+    { ic:ClipboardCheck, ar:'تدقيق النظام', en:'System Audit', to:'/system-audit', c:'#94a3b8' },
     { ic:Table2, ar:'الروستر', en:'Roster', to:'/roster', c:'#22c55e' },
   ];
 
