@@ -27,7 +27,7 @@ export default function Agent360Page() {
   const [perf, setPerf] = useState<any>(null);
   const [prog, setProg] = useState<any>(null);
   // compare-with (second agent)
-  const [person2, setPerson2] = useState(''); const [q2, setQ2] = useState(''); const [open2, setOpen2] = useState(false); const [d2, setD2] = useState<any>(null);
+  const [person2, setPerson2] = useState(''); const [q2, setQ2] = useState(''); const [open2, setOpen2] = useState(false); const [d2, setD2] = useState<any>(null); const [perf2, setPerf2] = useState<any>(null);
 
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ setPeople(r.data.rows||[]); if(r.data.rows?.[0]) setPerson(r.data.rows[0].person_no); }).catch(()=>{}); }, []);
 
@@ -47,9 +47,12 @@ export default function Agent360Page() {
 
   // second agent for side-by-side compare
   useEffect(() => {
-    if (!person2) { setD2(null); return; }
+    if (!person2) { setD2(null); setPerf2(null); return; }
     const qp = new URLSearchParams({ person: person2 }); if (from) qp.set('from',from); if (to) qp.set('to',to);
-    const t = setTimeout(()=>apiClient.get(`/attendance-recon/roster-v2/agent-360?${qp}`).then((r:any)=>setD2(r.data)).catch(()=>setD2(null)), 200);
+    const t = setTimeout(()=>{
+      apiClient.get(`/attendance-recon/roster-v2/agent-360?${qp}`).then((r:any)=>setD2(r.data)).catch(()=>setD2(null));
+      apiClient.get(`/attendance-recon/roster-v2/agent-performance?${qp}`).then((r:any)=>setPerf2(r.data)).catch(()=>setPerf2(null));
+    }, 200);
     return ()=>clearTimeout(t);
   }, [person2, from, to]);
 
@@ -182,6 +185,39 @@ export default function Agent360Page() {
                 </tr>);
               })}</tbody>
             </table></div>
+
+            {/* scorecard KPI comparison — Net Points + every KPI score (higher = better) */}
+            {((perf?.scorecardDetail?.kpis?.length||0)>0 || (perf2?.scorecardDetail?.kpis?.length||0)>0) && (()=>{
+              const k1:any[] = perf?.scorecardDetail?.kpis || []; const k2:any[] = perf2?.scorecardDetail?.kpis || [];
+              const m1 = new Map<string,any>(k1.map((k:any)=>[k.key,k] as [string,any]));
+              const m2 = new Map<string,any>(k2.map((k:any)=>[k.key,k] as [string,any]));
+              const keys = Array.from(new Set<string>([...k1.map((k:any)=>k.key), ...k2.map((k:any)=>k.key)]));
+              const fmtA = (k:any)=> !k||k.actual==null?'' : k.unit==='pct'?`${Math.round(k.actual*1000)/10}%` : k.unit==='min'?`${Math.floor(k.actual)}:${String(Math.round((k.actual-Math.floor(k.actual))*60)).padStart(2,'0')}` : `${k.actual}`;
+              const net1 = perf?.latestNet, net2 = perf2?.latestNet;
+              const col=(v:number|null,o:number|null)=> v==null?'#475569' : (o==null||v===o)?'#cbd5e1' : v>o?'#4ade80':'#f87171';
+              return (
+                <div className="mt-3 pt-3 border-t border-white/10">
+                  <p className="text-[10px] text-slate-500 mb-1.5 font-semibold">{ar?'مقارنة السكور كارد — نقاط (والقيمة الفعلية)':'Scorecard comparison — points (with actual)'}</p>
+                  <table className="w-full text-[11px]"><tbody>
+                    {(net1!=null||net2!=null) && (
+                      <tr className="border-t border-white/5">
+                        <td className="py-1 text-amber-300 font-semibold">Net Points</td>
+                        <td className="py-1 text-center font-bold" style={{ color: net1==null?'#475569':col(Number(net1),net2==null?null:Number(net2)) }}>{net1??'—'}</td>
+                        <td className="py-1 text-center font-bold" style={{ color: net2==null?'#475569':col(Number(net2),net1==null?null:Number(net1)) }}>{net2??'—'}</td>
+                      </tr>
+                    )}
+                    {keys.map((kk,i)=>{ const a=m1.get(kk), b=m2.get(kk); const s1=a?Number(a.score):null, s2=b?Number(b.score):null;
+                      return (<tr key={i} className="border-t border-white/5">
+                        <td className="py-1 text-slate-300">{(a||b)?.label}</td>
+                        <td className="py-1 text-center font-bold" style={{ color:col(s1,s2) }}>{s1==null?'—':s1}{a&&fmtA(a)?<span className="text-[8px] text-slate-500 font-normal"> {fmtA(a)}</span>:''}</td>
+                        <td className="py-1 text-center font-bold" style={{ color:col(s2,s1) }}>{s2==null?'—':s2}{b&&fmtA(b)?<span className="text-[8px] text-slate-500 font-normal"> {fmtA(b)}</span>:''}</td>
+                      </tr>);
+                    })}
+                  </tbody></table>
+                  <p className="text-[9px] text-slate-600 mt-1">{ar?'نقاط أعلى = أفضل لكل المؤشرات (حتى الأخطاء = نقاط أعلى تعني أخطاء أقل)':'higher points = better for all KPIs (even Mistakes — higher points = fewer mistakes)'}</p>
+                </div>
+              );
+            })()}
           </div>
         )}
 
