@@ -183,15 +183,15 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
     <td className="border-b border-e" style={tdStyle}>
       <button
         onClick={() => onCellClick(emp, date, day)}
-        className="w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5
-                   transition-all duration-150 hover:scale-[1.03] hover:z-10 relative"
+        className="shift-cell w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5 relative"
         style={{
           background: isSelected ? `${style.bg}` : style.bg,
           border: isSelected ? `2px solid rgba(99,102,241,0.8)` : `1px solid ${style.border}`,
           boxShadow: isSelected ? `0 0 0 3px rgba(99,102,241,0.2), 0 0 16px rgba(99,102,241,0.15)` : undefined,
           transform: isSelected ? 'scale(1.05)' : undefined,
           zIndex: isSelected ? 10 : undefined,
-        }}
+          ['--cell-accent' as any]: style.text,
+        } as any}
       >
         {/* Shift code */}
         <span className="text-[11px] font-bold leading-none tracking-wide" style={{ color: style.text }}>

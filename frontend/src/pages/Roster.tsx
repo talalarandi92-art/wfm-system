@@ -184,10 +184,10 @@ export default function RosterPage() {
               </tr>
             </thead>
             <tbody>
-              {data.rows.map((r) => { const key = `${r.employee_no}|${r.date}`; const pc = presColor(r.presence);
+              {data.rows.map((r, idx) => { const key = `${r.employee_no}|${r.date}`; const pc = presColor(r.presence); const lightRow = idx % 2 === 0;
                 return (
                 <Fragment key={key}>
-                  <tr onClick={()=>setOpenKey(openKey===key?null:key)} className="cursor-pointer hover:bg-white/[0.04] border-t border-white/5 transition-colors">
+                  <tr onClick={()=>setOpenKey(openKey===key?null:key)} className={`cursor-pointer border-t border-white/5 transition-colors ${lightRow?'zrow-light':'zrow-dark'}`}>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1.5">
                         {openKey===key ? <ChevronDown size={13} className="text-indigo-400 flex-shrink-0"/> : <ChevronRight size={13} className="text-slate-600 flex-shrink-0"/>}
@@ -206,7 +206,7 @@ export default function RosterPage() {
                     <td className="px-2 py-2.5 text-center">{r.adherence_pct!=null?<span className="px-1.5 py-0.5 rounded font-bold text-[11px]" style={{ background:`${adhColor(r.adherence_pct)}1f`, color:adhColor(r.adherence_pct) }}>{r.adherence_pct}%</span>:<span className="text-slate-600">—</span>}</td>
                   </tr>
                   {openKey===key && (
-                    <tr><td colSpan={7} className="px-4 pb-3.5" style={{ background:'rgba(99,102,241,0.05)' }}>
+                    <tr><td colSpan={7} className={`px-4 pb-3.5 ${lightRow?'zdet-on-light':'zdet-on-dark'}`} style={{ boxShadow:'inset 0 2px 0 rgba(99,102,241,0.5)' }}>
                       <div className="pt-3 space-y-2.5">
                         {/* identity row */}
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
