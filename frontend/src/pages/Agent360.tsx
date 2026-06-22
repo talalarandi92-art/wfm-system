@@ -236,7 +236,7 @@ export default function Agent360Page() {
                     <div key={i} className="p-2 rounded-lg" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
                       <p className="text-[10px] text-slate-400 font-semibold truncate">{k.label}</p>
                       <p className="text-base font-bold text-white leading-tight">{k.score}<span className="text-[9px] text-slate-500"> {ar?'نقطة':'pts'}</span></p>
-                      <p className="text-[9px] text-slate-500">{k.pct ? `${Math.round((k.actual||0)*1000)/10}%` : (ar?'فعلي':'actual')+' '+k.actual}</p>
+                      <p className="text-[9px] text-slate-500">{k.actual==null?'' : k.unit==='pct'?`${Math.round(k.actual*1000)/10}%` : k.unit==='min'?`${Math.floor(k.actual)}:${String(Math.round((k.actual-Math.floor(k.actual))*60)).padStart(2,'0')}` : `${k.actual}`}</p>
                     </div>
                   ))}
                 </div>

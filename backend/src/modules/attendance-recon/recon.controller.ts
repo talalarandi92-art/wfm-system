@@ -1050,17 +1050,20 @@ export class ReconController {
               ROUND(AVG(mistakes_score),1) mist_s, ROUND(AVG(mistakes_actual::numeric),1) mist_a,
               ROUND(AVG(attendance_score),1) att_s, ROUND(AVG(working_days_pct::numeric),4) wd_a
          FROM scorecard_entries WHERE tenant_id=$1 AND employee_no = ANY($2)`, [t, idList]);
+    // unit: pct (actual is a 0-1 fraction → ×100), min (minutes → m:ss), count.
+    // AHT actual is already minutes; Response Time actual is an Excel day-fraction → ×1440 = minutes.
+    const num = (v: any) => v == null ? null : Number(v);
     const kpiList = sc && sc.weeks > 0 ? [
-      { key: 'quality', label: 'Quality', score: sc.quality_s, actual: sc.quality_a, pct: true },
-      { key: 'aht', label: 'AHT', score: sc.aht_s, actual: sc.aht_a, pct: false },
-      { key: 'fcr', label: 'FCR', score: sc.fcr_s, actual: sc.fcr_a, pct: true },
-      { key: 'productivity', label: 'Productivity', score: sc.prod_s, actual: sc.prod_a, pct: true },
-      { key: 'ctr', label: 'CTR', score: sc.ctr_s, actual: sc.ctr_a, pct: true },
-      { key: 'quiz', label: 'Quiz', score: sc.quiz_s, actual: sc.quiz_a, pct: true },
-      { key: 'prr', label: 'PRR', score: sc.prr_s, actual: sc.prr_a, pct: true },
-      { key: 'responseTime', label: 'Response Time', score: sc.rt_s, actual: sc.rt_a, pct: false },
-      { key: 'mistakes', label: 'Mistakes', score: sc.mist_s, actual: sc.mist_a, pct: false },
-      { key: 'attendance', label: 'Attendance', score: sc.att_s, actual: sc.wd_a, pct: true },
+      { key: 'quality', label: 'Quality', score: sc.quality_s, actual: num(sc.quality_a), unit: 'pct' },
+      { key: 'aht', label: 'AHT', score: sc.aht_s, actual: num(sc.aht_a), unit: 'min' },
+      { key: 'fcr', label: 'FCR', score: sc.fcr_s, actual: num(sc.fcr_a), unit: 'pct' },
+      { key: 'productivity', label: 'Productivity', score: sc.prod_s, actual: num(sc.prod_a), unit: 'pct' },
+      { key: 'ctr', label: 'CTR', score: sc.ctr_s, actual: num(sc.ctr_a), unit: 'pct' },
+      { key: 'quiz', label: 'Quiz', score: sc.quiz_s, actual: num(sc.quiz_a), unit: 'pct' },
+      { key: 'prr', label: 'PRR', score: sc.prr_s, actual: num(sc.prr_a), unit: 'pct' },
+      { key: 'responseTime', label: 'Response Time', score: sc.rt_s, actual: sc.rt_a == null ? null : Math.round(Number(sc.rt_a) * 1440 * 100) / 100, unit: 'min' },
+      { key: 'mistakes', label: 'Mistakes', score: sc.mist_s, actual: num(sc.mist_a), unit: 'count' },
+      { key: 'attendance', label: 'Attendance', score: sc.att_s, actual: num(sc.wd_a), unit: 'pct' },
     ].filter(k => k.score != null) : [];
     const latest = scorecard.length ? scorecard[scorecard.length - 1] : null;
     return { person, ids: idList, from: dFrom, to: dTo,
