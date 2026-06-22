@@ -223,7 +223,11 @@ export class ReconController {
       offdayOt:{col:'offday_ot_min',label:'OFF-day OT'}, holidayOt:{col:'holiday_ot_min',label:'Holiday OT'},
       conformance:{col:'adherence_pct',label:'Conformance %'}, permission:{col:'permission_type',label:'Permission'},
       permissionDuration:{col:'permission_duration',label:'Permission Dur'}, dataQuality:{col:'data_quality',label:'Data Quality'}, crossesMidnight:{col:'crosses_midnight',label:'X-Midnight'},
-      netPoints:{col:'ROUND(sc.net,1)',label:'Net Points'},   // official scorecard (per-person, joined)
+      // official scorecard scores (per-person, joined) — available as detail columns too
+      netPoints:{col:'ROUND(sc.net,1)',label:'Net Points'}, scQuality:{col:'ROUND(sc.quality,1)',label:'Quality (pts)'}, scAht:{col:'ROUND(sc.aht,1)',label:'AHT (pts)'},
+      scFcr:{col:'ROUND(sc.fcr,1)',label:'FCR (pts)'}, scProductivity:{col:'ROUND(sc.prod,1)',label:'Productivity (pts)'}, scCtr:{col:'ROUND(sc.ctr,1)',label:'CTR (pts)'},
+      scQuiz:{col:'ROUND(sc.quiz,1)',label:'Quiz (pts)'}, scPrr:{col:'ROUND(sc.prr,1)',label:'PRR (pts)'}, scRes:{col:'ROUND(sc.res,1)',label:'RES %'},
+      scResponseTime:{col:'ROUND(sc.rt,1)',label:'Resp Time (pts)'}, scMistakes:{col:'ROUND(sc.mist,1)',label:'Mistakes (pts)'}, scIncidents:{col:'ROUND(sc.inc,1)',label:'Incidents (pts)'}, scAttendance:{col:'ROUND(sc.att,1)',label:'Attendance (pts)'},
     };
     // KPI map (key → {agg, label})
     const K: Record<string, { agg: string; label: string }> = {
@@ -245,6 +249,8 @@ export class ReconController {
       netPoints:{agg:'ROUND(AVG(sc.net),1)',label:'Net Points'}, scQuality:{agg:'ROUND(AVG(sc.quality),1)',label:'Quality (pts)'},
       scAht:{agg:'ROUND(AVG(sc.aht),1)',label:'AHT (pts)'}, scFcr:{agg:'ROUND(AVG(sc.fcr),1)',label:'FCR (pts)'},
       scProductivity:{agg:'ROUND(AVG(sc.prod),1)',label:'Productivity (pts)'}, scCtr:{agg:'ROUND(AVG(sc.ctr),1)',label:'CTR (pts)'}, scQuiz:{agg:'ROUND(AVG(sc.quiz),1)',label:'Quiz (pts)'},
+      scPrr:{agg:'ROUND(AVG(sc.prr),1)',label:'PRR (pts)'}, scRes:{agg:'ROUND(AVG(sc.res),1)',label:'RES %'}, scResponseTime:{agg:'ROUND(AVG(sc.rt),1)',label:'Response Time (pts)'},
+      scMistakes:{agg:'ROUND(AVG(sc.mist),1)',label:'Mistakes (pts)'}, scIncidents:{agg:'ROUND(AVG(sc.inc),1)',label:'Incidents (pts)'}, scAttendance:{agg:'ROUND(AVG(sc.att),1)',label:'Attendance (pts)'},
     };
     const G: Record<string, { col: string; label: string }> = {
       day:{col:'day_name',label:'Day'}, week:{col:'week_number',label:'Week'}, month:{col:'month_name',label:'Month'}, date:{col:'work_date::text',label:'Date'},
@@ -273,7 +279,9 @@ export class ReconController {
     // per-person official scorecard aggregate (Net Points + KPI scores), 1:1 joinable to roster_days
     // by person_no via a clash-free alias (sc_person) so existing aggregates are unaffected.
     const SC = `WITH sc AS (SELECT i.person_no sc_person, AVG(se.net_points) net, AVG(se.quality_score) quality,
-        AVG(se.aht_score) aht, AVG(se.fcr_score) fcr, AVG(se.productivity_score) prod, AVG(se.ctr_score) ctr, AVG(se.quiz_score) quiz
+        AVG(se.aht_score) aht, AVG(se.fcr_score) fcr, AVG(se.productivity_score) prod, AVG(se.ctr_score) ctr, AVG(se.quiz_score) quiz,
+        AVG(se.prr_points) prr, AVG(se.response_rate::numeric)*100 res, AVG(se.response_time_score) rt,
+        AVG(se.mistakes_score) mist, AVG(se.incidents_score) inc, AVG(se.attendance_score) att
       FROM scorecard_entries se JOIN employee_identity i ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
       WHERE se.tenant_id=$1 GROUP BY i.person_no)`;
     const FROM = `roster_days LEFT JOIN sc ON sc.sc_person = roster_days.person_no`;

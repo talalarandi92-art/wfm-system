@@ -39,6 +39,8 @@ const METRICS: { key:string; ar:string; en:string; time?:boolean; pct?:boolean }
   // official scorecard (joined per-person)
   { key:'netPoints', ar:'Net Points', en:'Net Points' }, { key:'scQuality', ar:'جودة (نقاط)', en:'Quality (pts)' }, { key:'scAht', ar:'AHT (نقاط)', en:'AHT (pts)' },
   { key:'scFcr', ar:'FCR (نقاط)', en:'FCR (pts)' }, { key:'scProductivity', ar:'إنتاجية (نقاط)', en:'Productivity (pts)' }, { key:'scCtr', ar:'CTR (نقاط)', en:'CTR (pts)' }, { key:'scQuiz', ar:'كويز (نقاط)', en:'Quiz (pts)' },
+  { key:'scPrr', ar:'PRR (نقاط)', en:'PRR (pts)' }, { key:'scRes', ar:'RES %', en:'RES %', pct:true }, { key:'scResponseTime', ar:'وقت الرد (نقاط)', en:'Resp Time (pts)' },
+  { key:'scMistakes', ar:'أخطاء (نقاط)', en:'Mistakes (pts)' }, { key:'scIncidents', ar:'حوادث (نقاط)', en:'Incidents (pts)' }, { key:'scAttendance', ar:'حضور (نقاط)', en:'Attendance (pts)' },
 ];
 
 type ChartCfg = { dim:string; metric:string };
