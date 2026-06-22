@@ -17,6 +17,7 @@ export default function Team360Page() {
   const [tl, setTl] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true); const [sort, setSort] = useState('conformance');
   const [prog, setProg] = useState<any>(null);
+  const [tl2, setTl2] = useState(''); const [d2, setD2] = useState<any>(null);  // compare-with second team
 
   const load = useCallback(() => {
     setLoading(true);
@@ -26,6 +27,12 @@ export default function Team360Page() {
     if (tl) { const pq=new URLSearchParams({ teamLeader:tl }); if(from)pq.set('from',from); if(to)pq.set('to',to);
       apiClient.get(`/attendance-recon/roster-v2/team-progress?${pq}`).then((r:any)=>setProg(r.data)).catch(()=>setProg(null)); }
   }, [tl, from, to]);
+  useEffect(() => {
+    if (!tl2) { setD2(null); return; }
+    const qp = new URLSearchParams({ teamLeader:tl2 }); if (from) qp.set('from',from); if (to) qp.set('to',to);
+    const t=setTimeout(()=>apiClient.get(`/attendance-recon/roster-v2/team-360?${qp}`).then((r:any)=>setD2(r.data)).catch(()=>setD2(null)),200);
+    return ()=>clearTimeout(t);
+  }, [tl2, from, to]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
 
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
@@ -58,8 +65,12 @@ export default function Team360Page() {
         <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
           <input type="date" value={from} onChange={e=>setFrom(e.target.value)} className={inputCls}/><span className="text-xs">→</span>
           <input type="date" value={to} onChange={e=>setTo(e.target.value)} className={inputCls}/></div>
-        <select value={tl} onChange={e=>setTl(e.target.value)} className={`${inputCls} min-w-[160px]`}>
+        <select value={tl} onChange={e=>setTl(e.target.value)} className={`${inputCls} min-w-[150px]`}>
           {(d?.teamLeaders||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}
+        </select>
+        <select value={tl2} onChange={e=>setTl2(e.target.value)} className={`${inputCls} min-w-[150px]`} style={{ color:tl2?'#67e8f9':undefined }}>
+          <option value="">{ar?'＋ قارن مع فريق…':'＋ Compare team…'}</option>
+          {(d?.teamLeaders||[]).filter((x:string)=>x!==tl).map((x:string)=><option key={x} value={x}>{x}</option>)}
         </select>
       </div>
 
@@ -76,6 +87,28 @@ export default function Team360Page() {
             </div>
           ))}
         </div>
+
+        {/* compare two teams side-by-side */}
+        {d2?.summary && (() => {
+          const A=s, B=d2.summary; const an=d.teamLeader, bn=d2.teamLeader;
+          const rows:[string,string,number][] = [['agents',ar?'موظفون':'Agents',0],['workeddays',ar?'أيام عمل':'Worked',1],['conformance',ar?'كونفورمانس %':'Conformance %',1],['latedays',ar?'أيام تأخير':'Late days',-1],['sick',ar?'سيك':'Sick',-1],['absent',ar?'غياب':'Absent',-1],['permissions',ar?'استئذانات':'Permissions',-1],['otafter',ar?'OT بعد':'OT after',0]];
+          return (
+            <div className="rounded-2xl p-4" style={{ background:'rgba(6,182,212,0.06)', border:'1px solid rgba(6,182,212,0.2)' }}>
+              <div className="flex items-center gap-2 mb-3"><Users size={15} className="text-cyan-300"/><h3 className="text-sm font-bold text-white">{ar?'مقارنة فريقين':'Compare teams'}</h3>
+                <span className="text-[11px]"><span style={{ color:'#a5b4fc' }}>{an}</span> <span className="text-slate-600">↔</span> <span style={{ color:'#67e8f9' }}>{bn}</span></span></div>
+              <div className="overflow-x-auto"><table className="w-full text-[11px]">
+                <thead><tr className="text-slate-500"><th className="text-start pb-1.5 font-semibold">{ar?'المقياس':'Metric'}</th><th className="text-center pb-1.5 font-semibold" style={{ color:'#a5b4fc' }}>{an}</th><th className="text-center pb-1.5 font-semibold" style={{ color:'#67e8f9' }}>{bn}</th></tr></thead>
+                <tbody>{rows.map(([k,lbl,hib],i)=>{ const va=Number(A?.[k]||0), vb=Number(B?.[k]||0); const eq=va===vb; const aWin=hib===0?false:hib>0?va>vb:va<vb;
+                  const fmt=(v:number)=> k==='conformance'?`${v}%`:k==='otafter'?dur(v):v.toLocaleString();
+                  const col=(win:boolean)=> hib===0||eq?'#cbd5e1':win?'#4ade80':'#f87171';
+                  return <tr key={i} className="border-t border-white/5"><td className="py-1 text-slate-300">{lbl}</td>
+                    <td className="py-1 text-center font-bold" style={{ color:col(aWin) }}>{fmt(va)}</td>
+                    <td className="py-1 text-center font-bold" style={{ color:col(!aWin&&!eq) }}>{fmt(vb)}</td></tr>;
+                })}</tbody>
+              </table></div>
+            </div>
+          );
+        })()}
 
         {/* Team progress over time — improving or declining? */}
         {prog?.months?.length>1 && (() => {

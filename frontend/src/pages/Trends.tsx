@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, TrendingUp, CalendarDays } from 'lucide-react';
+import { ArrowLeft, TrendingUp, CalendarDays, GitCompareArrows } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 
@@ -66,6 +66,23 @@ export default function TrendsPage() {
         <select value={f.function} onChange={e=>set('function',e.target.value)} className={inputCls}><option value="">{ar?'كل الفنكشن':'All functions'}</option>{(d?.filterOptions?.functions||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
         <select value={f.teamLeader} onChange={e=>set('teamLeader',e.target.value)} className={inputCls}><option value="">{ar?'كل التيم ليدرز':'All TLs'}</option>{(d?.filterOptions?.teamLeaders||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
       </div>
+
+      {/* progress verdict — works for the whole centre, or the filtered function / team leader */}
+      {!loading && pts.length>1 && (() => {
+        const cp = pts.filter((p:any)=>p.conf!=null); if (cp.length<2) return null;
+        const ch = Math.round((Number(cp[cp.length-1].conf)-Number(cp[0].conf))*10)/10;
+        const dir = ch>2?'up':ch<-2?'down':'flat';
+        const OVC:Record<string,[string,string]> = { up:['#22c55e', ar?'في تحسّن ↑':'Improving ↑'], down:['#f43f5e', ar?'في تراجع ↓':'Declining ↓'], flat:['#06b6d4', ar?'مستقر':'Stable'] };
+        const [c,l] = OVC[dir]; const scope = f.function || f.teamLeader || (ar?'السنتر كامل':'whole centre');
+        return (
+          <div className="flex items-center gap-3 p-3 rounded-2xl flex-wrap" style={{ background:`${c}10`, border:`1px solid ${c}33` }}>
+            <GitCompareArrows size={16} style={{ color:c }}/>
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background:`${c}22`, color:c }}>{l}</span>
+            <span className="text-xs text-slate-300"><b>{scope}</b> — {ar?'الكونفورمانس':'conformance'} {cp[0].conf}% → {cp[cp.length-1].conf}% <b style={{ color:ch>=0?'#4ade80':'#f87171' }}>({ch>=0?'+':''}{ch})</b></span>
+            <span className="text-[10px] text-slate-500">{ar?'من أول فترة لآخر فترة':'first → last period'}</span>
+          </div>
+        );
+      })()}
 
       {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}
       {!loading && (!d || !pts.length) && <p className="text-sm text-slate-500 py-8 text-center">{ar?'لا بيانات':'No data'}</p>}
