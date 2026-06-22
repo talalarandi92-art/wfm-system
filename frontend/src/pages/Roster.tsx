@@ -115,6 +115,7 @@ export default function RosterPage() {
           <button onClick={() => nav('/dashboard-builder')} className={btn('')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><LayoutDashboard size={13} />{ar?'باني الداشبورد':'Dashboard Builder'}</button>
           <button onClick={() => nav('/report-builder')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><Wrench size={13} />{ar?'منشئ التقارير':'Report Builder'}</button>
           <button onClick={() => nav('/data-quality')} className={btn('')} style={{ background:'rgba(245,158,11,0.15)', color:'#fbbf24' }}><ShieldCheck size={13} />{ar?'جودة البيانات':'Data Quality'}</button>
+          <button onClick={() => nav('/wfh-hr-report')} className={btn('')} style={{ background:'rgba(14,165,233,0.16)', color:'#38bdf8' }}><Home size={13} />{ar?'تقرير WFH لـ HR':'WFH HR Report'}</button>
           <button onClick={() => nav('/schedule-change-log')} className={btn('')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><GitCompareArrows size={13} />{ar?'تغييرات الجدول':'Change Log'}</button>
           <button onClick={() => nav('/interval-headcount')} className={btn('')} style={{ background:'rgba(6,182,212,0.16)', color:'#67e8f9' }}><BarChart4 size={13} />{ar?'هيدكاونت بالفترات':'Intervals'}</button>
           <button onClick={() => nav('/agent-360')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><UserSearch size={13} />{ar?'ملف 360':'Agent 360'}</button>
