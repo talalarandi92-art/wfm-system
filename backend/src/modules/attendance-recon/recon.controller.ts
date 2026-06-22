@@ -600,19 +600,19 @@ export class ReconController {
     const pn = emp.person_no; const p = [t, pn, dFrom, dTo];
     const W = `tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4`;
     const [summary] = await this.ds.query(`
-      SELECT COUNT(*)::int scheduledDays,
-             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int workedDays,
-             COUNT(*) FILTER (WHERE presence='office')::int officeDays, COUNT(*) FILTER (WHERE presence='wfh')::int wfhDays,
-             COUNT(*) FILTER (WHERE presence='off')::int offDays, COUNT(*) FILTER (WHERE presence='leave')::int leaveDays,
-             COUNT(*) FILTER (WHERE presence='sick')::int sickDays, COUNT(*) FILTER (WHERE presence='absent')::int absenceDays,
-             COUNT(*) FILTER (WHERE presence='holiday')::int holidayDays,
-             COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)::int compDays,
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int lateDays, COALESCE(SUM(sys_late_min),0)::int totalLateMin,
-             COUNT(*) FILTER (WHERE sys_early_min>0)::int earlyDays, COALESCE(SUM(sys_early_min),0)::int totalEarlyMin,
-             COALESCE(SUM(ot_before_min),0)::int otBefore, COALESCE(SUM(ot_after_min),0)::int otAfter,
-             COALESCE(SUM(ot_min),0)::int otTotal, COALESCE(SUM(offday_ot_min),0)::int offdayOt, COALESCE(SUM(holiday_ot_min),0)::int holidayOt,
+      SELECT COUNT(*)::int "scheduledDays",
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int "workedDays",
+             COUNT(*) FILTER (WHERE presence='office')::int "officeDays", COUNT(*) FILTER (WHERE presence='wfh')::int "wfhDays",
+             COUNT(*) FILTER (WHERE presence='off')::int "offDays", COUNT(*) FILTER (WHERE presence='leave')::int "leaveDays",
+             COUNT(*) FILTER (WHERE presence='sick')::int "sickDays", COUNT(*) FILTER (WHERE presence='absent')::int "absenceDays",
+             COUNT(*) FILTER (WHERE presence='holiday')::int "holidayDays",
+             COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)::int "compDays",
+             COUNT(*) FILTER (WHERE sys_late_min>0)::int "lateDays", COALESCE(SUM(sys_late_min),0)::int "totalLateMin",
+             COUNT(*) FILTER (WHERE sys_early_min>0)::int "earlyDays", COALESCE(SUM(sys_early_min),0)::int "totalEarlyMin",
+             COALESCE(SUM(ot_before_min),0)::int "otBefore", COALESCE(SUM(ot_after_min),0)::int "otAfter",
+             COALESCE(SUM(ot_min),0)::int "otTotal", COALESCE(SUM(offday_ot_min),0)::int "offdayOt", COALESCE(SUM(holiday_ot_min),0)::int "holidayOt",
              ROUND(AVG(adherence_pct),1) conformance,
-             COUNT(*) FILTER (WHERE missing_punch)::int missingPunch, COUNT(*) FILTER (WHERE missing_system)::int missingSystem,
+             COUNT(*) FILTER (WHERE missing_punch)::int "missingPunch", COUNT(*) FILTER (WHERE missing_system)::int "missingSystem",
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions
         FROM roster_days WHERE ${W}`, p);
     const tardinessBands = await this.ds.query(`SELECT COALESCE(late_category,'On time') band, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh') GROUP BY 1`, p);
@@ -621,7 +621,7 @@ export class ReconController {
     for (const r of sr) shiftRate[r.cat] = r.n;
     const byMonth = await this.ds.query(`
       SELECT month_name "month", COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
-             COALESCE(SUM(sys_late_min),0)::int lateMin, COALESCE(SUM(ot_min),0)::int otMin, ROUND(AVG(adherence_pct),1) conformance
+             COALESCE(SUM(sys_late_min),0)::int "lateMin", COALESCE(SUM(ot_min),0)::int "otMin", ROUND(AVG(adherence_pct),1) conformance
         FROM roster_days WHERE ${W} GROUP BY month_name ORDER BY MIN(work_date)`, p);
     const recent = await this.ds.query(`
       SELECT work_date::text date, day_name, shift_code, attendance_status, presence,

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, UserSearch, Search, ShieldCheck, Clock, TimerReset, Timer, Coffee, UserX,
-  Building2, CalendarDays, ListChecks, Briefcase, ChevronDown, Wrench, FileSpreadsheet, LayoutList, Table2,
+  Building2, CalendarDays, ListChecks, Briefcase, ChevronDown, Wrench, FileSpreadsheet, LayoutList, Table2, XCircle, GitCompareArrows,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -22,6 +22,8 @@ export default function Agent360Page() {
   const [q, setQ] = useState(''); const [open, setOpen] = useState(false);
   const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(false); const [err, setErr] = useState('');
+  // compare-with (second agent)
+  const [person2, setPerson2] = useState(''); const [q2, setQ2] = useState(''); const [open2, setOpen2] = useState(false); const [d2, setD2] = useState<any>(null);
 
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ setPeople(r.data.rows||[]); if(r.data.rows?.[0]) setPerson(r.data.rows[0].person_no); }).catch(()=>{}); }, []);
 
@@ -33,6 +35,14 @@ export default function Agent360Page() {
       .catch((e:any)=>{ setD(null); setErr(e?.response?.data?.message||'Failed'); }).finally(()=>setLoading(false));
   }, [person, from, to]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
+
+  // second agent for side-by-side compare
+  useEffect(() => {
+    if (!person2) { setD2(null); return; }
+    const qp = new URLSearchParams({ person: person2 }); if (from) qp.set('from',from); if (to) qp.set('to',to);
+    const t = setTimeout(()=>apiClient.get(`/attendance-recon/roster-v2/agent-360?${qp}`).then((r:any)=>setD2(r.data)).catch(()=>setD2(null)), 200);
+    return ()=>clearTimeout(t);
+  }, [person2, from, to]);
 
   // ── per-agent custom report (inline mini report-builder scoped to this agent) ──
   const RFIELDS: [string,string][] = [['date','Date'],['day','Day'],['week','Week'],['month','Month'],['shiftCode','Shift'],['originalShift','Orig Shift'],['attendanceStatus','Status'],['hrStatus','HR Code'],['sysLogin','Sys In'],['sysLogout','Sys Out'],['workedMin','Worked'],['lateMin','Late'],['lateCategory','Late Band'],['earlyMin','Early'],['otBefore','OT Before'],['otAfter','OT After'],['otTotal','OT Total'],['conformance','Conf %'],['permission','Permission'],['dataQuality','Data Quality']];
@@ -102,6 +112,24 @@ export default function Agent360Page() {
             </div>
           )}
         </div>
+        {/* compare-with a second agent */}
+        <div className="relative" onBlur={()=>setTimeout(()=>setOpen2(false),150)}>
+          <input
+            value={open2 ? q2 : (d2?.employee ? `↔ ${d2.employee.clean_name}` : '')}
+            onChange={ev=>{ setQ2(ev.target.value); setOpen2(true); }} onFocus={()=>{ setQ2(''); setOpen2(true); }}
+            placeholder={ar?'＋ قارن مع…':'＋ Compare…'} className={`${inputCls} min-w-[150px]`} />
+          {person2 && !open2 && <button onMouseDown={()=>{ setPerson2(''); setD2(null); }} className="absolute end-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-rose-400"><XCircle size={13}/></button>}
+          {open2 && (
+            <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)' }}>
+              {people.filter((p:any)=>{ const t=q2.toLowerCase().trim(); return p.person_no!==person && (!t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t) || (p.role_category||'').toLowerCase().includes(t)); }).slice(0,150).map((p:any)=>(
+                <button key={p.person_no} onMouseDown={()=>{ setPerson2(p.person_no); setOpen2(false); setQ2(''); }}
+                  className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex items-center justify-between gap-2" style={{ color: p.person_no===person2?'#67e8f9':'#cbd5e1' }}>
+                  <span className="truncate">{p.clean_name}</span><span className="text-slate-500 text-[10px]">{p.role_category} · #{p.person_no}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}
@@ -116,6 +144,29 @@ export default function Agent360Page() {
           ))}
           {!e.include_tardiness && <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background:'rgba(245,158,11,0.18)', color:'#fbbf24' }}>{ar?'مستثنى من حساب التأخير (8 ساعات)':'excluded from tardiness KPI (8h)'}</span>}
         </div>
+
+        {/* side-by-side comparison with a second agent */}
+        {d2?.summary && (
+          <div className="rounded-2xl p-4" style={{ background:'rgba(6,182,212,0.06)', border:'1px solid rgba(6,182,212,0.2)' }}>
+            <div className="flex items-center gap-2 mb-3"><GitCompareArrows size={15} className="text-cyan-300"/><h3 className="text-sm font-bold text-white">{ar?'مقارنة':'Compare'}</h3>
+              <span className="text-[11px]"><span style={{ color:'#a5b4fc' }}>{e?.clean_name}</span> <span className="text-slate-600">↔</span> <span style={{ color:'#67e8f9' }}>{d2.employee?.clean_name}</span></span></div>
+            <div className="overflow-x-auto"><table className="w-full text-[11px]">
+              <thead><tr className="text-slate-500"><th className="text-start pb-1.5 font-semibold">{ar?'المقياس':'Metric'}</th>
+                <th className="text-center pb-1.5 font-semibold" style={{ color:'#a5b4fc' }}>{e?.clean_name}</th>
+                <th className="text-center pb-1.5 font-semibold" style={{ color:'#67e8f9' }}>{d2.employee?.clean_name}</th></tr></thead>
+              <tbody>{([['workedDays','أيام عمل','Worked',true],['conformance','كونفورمانس','Conformance',true],['lateDays','أيام تأخير','Late days',false],['totalLateMin','دقائق تأخير','Late min',false],['otBefore','OT قبل','OT before',true],['otAfter','OT بعد','OT after',true],['sickDays','سيك','Sick',false],['absenceDays','غياب','Absent',false],['permissions','استئذانات','Permissions',false],['missingPunch','بصمة ناقصة','Missing punch',false],['missingSystem','سيستم ناقص','Missing system',false]] as [string,string,string,boolean][]).map(([k,la,le,hib],i)=>{
+                const v1=Number(s?.[k]??0), v2=Number(d2.summary?.[k]??0); const eq=v1===v2; const w1=hib?v1>v2:v1<v2;
+                const fmt=(v:number)=> k==='conformance'?`${v}%`:(/Min$/.test(k)||k==='otBefore'||k==='otAfter')?dur(v):v.toLocaleString();
+                const col=(win:boolean)=> eq?'#cbd5e1':win?'#4ade80':'#f87171';
+                return (<tr key={i} className="border-t border-white/5">
+                  <td className="py-1 text-slate-300">{ar?la:le}</td>
+                  <td className="py-1 text-center font-bold" style={{ color:col(w1) }}>{fmt(v1)}</td>
+                  <td className="py-1 text-center font-bold" style={{ color:col(!w1&&!eq) }}>{fmt(v2)}</td>
+                </tr>);
+              })}</tbody>
+            </table></div>
+          </div>
+        )}
 
         {/* KPI grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
