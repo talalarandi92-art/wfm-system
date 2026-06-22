@@ -28,6 +28,9 @@ export default function Agent360Page() {
   const [prog, setProg] = useState<any>(null);
   // compare-with (second agent)
   const [person2, setPerson2] = useState(''); const [q2, setQ2] = useState(''); const [open2, setOpen2] = useState(false); const [d2, setD2] = useState<any>(null); const [perf2, setPerf2] = useState<any>(null);
+  // compare mode: another agent, or the SAME agent across a different period (self over time)
+  const [cmpMode, setCmpMode] = useState<'agent'|'period'>('agent');
+  const [pcFrom, setPcFrom] = useState(''); const [pcTo, setPcTo] = useState(''); const [pc, setPc] = useState<any>(null); const [pcLoading, setPcLoading] = useState(false);
 
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ setPeople(r.data.rows||[]); if(r.data.rows?.[0]) setPerson(r.data.rows[0].person_no); }).catch(()=>{}); }, []);
 
@@ -55,6 +58,23 @@ export default function Agent360Page() {
     }, 200);
     return ()=>clearTimeout(t);
   }, [person2, from, to]);
+
+  // period-B presets: N full calendar months ending the month before Period A starts.
+  // Local date math only (no toISOString → avoids the known off-by-one TZ bug).
+  const fmtLocal = (dt:Date)=> `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+  const presetB = (n:number)=>{ if(!from) return; const a=new Date(from+'T00:00:00'); const y=a.getFullYear(), m=a.getMonth();
+    setPcFrom(fmtLocal(new Date(y, m-n, 1))); setPcTo(fmtLocal(new Date(y, m, 0))); };
+
+  const pcReversed = !!(pcFrom && pcTo && pcFrom > pcTo);   // guard manual reversed range
+  // self-over-time comparison (Period A = page range, Period B = pcFrom/pcTo)
+  useEffect(() => {
+    if (cmpMode!=='period' || !person || !from || !to || !pcFrom || !pcTo || pcReversed) { setPc(null); return; }
+    setPcLoading(true);
+    const qp = new URLSearchParams({ person, aFrom:from, aTo:to, bFrom:pcFrom, bTo:pcTo });
+    const t = setTimeout(()=>apiClient.get(`/attendance-recon/roster-v2/agent-period-compare?${qp}`)
+      .then((r:any)=>setPc(r.data)).catch(()=>setPc(null)).finally(()=>setPcLoading(false)), 250);
+    return ()=>clearTimeout(t);
+  }, [cmpMode, person, from, to, pcFrom, pcTo]);
 
   // ── per-agent custom report (inline mini report-builder scoped to this agent) ──
   const SC_KPIS: [string,string][] = [['netPoints','Net Points'],['scQuality','Quality (pts)'],['scAht','AHT (pts)'],['scFcr','FCR (pts)'],['scProductivity','Productivity (pts)'],['scCtr','CTR (pts)'],['scQuiz','Quiz (pts)'],['scPrr','PRR (pts)'],['scRes','RES %'],['scResponseTime','Resp Time (pts)'],['scMistakes','Mistakes (pts)'],['scIncidents','Incidents (pts)'],['scAttendance','Attendance (pts)']];
@@ -125,21 +145,41 @@ export default function Agent360Page() {
             </div>
           )}
         </div>
-        {/* compare-with a second agent */}
-        <div className="relative" onBlur={()=>setTimeout(()=>setOpen2(false),150)}>
-          <input
-            value={open2 ? q2 : (d2?.employee ? `↔ ${d2.employee.clean_name}` : '')}
-            onChange={ev=>{ setQ2(ev.target.value); setOpen2(true); }} onFocus={()=>{ setQ2(''); setOpen2(true); }}
-            placeholder={ar?'＋ قارن مع…':'＋ Compare…'} className={`${inputCls} min-w-[150px]`} />
-          {person2 && !open2 && <button onMouseDown={()=>{ setPerson2(''); setD2(null); }} className="absolute end-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-rose-400"><XCircle size={13}/></button>}
-          {open2 && (
-            <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)' }}>
-              {people.filter((p:any)=>{ const t=q2.toLowerCase().trim(); return p.person_no!==person && (!t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t) || (p.role_category||'').toLowerCase().includes(t)); }).slice(0,150).map((p:any)=>(
-                <button key={p.person_no} onMouseDown={()=>{ setPerson2(p.person_no); setOpen2(false); setQ2(''); }}
-                  className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex items-center justify-between gap-2" style={{ color: p.person_no===person2?'#67e8f9':'#cbd5e1' }}>
-                  <span className="truncate">{p.clean_name}</span><span className="text-slate-500 text-[10px]">{p.role_category} · #{p.person_no}</span>
-                </button>
+        {/* compare: another agent, OR the same agent across a different period */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex rounded-lg overflow-hidden border border-white/10">
+            {([['agent',ar?'موظف آخر':'Agent'],['period',ar?'فترة سابقة':'Period']] as [string,string][]).map(([k,l])=>(
+              <button key={k} onClick={()=>setCmpMode(k as any)} className="px-2.5 py-1.5 text-[11px] font-semibold"
+                style={cmpMode===k?{background:'linear-gradient(135deg,#06b6d4,#6366f1)',color:'#fff'}:{color:'#94a3b8'}}>{l}</button>
+            ))}
+          </div>
+          {cmpMode==='agent' ? (
+            <div className="relative" onBlur={()=>setTimeout(()=>setOpen2(false),150)}>
+              <input
+                value={open2 ? q2 : (d2?.employee ? `↔ ${d2.employee.clean_name}` : '')}
+                onChange={ev=>{ setQ2(ev.target.value); setOpen2(true); }} onFocus={()=>{ setQ2(''); setOpen2(true); }}
+                placeholder={ar?'＋ قارن مع…':'＋ Compare…'} className={`${inputCls} min-w-[150px]`} />
+              {person2 && !open2 && <button onMouseDown={()=>{ setPerson2(''); setD2(null); }} className="absolute end-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-rose-400"><XCircle size={13}/></button>}
+              {open2 && (
+                <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)' }}>
+                  {people.filter((p:any)=>{ const t=q2.toLowerCase().trim(); return p.person_no!==person && (!t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t) || (p.role_category||'').toLowerCase().includes(t)); }).slice(0,150).map((p:any)=>(
+                    <button key={p.person_no} onMouseDown={()=>{ setPerson2(p.person_no); setOpen2(false); setQ2(''); }}
+                      className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex items-center justify-between gap-2" style={{ color: p.person_no===person2?'#67e8f9':'#cbd5e1' }}>
+                      <span className="truncate">{p.clean_name}</span><span className="text-slate-500 text-[10px]">{p.role_category} · #{p.person_no}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {([[1,ar?'الشهر السابق':'Prev mo'],[2,ar?'آخر شهرين':'Last 2mo'],[3,ar?'آخر 3 أشهر':'Last 3mo']] as [number,string][]).map(([n,l])=>(
+                <button key={n} onClick={()=>presetB(n)} className="px-2 py-1.5 text-[11px] rounded-lg" style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color:'#cbd5e1' }}>{l}</button>
               ))}
+              <span className="text-[10px] text-slate-500">{ar?'مقابل':'vs'}</span>
+              <input type="date" value={pcFrom} onChange={e=>setPcFrom(e.target.value)} className={inputCls} title={ar?'بداية فترة المقارنة':'comparison from'}/>
+              <span className="text-[10px] text-slate-500">→</span>
+              <input type="date" value={pcTo} onChange={e=>setPcTo(e.target.value)} className={inputCls} title={ar?'نهاية فترة المقارنة':'comparison to'}/>
             </div>
           )}
         </div>
@@ -165,8 +205,62 @@ export default function Agent360Page() {
           )}
         </div>
 
+        {/* self-comparison across two periods — improvement / decline verdict */}
+        {cmpMode==='period' && (
+          pcReversed ? <p className="text-xs text-amber-400 py-3 px-1">{ar?'⚠ تاريخ بداية فترة المقارنة بعد تاريخ نهايتها — صحّح التواريخ.':'⚠ Comparison start date is after its end date — fix the dates.'}</p> :
+          pcLoading ? <p className="text-xs text-slate-500 py-3 px-1">{ar?'جارٍ حساب المقارنة…':'Computing comparison…'}</p> :
+          pc ? (()=>{
+            const VC:Record<string,[string,string]> = { improving:['#22c55e', ar?'في تحسّن ↑':'Improving ↑'], declining:['#f43f5e', ar?'في تراجع ↓':'Declining ↓'], mixed:['#f59e0b', ar?'متفاوت':'Mixed'], stable:['#06b6d4', ar?'مستقر':'Stable'] };
+            const [vc,vl] = VC[pc.verdict.overall]||VC.stable;
+            const fmt=(unit:string,v:any)=> v==null?'—' : unit==='pct'?`${v}%` : unit==='sec'?`${Math.floor(v/60)}:${String(Math.round(v%60)).padStart(2,'0')}` : unit==='min'?`${v}m` : `${v}`;
+            const fmtD=(unit:string,v:number)=>{ const s=v>0?'+':'-'; const a=Math.abs(v); return unit==='pct'?`${s}${a}%` : unit==='sec'?`${s}${Math.floor(a/60)}:${String(Math.round(a%60)).padStart(2,'0')}` : unit==='min'?`${s}${a}m` : `${s}${a}`; };
+            const tc=(tr:string)=> tr==='improved'?'#4ade80':tr==='declined'?'#f87171':tr==='context'?'#cbd5e1':tr==='flat'?'#94a3b8':'#475569';
+            const tl=(tr:string)=> tr==='improved'?(ar?'تحسّن':'better'):tr==='declined'?(ar?'تراجع':'worse'):tr==='context'?(ar?'للعلم':'info'):tr==='flat'?(ar?'ثابت':'same'):'—';
+            const lowSample = pc.a.workedDays<5 || pc.b.workedDays<5;
+            return (
+              <div className="rounded-2xl p-4 space-y-3" style={{ background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.18)' }}>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <GitCompareArrows size={15} className="text-indigo-300"/>
+                  <h3 className="text-sm font-bold text-white">{ar?'مقارنة الموظف بنفسه عبر الزمن':'Self-comparison over time'}</h3>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background:`${vc}22`, color:vc }}>{vl}</span>
+                  <span className="text-[10px] text-slate-400 ms-auto">
+                    <span style={{ color:'#a5b4fc' }}>A: {pc.a.from}→{pc.a.to}</span> · {pc.a.lengthDays}{ar?'ي':'d'} · {pc.a.workedDays}/{pc.a.scheduledDays} {ar?'عمل':'worked'} · {pc.a.netMonths} {ar?'شهر سكور':'sc-mo'}
+                    <span className="text-slate-600"> ‖ </span>
+                    <span style={{ color:'#67e8f9' }}>B: {pc.b.from}→{pc.b.to}</span> · {pc.b.lengthDays}{ar?'ي':'d'} · {pc.b.workedDays}/{pc.b.scheduledDays} · {pc.b.netMonths} {ar?'شهر':'mo'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  {pc.verdict.improvements.length>0 && <><span className="text-emerald-400 font-semibold">{ar?'تحسّن في: ':'Improved: '}</span>{pc.verdict.improvements.map((m:any)=>ar?m.labelAr:m.label).join('، ')}</>}
+                  {pc.verdict.improvements.length>0 && pc.verdict.declines.length>0 && <span className="text-slate-600"> — </span>}
+                  {pc.verdict.declines.length>0 && <><span className="text-rose-400 font-semibold">{ar?'تراجع في: ':'Declined: '}</span>{pc.verdict.declines.map((m:any)=>ar?m.labelAr:m.label).join('، ')}</>}
+                  {pc.verdict.improvements.length===0 && pc.verdict.declines.length===0 && <span className="text-slate-500">{ar?'لا يوجد تغيّر جوهري بين الفترتين':'No material change between the two periods'}</span>}
+                </p>
+                <div className="overflow-x-auto"><table className="w-full text-[11px]">
+                  <thead><tr className="text-slate-500">
+                    <th className="text-start pb-1.5 font-semibold">{ar?'المؤشر':'Metric'}</th>
+                    <th className="text-center pb-1.5 font-semibold" style={{ color:'#a5b4fc' }}>{ar?'فترة A':'Period A'}</th>
+                    <th className="text-center pb-1.5 font-semibold" style={{ color:'#67e8f9' }}>{ar?'فترة B':'Period B'}</th>
+                    <th className="text-center pb-1.5 font-semibold">{ar?'التغيّر':'Change'}</th>
+                  </tr></thead>
+                  <tbody>{pc.metrics.map((m:any,i:number)=>(
+                    <tr key={i} className="border-t border-white/5" style={{ opacity:m.trend==='na'?0.5:1 }}>
+                      <td className="py-1 text-slate-300">{ar?m.labelAr:m.label}</td>
+                      <td className="py-1 text-center font-bold text-slate-100">{fmt(m.unit,m.a)}</td>
+                      <td className="py-1 text-center text-slate-400">{fmt(m.unit,m.b)}</td>
+                      <td className="py-1 text-center font-bold" style={{ color:tc(m.trend) }}>{m.delta==null?'—':<>{fmtD(m.unit,m.delta)} <span className="text-[8px] font-normal">{tl(m.trend)}</span></>}</td>
+                    </tr>
+                  ))}</tbody>
+                </table></div>
+                {lowSample && <p className="text-[10px] text-amber-400/90">{ar?'⚠ عيّنة صغيرة في إحدى الفترتين (أيام عمل قليلة) — النِسَب قد تكون غير مستقرة.':'⚠ Small sample in one period (few worked days) — rates may be noisy.'}</p>}
+                <p className="text-[9px] text-slate-600">{ar?'كل المؤشرات نِسَب أو متوسطات مستقلة عن طول الفترة، حتى تكون المقارنة عادلة بين فترتين مختلفتين بالطول. AHT/الإشغال تظهر فقط عند توفّر بيانات Ameyo. Net Points = متوسط السكور كارد الشهري ضمن الفترة.':'All metrics are length-independent rates/averages so unequal periods compare fairly. AHT/occupancy appear only when Ameyo data exists. Net Points = avg monthly scorecard within the period.'}</p>
+              </div>
+            );
+          })() :
+          <p className="text-xs text-slate-500 py-3 px-1">{ar?'اختر فترة للمقارنة من الأزرار (الشهر السابق / آخر شهرين / آخر 3 أشهر) أو حدّد التواريخ فوق.':'Pick a comparison period from the buttons (Prev mo / Last 2mo / Last 3mo) or set the dates above.'}</p>
+        )}
+
         {/* side-by-side comparison with a second agent */}
-        {d2?.summary && (
+        {cmpMode==='agent' && d2?.summary && (
           <div className="rounded-2xl p-4" style={{ background:'rgba(6,182,212,0.06)', border:'1px solid rgba(6,182,212,0.2)' }}>
             <div className="flex items-center gap-2 mb-3"><GitCompareArrows size={15} className="text-cyan-300"/><h3 className="text-sm font-bold text-white">{ar?'مقارنة':'Compare'}</h3>
               <span className="text-[11px]"><span style={{ color:'#a5b4fc' }}>{e?.clean_name}</span> <span className="text-slate-600">↔</span> <span style={{ color:'#67e8f9' }}>{d2.employee?.clean_name}</span></span></div>

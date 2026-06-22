@@ -1072,6 +1072,113 @@ export class ReconController {
              productivity, fcr: { pct: fcr?.pct ?? null, total: fcr?.total ?? 0 } };
   }
 
+  /** Agent Period Compare — "compare the agent to himself" across two ARBITRARY
+   *  periods A and B (e.g. last month vs the prior 3 months). The periods may be
+   *  different lengths, so every compared metric is a RATE or an AVERAGE
+   *  (length-independent) — never a raw count, which would just track period length.
+   *  Returns both snapshots, per-metric deltas with an improved/declined/flat trend,
+   *  and an overall verdict the TL can read out to the agent. Alias-aware. */
+  @Get('roster-v2/agent-period-compare')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Self-comparison across two arbitrary periods (improvement/decline verdict)' })
+  async agentPeriodCompare(@Req() req: any, @Query('person') person?: string,
+    @Query('aFrom') aFrom?: string, @Query('aTo') aTo?: string, @Query('bFrom') bFrom?: string, @Query('bTo') bTo?: string) {
+    const t = req.user.tenantId;
+    if (!person) throw new BadRequestException('person is required');
+    if (!aFrom || !aTo || !bFrom || !bTo) throw new BadRequestException('aFrom, aTo, bFrom, bTo are all required');
+    const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+    if (![aFrom, aTo, bFrom, bTo].every(isDate)) throw new BadRequestException('dates must be YYYY-MM-DD');
+    if (aFrom > aTo) throw new BadRequestException('aFrom must be on or before aTo');
+    if (bFrom > bTo) throw new BadRequestException('bFrom must be on or before bTo');
+    const [emp] = await this.ds.query(
+      `SELECT person_no, clean_name, function_name, role_category, team_leader, is_active
+         FROM employee_identity WHERE tenant_id=$1 AND is_canonical AND (person_no=$2 OR lower(clean_name) LIKE lower($3)) ORDER BY (person_no=$2) DESC LIMIT 1`,
+      [t, person, `%${person}%`]);
+    if (!emp) throw new BadRequestException('No such agent');
+    const pn = emp.person_no;
+    const ids = (await this.ds.query(`SELECT employee_no FROM employee_identity WHERE tenant_id=$1 AND person_no=$2`, [t, pn])).map((r: any) => r.employee_no);
+    const idList = ids.length ? ids : [pn];
+
+    // one period snapshot → raw aggregates + length-independent rates/averages
+    const snap = async (f: string, to: string) => {
+      const [a] = await this.ds.query(`
+        SELECT COUNT(*)::int "scheduledDays",
+               COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int "workedDays",
+               COUNT(*) FILTER (WHERE presence='sick')::int "sickDays",
+               COUNT(*) FILTER (WHERE presence='absent')::int "absenceDays",
+               COUNT(*) FILTER (WHERE sys_late_min>0)::int "lateDays", COALESCE(SUM(sys_late_min),0)::int "totalLateMin",
+               COUNT(*) FILTER (WHERE sys_early_min>0)::int "earlyDays", COALESCE(SUM(sys_early_min),0)::int "totalEarlyMin",
+               COALESCE(SUM(ot_min),0)::int "otTotal",
+               COUNT(*) FILTER (WHERE missing_punch)::int "missingPunch", COUNT(*) FILTER (WHERE missing_system)::int "missingSystem",
+               COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+               ROUND(AVG(adherence_pct),1) conformance
+          FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4`, [t, pn, f, to]);
+      const [net] = await this.ds.query(`
+        SELECT ROUND(AVG(avg_net_points::numeric),1) net, COUNT(*)::int months
+          FROM scorecard_monthly WHERE tenant_id=$1 AND employee_no = ANY($2)
+            AND make_date(year,month,1) BETWEEN date_trunc('month',$3::date) AND $4::date`, [t, idList, f, to]);
+      const [prod] = await this.ds.query(`
+        SELECT COALESCE(SUM(talk_seconds),0)::bigint talk, COALESCE(SUM(acw_seconds),0)::bigint acw,
+               COALESCE(SUM(staffed_seconds),0)::bigint staffed, COALESCE(SUM(wrapped_calls),0)::int calls,
+               COALESCE(SUM(inbound_received),0)::int received, COUNT(DISTINCT work_date)::int days
+          FROM agent_productivity_daily WHERE tenant_id=$1 AND employee_no = ANY($2) AND work_date BETWEEN $3 AND $4`, [t, idList, f, to]);
+      const handled = prod.calls > 0 ? prod.calls : prod.received;
+      const ahtSec = handled > 0 ? Math.round((Number(prod.talk) + Number(prod.acw)) / handled) : null;
+      const occupancy = Number(prod.staffed) > 0 ? Math.round(100 * (Number(prod.talk) + Number(prod.acw)) / Number(prod.staffed)) : null;
+      const [fcr] = await this.ds.query(`
+        SELECT ROUND(AVG(fcr_pct::numeric),1) pct, COALESCE(SUM(total),0)::int total FROM survey_fcr_monthly
+          WHERE tenant_id=$1 AND employee_id IN (SELECT id FROM employees WHERE tenant_id=$1 AND employee_no = ANY($2))
+            AND year_month BETWEEN date_trunc('month',$3::date) AND $4::date`, [t, idList, f, to]).catch(() => [{ pct: null, total: 0 }]);
+      const sched = a.scheduledDays || 0, worked = a.workedDays || 0;
+      const rate = (n: number, d: number) => d > 0 ? Math.round(1000 * n / d) / 10 : null;
+      return { from: f, to, lengthDays: Math.round((Date.parse(to) - Date.parse(f)) / 86400000) + 1,
+        scheduledDays: sched, workedDays: worked, otTotal: a.otTotal, permissions: a.permissions,
+        absenceDays: a.absenceDays, sickDays: a.sickDays, lateDays: a.lateDays, calls: handled, prodDays: prod.days, netMonths: net.months,
+        // length-independent comparison metrics:
+        conformance: a.conformance == null ? null : Number(a.conformance),
+        lateRate: rate(a.lateDays, sched), lateMinPerDay: sched > 0 ? Math.round(10 * a.totalLateMin / sched) / 10 : null,
+        earlyRate: rate(a.earlyDays, sched), absenceRate: rate(a.absenceDays, sched), sickRate: rate(a.sickDays, sched),
+        missingPunchRate: rate(a.missingPunch, worked), missingSystemRate: rate(a.missingSystem, worked),
+        otPerDay: worked > 0 ? Math.round(10 * a.otTotal / worked) / 10 : null,
+        netPoints: net.net == null ? null : Number(net.net), ahtSec, occupancy, fcr: fcr?.pct == null ? null : Number(fcr.pct) };
+    };
+
+    const [A, B] = await Promise.all([snap(aFrom, aTo), snap(bFrom, bTo)]);
+    // metric catalogue — up=true means higher is better. flat = threshold below which a change is "no real change".
+    // up=true → higher is better; up=false → lower is better; up=null → context only
+    // (shown for awareness but NOT judged as improved/declined — e.g. sickness isn't a
+    // coachable performance failing, and OT volume is a workload signal, not a verdict).
+    const M: { key: string; label: string; labelAr: string; unit: string; up: boolean | null; flat: number }[] = [
+      { key: 'conformance', label: 'Conformance', labelAr: 'الكونفورمانس', unit: 'pct', up: true, flat: 1 },
+      { key: 'netPoints', label: 'Net Points', labelAr: 'Net Points', unit: 'pts', up: true, flat: 1 },
+      { key: 'lateRate', label: 'Late-day rate', labelAr: 'نسبة أيام التأخير', unit: 'pct', up: false, flat: 1 },
+      { key: 'lateMinPerDay', label: 'Late min / day', labelAr: 'دقائق التأخير/يوم', unit: 'min', up: false, flat: 0.5 },
+      { key: 'earlyRate', label: 'Early-out rate', labelAr: 'نسبة الخروج المبكر', unit: 'pct', up: false, flat: 1 },
+      { key: 'absenceRate', label: 'Absence rate', labelAr: 'نسبة الغياب', unit: 'pct', up: false, flat: 1 },
+      { key: 'missingPunchRate', label: 'Missing-punch rate', labelAr: 'نسبة البصمة الناقصة', unit: 'pct', up: false, flat: 1 },
+      { key: 'missingSystemRate', label: 'Missing-system rate', labelAr: 'نسبة السيستم الناقص', unit: 'pct', up: false, flat: 1 },
+      { key: 'ahtSec', label: 'AHT', labelAr: 'متوسط المعالجة (AHT)', unit: 'sec', up: false, flat: 3 },
+      { key: 'occupancy', label: 'Occupancy', labelAr: 'الإشغال', unit: 'pct', up: true, flat: 1 },
+      { key: 'fcr', label: 'FCR', labelAr: 'FCR', unit: 'pct', up: true, flat: 1 },
+      { key: 'sickRate', label: 'Sick-day rate', labelAr: 'نسبة أيام المرض', unit: 'pct', up: null, flat: 1 },
+      { key: 'otPerDay', label: 'OT min / worked day', labelAr: 'دقائق OT/يوم عمل', unit: 'min', up: null, flat: 1 },
+    ];
+    let improved = 0, declined = 0;
+    const metrics = M.map((m) => { const av = (A as any)[m.key], bv = (B as any)[m.key];
+      const delta = (av != null && bv != null) ? Math.round((av - bv) * 10) / 10 : null;
+      let trend: 'improved' | 'declined' | 'flat' | 'context' | 'na' = 'na';
+      if (delta != null) {
+        if (m.up === null) trend = 'context';                       // displayed, not judged
+        else if (Math.abs(delta) < m.flat) trend = 'flat';
+        else { const good = m.up ? delta > 0 : delta < 0; trend = good ? 'improved' : 'declined'; if (good) improved++; else declined++; }
+      }
+      return { key: m.key, label: m.label, labelAr: m.labelAr, unit: m.unit, goodWhenUp: m.up, context: m.up === null, a: av ?? null, b: bv ?? null, delta, trend };
+    });
+    const overall = improved > 0 && declined > 0 ? 'mixed' : improved > 0 ? 'improving' : declined > 0 ? 'declining' : 'stable';
+    return { person: pn, employee: emp, a: A, b: B, metrics,
+      verdict: { improvements: metrics.filter((x) => x.trend === 'improved'), declines: metrics.filter((x) => x.trend === 'declined'), improved, declined, overall } };
+  }
+
   /** Interval Headcount — half-hourly staffing curve for a date, by function, over
    *  the clean roster_days. Cross-midnight aware: an MD/MN shift staffs the late
    *  hours of its own date AND the early hours of the next date; the previous day's
