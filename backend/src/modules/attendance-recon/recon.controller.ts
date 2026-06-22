@@ -630,6 +630,39 @@ export class ReconController {
     return { from: dFrom, to: dTo, employee: emp, summary, tardinessBands, shiftRate, byMonth, recent };
   }
 
+  /** Trends — center-wide KPI movement over weeks or months (conformance, tardiness,
+   *  OT, absence, headcount), filterable by function / team leader. */
+  @Get('roster-v2/trends')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Weekly/monthly KPI trends (conformance, late, OT, absence, headcount)' })
+  async trends(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string,
+    @Query('function') fn?: string, @Query('teamLeader') tl?: string, @Query('interval') interval = 'week') {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
+    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (tl) { p.push(tl); w += ` AND team_manager=$${p.length}`; }
+    const bucket = interval === 'month' ? 'month_name' : 'week_number';
+    const rows = await this.ds.query(
+      `SELECT ${bucket} bucket, MIN(work_date)::text start, MAX(work_date)::text "end",
+              COUNT(DISTINCT person_no)::int agents,
+              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+              COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
+              COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
+              COALESCE(SUM(ot_min),0)::int otmin, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf
+         FROM roster_days r WHERE ${w} GROUP BY ${bucket} ORDER BY MIN(work_date)`, p);
+    // options for the filters
+    const [functions, teamLeaders] = await Promise.all([
+      this.ds.query(`SELECT DISTINCT role_function v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]),
+      this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]),
+    ]);
+    const label = (r: any) => interval === 'month' ? r.bucket : `W${r.bucket}`;
+    return { from: dFrom, to: dTo, interval, range,
+             points: rows.map((r: any) => ({ ...r, label: label(r) })),
+             filterOptions: { functions: functions.map((x: any) => x.v), teamLeaders: teamLeaders.map((x: any) => x.v) } };
+  }
+
   /** Attendance & Adherence Score — a transparent composite (0-100, grade A-D) per
    *  agent from conformance + absence + tardiness. NOT the official performance
    *  scorecard (which uses AHT/quality/quiz) — this is attendance/adherence only.
