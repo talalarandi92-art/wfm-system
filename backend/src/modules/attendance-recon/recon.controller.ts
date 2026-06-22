@@ -519,6 +519,134 @@ export class ReconController {
     res.end(Buffer.from(await wb.xlsx.writeBuffer()));
   }
 
+  // ── Schedule Change Log: manual shift edit / swap with before/after impact ──────
+  /** SQL classifier: a shift code → broad category (for shift-rate distribution). */
+  private readonly SHIFT_CAT = `CASE
+      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^(MD|MN)' THEN 'Midnight'
+      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^(EE|E)' THEN 'Evening'
+      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^N' THEN 'Night'
+      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^(M|B|C|AM)' THEN 'Morning'
+      ELSE 'Other' END`;
+  private catOf(code: string): string {
+    const c = (code || '').toUpperCase();
+    if (/^(MD|MN)/.test(c)) return 'Midnight';
+    if (/^(EE|E)/.test(c)) return 'Evening';
+    if (/^N/.test(c)) return 'Night';
+    if (/^(M|B|C|AM)/.test(c)) return 'Morning';
+    return 'Other';
+  }
+  /** Canonical start/end (min) for a shift code, learned from existing roster rows. */
+  private async resolveShiftTimes(t: string, code: string): Promise<{ ss: number | null; se: number | null }> {
+    const [r] = await this.ds.query(
+      `SELECT mode() WITHIN GROUP (ORDER BY shift_start_min) ss, mode() WITHIN GROUP (ORDER BY shift_end_min) se
+         FROM roster_days WHERE tenant_id=$1 AND upper(shift_code)=upper($2) AND shift_start_min IS NOT NULL`, [t, code]);
+    return { ss: r?.ss ?? null, se: r?.se ?? null };
+  }
+  /** Person's YTD shift-rate distribution (category → count) up to a date. */
+  private async shiftRate(t: string, personNo: string, toDate: string): Promise<Record<string, number>> {
+    const rows = await this.ds.query(
+      `SELECT ${this.SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days
+         WHERE tenant_id=$1 AND person_no=$2 AND work_date<=$3 GROUP BY 1`, [t, personNo, toDate]);
+    const out: Record<string, number> = { Morning: 0, Night: 0, Evening: 0, Midnight: 0, Other: 0 };
+    for (const r of rows) out[r.cat] = r.n; return out;
+  }
+  /** Headcount-by-shift for a function on a date (coverage view). */
+  private async coverageByShift(t: string, fn: string, date: string): Promise<Record<string, number>> {
+    const rows = await this.ds.query(
+      `SELECT shift_code, COUNT(DISTINCT person_no)::int n FROM roster_days
+         WHERE tenant_id=$1 AND role_function=$2 AND work_date=$3 AND is_active AND presence IN ('office','wfh') GROUP BY shift_code`, [t, fn, date]);
+    const out: Record<string, number> = {}; for (const r of rows) out[r.shift_code || '—'] = r.n; return out;
+  }
+
+  @Post('roster-v2/schedule-change')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Apply a manual shift change to a (person, date) — logs before/after + impact' })
+  async scheduleChange(@Req() req: any, @Body() b: { personNo: string; date: string; newShift: string; reason?: string }) {
+    const t = req.user.tenantId;
+    if (!b?.personNo || !b?.date || !b?.newShift) throw new BadRequestException('personNo, date and newShift are required');
+    const [cur] = await this.ds.query(
+      `SELECT person_no, clean_name, role_function, shift_code FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 LIMIT 1`, [t, b.personNo, b.date]);
+    if (!cur) throw new BadRequestException('No roster row for that person/date');
+    const oldShift = cur.shift_code;
+    const rateBefore = await this.shiftRate(t, b.personNo, b.date);
+    const covBefore = await this.coverageByShift(t, cur.role_function, b.date);
+    const { ss, se } = await this.resolveShiftTimes(t, b.newShift);
+    await this.ds.query(
+      `UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=COALESCE($5,shift_start_min), shift_end_min=COALESCE($6,shift_end_min)
+         WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, b.personNo, b.date, b.newShift, ss, se]);
+    // after = before shifted by one day from old category to new category
+    const rateAfter = { ...rateBefore }; const oc = this.catOf(oldShift), nc = this.catOf(b.newShift);
+    rateAfter[oc] = Math.max(0, (rateAfter[oc] || 0) - 1); rateAfter[nc] = (rateAfter[nc] || 0) + 1;
+    const covAfter = { ...covBefore }; if (oldShift) covAfter[oldShift] = Math.max(0, (covAfter[oldShift] || 0) - 1); covAfter[b.newShift] = (covAfter[b.newShift] || 0) + 1;
+    const impact = { shiftRate: { before: rateBefore, after: rateAfter }, coverage: { function: cur.role_function, date: b.date, before: covBefore, after: covAfter } };
+    const [log] = await this.ds.query(
+      `INSERT INTO schedule_change_log (tenant_id, change_type, work_date, person_no, person_name, old_shift, new_shift, reason, changed_by, approval_status, impact)
+       VALUES ($1,'edit',$2,$3,$4,$5,$6,$7,$8,'applied',$9) RETURNING id`,
+      [t, b.date, b.personNo, cur.clean_name, oldShift, b.newShift, b.reason || null, req.user.sub || req.user.userId || 'wfm', JSON.stringify(impact)]);
+    return { ok: true, id: log.id, oldShift, newShift: b.newShift, impact };
+  }
+
+  @Post('roster-v2/schedule-swap')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Swap shifts between two people on a date — logs both + before/after shift-rate' })
+  async scheduleSwap(@Req() req: any, @Body() b: { personA: string; personB: string; date: string; reason?: string }) {
+    const t = req.user.tenantId;
+    if (!b?.personA || !b?.personB || !b?.date) throw new BadRequestException('personA, personB and date are required');
+    const rows = await this.ds.query(
+      `SELECT person_no, clean_name, role_function, shift_code, shift_start_min, shift_end_min FROM roster_days
+         WHERE tenant_id=$1 AND person_no IN ($2,$3) AND work_date=$4`, [t, b.personA, b.personB, b.date]);
+    const A = rows.find((r: any) => r.person_no === b.personA), B = rows.find((r: any) => r.person_no === b.personB);
+    if (!A || !B) throw new BadRequestException('Both people must have a roster row on that date');
+    const rateBeforeA = await this.shiftRate(t, b.personA, b.date), rateBeforeB = await this.shiftRate(t, b.personB, b.date);
+    // swap shift code + times
+    await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, b.personA, b.date, B.shift_code, B.shift_start_min, B.shift_end_min]);
+    await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, b.personB, b.date, A.shift_code, A.shift_start_min, A.shift_end_min]);
+    const adj = (r: Record<string, number>, oldC: string, newC: string) => { const o = { ...r }; o[oldC] = Math.max(0, (o[oldC] || 0) - 1); o[newC] = (o[newC] || 0) + 1; return o; };
+    const impact = {
+      A: { before: rateBeforeA, after: adj(rateBeforeA, this.catOf(A.shift_code), this.catOf(B.shift_code)) },
+      B: { before: rateBeforeB, after: adj(rateBeforeB, this.catOf(B.shift_code), this.catOf(A.shift_code)) },
+    };
+    const [log] = await this.ds.query(
+      `INSERT INTO schedule_change_log (tenant_id, change_type, work_date, person_no, person_name, person_b_no, person_b_name, old_shift, new_shift, old_shift_b, new_shift_b, reason, changed_by, approval_status, impact)
+       VALUES ($1,'swap',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'applied',$13) RETURNING id`,
+      [t, b.date, b.personA, A.clean_name, b.personB, B.clean_name, A.shift_code, B.shift_code, B.shift_code, A.shift_code, b.reason || null, req.user.sub || 'wfm', JSON.stringify(impact)]);
+    return { ok: true, id: log.id, swapped: { [A.clean_name]: `${A.shift_code}→${B.shift_code}`, [B.clean_name]: `${B.shift_code}→${A.shift_code}` }, impact };
+  }
+
+  @Get('roster-v2/schedule-changes')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Schedule change/swap history log (newest first)' })
+  async scheduleChanges(@Req() req: any, @Query('limit') limit = '100', @Query('person') person?: string) {
+    const t = req.user.tenantId; const p: any[] = [t]; let w = `tenant_id=$1`;
+    if (person) { p.push(`%${person.toLowerCase()}%`); w += ` AND (lower(person_name) LIKE $${p.length} OR person_no ILIKE $${p.length} OR lower(person_b_name) LIKE $${p.length})`; }
+    const rows = await this.ds.query(
+      `SELECT id, change_type, work_date::text date, person_no, person_name, person_b_no, person_b_name,
+              old_shift, new_shift, old_shift_b, new_shift_b, reason, changed_by, approval_status, reverted, impact, created_at
+         FROM schedule_change_log WHERE ${w} ORDER BY created_at DESC LIMIT ${Math.min(Number(limit) || 100, 500)}`, p);
+    return { count: rows.length, rows };
+  }
+
+  @Post('roster-v2/schedule-change/:id/revert')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Revert a logged schedule change/swap — restores the prior shift(s)' })
+  async scheduleRevert(@Req() req: any, @Body() _b: any, @Query('id') idQ?: string) {
+    const t = req.user.tenantId; const id = idQ || (req.params && req.params.id);
+    const [log] = await this.ds.query(`SELECT * FROM schedule_change_log WHERE tenant_id=$1 AND id=$2`, [t, id]);
+    if (!log) throw new BadRequestException('Change not found');
+    if (log.reverted) return { ok: true, alreadyReverted: true };
+    const rt = async (code: string) => this.resolveShiftTimes(t, code);
+    if (log.change_type === 'swap') {
+      const a = await rt(log.old_shift), bb = await rt(log.old_shift_b);
+      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, log.person_no, log.work_date, log.old_shift, a.ss, a.se]);
+      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, log.person_b_no, log.work_date, log.old_shift_b, bb.ss, bb.se]);
+    } else {
+      const a = await rt(log.old_shift);
+      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, log.person_no, log.work_date, log.old_shift, a.ss, a.se]);
+    }
+    await this.ds.query(`UPDATE schedule_change_log SET reverted=true, approval_status='reverted', updated_at=now() WHERE tenant_id=$1 AND id=$2`, [t, id]);
+    return { ok: true, reverted: true };
+  }
+
   /** Documented, user-confirmed team-leader resolution (2026-06-22):
    *  - spelling alias: "Fatme Hassan" → active TL "Fatma Hasan"
    *  - Aya Ruiz = terminated (left) → excluded from current-TL views
