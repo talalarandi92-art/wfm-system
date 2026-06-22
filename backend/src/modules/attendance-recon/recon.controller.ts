@@ -519,6 +519,57 @@ export class ReconController {
     res.end(Buffer.from(await wb.xlsx.writeBuffer()));
   }
 
+  /** Interval Headcount — half-hourly staffing curve for a date, by function, over
+   *  the clean roster_days. Cross-midnight aware: an MD/MN shift staffs the late
+   *  hours of its own date AND the early hours of the next date; the previous day's
+   *  overnight tail is folded into this date's 00:00–07:30. Scheduled vs present. */
+  @Get('roster-v2/interval-headcount')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Half-hourly headcount by function for a date (scheduled vs present), cross-midnight aware' })
+  async intervalHeadcount(@Req() req: any, @Query('date') date?: string, @Query('function') fn?: string, @Query('step') step = '30') {
+    const t = req.user.tenantId;
+    const d = date || (await this.ds.query(`SELECT MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0]?.b;
+    const prev = new Date(d + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1); const dPrev = prev.toISOString().slice(0, 10);
+    const stepMin = Math.max(15, Math.min(60, Number(step) || 30));
+    const p: any[] = [t, dPrev, d]; let w = `tenant_id=$1 AND work_date IN ($2,$3) AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`;
+    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    const rows = await this.ds.query(
+      `SELECT work_date::text d, role_function fn, is_active, shift_start_min ss, shift_end_min se,
+              sys_login_min li, sys_logout_min lo FROM roster_days WHERE ${w} AND is_active`, p);
+
+    const fnSet = new Set<string>();
+    const N = Math.floor(1440 / stepMin);
+    // per interval: function → {scheduled, present}
+    const grid: Record<string, { sched: Record<string, number>; pres: Record<string, number> }> = {};
+    for (let i = 0; i < N; i++) grid[i] = { sched: {}, pres: {} };
+    const covers = (rowDate: string, lo: number, hi: number, i0: number) => {
+      // does an interval starting at minute i0 (on date d) fall in this agent's window?
+      // window [lo,hi) is on the row's own date; for a previous-day row, its tail [1440,hi) maps to [0,hi-1440) on d.
+      if (lo == null || hi == null) return false;
+      if (rowDate === d) return i0 >= lo && i0 < Math.min(hi, 1440);
+      // previous day: only the overnight tail (hi>1440) reaches date d
+      return hi > 1440 && i0 < (hi - 1440);
+    };
+    for (const r of rows) {
+      const f = r.fn || '—'; fnSet.add(f);
+      for (let k = 0; k < N; k++) { const i0 = k * stepMin;
+        if (covers(r.d, r.ss, r.se, i0)) grid[k].sched[f] = (grid[k].sched[f] || 0) + 1;
+        // present uses actual login/logout (logout may be > login already; if logout<login it wrapped)
+        let li = r.li, lo = r.lo; if (li != null && lo != null && lo < li) lo += 1440;
+        if (li != null && lo != null && covers(r.d, li, lo, i0)) grid[k].pres[f] = (grid[k].pres[f] || 0) + 1;
+      }
+    }
+    const functions = [...fnSet].sort();
+    const intervals = Array.from({ length: N }, (_, k) => {
+      const m = k * stepMin; const label = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const schedTotal = Object.values(grid[k].sched).reduce((a, b) => a + b, 0);
+      const presTotal = Object.values(grid[k].pres).reduce((a, b) => a + b, 0);
+      return { t: label, scheduled: grid[k].sched, present: grid[k].pres, scheduledTotal: schedTotal, presentTotal: presTotal };
+    });
+    const peak = intervals.reduce((mx, x) => x.scheduledTotal > mx.scheduledTotal ? x : mx, intervals[0]);
+    return { date: d, function: fn || null, step: stepMin, functions, intervals, peak: { t: peak?.t, headcount: peak?.scheduledTotal } };
+  }
+
   // ── Schedule Change Log: manual shift edit / swap with before/after impact ──────
   /** SQL classifier: a shift code → broad category (for shift-rate distribution). */
   private readonly SHIFT_CAT = `CASE
