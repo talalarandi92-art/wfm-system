@@ -7,6 +7,31 @@ import { useUiStore } from '@/store/ui.store';
 const SHIFTS = ['M','B','C','N','E','EE20','MD','MN','M20','B20','C20','N20','M7','B7','C7','N7','OFF','H','L','COMP'];
 const CAT_COLORS: Record<string,string> = { Morning:'#22c55e', Night:'#06b6d4', Evening:'#f59e0b', Midnight:'#8b5cf6', Other:'#64748b' };
 
+/** Searchable agent picker (type to filter 141 people, click to select). */
+function PersonPicker({ value, onChange, people, placeholder }: { value:string; onChange:(v:string)=>void; people:any[]; placeholder:string }) {
+  const [q,setQ] = useState(''); const [open,setOpen] = useState(false);
+  const sel = people.find((p:any)=>p.person_no===value);
+  const cls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400 min-w-[200px]';
+  const filtered = people.filter((p:any)=>{ const t=q.toLowerCase().trim(); return !t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t) || (p.role_category||'').toLowerCase().includes(t); });
+  return (
+    <div className="relative" onBlur={()=>setTimeout(()=>setOpen(false),150)}>
+      <input value={open?q:(sel?`${sel.clean_name} · ${sel.role_category}`:'')} placeholder={placeholder}
+        onChange={e=>{ setQ(e.target.value); setOpen(true); }} onFocus={()=>{ setQ(''); setOpen(true); }} className={cls}/>
+      {open && (
+        <div className="absolute z-50 mt-1 w-[280px] max-h-72 overflow-auto rounded-xl shadow-2xl" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)' }}>
+          {filtered.slice(0,150).map((p:any)=>(
+            <button key={p.person_no} type="button" onMouseDown={()=>{ onChange(p.person_no); setOpen(false); setQ(''); }}
+              className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex justify-between gap-2" style={{ color:p.person_no===value?'#a5b4fc':'#cbd5e1' }}>
+              <span className="truncate">{p.clean_name}</span><span className="text-slate-500 text-[10px] flex-shrink-0">{p.role_category} · #{p.person_no}</span>
+            </button>
+          ))}
+          {filtered.length===0 && <p className="px-3 py-2 text-xs text-slate-500">No matches</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Schedule Change Log — DIRECT operational roster shift edit / swap over
  *  roster_days, with before/after shift-rate impact, full history and one-click
  *  revert. (Distinct from the request-approval flow on /schedule-changes.) */
@@ -90,15 +115,9 @@ export default function ScheduleChangeLogPage() {
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <div><label className="text-[10px] text-slate-500 block mb-1">{ar?'الموظف':'Person'}{mode==='swap'?' A':''}</label>
-            <select value={form.personNo} onChange={e=>set('personNo',e.target.value)} className={`${inputCls} min-w-[180px]`}>
-              <option value="">{ar?'اختر…':'Select…'}</option>
-              {people.map(p=><option key={p.person_no} value={p.person_no}>{p.clean_name} · {p.role_category}</option>)}
-            </select></div>
+            <PersonPicker value={form.personNo} onChange={v=>set('personNo',v)} people={people} placeholder={ar?'ابحث عن موظف…':'Search agent…'}/></div>
           {mode==='swap' && <div><label className="text-[10px] text-slate-500 block mb-1">{ar?'الموظف B':'Person B'}</label>
-            <select value={form.personB} onChange={e=>set('personB',e.target.value)} className={`${inputCls} min-w-[180px]`}>
-              <option value="">{ar?'اختر…':'Select…'}</option>
-              {people.map(p=><option key={p.person_no} value={p.person_no}>{p.clean_name} · {p.role_category}</option>)}
-            </select></div>}
+            <PersonPicker value={form.personB} onChange={v=>set('personB',v)} people={people} placeholder={ar?'ابحث عن موظف…':'Search agent…'}/></div>}
           <div><label className="text-[10px] text-slate-500 block mb-1"><CalendarDays size={11} className="inline"/> {ar?'التاريخ':'Date'}</label>
             <input type="date" value={form.date} onChange={e=>set('date',e.target.value)} className={inputCls}/></div>
           {mode==='edit' && <div><label className="text-[10px] text-slate-500 block mb-1">{ar?'الشفت الجديد':'New shift'}</label>
