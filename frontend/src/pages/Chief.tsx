@@ -120,7 +120,7 @@ export default function ChiefPage() {
               <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ background: posture.color, color: '#0b0f1c' }}>{ar ? 'الوضع العام' : 'Posture'}: {ar ? posture.ar : posture.en}</span>
               <span className="text-[11px]" style={{ color: '#64748b' }}>{data.date}{data.llm ? '' : ` · ${ar ? 'موجز قواعدي' : 'rule-based'}`}</span>
             </div>
-            <p className="text-sm whitespace-pre-line leading-relaxed" style={{ color: '#e2e8f0' }}>{data.executiveBrief}</p>
+            <p className="text-sm whitespace-pre-line leading-relaxed" style={{ color: 'var(--text-1)' }}>{data.executiveBrief}</p>
             <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-xl" style={{ background: 'rgba(234,179,8,0.1)', border: '1px solid rgba(234,179,8,0.25)' }}>
               <Target size={15} style={{ color: '#eab308', flexShrink: 0 }} />
               <p className="text-xs font-bold" style={{ color: '#fde047' }}>{data.directive}</p>
