@@ -854,6 +854,56 @@ export class ReconController {
     return { teamLeader: tlName, from: dFrom, to: dTo, range, summary, agents, byShift, teamLeaders: tlOpts.map((r: any) => r.v) };
   }
 
+  /** Scorecard Board — the official scorecard at its TRUE grain (agent × week), not
+   *  smeared per day. By-agent = avg across the agent's weeks for every KPI; pass
+   *  ?person= for the W1–W5 weekly drill. Alias-aware via employee_identity. */
+  @Get('roster-v2/scorecard')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Official scorecard board — per-agent (avg of weeks) + weekly W1–W5 drill, all KPIs' })
+  async scorecardBoard(@Req() req: any, @Query('function') fn?: string, @Query('teamLeader') tl?: string, @Query('person') person?: string) {
+    const t = req.user.tenantId;
+    // KPI metadata + max points (cap = top observed score per KPI)
+    const [mx] = await this.ds.query(
+      `SELECT MAX(quality_score) quality, MAX(aht_score) aht, MAX(fcr_score) fcr, MAX(productivity_score) productivity,
+              MAX(ctr_score) ctr, MAX(quiz_score) quiz, MAX(prr_points) prr, MAX(response_time_score) resptime,
+              MAX(mistakes_score) mistakes, MAX(incidents_score) incidents, MAX(attendance_score) attendance
+         FROM scorecard_entries WHERE tenant_id=$1`, [t]);
+    const kpiMeta = [
+      ['quality', 'Quality'], ['fcr', 'FCR'], ['productivity', 'Productivity'], ['mistakes', 'Mistakes'], ['resptime', 'Response Time'],
+      ['ctr', 'CTR'], ['quiz', 'Quiz'], ['aht', 'AHT'], ['prr', 'PRR'], ['incidents', 'Incidents'], ['attendance', 'Attendance'],
+    ].map(([k, l]) => ({ key: k, label: l, max: mx?.[k] != null ? Number(mx[k]) : null }))
+      .filter((m) => m.max != null && m.max > 0);   // hide KPIs with no data this period (e.g. Incidents/Attendance)
+
+    if (person) { // weekly drill for one agent
+      const ids = (await this.ds.query(`SELECT employee_no FROM employee_identity WHERE tenant_id=$1 AND person_no=$2`, [t, person])).map((r: any) => r.employee_no);
+      const weeks = await this.ds.query(
+        `SELECT week_label, net_points net, function_rank rank, quality_score quality, aht_score aht, fcr_score fcr,
+                productivity_score productivity, ctr_score ctr, quiz_score quiz, prr_points prr, response_time_score resptime,
+                mistakes_score mistakes, incidents_score incidents, attendance_score attendance,
+                ROUND(response_rate::numeric*100,1) res, ROUND(working_days_pct::numeric*100,1) wd
+           FROM scorecard_entries WHERE tenant_id=$1 AND employee_no = ANY($2) ORDER BY week_label`, [t, ids.length ? ids : [person]]);
+      return { person, kpiMeta, weeks };
+    }
+
+    const p: any[] = [t]; let w = `se.tenant_id=$1`;
+    if (fn) { p.push(fn); w += ` AND se.function_name=$${p.length}`; }
+    if (tl) { p.push(tl); w += ` AND se.team_leader=$${p.length}`; }
+    const agents = await this.ds.query(
+      `SELECT i.person_no, mode() WITHIN GROUP (ORDER BY i.clean_name) name, mode() WITHIN GROUP (ORDER BY se.function_name) fn,
+              mode() WITHIN GROUP (ORDER BY se.team_leader) tl, COUNT(*)::int weeks,
+              ROUND(AVG(se.net_points),1) net, ROUND(AVG(se.function_rank),1) rank,
+              ROUND(AVG(se.quality_score),1) quality, ROUND(AVG(se.aht_score),1) aht, ROUND(AVG(se.fcr_score),1) fcr,
+              ROUND(AVG(se.productivity_score),1) productivity, ROUND(AVG(se.ctr_score),1) ctr, ROUND(AVG(se.quiz_score),1) quiz,
+              ROUND(AVG(se.prr_points),1) prr, ROUND(AVG(se.response_time_score),1) resptime, ROUND(AVG(se.mistakes_score),1) mistakes,
+              ROUND(AVG(se.incidents_score),1) incidents, ROUND(AVG(se.attendance_score),1) attendance, ROUND(AVG(se.response_rate::numeric)*100,1) res
+         FROM scorecard_entries se JOIN employee_identity i ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
+        WHERE ${w} GROUP BY i.person_no ORDER BY net DESC NULLS LAST`, p);
+    const fnOpts = await this.ds.query(`SELECT DISTINCT function_name v FROM scorecard_entries WHERE tenant_id=$1 AND function_name IS NOT NULL ORDER BY 1`, [t]);
+    const tlOpts = await this.ds.query(`SELECT DISTINCT team_leader v FROM scorecard_entries WHERE tenant_id=$1 AND team_leader IS NOT NULL ORDER BY 1`, [t]);
+    const avgNet = agents.length ? Math.round(agents.reduce((a: number, r: any) => a + Number(r.net || 0), 0) / agents.length * 10) / 10 : 0;
+    return { kpiMeta, agents, avgNet, count: agents.length, filterOptions: { functions: fnOpts.map((r: any) => r.v), teamLeaders: tlOpts.map((r: any) => r.v) } };
+  }
+
   /** Agent Progress — month-over-month self-comparison: did this agent improve or
    *  decline? Merges roster KPIs (conformance/late/OT/absence) with official Net
    *  Points per month, computes deltas vs the prior month, and a verdict. */

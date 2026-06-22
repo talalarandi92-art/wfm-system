@@ -29,6 +29,7 @@ import SystemAuditPage          from '@/pages/SystemAudit';
 import Team360Page              from '@/pages/Team360';
 import AgentScoresPage          from '@/pages/AgentScores';
 import TrendsPage               from '@/pages/Trends';
+import ScorecardBoardPage       from '@/pages/ScorecardBoard';
 import SettingsPage            from '@/pages/Settings';
 import CalendarPage            from '@/pages/Calendar';
 import SkillsPage              from '@/pages/Skills';
@@ -132,6 +133,7 @@ export default function App() {
           <Route path="team-360" element={<Team360Page />} />
           <Route path="agent-scores" element={<AgentScoresPage />} />
           <Route path="trends" element={<TrendsPage />} />
+          <Route path="scorecard-board" element={<ScorecardBoardPage />} />
           <Route path="campaigns" element={<Navigate to="/schedule?tab=campaigns" replace />} />
           <Route path="attendance-corrections" element={<Navigate to="/attendance?tab=corrections" replace />} />
           <Route path="schedule-changes" element={<Navigate to="/schedule?tab=changes" replace />} />
