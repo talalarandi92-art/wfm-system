@@ -539,11 +539,11 @@
 .zrow-light:hover, .zrow-dark:hover { background: rgba(99,102,241,0.12) !important; }
 .zdet-on-light { background: rgba(0,0,0,0.22); }
 .zdet-on-dark  { background: rgba(255,255,255,0.045); }
-.theme-light .zrow-light { background: #ffffff; }
-.theme-light .zrow-dark  { background: #e6e9f1; }
-.theme-light .zrow-light:hover, .theme-light .zrow-dark:hover { background: #dde2ee !important; }
-.theme-light .zdet-on-light { background: #e6e9f1 !important; }   /* under white row → grey detail */
-.theme-light .zdet-on-dark  { background: #ffffff !important; }   /* under grey row → white detail */
+.theme-light .zrow-light { background: #f4f6fa; }                 /* lighter grey */
+.theme-light .zrow-dark  { background: #e4e7ef; }                 /* grey */
+.theme-light .zrow-light:hover, .theme-light .zrow-dark:hover { background: #dadfeb !important; }
+.theme-light .zdet-on-light { background: #e4e7ef !important; }   /* under lighter row → grey detail */
+.theme-light .zdet-on-dark  { background: #f4f6fa !important; }   /* under grey row → lighter detail */
 
 /* ════════════════════════════════════════════════════════════════════════════
    AURORA GLASS — optional 3rd theme (dark-based, so all existing text/contrast
@@ -667,6 +667,33 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light [style*="color: rgb(94, 234, 212)"]  { color: #0f766e !important; }  /* teal-300 */
 .theme-light [style*="color: rgb(253, 164, 175)"] { color: #e11d48 !important; }  /* rose-300 */
 .theme-light [style*="color: rgb(196, 181, 253)"] { color: #7c3aed !important; }  /* violet-300 */
+.theme-light [style*="color: rgb(199, 210, 254)"] { color: #4338ca !important; }  /* indigo-200 (active chips) */
+.theme-light [style*="color: rgb(165, 180, 252)"] { color: #4f46e5 !important; }  /* indigo-300 (accent text) */
+.theme-light [style*="color: rgb(103, 232, 249)"] { color: #0e7490 !important; }  /* cyan-300 */
+.theme-light [style*="color: rgba(251, 191, 36"] { color: #b45309 !important; }   /* amber-400 w/ alpha */
+
+/* light-mode: deepen pale accent TEXT *classes* (Tailwind -300/-400) so they read
+   on light surfaces. Safe — in Light every surface is light; solid colored buttons
+   use inline white, not these classes. (Sidebar text is re-lit separately.) */
+.theme-light .text-amber-300, .theme-light .text-amber-400,
+.theme-light [class*="text-amber-3"], .theme-light [class*="text-amber-4"] { color: #b45309 !important; }
+.theme-light .text-yellow-300, .theme-light .text-yellow-400 { color: #a16207 !important; }
+.theme-light .text-emerald-300, .theme-light .text-emerald-400 { color: #047857 !important; }
+.theme-light .text-green-300, .theme-light .text-green-400 { color: #15803d !important; }
+.theme-light .text-sky-300, .theme-light .text-sky-400 { color: #0284c7 !important; }
+.theme-light .text-cyan-300, .theme-light .text-cyan-400 { color: #0e7490 !important; }
+.theme-light .text-blue-300, .theme-light .text-blue-400 { color: #2563eb !important; }
+.theme-light .text-indigo-200, .theme-light .text-indigo-300, .theme-light .text-indigo-400 { color: #4338ca !important; }
+.theme-light .text-violet-300, .theme-light .text-violet-400 { color: #7c3aed !important; }
+.theme-light .text-purple-300, .theme-light .text-purple-400 { color: #9333ea !important; }
+.theme-light .text-rose-300, .theme-light .text-rose-400 { color: #e11d48 !important; }
+.theme-light .text-red-300, .theme-light .text-red-400 { color: #dc2626 !important; }
+.theme-light .text-pink-300, .theme-light .text-pink-400 { color: #db2777 !important; }
+.theme-light .text-teal-300, .theme-light .text-teal-400 { color: #0f766e !important; }
+.theme-light .text-orange-300, .theme-light .text-orange-400 { color: #c2410c !important; }
+.theme-light [style*="color: rgb(253, 186, 116)"] { color: #c2410c !important; }  /* orange-300 inline */
+/* but keep these light inside the dark sidebar rail */
+.theme-light aside [class*="text-amber-"], .theme-light aside [class*="text-emerald-"], .theme-light aside [class*="text-indigo-"] { color: inherit !important; }
 
 /* form controls built dark-first (inline white text + white-alpha bg) → light */
 .theme-light input, .theme-light select, .theme-light textarea { color: #0f172a !important; }
@@ -682,21 +709,31 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light .hover\:bg-white\/5:hover,
 .theme-light .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 42, 0.04) !important; }
 
-/* softer, slightly darker light page (less stark than pure white) — cards stay white so they pop */
-.theme-light { --bg: #e7e9f0; --surface-2: #eef0f6; }
+/* soft GREY + LIGHT-GREY mix (not stark white) — page is a calm grey, cards a
+   lighter grey so they lift gently off it. */
+.theme-light { --bg: #e6e8ef; --surface: #f4f6fa; --surface-2: #edf0f6; }
 
-/* dark-canvas data surfaces (Schedule grid, Chat shell) → light in Light mode.
-   text/cells on them follow the normal light overrides, so they read crisply. */
-.theme-light [style*="rgba(7, 9, 15, 0.6)"]   { background: #ffffff !important; }   /* schedule grid wrapper */
-.theme-light [style*="rgba(7, 9, 15, 0.95)"]  { background: #ffffff !important; }   /* sticky col header + even name rows */
-.theme-light [style*="rgba(10, 12, 20, 0.95)"]{ background: #eff2f8 !important; }   /* odd name rows (clean zebra) */
+/* dark-canvas data surfaces (Schedule grid, Chat shell, modal) → light-grey in
+   Light mode. text/cells on them follow the normal light overrides. */
+.theme-light [style*="rgba(7, 9, 15, 0.6)"]   { background: #f4f6fa !important; }   /* schedule grid wrapper */
+.theme-light [style*="rgba(7, 9, 15, 0.95)"]  { background: #f4f6fa !important; }   /* sticky col header + even name rows */
+.theme-light [style*="rgba(10, 12, 20, 0.95)"]{ background: #e6e9f1 !important; }   /* odd name rows (grey zebra) */
 .theme-light [style*="rgba(17, 14, 65, 0.75)"]{ background: rgba(99, 102, 241, 0.13) !important; }  /* midnight (MD) cell: dark navy → light indigo tint like the others */
-.theme-light [style*="rgb(15, 21, 39)"]       { background: #ffffff !important; }   /* chat shell #0f1527 */
-.theme-light [style*="rgb(18, 25, 41)"]       { background: #f3f5f9 !important; }   /* chat panel #121929 */
-.theme-light [style*="rgb(10, 15, 30)"]       { background: #ffffff !important; }   /* chat shell gradient #0a0f1e→#080c18 */
-.theme-light [style*="rgb(8, 12, 24)"]        { background: #ffffff !important; }   /* chat shell gradient tail */
-.theme-light [style*="rgb(26, 35, 64)"]       { background: #f0f2f7 !important; }   /* chat sub-panel #1a2340 */
-.theme-light [style*="rgb(13, 20, 36)"]       { background: #ffffff !important; }   /* shift-detail modal gradient #0d1424 */
+.theme-light [style*="rgb(15, 21, 39)"]       { background: #f4f6fa !important; }   /* chat shell #0f1527 */
+.theme-light [style*="rgb(18, 25, 41)"]       { background: #eef1f7 !important; }   /* chat panel #121929 */
+.theme-light [style*="rgb(10, 15, 30)"]       { background: #f4f6fa !important; }   /* chat shell gradient #0a0f1e→#080c18 */
+.theme-light [style*="rgb(8, 12, 24)"]        { background: #f4f6fa !important; }   /* chat shell gradient tail */
+.theme-light [style*="rgb(26, 35, 64)"]       { background: #eef1f7 !important; }   /* chat sub-panel #1a2340 */
+.theme-light [style*="rgb(13, 20, 36)"]       { background: #f4f6fa !important; }   /* shift-detail modal gradient #0d1424 */
+
+/* the dark sidebar rail stays dark in Light mode → keep its text LIGHT (the
+   light overrides wrongly darkened the brand + labels). */
+.theme-light aside { color: #cbd5e1; }
+.theme-light aside .text-white, .theme-light aside .text-slate-100 { color: #f1f5f9 !important; }
+.theme-light aside .text-slate-200 { color: #e2e8f0 !important; }
+.theme-light aside .text-slate-300 { color: #cbd5e1 !important; }
+.theme-light aside .text-slate-400, .theme-light aside .text-slate-500 { color: #94a3b8 !important; }
+.theme-light aside [style*="background: rgba(255, 255, 255, 0.0"] { background: rgba(255,255,255,0.05) !important; }
 
 /* ── keep-dark: opt-OUT for intentionally-dark surfaces (data grids, dark popovers).
    Put class="keep-dark" on a dark container and its subtree keeps the dark look

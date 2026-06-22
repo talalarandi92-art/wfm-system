@@ -517,8 +517,10 @@ function RequestCard({
   const [peerRejectReason, setPeerRejectReason] = useState('');
   const [showPeerReject, setShowPeerReject] = useState(false);
 
-  const cardBg = dark ? 'rgba(15,21,40,0.7)' : 'rgba(255,255,255,0.85)';
+  const cardBg = dark ? 'rgba(15,21,40,0.7)' : 'rgba(255,255,255,0.92)';
   const borderColor = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+  // colour-code every card by its request type (each "layer" its own colour)
+  const typeColor = REQUEST_TYPES.find(t => t.code === req.type)?.color ?? '#6366f1';
 
   const isSwap = req.type === 'shift_swap' || req.type === 'off_swap';
   const isPeerPending = req.status === 'peer_pending';
@@ -528,7 +530,7 @@ function RequestCard({
 
   return (
     <div className="rounded-2xl overflow-hidden transition-all duration-200"
-      style={{ background: cardBg, border: `1px solid ${borderColor}`, boxShadow: dark ? '0 4px 24px rgba(0,0,0,0.3)' : '0 2px 12px rgba(0,0,0,0.06)' }}>
+      style={{ background: `linear-gradient(90deg, ${typeColor}14, transparent 55%), ${cardBg}`, border: `1px solid ${borderColor}`, borderInlineStart: `4px solid ${typeColor}`, boxShadow: dark ? '0 4px 24px rgba(0,0,0,0.3)' : '0 2px 12px rgba(0,0,0,0.06)' }}>
 
       {/* Header row */}
       <div className="px-4 py-3 flex items-center gap-3 cursor-pointer select-none"
