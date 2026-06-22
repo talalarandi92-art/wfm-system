@@ -7,6 +7,11 @@ import { useUiStore } from '@/store/ui.store';
 // score-vs-max colour
 const sc = (v:number|null, max:number|null) => { if (v==null||!max) return '#475569'; const r=v/max; return r>=0.9?'#22c55e':r>=0.7?'#06b6d4':r>=0.5?'#f59e0b':'#f43f5e'; };
 const netC = (v:number) => v>=100?'#22c55e':v>=80?'#06b6d4':v>=60?'#f59e0b':'#f43f5e';
+// actual value formatted by unit: pct→%, min→M:SS, count→number
+const fmtAct = (unit:string, v:any) => { if (v==null) return ''; const n=Number(v);
+  if (unit==='pct') return `${n}%`;
+  if (unit==='min') { const m=Math.floor(n), s=Math.round((n-m)*60); return `${m}:${String(s).padStart(2,'0')}`; }
+  return `${n}`; };
 
 /** Scorecard Board — the official scorecard at its real grain: one row per agent
  *  (avg of their weeks) with every KPI, expandable to the weekly W1–W5 detail. */
@@ -70,6 +75,7 @@ export default function ScorecardBoardPage() {
                 <th className="px-2 py-2 text-start font-semibold">{ar?'الفنكشن':'Function'}</th>
                 {kpis.map((k:any)=><th key={k.key} className="px-2 py-2 text-center font-semibold whitespace-nowrap" title={k.max!=null?`max ${k.max}`:''}>{k.label}{k.max!=null?<span className="text-slate-600"> /{k.max}</span>:''}</th>)}
                 <th className="px-2 py-2 text-center font-semibold">Net</th><th className="px-2 py-2 text-center font-semibold">{ar?'ترتيب':'Rank'}</th>
+                <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{ar?'وين النقص':'Weakest'}</th>
               </tr>
             </thead>
             <tbody>
@@ -79,19 +85,22 @@ export default function ScorecardBoardPage() {
                     <td className="px-2 py-1.5 text-center text-slate-500">{i+1}</td>
                     <td className="px-2 py-1.5 text-white font-medium whitespace-nowrap">{openRow===a.person_no?<ChevronDown size={11} className="inline me-1"/>:<ChevronRight size={11} className="inline me-1 text-slate-600"/>}{a.name} <span className="text-[9px] text-slate-500">({a.weeks}w)</span></td>
                     <td className="px-2 py-1.5 text-slate-400 whitespace-nowrap">{a.fn}</td>
-                    {kpis.map((k:any)=>{ const v=a[k.key]==null?null:Number(a[k.key]); return <td key={k.key} className="px-2 py-1.5 text-center font-semibold" style={{ color:sc(v,k.max) }}>{v==null?'—':v}</td>; })}
+                    {kpis.map((k:any)=>{ const v=a[k.key]==null?null:Number(a[k.key]); const act=a[k.key+'_act'];
+                      return <td key={k.key} className="px-2 py-1.5 text-center"><div className="font-semibold" style={{ color:sc(v,k.max) }}>{v==null?'—':v}</div><div className="text-[8px] text-slate-500 leading-none">{fmtAct(k.unit,act)}</div></td>; })}
                     <td className="px-2 py-1.5 text-center font-bold" style={{ color:netC(Number(a.net)) }}>{a.net}</td>
                     <td className="px-2 py-1.5 text-center text-slate-300">{a.rank!=null?`#${a.rank}`:'—'}</td>
+                    <td className="px-2 py-1.5 text-start whitespace-nowrap">{a.weakest?<span style={{ color:'#f87171' }}>{a.weakest.label} <span className="text-slate-500">(−{a.weakest.gap})</span></span>:<span className="text-emerald-400">✓</span>}</td>
                   </tr>
                   {openRow===a.person_no && (
-                    <tr><td colSpan={kpis.length+5} className="px-3 py-2" style={{ background:'rgba(99,102,241,0.05)' }}>
+                    <tr><td colSpan={kpis.length+6} className="px-3 py-2" style={{ background:'rgba(99,102,241,0.05)' }}>
                       <p className="text-[10px] text-slate-400 mb-1">{ar?'التفصيل الأسبوعي':'Weekly breakdown'}</p>
                       {!weeks[a.person_no] ? <p className="text-[10px] text-slate-500">…</p> : (
                         <table className="w-full text-[10px]"><thead><tr className="text-slate-500"><th className="text-start">{ar?'الأسبوع':'Week'}</th>{kpis.map((k:any)=><th key={k.key} className="text-center">{k.label}</th>)}<th className="text-center">Net</th></tr></thead>
                           <tbody>{weeks[a.person_no].map((wk:any,j:number)=>(
                             <tr key={j} className="border-t border-white/5">
                               <td className="py-0.5 text-slate-300 font-mono">{wk.week_label}</td>
-                              {kpis.map((k:any)=>{ const v=wk[k.key]==null?null:Number(wk[k.key]); return <td key={k.key} className="py-0.5 text-center" style={{ color:sc(v,k.max) }}>{v==null?'·':v}</td>; })}
+                              {kpis.map((k:any)=>{ const v=wk[k.key]==null?null:Number(wk[k.key]); const act=wk[k.key+'_act'];
+                                return <td key={k.key} className="py-0.5 text-center" style={{ color:sc(v,k.max) }}>{v==null?'·':v}{act!=null?<span className="text-[7px] text-slate-500"> ({fmtAct(k.unit,act)})</span>:''}</td>; })}
                               <td className="py-0.5 text-center font-bold" style={{ color:netC(Number(wk.net)) }}>{wk.net}</td>
                             </tr>
                           ))}</tbody>

@@ -869,10 +869,16 @@ export class ReconController {
               MAX(mistakes_score) mistakes, MAX(incidents_score) incidents, MAX(attendance_score) attendance
          FROM scorecard_entries WHERE tenant_id=$1`, [t]);
     const kpiMeta = [
-      ['quality', 'Quality'], ['fcr', 'FCR'], ['productivity', 'Productivity'], ['mistakes', 'Mistakes'], ['resptime', 'Response Time'],
-      ['ctr', 'CTR'], ['quiz', 'Quiz'], ['aht', 'AHT'], ['prr', 'PRR'], ['incidents', 'Incidents'], ['attendance', 'Attendance'],
-    ].map(([k, l]) => ({ key: k, label: l, max: mx?.[k] != null ? Number(mx[k]) : null }))
+      ['quality', 'Quality', 'pct'], ['fcr', 'FCR', 'pct'], ['productivity', 'Productivity', 'pct'], ['mistakes', 'Mistakes', 'count'], ['resptime', 'Response Time', 'min'],
+      ['ctr', 'CTR', 'pct'], ['quiz', 'Quiz', 'pct'], ['aht', 'AHT', 'min'], ['prr', 'PRR', 'pct'], ['incidents', 'Incidents', 'count'], ['attendance', 'Attendance', 'pct'],
+    ].map(([k, l, unit]) => ({ key: k, label: l, unit, max: mx?.[k] != null ? Number(mx[k]) : null }))
       .filter((m) => m.max != null && m.max > 0);   // hide KPIs with no data this period (e.g. Incidents/Attendance)
+    // actual measure per KPI (alongside points): pct ×100, AHT in minutes, response-time day-fraction ×1440 = minutes, counts as-is
+    const ACT = `ROUND(AVG(se.quality_actual::numeric)*100,1) quality_act, ROUND(AVG(se.aht_actual::numeric),2) aht_act,
+      ROUND(AVG(se.fcr_actual::numeric)*100,1) fcr_act, ROUND(AVG(se.productivity_actual::numeric)*100,1) productivity_act,
+      ROUND(AVG(se.ctr_actual::numeric)*100,1) ctr_act, ROUND(AVG(se.quiz_actual::numeric)*100,1) quiz_act,
+      ROUND(AVG(se.prr_rate::numeric)*100,1) prr_act, ROUND(AVG(se.response_time_actual::numeric)*1440,1) resptime_act,
+      ROUND(AVG(se.mistakes_actual::numeric),1) mistakes_act`;
 
     if (person) { // weekly drill for one agent
       const ids = (await this.ds.query(`SELECT employee_no FROM employee_identity WHERE tenant_id=$1 AND person_no=$2`, [t, person])).map((r: any) => r.employee_no);
@@ -880,6 +886,9 @@ export class ReconController {
         `SELECT week_label, net_points net, function_rank rank, quality_score quality, aht_score aht, fcr_score fcr,
                 productivity_score productivity, ctr_score ctr, quiz_score quiz, prr_points prr, response_time_score resptime,
                 mistakes_score mistakes, incidents_score incidents, attendance_score attendance,
+                ROUND(quality_actual::numeric*100,1) quality_act, ROUND(aht_actual::numeric,2) aht_act, ROUND(fcr_actual::numeric*100,1) fcr_act,
+                ROUND(productivity_actual::numeric*100,1) productivity_act, ROUND(ctr_actual::numeric*100,1) ctr_act, ROUND(quiz_actual::numeric*100,1) quiz_act,
+                ROUND(prr_rate::numeric*100,1) prr_act, ROUND(response_time_actual::numeric*1440,1) resptime_act, ROUND(mistakes_actual::numeric,1) mistakes_act,
                 ROUND(response_rate::numeric*100,1) res, ROUND(working_days_pct::numeric*100,1) wd
            FROM scorecard_entries WHERE tenant_id=$1 AND employee_no = ANY($2) ORDER BY week_label`, [t, ids.length ? ids : [person]]);
       return { person, kpiMeta, weeks };
@@ -895,9 +904,13 @@ export class ReconController {
               ROUND(AVG(se.quality_score),1) quality, ROUND(AVG(se.aht_score),1) aht, ROUND(AVG(se.fcr_score),1) fcr,
               ROUND(AVG(se.productivity_score),1) productivity, ROUND(AVG(se.ctr_score),1) ctr, ROUND(AVG(se.quiz_score),1) quiz,
               ROUND(AVG(se.prr_points),1) prr, ROUND(AVG(se.response_time_score),1) resptime, ROUND(AVG(se.mistakes_score),1) mistakes,
-              ROUND(AVG(se.incidents_score),1) incidents, ROUND(AVG(se.attendance_score),1) attendance, ROUND(AVG(se.response_rate::numeric)*100,1) res
+              ROUND(AVG(se.incidents_score),1) incidents, ROUND(AVG(se.attendance_score),1) attendance, ROUND(AVG(se.response_rate::numeric)*100,1) res, ${ACT}
          FROM scorecard_entries se JOIN employee_identity i ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
         WHERE ${w} GROUP BY i.person_no ORDER BY net DESC NULLS LAST`, p);
+    // "where short" — the KPI losing the most points vs its max (biggest gap)
+    for (const a of agents) { let worst: any = null;
+      for (const k of kpiMeta) { const v = a[k.key] == null ? null : Number(a[k.key]); if (v == null || !k.max) continue; const gap = Math.round((k.max - v) * 10) / 10; if (gap > 0 && (!worst || gap > worst.gap)) worst = { key: k.key, label: k.label, gap, score: v, max: k.max }; }
+      a.weakest = worst; }
     const fnOpts = await this.ds.query(`SELECT DISTINCT function_name v FROM scorecard_entries WHERE tenant_id=$1 AND function_name IS NOT NULL ORDER BY 1`, [t]);
     const tlOpts = await this.ds.query(`SELECT DISTINCT team_leader v FROM scorecard_entries WHERE tenant_id=$1 AND team_leader IS NOT NULL ORDER BY 1`, [t]);
     const avgNet = agents.length ? Math.round(agents.reduce((a: number, r: any) => a + Number(r.net || 0), 0) / agents.length * 10) / 10 : 0;
