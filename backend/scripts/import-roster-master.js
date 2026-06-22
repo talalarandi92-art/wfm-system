@@ -220,14 +220,19 @@ function attStatus(presence, pcStatus, code) {
       }
       const authLate=(odPerm&&/late/i.test(odPerm.type))||(odComp&&/late/i.test(odComp.type));
       const authEarly=(odPerm&&/early/i.test(odPerm.type))||(odComp&&/early/i.test(odComp.type));
-      const sysLate=(worked&&ss!=null&&inMin!=null)?Math.max(0,inMin-ss):0;
-      const sysEarly=(worked&&se!=null&&outMin!=null)?Math.max(0,se-outMin):0;
+      // cross-midnight metrics timeline: an early-morning login/logout belongs to the shift that
+      // started the previous evening (MN 23:00 + login 00:30) — wrap it so OT-before / lateness
+      // don't blow up into 20h. Caps remove residual persistent-session (never-logged-out) noise.
+      let inAdj=inMin, outAdj=outMin;
+      if (ss!=null && se!=null && (se>1440||se<ss) && inAdj!=null && inAdj<ss-180) { inAdj+=1440; if(outAdj!=null&&outAdj<inAdj)outAdj+=1440; }
+      const sysLate=(worked&&ss!=null&&inAdj!=null)?Math.max(0,inAdj-ss):0;
+      const sysEarly=(worked&&se!=null&&outAdj!=null)?Math.max(0,se-outAdj):0;
       const punchLate=(worked&&ss!=null&&pin!=null)?Math.max(0,pin-ss):0;
       let poutAdj=pout; if(pin!=null&&pout!=null&&pout<pin)poutAdj=pout+1440;
       const punchEarly=(worked&&se!=null&&pout!=null)?Math.max(0,se-poutAdj):0;
-      const otBefore=(worked&&ss!=null&&inMin!=null)?Math.max(0,ss-inMin):0;
-      const otAfter=(worked&&se!=null&&outMin!=null)?Math.max(0,outMin-se):0;
-      const workedMin=(pin!=null&&pout!=null)?(poutAdj-pin):(inMin!=null&&outMin!=null?outMin-inMin:null);
+      const otBefore=(worked&&ss!=null&&inAdj!=null)?Math.min(360,Math.max(0,ss-inAdj)):0;   // cap 6h
+      const otAfter=(worked&&se!=null&&outAdj!=null)?Math.min(480,Math.max(0,outAdj-se)):0;    // cap 8h
+      const workedMin=(pin!=null&&pout!=null)?(poutAdj-pin):(inAdj!=null&&outAdj!=null?outAdj-inAdj:null);
       const effLate=authLate?0:sysLate, effEarly=authEarly?0:sysEarly;
       const shiftLen=(ss!=null&&se!=null)?(se-ss):null;
       const adherence=(worked&&shiftLen>0&&hasActual)?Math.max(0,Math.round(100*(shiftLen-Math.min(shiftLen,effLate+effEarly))/shiftLen*10)/10):null;
