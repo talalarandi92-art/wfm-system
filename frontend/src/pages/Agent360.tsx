@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, UserSearch, Search, ShieldCheck, Clock, TimerReset, Timer, Coffee, UserX,
-  Building2, CalendarDays, ListChecks, Briefcase,
+  Building2, CalendarDays, ListChecks, Briefcase, ChevronDown,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -19,6 +19,7 @@ export default function Agent360Page() {
   const nav = useNavigate();
   const [people, setPeople] = useState<any[]>([]);
   const [person, setPerson] = useState('');
+  const [q, setQ] = useState(''); const [open, setOpen] = useState(false);
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(false); const [err, setErr] = useState('');
 
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ setPeople(r.data.rows||[]); if(r.data.rows?.[0]) setPerson(r.data.rows[0].person_no); }).catch(()=>{}); }, []);
@@ -58,10 +59,30 @@ export default function Agent360Page() {
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#8b5cf6,#6366f1)' }}><UserSearch size={20} className="text-white"/></div>
         <div className="flex-1 min-w-[180px]"><h1 className="text-lg font-bold text-white">{ar?'ملف الموظف 360':'Agent 360 Profile'}</h1>
           <p className="text-xs text-slate-500">{ar?'صورة كاملة لأداء وحضور الموظف من الماستر النظيف':'A complete attendance & performance picture from the clean master'}</p></div>
-        <div className="flex items-center gap-1.5"><Search size={14} className="text-slate-400"/>
-          <select value={person} onChange={e=>setPerson(e.target.value)} className={`${inputCls} min-w-[220px]`}>
-            {people.map(p=><option key={p.person_no} value={p.person_no}>{p.clean_name} · {p.role_category}</option>)}
-          </select></div>
+        <div className="relative" onBlur={()=>setTimeout(()=>setOpen(false),150)}>
+          <div className="flex items-center gap-1.5"><Search size={14} className="text-slate-400"/>
+            <input
+              value={open ? q : (e ? `${e.clean_name} · ${e.role_category}` : (ar?'ابحث عن موظف…':'Search agent…'))}
+              onChange={ev=>{ setQ(ev.target.value); setOpen(true); }}
+              onFocus={()=>{ setQ(''); setOpen(true); }}
+              placeholder={ar?'ابحث بالاسم/الرقم…':'Search name / no…'}
+              className={`${inputCls} min-w-[240px]`} />
+            <ChevronDown size={14} className="text-slate-500 -ms-6 pointer-events-none" />
+          </div>
+          {open && (
+            <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)' }}>
+              {people.filter((p:any)=>{ const t=q.toLowerCase().trim(); return !t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t) || (p.role_category||'').toLowerCase().includes(t); }).slice(0,150).map((p:any)=>(
+                <button key={p.person_no} onMouseDown={()=>{ setPerson(p.person_no); setOpen(false); setQ(''); }}
+                  className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex items-center justify-between gap-2"
+                  style={{ color: p.person_no===person?'#a5b4fc':'#cbd5e1', background: p.person_no===person?'rgba(99,102,241,0.12)':'transparent' }}>
+                  <span className="truncate">{p.clean_name}</span>
+                  <span className="text-slate-500 text-[10px] flex-shrink-0">{p.role_category} · #{p.person_no}</span>
+                </button>
+              ))}
+              {people.filter((p:any)=>{ const t=q.toLowerCase().trim(); return !t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t); }).length===0 && <p className="px-3 py-2 text-xs text-slate-500">{ar?'لا نتائج':'No matches'}</p>}
+            </div>
+          )}
+        </div>
       </div>
 
       {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}
