@@ -1356,6 +1356,101 @@ export class ReconController {
     res.end(Buffer.from(await wb.xlsx.writeBuffer()));
   }
 
+  /* ══════════════════════════════════════════════════════════════════════════
+   *  SCHEDULE ANALYSIS — the consolidated dashboard over the APPROVED roster_days
+   *  schedule: shrinkage, shift-rate distribution, OFF%, leave%, weekend-OFF%,
+   *  hourly headcount, permission hours — by function/team/period. This is the
+   *  authoritative foundation everything builds on once the schedule is uploaded.
+   *  ══════════════════════════════════════════════════════════════════════════ */
+  private parsePermMin(d: any): number {
+    if (d == null) return 0; const s = String(d).trim(); let m;
+    // dominant format: a TIME WINDOW like "02:00 PM-04:00 PM" → duration = end − start (cross-midnight aware)
+    if ((m = s.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?\s*(?:-|–|—|to)\s*(\d{1,2}):(\d{2})\s*(AM|PM)?/i))) {
+      const to24 = (h: string, mn: string, ap?: string) => { let hh = (+h) % 12; if (ap && /pm/i.test(ap)) hh += 12; return hh * 60 + (+mn); };
+      let dur = to24(m[4], m[5], m[6]) - to24(m[1], m[2], m[3]); if (dur <= 0) dur += 1440;
+      return dur > 0 && dur <= 1440 ? dur : 0;
+    }
+    if ((m = s.match(/(\d+(?:\.\d+)?)\s*h/i))) return Math.round(parseFloat(m[1]) * 60);
+    if ((m = s.match(/(\d+)\s*m/i))) return +m[1];
+    if ((m = s.match(/^(\d+(?:\.\d+)?)$/))) { const n = parseFloat(m[1]); return n <= 12 ? Math.round(n * 60) : Math.round(n); }
+    return 0;
+  }
+
+  @Get('roster-v2/schedule-analysis')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Consolidated schedule analysis — shrinkage, shift-rate, OFF/leave/weekend-OFF %, hourly HC, permission hours' })
+  async scheduleAnalysis(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('function') fn?: string, @Query('teamLeader') tl?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
+    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (tl) { p.push(tl); w += ` AND team_manager=$${p.length}`; }
+
+    const [s] = await this.ds.query(`
+      SELECT COUNT(*)::int scheduled,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             COUNT(*) FILTER (WHERE presence='office')::int office,
+             COUNT(*) FILTER (WHERE presence='wfh')::int wfh,
+             COUNT(*) FILTER (WHERE presence='off')::int "off",
+             COUNT(*) FILTER (WHERE presence='leave')::int "leave",
+             COUNT(*) FILTER (WHERE presence='sick')::int sick,
+             COUNT(*) FILTER (WHERE presence='absent')::int absent,
+             COUNT(*) FILTER (WHERE presence='holiday')::int holiday,
+             COUNT(*) FILTER (WHERE EXTRACT(DOW FROM work_date) IN (5,6))::int weekend,
+             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (5,6))::int "weekendOff",
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+             COUNT(DISTINCT person_no)::int people, COUNT(DISTINCT work_date)::int days
+        FROM roster_days WHERE ${w}`, p);
+    const cats = await this.ds.query(`SELECT ${this.SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days WHERE ${w} AND presence IN ('office','wfh') GROUP BY 1`, p);
+    const shiftRate: Record<string, number> = { Morning: 0, Night: 0, Evening: 0, Midnight: 0, Other: 0 };
+    for (const c of cats) shiftRate[c.cat] = c.n;
+    const byFn = await this.ds.query(`
+      SELECT role_function fn, COUNT(*)::int scheduled,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             COUNT(*) FILTER (WHERE presence='off')::int "off",
+             COUNT(*) FILTER (WHERE presence IN ('leave','sick','absent','holiday'))::int lost,
+             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (5,6))::int "weekendOff",
+             COUNT(DISTINCT person_no)::int people
+        FROM roster_days WHERE ${w} GROUP BY role_function ORDER BY scheduled DESC`, p);
+    const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);
+    const fnOpts = await this.ds.query(`SELECT DISTINCT role_function v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]);
+
+    // hourly scheduled headcount (avg concurrent by clock-hour, cross-midnight aware)
+    const shifts = await this.ds.query(`SELECT shift_start_min ss, shift_end_min se FROM roster_days WHERE ${w} AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL AND shift_end_min IS NOT NULL`, p);
+    const mins = new Array(24).fill(0);
+    for (const sh of shifts) { for (let m = Number(sh.ss); m < Number(sh.se); m += 30) { mins[Math.floor((((m % 1440) + 1440) % 1440)) / 60 | 0] += 30; } }
+    const days = s.days || 1;
+    const hourly = mins.map((pm, h) => ({ hour: h, avgHC: Math.round(pm / 60 / days * 10) / 10 }));
+
+    // permission hours (parse the TEXT duration)
+    const perms = await this.ds.query(`SELECT permission_duration d FROM roster_days WHERE ${w} AND permission_type IS NOT NULL AND permission_duration IS NOT NULL`, p);
+    const permMin = perms.reduce((a: number, r: any) => a + this.parsePermMin(r.d), 0);
+
+    // rates + shrinkage
+    const HRS = 8; // net hours/day basis for shrinkage
+    const schedulable = s.worked + s.leave + s.sick + s.absent + s.holiday; // = scheduled − off
+    const lostHrs = (s.leave + s.sick + s.absent + s.holiday) * HRS + permMin / 60;
+    const schedulableHrs = schedulable * HRS;
+    const pct = (n: number, d: number) => d > 0 ? Math.round(1000 * n / d) / 10 : 0;
+    return {
+      from: dFrom, to: dTo, function: fn || null, teamLeader: tl || null,
+      summary: {
+        people: s.people, days: s.days, scheduled: s.scheduled, worked: s.worked, office: s.office, wfh: s.wfh,
+        off: s.off, leave: s.leave, sick: s.sick, absent: s.absent, holiday: s.holiday,
+        offPct: pct(s.off, s.scheduled), leavePct: pct(s.leave, s.scheduled), sickPct: pct(s.sick, s.scheduled),
+        absentPct: pct(s.absent, s.scheduled), wfhPct: pct(s.wfh, s.worked),
+        weekendOffPct: pct(s.weekendOff, s.off), weekendOff: s.weekendOff, weekend: s.weekend,
+        shrinkagePct: pct(lostHrs, schedulableHrs), lostHrs: Math.round(lostHrs), schedulableHrs: Math.round(schedulableHrs),
+        permissions: s.permissions, permissionHrs: Math.round(permMin / 60 * 10) / 10,
+      },
+      shiftRate, shiftRatePct: Object.fromEntries(Object.entries(shiftRate).map(([k, v]) => [k, pct(v as number, s.worked)])),
+      byFunction: byFn.map((r: any) => ({ ...r, workedPct: pct(r.worked, r.scheduled), offPct: pct(r.off, r.scheduled), lostPct: pct(r.lost, r.scheduled) })),
+      hourly,
+      filterOptions: { functions: fnOpts.map((r: any) => r.v), teamLeaders: tlOpts.map((r: any) => r.v) },
+    };
+  }
+
   /** Interval Headcount — half-hourly staffing curve for a date, by function, over
    *  the clean roster_days. Cross-midnight aware: an MD/MN shift staffs the late
    *  hours of its own date AND the early hours of the next date; the previous day's

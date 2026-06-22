@@ -20,6 +20,7 @@ import RosterPage              from '@/pages/Roster';
 import RosterDashboardPage     from '@/pages/RosterDashboard';
 import ReportBuilderPage       from '@/pages/ReportBuilder';
 import WfhHrReportPage          from '@/pages/WfhHrReport';
+import ScheduleAnalysisPage     from '@/pages/ScheduleAnalysis';
 import DataQualityPage         from '@/pages/DataQuality';
 import DashboardBuilderPage    from '@/pages/DashboardBuilder';
 import ScheduleChangeLogPage   from '@/pages/ScheduleChangeLog';
@@ -126,6 +127,7 @@ export default function App() {
           <Route path="report-builder" element={<ReportBuilderPage />} />
           <Route path="data-quality" element={<DataQualityPage />} />
           <Route path="wfh-hr-report" element={<WfhHrReportPage />} />
+          <Route path="schedule-analysis" element={<ScheduleAnalysisPage />} />
           <Route path="dashboard-builder" element={<DashboardBuilderPage />} />
           <Route path="schedule-change-log" element={<ScheduleChangeLogPage />} />
           <Route path="interval-headcount" element={<IntervalHeadcountPage />} />
