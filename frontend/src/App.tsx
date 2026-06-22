@@ -24,6 +24,7 @@ import DashboardBuilderPage    from '@/pages/DashboardBuilder';
 import ScheduleChangeLogPage   from '@/pages/ScheduleChangeLog';
 import IntervalHeadcountPage    from '@/pages/IntervalHeadcount';
 import Agent360Page             from '@/pages/Agent360';
+import WfmOverviewPage          from '@/pages/WfmOverview';
 import SettingsPage            from '@/pages/Settings';
 import CalendarPage            from '@/pages/Calendar';
 import SkillsPage              from '@/pages/Skills';
@@ -122,6 +123,7 @@ export default function App() {
           <Route path="schedule-change-log" element={<ScheduleChangeLogPage />} />
           <Route path="interval-headcount" element={<IntervalHeadcountPage />} />
           <Route path="agent-360" element={<Agent360Page />} />
+          <Route path="wfm-overview" element={<WfmOverviewPage />} />
           <Route path="campaigns" element={<Navigate to="/schedule?tab=campaigns" replace />} />
           <Route path="attendance-corrections" element={<Navigate to="/attendance?tab=corrections" replace />} />
           <Route path="schedule-changes" element={<Navigate to="/schedule?tab=changes" replace />} />

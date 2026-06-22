@@ -110,6 +110,7 @@ export default function RosterPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => nav('/wfm-overview')} className={btn('text-white')} style={{ background:'linear-gradient(135deg,rgba(99,102,241,0.3),rgba(6,182,212,0.3))', color:'#c7d2fe' }}><LayoutDashboard size={13} />{ar?'النظرة التنفيذية':'Overview'}</button>
           <button onClick={() => nav('/roster-dashboard')} className={btn('text-white')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><BarChart3 size={13} />{ar?'لوحة':'Dashboard'}</button>
           <button onClick={() => nav('/dashboard-builder')} className={btn('')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><LayoutDashboard size={13} />{ar?'باني الداشبورد':'Dashboard Builder'}</button>
           <button onClick={() => nav('/report-builder')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><Wrench size={13} />{ar?'منشئ التقارير':'Report Builder'}</button>
