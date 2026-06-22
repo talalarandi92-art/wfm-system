@@ -1,12 +1,58 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileSpreadsheet, Table2, LayoutList, Play, CalendarDays, Search, Wrench } from 'lucide-react';
+import { ArrowLeft, FileSpreadsheet, Table2, LayoutList, Play, CalendarDays, Search, Wrench, Zap } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 
 type Cat = { key: string; label: string };
 const DEFAULT_FIELDS = ['date','agent','function','teamLeader','shiftCode','sysLogin','sysLogout','lateMin','otBefore','otAfter','attendanceStatus'];
 const DEFAULT_KPIS = ['scheduledDays','workedDays','sickDays','absenceDays','lateMin','otMin','conformance'];
+
+// The 36 spec reports as one-click presets. Each sets mode + fields/KPIs + groupBy + filters.
+type Preset = { id:string; ar:string; en:string; grp:string; mode:'detail'|'summary'; fields?:string[]; kpis?:string[]; groupBy?:string; filters?:Record<string,string> };
+const PRESETS: Preset[] = [
+  // Attendance
+  { id:'att-d', ar:'الحضور — يومي', en:'Attendance — Daily', grp:'Attendance', mode:'detail', fields:['date','agent','function','teamLeader','shiftCode','attendanceStatus','sysLogin','sysLogout','lateMin','otAfter','conformance'] },
+  { id:'att-w', ar:'الحضور — أسبوعي', en:'Attendance — Weekly', grp:'Attendance', mode:'summary', groupBy:'week', kpis:['scheduledDays','workedDays','sickDays','absenceDays','lateDays','conformance'] },
+  { id:'att-m', ar:'الحضور — شهري', en:'Attendance — Monthly', grp:'Attendance', mode:'summary', groupBy:'month', kpis:['scheduledDays','workedDays','sickDays','absenceDays','lateDays','conformance'] },
+  // Tardiness
+  { id:'tar-d', ar:'التأخير — يومي', en:'Tardiness — Daily', grp:'Tardiness', mode:'summary', groupBy:'date', kpis:['lateDays','lateMin','avgLate','earlyMin'], filters:{ onlyTardiness:'1' } },
+  { id:'tar-w', ar:'التأخير — أسبوعي', en:'Tardiness — Weekly', grp:'Tardiness', mode:'summary', groupBy:'week', kpis:['lateDays','lateMin','avgLate','earlyMin'], filters:{ onlyTardiness:'1' } },
+  { id:'tar-m', ar:'التأخير — شهري', en:'Tardiness — Monthly', grp:'Tardiness', mode:'summary', groupBy:'month', kpis:['lateDays','lateMin','avgLate','earlyMin'], filters:{ onlyTardiness:'1' } },
+  { id:'tar-band', ar:'التأخير — حسب الفئة', en:'Tardiness — by Band', grp:'Tardiness', mode:'summary', groupBy:'lateCategory', kpis:['scheduledDays','agents'], filters:{ onlyTardiness:'1' } },
+  // Overtime
+  { id:'ot-d', ar:'OT — يومي', en:'Overtime — Daily', grp:'Overtime', mode:'summary', groupBy:'date', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
+  { id:'ot-w', ar:'OT — أسبوعي', en:'Overtime — Weekly', grp:'Overtime', mode:'summary', groupBy:'week', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
+  { id:'ot-m', ar:'OT — شهري', en:'Overtime — Monthly', grp:'Overtime', mode:'summary', groupBy:'month', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
+  { id:'ot-shift', ar:'OT — حسب الشفت', en:'Overtime — by Shift', grp:'Overtime', mode:'summary', groupBy:'shift', kpis:['otMin','otBefore','otAfter'] },
+  { id:'ot-agent', ar:'OT — حسب الموظف', en:'Overtime — by Agent', grp:'Overtime', mode:'summary', groupBy:'agent', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
+  { id:'ot-fn', ar:'OT — حسب الفنكشن', en:'Overtime — by Function', grp:'Overtime', mode:'summary', groupBy:'function', kpis:['otMin','otBefore','otAfter'] },
+  { id:'ot-tl', ar:'OT — حسب التيم ليدر', en:'Overtime — by Team Leader', grp:'Overtime', mode:'summary', groupBy:'teamLeader', kpis:['otMin','otBefore','otAfter'] },
+  { id:'ot-grp', ar:'OT — حسب الجروب', en:'Overtime — by Group', grp:'Overtime', mode:'summary', groupBy:'group', kpis:['otMin','otBefore','otAfter'] },
+  // HR Matrix
+  { id:'hr-d', ar:'HR Matrix — يومي', en:'HR Matrix — Daily', grp:'HR Matrix', mode:'summary', groupBy:'date', kpis:['workedDays','sickDays','absenceDays','leaveDays','offDays'] },
+  { id:'hr-w', ar:'HR Matrix — أسبوعي', en:'HR Matrix — Weekly', grp:'HR Matrix', mode:'summary', groupBy:'week', kpis:['workedDays','sickDays','absenceDays','leaveDays','offDays'] },
+  { id:'hr-m', ar:'HR Matrix — شهري', en:'HR Matrix — Monthly', grp:'HR Matrix', mode:'summary', groupBy:'month', kpis:['workedDays','sickDays','absenceDays','leaveDays','offDays'] },
+  { id:'hr-agent', ar:'HR Matrix — حسب الموظف', en:'HR Matrix — by Agent', grp:'HR Matrix', mode:'summary', groupBy:'agent', kpis:['workedDays','sickDays','absenceDays','lateMin','conformance'] },
+  { id:'hr-fn', ar:'HR Matrix — حسب الفنكشن', en:'HR Matrix — by Function', grp:'HR Matrix', mode:'summary', groupBy:'function', kpis:['workedDays','sickDays','absenceDays','conformance'] },
+  { id:'hr-tl', ar:'HR Matrix — حسب التيم ليدر', en:'HR Matrix — by Team Leader', grp:'HR Matrix', mode:'summary', groupBy:'teamLeader', kpis:['workedDays','sickDays','absenceDays','conformance'] },
+  { id:'hr-grp', ar:'HR Matrix — حسب الجروب', en:'HR Matrix — by Group', grp:'HR Matrix', mode:'summary', groupBy:'group', kpis:['workedDays','sickDays','absenceDays','conformance'] },
+  // Leave / WFH / permission / comp
+  { id:'sick', ar:'الإجازات المرضية', en:'Sick Leave', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','teamLeader','originalShift','attendanceStatus'], filters:{ sick:'1' } },
+  { id:'absence', ar:'الغياب', en:'Absence', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','teamLeader','originalShift','attendanceStatus'], filters:{ absent:'1' } },
+  { id:'wfh', ar:'العمل من المنزل', en:'WFH', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','shiftCode','sysLogin','sysLogout','conformance'], filters:{ wfh:'1' } },
+  { id:'perm', ar:'الاستئذانات', en:'Permissions', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','permission','permissionDuration','shiftCode'], filters:{ permission:'1' } },
+  { id:'comp', ar:'أيام COMP', en:'COMP', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','shiftCode','attendanceStatus'], filters:{ comp:'1' } },
+  // Shift distribution
+  { id:'shiftdist', ar:'توزيع الشفتات', en:'Shift Distribution', grp:'Shift', mode:'summary', groupBy:'shift', kpis:['scheduledDays','agents','workedDays'] },
+  { id:'shiftrate', ar:'توزيع الشفتات حسب الموظف', en:'Shift Distribution by Agent', grp:'Shift', mode:'summary', groupBy:'agent', kpis:['scheduledDays','workedDays','otMin','conformance'] },
+  // Conformance
+  { id:'conf-fn', ar:'الكونفورمانس حسب الفنكشن', en:'Conformance by Function', grp:'Conformance', mode:'summary', groupBy:'function', kpis:['conformance','workedDays','lateMin','missingSystem'] },
+  { id:'conf-tl', ar:'الكونفورمانس حسب التيم ليدر', en:'Conformance by Team Leader', grp:'Conformance', mode:'summary', groupBy:'teamLeader', kpis:['conformance','workedDays','lateMin','mismatch'] },
+  // Data quality
+  { id:'dq', ar:'تقرير جودة البيانات', en:'Data Quality', grp:'Quality', mode:'detail', fields:['date','agent','function','shiftCode','attendanceStatus','dataQuality'] },
+  { id:'misspunch', ar:'بصمة ناقصة', en:'Missing Punch', grp:'Quality', mode:'detail', fields:['date','agent','function','shiftCode','sysLogin','sysLogout'], filters:{ dataQuality:'missing-punch' } },
+];
 
 export default function ReportBuilderPage() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
@@ -42,6 +88,14 @@ export default function ReportBuilderPage() {
   };
   const toggle = (arr:string[], setArr:(v:string[])=>void, k:string) => setArr(arr.includes(k)?arr.filter(x=>x!==k):[...arr,k]);
   const setFilt = (k:string,v:string) => setFilters(p=>({ ...p, [k]:v }));
+  const applyPreset = (p:Preset) => {
+    setMode(p.mode);
+    if (p.fields) setFields(p.fields);
+    if (p.groupBy) setGroupBy(p.groupBy);
+    if (p.kpis) setKpis(p.kpis);
+    setFilters({ search:'', ...(p.filters||{}) });   // clean slate + preset filters (triggers the debounced run)
+  };
+  const PRESET_GROUPS = [...new Set(PRESETS.map(p=>p.grp))];
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
 
   const FILTERS: [string,string,string][] = [['function',ar?'الفنكشن':'Function','function_name'],['teamLeader',ar?'التيم ليدر':'Team leader','team_manager'],['group',ar?'الجروب':'Group','team_group'],['shift',ar?'الشفت':'Shift','shift_code'],['attendanceStatus',ar?'الحالة':'Status','attendance_status'],['lateCategory',ar?'فئة التأخير':'Late cat','late_category']];
@@ -54,6 +108,20 @@ export default function ReportBuilderPage() {
         <div className="flex-1"><h1 className="text-lg font-bold text-white">{ar?'منشئ التقارير المخصّصة':'Custom Report Builder'}</h1>
           <p className="text-xs text-slate-500">{ar?'اختر الأعمدة أو الـKPIs، فلتر، جمّع، وصدّر Excel':'Pick fields or KPIs, filter, group, export Excel'}</p></div>
         <button onClick={exportXlsx} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}><FileSpreadsheet size={14}/>{ar?'تصدير Excel':'Export Excel'}</button>
+      </div>
+
+      {/* quick reports — the 36 spec reports as one-click presets */}
+      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.18)' }}>
+        <span className="text-[11px] text-indigo-300 font-bold flex items-center gap-1"><Zap size={13}/>{ar?'تقارير جاهزة':'Quick reports'}</span>
+        <select onChange={e=>{ const p=PRESETS.find(x=>x.id===e.target.value); if(p) applyPreset(p); e.target.value=''; }} defaultValue="" className={`${inputCls} min-w-[220px]`}>
+          <option value="">{ar?`اختر من ${PRESETS.length} تقريراً جاهزاً…`:`Pick from ${PRESETS.length} ready reports…`}</option>
+          {PRESET_GROUPS.map(g=>(
+            <optgroup key={g} label={g}>
+              {PRESETS.filter(p=>p.grp===g).map(p=><option key={p.id} value={p.id}>{ar?p.ar:p.en}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        <span className="text-[10px] text-slate-500">{ar?'يضبط الأعمدة/الـKPIs/الفلاتر تلقائياً — عدّل بعدها كما تحب':'sets fields/KPIs/filters automatically — tweak afterwards'}</span>
       </div>
 
       {/* mode + filters */}
