@@ -630,6 +630,47 @@ export class ReconController {
     return { from: dFrom, to: dTo, employee: emp, summary, tardinessBands, shiftRate, byMonth, recent };
   }
 
+  /** Attendance & Adherence Score — a transparent composite (0-100, grade A-D) per
+   *  agent from conformance + absence + tardiness. NOT the official performance
+   *  scorecard (which uses AHT/quality/quiz) — this is attendance/adherence only.
+   *  Default: tardiness-eligible roles with >=5 worked days. */
+  @Get('roster-v2/agent-scores')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Composite attendance/adherence score + grade per agent (ranked leaderboard)' })
+  async agentScores(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('includeExcludedRoles') incRoles?: string, @Query('person') person?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
+    if (incRoles !== '1') w += ` AND include_tardiness`;
+    if (person) { p.push(person); w += ` AND person_no=$${p.length}`; }
+    const rows = await this.ds.query(
+      `SELECT person_no, mode() WITHIN GROUP (ORDER BY clean_name) name, mode() WITHIN GROUP (ORDER BY role_function) fn,
+              mode() WITHIN GROUP (ORDER BY role_category) role, mode() WITHIN GROUP (ORDER BY team_manager) tl,
+              COUNT(*) FILTER (WHERE presence IN ('office','wfh')) worked,
+              COUNT(*) FILTER (WHERE presence='absent') absent, COUNT(*) FILTER (WHERE presence='sick') sick,
+              COUNT(*) FILTER (WHERE sys_late_min>0) latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
+              COUNT(*) FILTER (WHERE missing_system) misssys, ROUND(AVG(adherence_pct),1) conf, COALESCE(SUM(ot_min),0)::int otmin
+         FROM roster_days r WHERE ${w} AND person_no IS NOT NULL
+         GROUP BY person_no HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh'))>=5`, p);
+    const clamp = (v: number) => Math.max(0, Math.min(100, v));
+    const scored = rows.map((r: any) => {
+      const worked = r.worked, scheduled = worked + r.absent + r.sick;
+      const conf = r.conf == null ? 0 : Number(r.conf);
+      const attend = clamp(100 - (scheduled ? (r.absent / scheduled) * 100 : 0));      // absence reliability
+      const punct = clamp(100 - (worked ? (r.latedays / worked) * 100 : 0));            // punctuality
+      const score = Math.round(0.55 * conf + 0.30 * attend + 0.15 * punct);
+      const grade = score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 55 ? 'C' : 'D';
+      return { person_no: r.person_no, name: r.name, fn: r.fn, role: r.role, tl: r.tl, worked, absent: r.absent, sick: r.sick,
+               lateDays: r.latedays, lateMin: r.latemin, missSys: r.misssys, otMin: r.otmin, conf, attend, punct, score, grade };
+    }).sort((a: any, b: any) => b.score - a.score).map((r: any, i: number) => ({ rank: i + 1, ...r }));
+    const dist = { A: 0, B: 0, C: 0, D: 0 } as Record<string, number>; for (const r of scored) dist[r.grade]++;
+    const avg = scored.length ? Math.round(scored.reduce((a: number, r: any) => a + r.score, 0) / scored.length) : 0;
+    return { from: dFrom, to: dTo, count: scored.length, average: avg, distribution: dist,
+             formula: 'score = 0.55×conformance + 0.30×attendance(absence) + 0.15×punctuality(lateness); grades A≥85 B≥70 C≥55 D<55',
+             agents: person ? scored : scored.slice(0, 200) };
+  }
+
   /** WFM Insights — auto-prioritized, actionable findings over the clean roster_days:
    *  coaching candidates (low conformance), tardiness/absence outliers, coverage-risk
    *  functions, OT concentration, conformance trend vs the previous period, and data

@@ -9,6 +9,7 @@ import { useUiStore } from '@/store/ui.store';
 
 const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
+const scoreColor = (v:number)=> v>=85?'#22c55e':v>=70?'#06b6d4':v>=55?'#f59e0b':'#f43f5e';
 const BAND_ORDER = ['On time','Late 1-5','Late 6-15','Late 16-20','Late 21-29','Late 30-59','Late 60+','No show'];
 const BAND_COLOR: Record<string,string> = { 'On time':'#22c55e','Late 1-5':'#84cc16','Late 6-15':'#f59e0b','Late 16-20':'#f97316','Late 21-29':'#ef4444','Late 30-59':'#dc2626','Late 60+':'#991b1b','No show':'#7f1d1d' };
 const CAT_COLOR: Record<string,string> = { Morning:'#22c55e', Night:'#06b6d4', Evening:'#f59e0b', Midnight:'#8b5cf6' };
@@ -22,6 +23,7 @@ export default function Agent360Page() {
   const [q, setQ] = useState(''); const [open, setOpen] = useState(false);
   const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(false); const [err, setErr] = useState('');
+  const [score, setScore] = useState<any>(null);
   // compare-with (second agent)
   const [person2, setPerson2] = useState(''); const [q2, setQ2] = useState(''); const [open2, setOpen2] = useState(false); const [d2, setD2] = useState<any>(null);
 
@@ -33,6 +35,8 @@ export default function Agent360Page() {
     apiClient.get(`/attendance-recon/roster-v2/agent-360?${qp}`)
       .then((r:any)=>{ setD(r.data); if(!from) setFrom(r.data.from); if(!to) setTo(r.data.to); })
       .catch((e:any)=>{ setD(null); setErr(e?.response?.data?.message||'Failed'); }).finally(()=>setLoading(false));
+    const sq = new URLSearchParams({ person, includeExcludedRoles:'1' }); if (from) sq.set('from',from); if (to) sq.set('to',to);
+    apiClient.get(`/attendance-recon/roster-v2/agent-scores?${sq}`).then((r:any)=>setScore(r.data.agents?.[0]||null)).catch(()=>setScore(null));
   }, [person, from, to]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
 
@@ -143,6 +147,13 @@ export default function Agent360Page() {
             <div key={i}><p className="text-[9px] text-slate-500 uppercase font-semibold">{l}</p><p className="text-xs text-slate-200">{v||'—'}</p></div>
           ))}
           {!e.include_tardiness && <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background:'rgba(245,158,11,0.18)', color:'#fbbf24' }}>{ar?'مستثنى من حساب التأخير (8 ساعات)':'excluded from tardiness KPI (8h)'}</span>}
+          {score && (
+            <button onClick={()=>nav('/agent-scores')} className="ms-auto flex items-center gap-2 px-3 py-1.5 rounded-xl" style={{ background:`${scoreColor(score.score)}18`, border:`1px solid ${scoreColor(score.score)}40` }} title={ar?'سكور الحضور والالتزام':'Attendance & adherence score'}>
+              <div className="text-end"><p className="text-[8px] text-slate-400 uppercase font-semibold">{ar?'سكور الالتزام':'Adherence'}</p>
+                <p className="text-lg font-bold leading-none" style={{ color:scoreColor(score.score) }}>{score.score}<span className="text-[10px] text-slate-500">/100</span></p></div>
+              <span className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold" style={{ background:`${scoreColor(score.score)}22`, color:scoreColor(score.score) }}>{score.grade}</span>
+            </button>
+          )}
         </div>
 
         {/* side-by-side comparison with a second agent */}

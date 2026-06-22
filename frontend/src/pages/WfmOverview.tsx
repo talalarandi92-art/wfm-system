@@ -53,6 +53,7 @@ export default function WfmOverviewPage() {
     { ic:BarChart4, ar:'الهيدكاونت بالفترات', en:'Interval Headcount', to:'/interval-headcount', c:'#06b6d4' },
     { ic:UserSearch, ar:'ملف الموظف 360', en:'Agent 360', to:'/agent-360', c:'#c4b5fd' },
     { ic:Users, ar:'ملف الفريق 360', en:'Team 360', to:'/team-360', c:'#67e8f9' },
+    { ic:Award, ar:'لوحة الترتيب', en:'Leaderboard', to:'/agent-scores', c:'#fbbf24' },
     { ic:GitCompareArrows, ar:'سجل تغييرات الجدول', en:'Change Log', to:'/schedule-change-log', c:'#818cf8' },
     { ic:ShieldCheck, ar:'جودة البيانات', en:'Data Quality', to:'/data-quality', c:'#fbbf24' },
     { ic:ClipboardCheck, ar:'تدقيق النظام', en:'System Audit', to:'/system-audit', c:'#94a3b8' },
