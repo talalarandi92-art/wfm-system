@@ -975,7 +975,11 @@ export class ReconController {
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf,
              COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
-             COALESCE(SUM(ot_min),0)::int otmin, COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick
+             COUNT(*) FILTER (WHERE sys_early_min>0)::int earlydays, COALESCE(SUM(sys_early_min),0)::int earlymin,
+             COALESCE(SUM(ot_min),0)::int otmin,
+             COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
+             COUNT(*) FILTER (WHERE missing_punch)::int missingpunch, COUNT(*) FILTER (WHERE missing_system)::int missingsystem,
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions
         FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4
         GROUP BY 1,2 ORDER BY 1,2`, [t, person, dFrom, dTo]);
     const netM = await this.ds.query(`
@@ -985,13 +989,14 @@ export class ReconController {
         GROUP BY year,month`, [t, idList, dFrom, dTo]);
     const netMap = new Map(netM.map((r: any) => [`${r.yr}-${r.mo}`, Number(r.net)]));
     const months = rosterM.map((r: any) => ({ yr: r.yr, mo: r.mo, label: `${r.month_name || r.mo} ${String(r.yr).slice(2)}`,
-      worked: r.worked, conf: r.conf == null ? null : Number(r.conf), lateDays: r.latedays, lateMin: r.latemin, otMin: r.otmin,
-      absent: r.absent, sick: r.sick, net: netMap.has(`${r.yr}-${r.mo}`) ? netMap.get(`${r.yr}-${r.mo}`) : null }));
-    // deltas vs previous month
+      worked: r.worked, conf: r.conf == null ? null : Number(r.conf), lateDays: r.latedays, lateMin: r.latemin,
+      earlyDays: r.earlydays, earlyMin: r.earlymin, otMin: r.otmin, absent: r.absent, sick: r.sick,
+      missingPunch: r.missingpunch, missingSystem: r.missingsystem, permissions: r.permissions,
+      net: netMap.has(`${r.yr}-${r.mo}`) ? netMap.get(`${r.yr}-${r.mo}`) : null }));
+    // deltas vs previous month — every customizable metric, so the UI can pick any column
+    const DKEYS = ['conf', 'net', 'worked', 'lateDays', 'lateMin', 'earlyDays', 'earlyMin', 'otMin', 'absent', 'sick', 'missingPunch', 'missingSystem', 'permissions'];
     months.forEach((m: any, i: number) => { const p: any = i > 0 ? months[i - 1] : null;
-      m.d = p ? { conf: m.conf != null && p.conf != null ? Math.round((m.conf - p.conf) * 10) / 10 : null,
-        net: m.net != null && p.net != null ? Math.round((m.net - p.net) * 10) / 10 : null,
-        lateDays: m.lateDays - p.lateDays, absent: m.absent - p.absent, otMin: m.otMin - p.otMin } : null; });
+      m.d = p ? Object.fromEntries(DKEYS.map((k) => [k, m[k] != null && p[k] != null ? Math.round((m[k] - p[k]) * 10) / 10 : null])) : null; });
     // verdict: first vs last non-null
     const firstLast = (key: string) => { const vals = months.filter((m: any) => m[key] != null); return vals.length >= 2 ? { first: vals[0][key], last: vals[vals.length - 1][key], change: Math.round((vals[vals.length - 1][key] - vals[0][key]) * 10) / 10 } : null; };
     const confV = firstLast('conf'), netV = firstLast('net');

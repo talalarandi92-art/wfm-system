@@ -520,3 +520,75 @@
 .dot-loader span:nth-child(1) { animation-delay:0s; }
 .dot-loader span:nth-child(2) { animation-delay:.16s; }
 .dot-loader span:nth-child(3) { animation-delay:.32s; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LIVING BACKGROUND — layered drifting auroras + faint grid + floating motes.
+   Fixed, behind everything, zero interaction, GPU transforms only, frozen under
+   prefers-reduced-motion (handled by the global rule above). Rendered by
+   <LivingBackground/> in AppLayout so every page breathes the same canvas.
+   ════════════════════════════════════════════════════════════════════════════ */
+.living-bg { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.living-bg .aurora {
+  position: absolute; border-radius: 50%; filter: blur(90px);
+  mix-blend-mode: screen; will-change: transform; opacity: .30;
+}
+.dark .living-bg .aurora { opacity: .42; }
+.living-bg .a1 { width: 46vw; height: 46vw; left: -8vw;  top: -12vh;     background: radial-gradient(circle, #6366f1, transparent 70%); animation: aur1 30s ease-in-out infinite alternate; }
+.living-bg .a2 { width: 40vw; height: 40vw; right: -6vw; top:  8vh;      background: radial-gradient(circle, #06b6d4, transparent 70%); animation: aur2 36s ease-in-out infinite alternate; }
+.living-bg .a3 { width: 38vw; height: 38vw; left: 26vw;  bottom: -16vh;  background: radial-gradient(circle, #8b5cf6, transparent 70%); animation: aur3 42s ease-in-out infinite alternate; }
+.living-bg .a4 { width: 30vw; height: 30vw; right: 16vw; bottom: -10vh;  background: radial-gradient(circle, #10b981, transparent 70%); animation: aur1 48s ease-in-out infinite alternate-reverse; opacity: .22; }
+.dark .living-bg .a4 { opacity: .30; }
+@keyframes aur1 { 0%{transform:translate3d(0,0,0) scale(1)}   100%{transform:translate3d(8vw,6vh,0)  scale(1.18)} }
+@keyframes aur2 { 0%{transform:translate3d(0,0,0) scale(1)}   100%{transform:translate3d(-7vw,7vh,0) scale(1.12)} }
+@keyframes aur3 { 0%{transform:translate3d(0,0,0) scale(1)}   100%{transform:translate3d(5vw,-7vh,0) scale(1.14)} }
+
+.living-bg .gridlines {
+  position: absolute; inset: 0; opacity: .55;
+  background-image: linear-gradient(rgba(148,163,184,.05) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(148,163,184,.05) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(ellipse 78% 62% at 50% 38%, #000 28%, transparent 76%);
+          mask-image: radial-gradient(ellipse 78% 62% at 50% 38%, #000 28%, transparent 76%);
+}
+.dark .living-bg .gridlines {
+  background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+}
+
+.living-bg .mote { position: absolute; bottom: -6vh; border-radius: 50%; will-change: transform, opacity; }
+@keyframes moteRise {
+  0%   { transform: translate3d(0,0,0);            opacity: 0; }
+  12%  { opacity: .8; }
+  88%  { opacity: .8; }
+  100% { transform: translate3d(14px,-112vh,0);    opacity: 0; }
+}
+
+/* ── Premium effect utilities (opt-in per surface) ─────────────────────────── */
+/* Animated gradient ring (mask trick) — for hero/verdict panels */
+.glow-border-soft { position: relative; }
+.glow-border-soft::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+  background: linear-gradient(120deg, rgba(99,102,241,.55), rgba(6,182,212,.4), rgba(139,92,246,.55), rgba(16,185,129,.35));
+  background-size: 250% 250%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: gradMove 9s ease infinite; opacity: .55;
+}
+
+/* Light sheen sweep on hover */
+.sheen { position: relative; overflow: hidden; }
+.sheen::after {
+  content: ''; position: absolute; top: 0; inset-inline-start: -160%; width: 55%; height: 100%;
+  background: linear-gradient(105deg, transparent, rgba(255,255,255,.14), transparent);
+  transform: skewX(-18deg); pointer-events: none;
+}
+.sheen:hover::after { animation: sheenSweep .9s ease; }
+@keyframes sheenSweep { to { inset-inline-start: 165%; } }
+
+/* Lift + brand glow on hover (opt-in) */
+.lift { transition: transform .22s cubic-bezier(.34,1.56,.64,1), box-shadow .22s ease, border-color .2s ease; }
+.lift:hover { transform: translateY(-3px); box-shadow: 0 16px 40px -14px rgba(99,102,241,.45); }
+
+/* Number pop on mount */
+.num-pop { animation: countUp .55s cubic-bezier(.34,1.56,.64,1) both; }

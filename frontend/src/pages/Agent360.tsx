@@ -15,6 +15,23 @@ const BAND_COLOR: Record<string,string> = { 'On time':'#22c55e','Late 1-5':'#84c
 const CAT_COLOR: Record<string,string> = { Morning:'#22c55e', Night:'#06b6d4', Evening:'#f59e0b', Midnight:'#8b5cf6' };
 const tm = (m:number|null)=> m==null?'—':`${String(Math.floor((((m%1440)+1440)%1440)/60)).padStart(2,'0')}:${String(((m%60)+60)%60).padStart(2,'0')}`;
 
+// Customizable Progress-over-time columns. up: true=higher better, false=lower better, null=neutral (no green/red).
+const PROG_METRICS: { key:string; ar:string; en:string; unit:'pct'|'pts'|'count'|'min'; up:boolean|null }[] = [
+  { key:'conf',          ar:'الكونفورمانس',     en:'Conformance',     unit:'pct',   up:true  },
+  { key:'net',           ar:'Net Points',       en:'Net Points',      unit:'pts',   up:true  },
+  { key:'worked',        ar:'أيام العمل',        en:'Worked days',     unit:'count', up:null  },
+  { key:'lateDays',      ar:'أيام التأخير',      en:'Late days',       unit:'count', up:false },
+  { key:'lateMin',       ar:'دقائق التأخير',     en:'Late minutes',    unit:'min',   up:false },
+  { key:'earlyDays',     ar:'أيام خروج مبكر',    en:'Early-out days',  unit:'count', up:false },
+  { key:'earlyMin',      ar:'دقائق خروج مبكر',   en:'Early-out min',   unit:'min',   up:false },
+  { key:'otMin',         ar:'الأوفر تايم',       en:'Overtime',        unit:'min',   up:null  },
+  { key:'absent',        ar:'الغياب',            en:'Absence',         unit:'count', up:false },
+  { key:'sick',          ar:'المرض',             en:'Sick',            unit:'count', up:null  },
+  { key:'missingPunch',  ar:'بصمة ناقصة',        en:'Missing punch',   unit:'count', up:false },
+  { key:'missingSystem', ar:'سيستم ناقص',        en:'Missing system',  unit:'count', up:false },
+  { key:'permissions',   ar:'الاستئذانات',       en:'Permissions',     unit:'count', up:null  },
+];
+
 export default function Agent360Page() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
   const nav = useNavigate();
@@ -31,6 +48,8 @@ export default function Agent360Page() {
   // compare mode: another agent, or the SAME agent across a different period (self over time)
   const [cmpMode, setCmpMode] = useState<'agent'|'period'>('agent');
   const [pcFrom, setPcFrom] = useState(''); const [pcTo, setPcTo] = useState(''); const [pc, setPc] = useState<any>(null); const [pcLoading, setPcLoading] = useState(false);
+  // customizable Progress-over-time columns (user picks which metrics to track)
+  const [progCols, setProgCols] = useState<string[]>(['conf','net','lateDays','absent','otMin']);
 
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ setPeople(r.data.rows||[]); if(r.data.rows?.[0]) setPerson(r.data.rows[0].person_no); }).catch(()=>{}); }, []);
 
@@ -218,7 +237,7 @@ export default function Agent360Page() {
             const tl=(tr:string)=> tr==='improved'?(ar?'تحسّن':'better'):tr==='declined'?(ar?'تراجع':'worse'):tr==='context'?(ar?'للعلم':'info'):tr==='flat'?(ar?'ثابت':'same'):'—';
             const lowSample = pc.a.workedDays<5 || pc.b.workedDays<5;
             return (
-              <div className="rounded-2xl p-4 space-y-3" style={{ background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.18)' }}>
+              <div className="rounded-2xl p-4 space-y-3 glow-border-soft anim-fadeUp" style={{ background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.18)' }}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <GitCompareArrows size={15} className="text-indigo-300"/>
                   <h3 className="text-sm font-bold text-white">{ar?'مقارنة الموظف بنفسه عبر الزمن':'Self-comparison over time'}</h3>
@@ -316,12 +335,12 @@ export default function Agent360Page() {
         )}
 
         {/* KPI grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 stagger-grid">
           {kpis.map((x,i)=>(
-            <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
+            <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl lift sheen" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
               <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:`${x.c}22`, color:x.c }}><x.ic size={16}/></div>
               <div className="min-w-0"><p className="text-[9px] text-slate-500 uppercase font-semibold truncate">{x.l}</p>
-                <p className="text-lg font-bold text-white leading-tight">{typeof x.v==='number'?x.v.toLocaleString():x.v}</p>{x.sub&&<p className="text-[9px] text-slate-500 truncate">{x.sub}</p>}</div>
+                <p className="text-lg font-bold text-white leading-tight num-pop">{typeof x.v==='number'?x.v.toLocaleString():x.v}</p>{x.sub&&<p className="text-[9px] text-slate-500 truncate">{x.sub}</p>}</div>
             </div>
           ))}
         </div>
@@ -375,35 +394,56 @@ export default function Agent360Page() {
           </div>
         )}
 
-        {/* Progress over time — did this agent improve or decline? */}
+        {/* Progress over time — CUSTOMIZABLE: pick which metrics to track, ▲/▼ vs prior month */}
         {prog?.months?.length>1 && (() => {
           const v = prog.verdict; const OVC:Record<string,[string,string]> = { improving:['#22c55e', ar?'في تحسّن ↑':'Improving ↑'], declining:['#f43f5e', ar?'في تراجع ↓':'Declining ↓'], mixed:['#f59e0b', ar?'متفاوت':'Mixed'], stable:['#06b6d4', ar?'مستقر':'Stable'] };
           const [oc,ol] = OVC[v.overall]||OVC.stable;
-          const arrow = (dd:number|null, goodUp=true) => dd==null ? <span className="text-slate-600">·</span> : (()=>{ const good = goodUp ? dd>0 : dd<0; const c = dd===0?'#64748b':good?'#4ade80':'#f87171'; return <span style={{ color:c }}>{dd>0?'▲':dd<0?'▼':'•'} {Math.abs(dd)}</span>; })();
+          const cols = PROG_METRICS.filter(c=>progCols.includes(c.key));
+          const toggle = (k:string)=> setProgCols(p=> p.includes(k) ? p.filter(x=>x!==k) : [...p,k]);
+          const fmtV = (unit:string, val:any)=> val==null?'—' : unit==='min'?dur(val) : unit==='pct'?`${val}%` : `${val}`;
+          const valColor = (c:any, val:any)=> val==null?'#475569' : c.key==='conf'?adhC(val) : c.key==='net'?(val>=100?'#4ade80':val>=80?'#22d3ee':val>=60?'#fbbf24':'#f87171') : '#cbd5e1';
+          // Δ arrow: green/red by goodWhenUp; neutral (grey) for context metrics; carries the change magnitude
+          const arrow = (dd:number|null, unit:string, up:boolean|null) => { if (dd==null) return <span className="text-slate-600">·</span>;
+            if (dd===0) return <span className="text-slate-600">•0</span>;
+            const c = up===null ? '#94a3b8' : ((up?dd>0:dd<0) ? '#4ade80' : '#f87171');
+            const mag = unit==='min'?dur(Math.abs(dd)) : Math.abs(dd);
+            return <span style={{ color:c }}>{dd>0?'▲':'▼'} {mag}</span>; };
           return (
-            <div className="rounded-2xl p-4" style={{ background:`${oc}10`, border:`1px solid ${oc}33` }}>
-              <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <div className="rounded-2xl p-4 glow-border-soft" style={{ background:`${oc}10`, border:`1px solid ${oc}33` }}>
+              <div className="flex items-center gap-2 mb-2.5 flex-wrap">
                 <GitCompareArrows size={15} style={{ color:oc }}/><h3 className="text-sm font-bold text-white">{ar?'التحسّن عبر الزمن':'Progress over time'}</h3>
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background:`${oc}22`, color:oc }}>{ol}</span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold anim-scaleIn" style={{ background:`${oc}22`, color:oc }}>{ol}</span>
                 {v.conformance && <span className="text-[11px] text-slate-300">{ar?'الكونفورمانس':'Conformance'}: {v.conformance.first}% → {v.conformance.last}% <b style={{ color:v.conformance.change>=0?'#4ade80':'#f87171' }}>({v.conformance.change>=0?'+':''}{v.conformance.change})</b></span>}
                 {v.net && <span className="text-[11px] text-slate-300">Net: {v.net.first} → {v.net.last} <b style={{ color:v.net.change>=0?'#4ade80':'#f87171' }}>({v.net.change>=0?'+':''}{v.net.change})</b></span>}
               </div>
+              {/* metric picker — choose the columns you care about */}
+              <div className="flex items-center gap-1.5 flex-wrap mb-3 pb-3" style={{ borderBottom:'1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-[10px] text-slate-500 me-1">{ar?'الأعمدة:':'Columns:'}</span>
+                {PROG_METRICS.map(c=>{ const on=progCols.includes(c.key);
+                  return <button key={c.key} onClick={()=>toggle(c.key)} className="px-2 py-0.5 rounded-full text-[10px] font-medium transition-all duration-150"
+                    style={ on ? { background:'linear-gradient(135deg,#6366f1,#06b6d4)', color:'#fff', boxShadow:'0 2px 8px rgba(99,102,241,0.35)' } : { background:'rgba(255,255,255,0.05)', color:'#94a3b8', border:'1px solid rgba(255,255,255,0.08)' } }>
+                    {ar?c.ar:c.en}</button>; })}
+              </div>
+              {cols.length===0 ? <p className="text-[11px] text-slate-500 py-2 text-center">{ar?'اختر مؤشراً واحداً على الأقل':'Pick at least one metric'}</p> : (
               <div className="overflow-x-auto"><table className="w-full text-[11px]">
-                <thead><tr className="text-slate-500">{[ar?'الشهر':'Month',ar?'كونف%':'Conf%','Δ','Net','Δ',ar?'تأخير':'Late',ar?'غياب':'Abs','OT'].map((h,i)=><th key={i} className={`pb-1.5 font-semibold ${i===0?'text-start':'text-center'}`}>{h}</th>)}</tr></thead>
+                <thead><tr className="text-slate-500">
+                  <th className="pb-1.5 font-semibold text-start">{ar?'الشهر':'Month'}</th>
+                  {cols.map(c=><th key={c.key} className="pb-1.5 font-semibold text-center whitespace-nowrap">{ar?c.ar:c.en}</th>)}
+                </tr></thead>
                 <tbody>{prog.months.map((m:any,i:number)=>(
-                  <tr key={i} className="border-t border-white/5">
-                    <td className="py-1 text-slate-200">{m.label}</td>
-                    <td className="py-1 text-center font-semibold" style={{ color:adhC(m.conf) }}>{m.conf??'—'}</td>
-                    <td className="py-1 text-center">{m.d?arrow(m.d.conf,true):''}</td>
-                    <td className="py-1 text-center text-slate-300">{m.net??'—'}</td>
-                    <td className="py-1 text-center">{m.d?arrow(m.d.net,true):''}</td>
-                    <td className="py-1 text-center" style={{ color:m.lateDays?'#f59e0b':'#475569' }}>{m.lateDays||'·'}</td>
-                    <td className="py-1 text-center" style={{ color:m.absent?'#f87171':'#475569' }}>{m.absent||'·'}</td>
-                    <td className="py-1 text-center text-emerald-300/80">{m.otMin?dur(m.otMin):'·'}</td>
+                  <tr key={i} className="border-t border-white/5 transition-colors hover:bg-white/[0.03]">
+                    <td className="py-1 text-slate-200 whitespace-nowrap">{m.label}</td>
+                    {cols.map(c=>(
+                      <td key={c.key} className="py-1 text-center">
+                        <div className="font-semibold" style={{ color:valColor(c,m[c.key]) }}>{fmtV(c.unit, m[c.key])}</div>
+                        <div className="text-[8px] leading-none mt-0.5">{m.d?arrow(m.d[c.key], c.unit, c.up):''}</div>
+                      </td>
+                    ))}
                   </tr>
                 ))}</tbody>
               </table></div>
-              <p className="text-[10px] text-slate-500 mt-2">{ar?'▲/▼ مقارنة بالشهر السابق (أخضر = أفضل). Net فارغ بعد آخر شهر سكور كارد.':'▲/▼ vs previous month (green = better). Net blank after the last scorecard month.'}</p>
+              )}
+              <p className="text-[10px] text-slate-500 mt-2">{ar?'▲/▼ مقارنة بالشهر السابق (أخضر = أفضل، رمادي = للعلم). اختر/أزل أي عمود من فوق. Net فارغ بعد آخر شهر سكور كارد.':'▲/▼ vs previous month (green = better, grey = neutral). Toggle any column above. Net blank after the last scorecard month.'}</p>
             </div>
           );
         })()}

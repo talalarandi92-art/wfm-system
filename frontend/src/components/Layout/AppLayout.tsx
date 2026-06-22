@@ -2,6 +2,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Bell, Moon, Sun, Globe, LogOut, ChevronDown, Search, X, CheckCheck, KeyRound } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
+import LivingBackground from '@/components/LivingBackground';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
@@ -178,6 +179,7 @@ export default function AppLayout() {
 
   return (
     <div className={`min-h-screen ${ar ? 'font-arabic' : ''}`}>
+      <LivingBackground />
       <Sidebar />
 
       {/* ── Main wrapper ────────────────────────────────────────────────── */}
