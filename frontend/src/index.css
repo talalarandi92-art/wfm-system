@@ -99,55 +99,22 @@
   body { @apply text-gray-900 antialiased; background-color: var(--bg); }
   .dark body { @apply text-gray-100; }
 
-  /* Soft ambient washes behind everything — light gets a cool top tint,
-     dark gets faint brand glows. Fixed layer, zero interaction.
-     Two layers drift on slow, opposed orbits so the canvas breathes
-     instead of sitting dead-flat. Frozen under prefers-reduced-motion. */
+  /* Soft ambient wash behind everything — a single STATIC gradient for gentle
+     depth. No motion (user opted out of the animated background). */
   body::before {
     content: '';
     position: fixed;
-    inset: -20%;            /* over-scan so the drift never reveals an edge */
+    inset: 0;
     z-index: -2;
     pointer-events: none;
-    will-change: transform;
     background:
-      radial-gradient(900px 480px at 85% -10%, rgba(99,102,241,.07), transparent 60%),
-      radial-gradient(700px 420px at -10% 0%,  rgba(6,182,212,.05),  transparent 60%);
-    animation: ambientDrift 34s ease-in-out infinite alternate;
+      radial-gradient(900px 480px at 85% -10%, rgba(99,102,241,.06), transparent 60%),
+      radial-gradient(700px 420px at -10% 0%,  rgba(6,182,212,.04),  transparent 60%);
   }
   .dark body::before {
     background:
-      radial-gradient(1000px 540px at 80% -10%, rgba(99,102,241,.10), transparent 60%),
-      radial-gradient(800px 480px at -10% 20%,  rgba(6,182,212,.06),  transparent 60%),
-      radial-gradient(600px 400px at 50% 110%,  rgba(139,92,246,.05), transparent 60%);
-  }
-  /* Second, slower aurora layer for depth — opposite orbit. */
-  body::after {
-    content: '';
-    position: fixed;
-    inset: -25%;
-    z-index: -1;
-    pointer-events: none;
-    will-change: transform, opacity;
-    background:
-      radial-gradient(620px 620px at 18% 88%, rgba(16,185,129,.045), transparent 62%),
-      radial-gradient(560px 560px at 92% 78%, rgba(168,85,247,.05),  transparent 62%);
-    animation: ambientFloat 48s ease-in-out infinite alternate;
-  }
-  .dark body::after {
-    background:
-      radial-gradient(680px 680px at 16% 90%, rgba(16,185,129,.06), transparent 62%),
-      radial-gradient(620px 620px at 94% 76%, rgba(168,85,247,.07), transparent 62%);
-  }
-  @keyframes ambientDrift {
-    0%   { transform: translate3d(0, 0, 0) scale(1); }
-    50%  { transform: translate3d(2.2%, -1.6%, 0) scale(1.05); }
-    100% { transform: translate3d(-1.8%, 1.4%, 0) scale(1.02); }
-  }
-  @keyframes ambientFloat {
-    0%   { transform: translate3d(0, 0, 0) scale(1);    opacity: .85; }
-    50%  { transform: translate3d(-2.4%, 1.8%, 0) scale(1.08); opacity: 1; }
-    100% { transform: translate3d(1.6%, -1.2%, 0) scale(1.04); opacity: .9; }
+      radial-gradient(1000px 540px at 80% -10%, rgba(99,102,241,.09), transparent 60%),
+      radial-gradient(800px 480px at -10% 20%,  rgba(6,182,212,.05),  transparent 60%);
   }
 
   /* Text selection in brand color */
@@ -521,48 +488,6 @@
 .dot-loader span:nth-child(2) { animation-delay:.16s; }
 .dot-loader span:nth-child(3) { animation-delay:.32s; }
 
-/* ════════════════════════════════════════════════════════════════════════════
-   LIVING BACKGROUND — layered drifting auroras + faint grid + floating motes.
-   Fixed, behind everything, zero interaction, GPU transforms only, frozen under
-   prefers-reduced-motion (handled by the global rule above). Rendered by
-   <LivingBackground/> in AppLayout so every page breathes the same canvas.
-   ════════════════════════════════════════════════════════════════════════════ */
-.living-bg { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
-.living-bg .aurora {
-  position: absolute; border-radius: 50%; filter: blur(90px);
-  mix-blend-mode: screen; will-change: transform; opacity: .30;
-}
-.dark .living-bg .aurora { opacity: .42; }
-.living-bg .a1 { width: 46vw; height: 46vw; left: -8vw;  top: -12vh;     background: radial-gradient(circle, #6366f1, transparent 70%); animation: aur1 30s ease-in-out infinite alternate; }
-.living-bg .a2 { width: 40vw; height: 40vw; right: -6vw; top:  8vh;      background: radial-gradient(circle, #06b6d4, transparent 70%); animation: aur2 36s ease-in-out infinite alternate; }
-.living-bg .a3 { width: 38vw; height: 38vw; left: 26vw;  bottom: -16vh;  background: radial-gradient(circle, #8b5cf6, transparent 70%); animation: aur3 42s ease-in-out infinite alternate; }
-.living-bg .a4 { width: 30vw; height: 30vw; right: 16vw; bottom: -10vh;  background: radial-gradient(circle, #10b981, transparent 70%); animation: aur1 48s ease-in-out infinite alternate-reverse; opacity: .22; }
-.dark .living-bg .a4 { opacity: .30; }
-@keyframes aur1 { 0%{transform:translate3d(0,0,0) scale(1)}   100%{transform:translate3d(8vw,6vh,0)  scale(1.18)} }
-@keyframes aur2 { 0%{transform:translate3d(0,0,0) scale(1)}   100%{transform:translate3d(-7vw,7vh,0) scale(1.12)} }
-@keyframes aur3 { 0%{transform:translate3d(0,0,0) scale(1)}   100%{transform:translate3d(5vw,-7vh,0) scale(1.14)} }
-
-.living-bg .gridlines {
-  position: absolute; inset: 0; opacity: .55;
-  background-image: linear-gradient(rgba(148,163,184,.05) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(148,163,184,.05) 1px, transparent 1px);
-  background-size: 46px 46px;
-  -webkit-mask-image: radial-gradient(ellipse 78% 62% at 50% 38%, #000 28%, transparent 76%);
-          mask-image: radial-gradient(ellipse 78% 62% at 50% 38%, #000 28%, transparent 76%);
-}
-.dark .living-bg .gridlines {
-  background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
-}
-
-.living-bg .mote { position: absolute; bottom: -6vh; border-radius: 50%; will-change: transform, opacity; }
-@keyframes moteRise {
-  0%   { transform: translate3d(0,0,0);            opacity: 0; }
-  12%  { opacity: .8; }
-  88%  { opacity: .8; }
-  100% { transform: translate3d(14px,-112vh,0);    opacity: 0; }
-}
-
 /* ── Premium effect utilities (opt-in per surface) ─────────────────────────── */
 /* Animated gradient ring (mask trick) — for hero/verdict panels */
 .glow-border-soft { position: relative; }
@@ -603,15 +528,13 @@
 
 /* deeper teal-black base so the mint glows read */
 .theme-glass body { background-color: #061210; }
-
-/* recolor the living background to mint / teal / cyan / soft-violet, more present */
-.theme-glass .living-bg .aurora { opacity: .5; }
-.theme-glass .living-bg .a1 { background: radial-gradient(circle, #14b8a6, transparent 70%); }
-.theme-glass .living-bg .a2 { background: radial-gradient(circle, #06b6d4, transparent 70%); }
-.theme-glass .living-bg .a3 { background: radial-gradient(circle, #22c55e, transparent 70%); }
-.theme-glass .living-bg .a4 { background: radial-gradient(circle, #818cf8, transparent 70%); opacity: .34; }
-.theme-glass .living-bg .gridlines { opacity: .7; }
-.theme-glass .living-bg .mote { background: rgba(45,212,191,.9) !important; box-shadow: 0 0 8px rgba(45,212,191,.8) !important; }
+/* static mint/teal wash for the glass identity — no motion */
+.theme-glass body::before {
+  background:
+    radial-gradient(1000px 560px at 82% -10%, rgba(20,184,166,.16), transparent 62%),
+    radial-gradient(820px 520px at -8% 12%,   rgba(6,182,212,.12),  transparent 62%),
+    radial-gradient(700px 520px at 50% 112%,  rgba(34,197,94,.10),  transparent 62%);
+}
 
 /* frosted depth on the bounded chrome surfaces (limited count → cheap blur) */
 .theme-glass .card, .theme-glass .card-hover, .theme-glass .card-stat {
