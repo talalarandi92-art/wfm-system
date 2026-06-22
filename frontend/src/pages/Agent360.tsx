@@ -24,6 +24,7 @@ export default function Agent360Page() {
   const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(false); const [err, setErr] = useState('');
   const [score, setScore] = useState<any>(null);
+  const [perf, setPerf] = useState<any>(null);
   // compare-with (second agent)
   const [person2, setPerson2] = useState(''); const [q2, setQ2] = useState(''); const [open2, setOpen2] = useState(false); const [d2, setD2] = useState<any>(null);
 
@@ -37,6 +38,8 @@ export default function Agent360Page() {
       .catch((e:any)=>{ setD(null); setErr(e?.response?.data?.message||'Failed'); }).finally(()=>setLoading(false));
     const sq = new URLSearchParams({ person, includeExcludedRoles:'1' }); if (from) sq.set('from',from); if (to) sq.set('to',to);
     apiClient.get(`/attendance-recon/roster-v2/agent-scores?${sq}`).then((r:any)=>setScore(r.data.agents?.[0]||null)).catch(()=>setScore(null));
+    const pq = new URLSearchParams({ person }); if (from) pq.set('from',from); if (to) pq.set('to',to);
+    apiClient.get(`/attendance-recon/roster-v2/agent-performance?${pq}`).then((r:any)=>setPerf(r.data)).catch(()=>setPerf(null));
   }, [person, from, to]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
 
@@ -189,6 +192,40 @@ export default function Agent360Page() {
             </div>
           ))}
         </div>
+
+        {/* Performance & Productivity — official scorecard Net Points + Ameyo AHT/occupancy */}
+        {perf && (perf.scorecardMonths>0 || perf.productivity?.hasData) && (
+          <div className="rounded-2xl p-4" style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.2)' }}>
+            <div className="flex items-center gap-2 mb-3"><Briefcase size={15} className="text-amber-300"/><h3 className="text-sm font-bold text-white">{ar?'الأداء والإنتاجية':'Performance & Productivity'}</h3>
+              <span className="text-[10px] text-slate-500">{ar?'سكور كارد رسمي (Net Points) + إنتاجية أميو (AHT)':'official scorecard (Net Points) + Ameyo productivity (AHT)'}</span></div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+              {[
+                { l:ar?'Net Points (آخر)':'Net Points (latest)', v:perf.latestNet??'—', sub:`${perf.scorecardMonths} ${ar?'شهر':'mo'}`, c:'#fbbf24' },
+                { l:'AHT', v:perf.productivity.ahtSec!=null?`${Math.floor(perf.productivity.ahtSec/60)}:${String(perf.productivity.ahtSec%60).padStart(2,'0')}`:'—', sub:ar?'دقيقة:ثانية':'mm:ss', c:'#06b6d4' },
+                { l:ar?'الإشغال':'Occupancy', v:perf.productivity.occupancy!=null?perf.productivity.occupancy+'%':'—', c:'#8b5cf6' },
+                { l:ar?'مكالمات':'Calls', v:(perf.productivity.calls||0).toLocaleString(), sub:`${perf.productivity.days} ${ar?'يوم':'days'}`, c:'#22c55e' },
+                { l:'FCR', v:perf.fcr?.pct!=null?perf.fcr.pct+'%':'—', c:'#34d399' },
+              ].map((x,i)=>(
+                <div key={i} className="p-2.5 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
+                  <p className="text-[9px] text-slate-500 uppercase font-semibold truncate">{x.l}</p>
+                  <p className="text-lg font-bold leading-tight" style={{ color:x.c }}>{x.v}</p>{x.sub&&<p className="text-[9px] text-slate-500">{x.sub}</p>}</div>
+              ))}
+            </div>
+            {perf.scorecard?.length>0 && (
+              <div><p className="text-[10px] text-slate-500 mb-1">{ar?'اتجاه Net Points الشهري':'Monthly Net Points trend'}</p>
+                <div className="flex items-end gap-2 h-20">
+                  {perf.scorecard.map((m:any,i:number)=>{ const max=Math.max(...perf.scorecard.map((x:any)=>Number(x.net)||0),1); const v=Number(m.net)||0; const col=v>=100?'#22c55e':v>=80?'#06b6d4':v>=60?'#f59e0b':'#f43f5e';
+                    return (<div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                      <span className="text-[8px] mb-0.5" style={{ color:col }}>{v}</span>
+                      <div className="w-full rounded-t" style={{ height:`${Math.max(4,100*v/max)}%`, background:col }}/>
+                      <span className="text-[8px] text-slate-500 mt-0.5">{m.year%100}/{m.month}</span>
+                    </div>);
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-3 gap-3">
           {/* tardiness bands */}

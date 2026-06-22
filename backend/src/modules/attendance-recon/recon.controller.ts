@@ -813,6 +813,44 @@ export class ReconController {
     return { teamLeader: tlName, from: dFrom, to: dTo, range, summary, agents, byShift, teamLeaders: tlOpts.map((r: any) => r.v) };
   }
 
+  /** Agent Performance — joins the official monthly scorecard (Net Points), Ameyo
+   *  productivity (AHT / occupancy / calls from talk+ACW) and FCR to the roster
+   *  identity (alias-aware: old+new IDs). Complements the attendance/adherence score. */
+  @Get('roster-v2/agent-performance')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Agent performance: official Net Points + AHT/occupancy + FCR joined to roster identity' })
+  async agentPerformance(@Req() req: any, @Query('person') person?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    if (!person) throw new BadRequestException('person is required');
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    // every raw id this person has had (old intern + new full-time)
+    const ids = (await this.ds.query(`SELECT employee_no FROM employee_identity WHERE tenant_id=$1 AND person_no=$2`, [t, person])).map((r: any) => r.employee_no);
+    const idList = ids.length ? ids : [person];
+    // official scorecard — monthly Net Points
+    const scorecard = await this.ds.query(
+      `SELECT year, month, ROUND(AVG(avg_net_points::numeric),1) net, ROUND(AVG(best_net::numeric),0) best, ROUND(AVG(worst_net::numeric),0) worst, SUM(weeks_scored)::int weeks
+         FROM scorecard_monthly WHERE tenant_id=$1 AND employee_no = ANY($2) GROUP BY year, month ORDER BY year, month`, [t, idList]);
+    // Ameyo productivity → AHT / occupancy / calls
+    const [prod] = await this.ds.query(
+      `SELECT COALESCE(SUM(talk_seconds),0)::bigint talk, COALESCE(SUM(acw_seconds),0)::bigint acw,
+              COALESCE(SUM(staffed_seconds),0)::bigint staffed, COALESCE(SUM(ready_seconds),0)::bigint ready,
+              COALESCE(SUM(wrapped_calls),0)::int calls, COALESCE(SUM(inbound_received),0)::int received,
+              COUNT(DISTINCT work_date)::int days
+         FROM agent_productivity_daily WHERE tenant_id=$1 AND employee_no = ANY($2) AND work_date BETWEEN $3 AND $4`, [t, idList, dFrom, dTo]);
+    const handled = prod.calls > 0 ? prod.calls : prod.received;
+    const ahtSec = handled > 0 ? Math.round((Number(prod.talk) + Number(prod.acw)) / handled) : null;
+    const occupancy = Number(prod.staffed) > 0 ? Math.round(100 * (Number(prod.talk) + Number(prod.acw)) / Number(prod.staffed)) : null;
+    const productivity = { ahtSec, occupancy, calls: handled, days: prod.days, talkH: Math.round(Number(prod.talk) / 360) / 10, acwH: Math.round(Number(prod.acw) / 360) / 10, staffedH: Math.round(Number(prod.staffed) / 360) / 10, hasData: prod.days > 0 };
+    // FCR (best-effort match by employee id)
+    const [fcr] = await this.ds.query(
+      `SELECT ROUND(AVG(fcr_pct::numeric),1) pct, COALESCE(SUM(total),0)::int total FROM survey_fcr_monthly WHERE tenant_id=$1 AND employee_id = ANY($2)`, [t, idList]).catch(() => [{ pct: null, total: 0 }]);
+    const latest = scorecard.length ? scorecard[scorecard.length - 1] : null;
+    return { person, ids: idList, from: dFrom, to: dTo,
+             scorecard, latestNet: latest?.net ?? null, scorecardMonths: scorecard.length,
+             productivity, fcr: { pct: fcr?.pct ?? null, total: fcr?.total ?? 0 } };
+  }
+
   /** Interval Headcount — half-hourly staffing curve for a date, by function, over
    *  the clean roster_days. Cross-midnight aware: an MD/MN shift staffs the late
    *  hours of its own date AND the early hours of the next date; the previous day's
