@@ -25,6 +25,7 @@ export default function Agent360Page() {
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(false); const [err, setErr] = useState('');
   const [score, setScore] = useState<any>(null);
   const [perf, setPerf] = useState<any>(null);
+  const [prog, setProg] = useState<any>(null);
   // compare-with (second agent)
   const [person2, setPerson2] = useState(''); const [q2, setQ2] = useState(''); const [open2, setOpen2] = useState(false); const [d2, setD2] = useState<any>(null);
 
@@ -40,6 +41,7 @@ export default function Agent360Page() {
     apiClient.get(`/attendance-recon/roster-v2/agent-scores?${sq}`).then((r:any)=>setScore(r.data.agents?.[0]||null)).catch(()=>setScore(null));
     const pq = new URLSearchParams({ person }); if (from) pq.set('from',from); if (to) pq.set('to',to);
     apiClient.get(`/attendance-recon/roster-v2/agent-performance?${pq}`).then((r:any)=>setPerf(r.data)).catch(()=>setPerf(null));
+    apiClient.get(`/attendance-recon/roster-v2/agent-progress?${pq}`).then((r:any)=>setProg(r.data)).catch(()=>setProg(null));
   }, [person, from, to]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
 
@@ -241,6 +243,39 @@ export default function Agent360Page() {
             )}
           </div>
         )}
+
+        {/* Progress over time — did this agent improve or decline? */}
+        {prog?.months?.length>1 && (() => {
+          const v = prog.verdict; const OVC:Record<string,[string,string]> = { improving:['#22c55e', ar?'في تحسّن ↑':'Improving ↑'], declining:['#f43f5e', ar?'في تراجع ↓':'Declining ↓'], mixed:['#f59e0b', ar?'متفاوت':'Mixed'], stable:['#06b6d4', ar?'مستقر':'Stable'] };
+          const [oc,ol] = OVC[v.overall]||OVC.stable;
+          const arrow = (dd:number|null, goodUp=true) => dd==null ? <span className="text-slate-600">·</span> : (()=>{ const good = goodUp ? dd>0 : dd<0; const c = dd===0?'#64748b':good?'#4ade80':'#f87171'; return <span style={{ color:c }}>{dd>0?'▲':dd<0?'▼':'•'} {Math.abs(dd)}</span>; })();
+          return (
+            <div className="rounded-2xl p-4" style={{ background:`${oc}10`, border:`1px solid ${oc}33` }}>
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <GitCompareArrows size={15} style={{ color:oc }}/><h3 className="text-sm font-bold text-white">{ar?'التحسّن عبر الزمن':'Progress over time'}</h3>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background:`${oc}22`, color:oc }}>{ol}</span>
+                {v.conformance && <span className="text-[11px] text-slate-300">{ar?'الكونفورمانس':'Conformance'}: {v.conformance.first}% → {v.conformance.last}% <b style={{ color:v.conformance.change>=0?'#4ade80':'#f87171' }}>({v.conformance.change>=0?'+':''}{v.conformance.change})</b></span>}
+                {v.net && <span className="text-[11px] text-slate-300">Net: {v.net.first} → {v.net.last} <b style={{ color:v.net.change>=0?'#4ade80':'#f87171' }}>({v.net.change>=0?'+':''}{v.net.change})</b></span>}
+              </div>
+              <div className="overflow-x-auto"><table className="w-full text-[11px]">
+                <thead><tr className="text-slate-500">{[ar?'الشهر':'Month',ar?'كونف%':'Conf%','Δ','Net','Δ',ar?'تأخير':'Late',ar?'غياب':'Abs','OT'].map((h,i)=><th key={i} className={`pb-1.5 font-semibold ${i===0?'text-start':'text-center'}`}>{h}</th>)}</tr></thead>
+                <tbody>{prog.months.map((m:any,i:number)=>(
+                  <tr key={i} className="border-t border-white/5">
+                    <td className="py-1 text-slate-200">{m.label}</td>
+                    <td className="py-1 text-center font-semibold" style={{ color:adhC(m.conf) }}>{m.conf??'—'}</td>
+                    <td className="py-1 text-center">{m.d?arrow(m.d.conf,true):''}</td>
+                    <td className="py-1 text-center text-slate-300">{m.net??'—'}</td>
+                    <td className="py-1 text-center">{m.d?arrow(m.d.net,true):''}</td>
+                    <td className="py-1 text-center" style={{ color:m.lateDays?'#f59e0b':'#475569' }}>{m.lateDays||'·'}</td>
+                    <td className="py-1 text-center" style={{ color:m.absent?'#f87171':'#475569' }}>{m.absent||'·'}</td>
+                    <td className="py-1 text-center text-emerald-300/80">{m.otMin?dur(m.otMin):'·'}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+              <p className="text-[10px] text-slate-500 mt-2">{ar?'▲/▼ مقارنة بالشهر السابق (أخضر = أفضل). Net فارغ بعد آخر شهر سكور كارد.':'▲/▼ vs previous month (green = better). Net blank after the last scorecard month.'}</p>
+            </div>
+          );
+        })()}
 
         <div className="grid lg:grid-cols-3 gap-3">
           {/* tardiness bands */}

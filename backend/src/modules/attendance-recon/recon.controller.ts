@@ -820,6 +820,53 @@ export class ReconController {
     return { teamLeader: tlName, from: dFrom, to: dTo, range, summary, agents, byShift, teamLeaders: tlOpts.map((r: any) => r.v) };
   }
 
+  /** Agent Progress — month-over-month self-comparison: did this agent improve or
+   *  decline? Merges roster KPIs (conformance/late/OT/absence) with official Net
+   *  Points per month, computes deltas vs the prior month, and a verdict. */
+  @Get('roster-v2/agent-progress')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Per-agent month-over-month progress + improving/declining verdict' })
+  async agentProgress(@Req() req: any, @Query('person') person?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    if (!person) throw new BadRequestException('person is required');
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const ids = (await this.ds.query(`SELECT employee_no FROM employee_identity WHERE tenant_id=$1 AND person_no=$2`, [t, person])).map((r: any) => r.employee_no);
+    const idList = ids.length ? ids : [person];
+    const rosterM = await this.ds.query(`
+      SELECT EXTRACT(YEAR FROM work_date)::int yr, EXTRACT(MONTH FROM work_date)::int mo, MIN(month_name) month_name,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf,
+             COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
+             COALESCE(SUM(ot_min),0)::int otmin, COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick
+        FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4
+        GROUP BY 1,2 ORDER BY 1,2`, [t, person, dFrom, dTo]);
+    const netM = await this.ds.query(`
+      SELECT year yr, month mo, ROUND(AVG(avg_net_points::numeric),1) net
+        FROM scorecard_monthly WHERE tenant_id=$1 AND employee_no = ANY($2)
+          AND make_date(year,month,1) BETWEEN date_trunc('month',$3::date) AND $4::date
+        GROUP BY year,month`, [t, idList, dFrom, dTo]);
+    const netMap = new Map(netM.map((r: any) => [`${r.yr}-${r.mo}`, Number(r.net)]));
+    const months = rosterM.map((r: any) => ({ yr: r.yr, mo: r.mo, label: `${r.month_name || r.mo} ${String(r.yr).slice(2)}`,
+      worked: r.worked, conf: r.conf == null ? null : Number(r.conf), lateDays: r.latedays, lateMin: r.latemin, otMin: r.otmin,
+      absent: r.absent, sick: r.sick, net: netMap.has(`${r.yr}-${r.mo}`) ? netMap.get(`${r.yr}-${r.mo}`) : null }));
+    // deltas vs previous month
+    months.forEach((m: any, i: number) => { const p: any = i > 0 ? months[i - 1] : null;
+      m.d = p ? { conf: m.conf != null && p.conf != null ? Math.round((m.conf - p.conf) * 10) / 10 : null,
+        net: m.net != null && p.net != null ? Math.round((m.net - p.net) * 10) / 10 : null,
+        lateDays: m.lateDays - p.lateDays, absent: m.absent - p.absent, otMin: m.otMin - p.otMin } : null; });
+    // verdict: first vs last non-null
+    const firstLast = (key: string) => { const vals = months.filter((m: any) => m[key] != null); return vals.length >= 2 ? { first: vals[0][key], last: vals[vals.length - 1][key], change: Math.round((vals[vals.length - 1][key] - vals[0][key]) * 10) / 10 } : null; };
+    const confV = firstLast('conf'), netV = firstLast('net');
+    const dir = (c: number | null | undefined, th = 2) => c == null ? 'flat' : c > th ? 'up' : c < -th ? 'down' : 'flat';
+    let overall = 'stable';
+    const cd = confV ? dir(confV.change) : null, nd = netV ? dir(netV.change, 3) : null;
+    if (cd === 'up' || nd === 'up') overall = (cd === 'down' || nd === 'down') ? 'mixed' : 'improving';
+    if ((cd === 'down' || nd === 'down') && overall !== 'mixed' && overall !== 'improving') overall = 'declining';
+    return { person, ids: idList, from: dFrom, to: dTo, months,
+             verdict: { conformance: confV && { ...confV, dir: dir(confV.change) }, net: netV && { ...netV, dir: dir(netV.change, 3) }, overall } };
+  }
+
   /** Agent Performance — joins the official monthly scorecard (Net Points), Ameyo
    *  productivity (AHT / occupancy / calls from talk+ACW) and FCR to the roster
    *  identity (alias-aware: old+new IDs). Complements the attendance/adherence score. */
