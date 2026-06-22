@@ -697,6 +697,13 @@ export class ReconController {
       return { person_no: r.person_no, name: r.name, fn: r.fn, role: r.role, tl: r.tl, worked, absent: r.absent, sick: r.sick,
                lateDays: r.latedays, lateMin: r.latemin, missSys: r.misssys, otMin: r.otmin, conf, attend, punct, score, grade };
     }).sort((a: any, b: any) => b.score - a.score).map((r: any, i: number) => ({ rank: i + 1, ...r }));
+    // attach each person's latest official Net Points (scorecard), alias-aware
+    const netRows = await this.ds.query(
+      `SELECT DISTINCT ON (i.person_no) i.person_no, sm.avg_net_points::numeric net, sm.year, sm.month
+         FROM scorecard_monthly sm JOIN employee_identity i ON i.tenant_id=sm.tenant_id AND i.employee_no=sm.employee_no
+        WHERE sm.tenant_id=$1 ORDER BY i.person_no, sm.year DESC, sm.month DESC`, [t]);
+    const netMap = new Map<string, { net: number; period: string }>(netRows.map((r: any) => [r.person_no, { net: Number(r.net), period: `${r.year}-${String(r.month).padStart(2, '0')}` }] as [string, { net: number; period: string }]));
+    for (const a of scored) { const n = netMap.get(a.person_no); a.netPoints = n ? n.net : null; a.netPeriod = n ? n.period : null; }
     const dist = { A: 0, B: 0, C: 0, D: 0 } as Record<string, number>; for (const r of scored) dist[r.grade]++;
     const avg = scored.length ? Math.round(scored.reduce((a: number, r: any) => a + r.score, 0) / scored.length) : 0;
     return { from: dFrom, to: dTo, count: scored.length, average: avg, distribution: dist,
