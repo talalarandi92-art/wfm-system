@@ -223,6 +223,7 @@ export class ReconController {
       offdayOt:{col:'offday_ot_min',label:'OFF-day OT'}, holidayOt:{col:'holiday_ot_min',label:'Holiday OT'},
       conformance:{col:'adherence_pct',label:'Conformance %'}, permission:{col:'permission_type',label:'Permission'},
       permissionDuration:{col:'permission_duration',label:'Permission Dur'}, dataQuality:{col:'data_quality',label:'Data Quality'}, crossesMidnight:{col:'crosses_midnight',label:'X-Midnight'},
+      netPoints:{col:'ROUND(sc.net,1)',label:'Net Points'},   // official scorecard (per-person, joined)
     };
     // KPI map (key → {agg, label})
     const K: Record<string, { agg: string; label: string }> = {
@@ -240,6 +241,10 @@ export class ReconController {
       conformance:{agg:'ROUND(AVG(adherence_pct),1)',label:'Conformance %'}, missingPunch:{agg:'COUNT(*) FILTER (WHERE missing_punch)',label:'Missing Punch'},
       missingSystem:{agg:'COUNT(*) FILTER (WHERE missing_system)',label:'Missing System'}, mismatch:{agg:'COUNT(*) FILTER (WHERE mismatch IS NOT NULL)',label:'Mismatch'},
       agents:{agg:'COUNT(DISTINCT COALESCE(person_no,employee_no))',label:'Agents'},
+      // official scorecard (joined per-person via the sc CTE) — Net Points + KPI scores
+      netPoints:{agg:'ROUND(AVG(sc.net),1)',label:'Net Points'}, scQuality:{agg:'ROUND(AVG(sc.quality),1)',label:'Quality (pts)'},
+      scAht:{agg:'ROUND(AVG(sc.aht),1)',label:'AHT (pts)'}, scFcr:{agg:'ROUND(AVG(sc.fcr),1)',label:'FCR (pts)'},
+      scProductivity:{agg:'ROUND(AVG(sc.prod),1)',label:'Productivity (pts)'}, scCtr:{agg:'ROUND(AVG(sc.ctr),1)',label:'CTR (pts)'}, scQuiz:{agg:'ROUND(AVG(sc.quiz),1)',label:'Quiz (pts)'},
     };
     const G: Record<string, { col: string; label: string }> = {
       day:{col:'day_name',label:'Day'}, week:{col:'week_number',label:'Week'}, month:{col:'month_name',label:'Month'}, date:{col:'work_date::text',label:'Date'},
@@ -265,19 +270,26 @@ export class ReconController {
 
     const timeFn = (m: number|null) => m==null?'':`${String(Math.floor((((m%1440)+1440)%1440)/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
     let columns: { key: string; label: string }[] = []; let rows: any[] = [];
+    // per-person official scorecard aggregate (Net Points + KPI scores), 1:1 joinable to roster_days
+    // by person_no via a clash-free alias (sc_person) so existing aggregates are unaffected.
+    const SC = `WITH sc AS (SELECT i.person_no sc_person, AVG(se.net_points) net, AVG(se.quality_score) quality,
+        AVG(se.aht_score) aht, AVG(se.fcr_score) fcr, AVG(se.productivity_score) prod, AVG(se.ctr_score) ctr, AVG(se.quiz_score) quiz
+      FROM scorecard_entries se JOIN employee_identity i ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
+      WHERE se.tenant_id=$1 GROUP BY i.person_no)`;
+    const FROM = `roster_days LEFT JOIN sc ON sc.sc_person = roster_days.person_no`;
 
     if (q.groupBy && G[q.groupBy]) {
       const g = G[q.groupBy];
       const kpis = String(q.kpis||'scheduledDays,workedDays,lateMin,otMin,conformance').split(',').filter(k=>K[k]);
       columns = [{ key:'group', label:g.label }, ...kpis.map(k=>({ key:k, label:K[k].label }))];
-      const sel = [`${g.col} AS group`, ...kpis.map(k=>`${K[k].agg} AS "${k}"`)].join(', ');
-      rows = await this.ds.query(`SELECT ${sel} FROM roster_days WHERE ${w} GROUP BY ${g.col} ORDER BY 2 DESC NULLS LAST LIMIT 500`, p);
+      const sel = [`${g.col} AS "group"`, ...kpis.map(k=>`${K[k].agg} AS "${k}"`)].join(', ');
+      rows = await this.ds.query(`${SC} SELECT ${sel} FROM ${FROM} WHERE ${w} GROUP BY ${g.col} ORDER BY 2 DESC NULLS LAST LIMIT 500`, p);
     } else {
       const fields = String(q.fields||'date,agent,function,shiftCode,attendanceStatus,lateMin,otBefore,otAfter,conformance').split(',').filter(k=>F[k]);
       columns = fields.map(k=>({ key:k, label:F[k].label }));
       const sel = fields.map(k=>`${F[k].col} AS "${k}"`).join(', ');
       const lim = q.format==='xlsx' ? 50000 : 1000;
-      const raw = await this.ds.query(`SELECT ${sel} FROM roster_days WHERE ${w} ORDER BY work_date DESC, name LIMIT ${lim}`, p);
+      const raw = await this.ds.query(`${SC} SELECT ${sel} FROM ${FROM} WHERE ${w} ORDER BY work_date DESC, name LIMIT ${lim}`, p);
       rows = raw.map((r: any) => { const o:any={}; for (const k of fields) o[k] = F[k].time ? timeFn(r[k]) : r[k]; return o; });
     }
 

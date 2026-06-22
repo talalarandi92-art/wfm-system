@@ -36,6 +36,9 @@ const METRICS: { key:string; ar:string; en:string; time?:boolean; pct?:boolean }
   { key:'otBefore', ar:'OT قبل', en:'OT before', time:true }, { key:'otAfter', ar:'OT بعد', en:'OT after', time:true },
   { key:'conformance', ar:'كونفورمانس', en:'Conformance', pct:true }, { key:'absenceDays', ar:'غياب', en:'Absence' },
   { key:'sickDays', ar:'سيك', en:'Sick' }, { key:'permissionCount', ar:'استئذانات', en:'Permissions' }, { key:'agents', ar:'موظفين', en:'Agents' },
+  // official scorecard (joined per-person)
+  { key:'netPoints', ar:'Net Points', en:'Net Points' }, { key:'scQuality', ar:'جودة (نقاط)', en:'Quality (pts)' }, { key:'scAht', ar:'AHT (نقاط)', en:'AHT (pts)' },
+  { key:'scFcr', ar:'FCR (نقاط)', en:'FCR (pts)' }, { key:'scProductivity', ar:'إنتاجية (نقاط)', en:'Productivity (pts)' }, { key:'scCtr', ar:'CTR (نقاط)', en:'CTR (pts)' }, { key:'scQuiz', ar:'كويز (نقاط)', en:'Quiz (pts)' },
 ];
 
 type ChartCfg = { dim:string; metric:string };
