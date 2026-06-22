@@ -4,6 +4,9 @@ import { ArrowLeft, BarChart4, CalendarDays, TrendingUp, Users } from 'lucide-re
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 
+const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
+const RISK_C: Record<string,string> = { ok:'#4ade80', watch:'#fbbf24', critical:'#f87171', 'n/a':'#64748b' };
+
 /** Interval Headcount — half-hourly staffing curve for a date, by function.
  *  Scheduled vs present per interval (cross-midnight aware on the backend). */
 export default function IntervalHeadcountPage() {
@@ -12,11 +15,13 @@ export default function IntervalHeadcountPage() {
   const [date, setDate] = useState('2026-06-15');
   const [fn, setFn] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
+  const [imp, setImp] = useState<any>(null);
 
   const load = useCallback(() => {
     setLoading(true);
     const q = new URLSearchParams({ date }); if (fn) q.set('function', fn);
     apiClient.get(`/attendance-recon/roster-v2/interval-headcount?${q}`).then((r:any)=>setD(r.data)).catch(()=>setD(null)).finally(()=>setLoading(false));
+    apiClient.get(`/attendance-recon/roster-v2/coverage-impact?date=${date}`).then((r:any)=>setImp(r.data)).catch(()=>setImp(null));
   }, [date, fn]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
 
@@ -77,6 +82,44 @@ export default function IntervalHeadcountPage() {
             ))}
           </div>
         </div>
+
+        {/* per-function permission/leave coverage impact for the date */}
+        {imp?.rows?.length>0 && (
+          <div className="rounded-2xl p-4" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+            <h3 className="text-sm font-bold text-white mb-1">{ar?'أثر الاستئذان/الإجازة على التغطية':'Permission / Leave Coverage Impact'}</h3>
+            <p className="text-[10px] text-slate-500 mb-3">{ar?'مجدول للعمل مقابل ما يأخذه الاستئذان/السيك/الغياب/عدم الدخول — بدقة اليوم':'Planned-to-work vs what permission/sick/absent/no-show take away — day granularity'}</p>
+            <div className="overflow-x-auto"><table className="w-full text-[11px]">
+              <thead><tr className="text-slate-500">
+                {[ar?'الفنكشن':'Function',ar?'مجدول':'Planned',ar?'اشتغل':'Worked',ar?'حاضر':'Present',ar?'استئذان':'Perm',ar?'سيك':'Sick',ar?'غياب':'Absent',ar?'لم يدخل':'No-show',ar?'تغطية%':'Cov%',ar?'الخطر':'Risk'].map((h,i)=><th key={i} className={`pb-1.5 font-semibold ${i===0?'text-start':'text-center'}`}>{h}</th>)}
+              </tr></thead>
+              <tbody>{imp.rows.map((r:any,i:number)=>{ const rc=RISK_C[r.risk]||'#64748b';
+                return (
+                  <tr key={i} className="border-t border-white/5">
+                    <td className="py-1 text-slate-200">{r.fn}</td>
+                    <td className="py-1 text-center text-white font-semibold">{r.planned}</td>
+                    <td className="py-1 text-center text-slate-300">{r.worked}</td>
+                    <td className="py-1 text-center text-emerald-300">{r.present}</td>
+                    <td className="py-1 text-center" style={{ color:r.on_permission?'#c4b5fd':'#475569' }}>{r.on_permission||'·'}</td>
+                    <td className="py-1 text-center" style={{ color:r.sick?'#fbbf24':'#475569' }}>{r.sick||'·'}</td>
+                    <td className="py-1 text-center" style={{ color:r.absent?'#f87171':'#475569' }}>{r.absent||'·'}</td>
+                    <td className="py-1 text-center" style={{ color:r.noShow?'#f97316':'#475569' }}>{r.noShow||'·'}</td>
+                    <td className="py-1 text-center font-bold" style={{ color:rc }}>{r.coverage!=null?r.coverage+'%':'—'}</td>
+                    <td className="py-1 text-center"><span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold" style={{ background:`${rc}22`, color:rc }}>{r.risk}</span></td>
+                  </tr>
+                );
+              })}
+              {imp.totals && <tr className="border-t-2 border-white/10 font-bold">
+                <td className="py-1 text-white">{ar?'الإجمالي':'Total'}</td>
+                <td className="py-1 text-center text-white">{imp.totals.planned}</td><td className="py-1 text-center text-slate-300">{imp.totals.worked}</td>
+                <td className="py-1 text-center text-emerald-300">{imp.totals.present}</td><td className="py-1 text-center text-violet-300">{imp.totals.on_permission}</td>
+                <td className="py-1 text-center text-amber-300">{imp.totals.sick}</td><td className="py-1 text-center text-rose-300">{imp.totals.absent}</td>
+                <td className="py-1 text-center text-orange-300">{imp.totals.noShow}</td>
+                <td className="py-1 text-center" style={{ color:adhC(imp.totals.coverage) }}>{imp.totals.coverage!=null?imp.totals.coverage+'%':'—'}</td><td/>
+              </tr>}
+              </tbody>
+            </table></div>
+          </div>
+        )}
 
         {/* table by interval × function (scheduled) */}
         <div className="rounded-2xl overflow-auto" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)', maxHeight:'50vh' }}>

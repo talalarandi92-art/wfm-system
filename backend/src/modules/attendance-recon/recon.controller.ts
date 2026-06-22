@@ -661,6 +661,42 @@ export class ReconController {
     return { date: d, function: fn || null, step: stepMin, functions, intervals, peak: { t: peak?.t, headcount: peak?.scheduledTotal } };
   }
 
+  /** Permission / Leave HC Impact (daily) — per function for a date: planned working
+   *  headcount vs what permission / sick / absent / leave / no-show take away, with a
+   *  coverage% and risk level. Day-granularity (roster_days has no permission start/end). */
+  @Get('roster-v2/coverage-impact')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Per-function daily coverage vs permission/sick/absent/no-show impact + risk' })
+  async coverageImpact(@Req() req: any, @Query('date') date?: string, @Query('function') fn?: string) {
+    const t = req.user.tenantId;
+    const d = date || (await this.ds.query(`SELECT MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0]?.b;
+    const p: any[] = [t, d]; let w = `tenant_id=$1 AND work_date=$2 AND is_active`;
+    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    const rows = await this.ds.query(`
+      SELECT role_function fn,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence='sick' OR presence='absent')::int planned,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             COUNT(*) FILTER (WHERE presence='office')::int office,
+             COUNT(*) FILTER (WHERE presence='wfh')::int wfh,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND sys_login_min IS NOT NULL)::int present,
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int on_permission,
+             COUNT(*) FILTER (WHERE presence='sick')::int sick,
+             COUNT(*) FILTER (WHERE presence='absent')::int absent,
+             COUNT(*) FILTER (WHERE presence='leave')::int leave,
+             COUNT(*) FILTER (WHERE presence='off')::int off
+        FROM roster_days r WHERE ${w} GROUP BY role_function ORDER BY planned DESC NULLS LAST`, p);
+    const out = rows.filter((r: any) => r.fn).map((r: any) => {
+      const lost = r.sick + r.absent;                      // rostered but didn't work
+      const noShow = Math.max(0, r.worked - r.present);    // worked-roster but no system login
+      const coverage = r.planned ? Math.round(100 * r.present / r.planned) : null;
+      const risk = coverage == null ? 'n/a' : coverage >= 90 ? 'ok' : coverage >= 75 ? 'watch' : 'critical';
+      return { ...r, lost, noShow, coverage, risk };
+    });
+    const tot = out.reduce((a: any, r: any) => { for (const k of ['planned', 'worked', 'present', 'on_permission', 'sick', 'absent', 'leave', 'off', 'lost', 'noShow']) a[k] = (a[k] || 0) + (r[k] || 0); return a; }, {});
+    tot.coverage = tot.planned ? Math.round(100 * tot.present / tot.planned) : null;
+    return { date: d, function: fn || null, rows: out, totals: tot };
+  }
+
   // ── Schedule Change Log: manual shift edit / swap with before/after impact ──────
   /** SQL classifier: a shift code → broad category (for shift-rate distribution). */
   private readonly SHIFT_CAT = `CASE
