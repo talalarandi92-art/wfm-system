@@ -1054,6 +1054,85 @@ export class ReconController {
     return { tlActive, tlStatus, hidden, norm };
   }
 
+  /** Executive Summary export — ONE management-ready Excel combining the headline
+   *  KPIs, prioritized insights, the score leaderboard, monthly trends and a
+   *  by-function summary. Reuses the insights/score/trend engines. */
+  @Get('roster-v2/executive-export')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Executive Summary Excel — KPIs + Insights + Leaderboard + Trends + by-function' })
+  async executiveExport(@Req() req: any, @Res() res: Response, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || (range?.b ? `${range.b.slice(0, 7)}-01` : range?.a), dTo = to || range?.b;
+    // reuse the engines
+    const [ins, scores, trend] = await Promise.all([
+      this.insights(req, dFrom, dTo), this.agentScores(req, dFrom, dTo), this.trends(req, dFrom, dTo, undefined, undefined, 'month'),
+    ]);
+    const [kpi] = await this.ds.query(`
+      SELECT COUNT(DISTINCT person_no)::int agents, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             COUNT(*) FILTER (WHERE presence='off')::int off, COUNT(*) FILTER (WHERE presence='sick')::int sick,
+             COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='leave')::int leave,
+             COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
+             COALESCE(SUM(ot_min),0)::int otmin, COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
+        FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`, [t, dFrom, dTo]);
+    const byFn = await this.ds.query(`
+      SELECT role_function fn, COUNT(DISTINCT person_no)::int agents, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance, COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays,
+             COALESCE(SUM(ot_min),0)::int otmin, COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent
+        FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND role_function IS NOT NULL
+        GROUP BY role_function ORDER BY agents DESC`, [t, dFrom, dTo]);
+
+    const wb = new ExcelJS.Workbook(); wb.creator = 'WFM System';
+    const hrs = (m: number) => Math.round((m || 0) / 60);
+    const sheet = (name: string, cols: any[], rows: any[], color = 'FF4F46E5') => {
+      const ws = wb.addWorksheet(name); ws.columns = cols.map((c: any) => ({ ...c, width: c.width || 18 }));
+      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
+      ws.views = [{ state: 'frozen', ySplit: 1 }]; rows.forEach(r => ws.addRow(r)); return ws;
+    };
+
+    // 1) Executive Summary cover
+    const cover = wb.addWorksheet('Executive Summary');
+    cover.columns = [{ width: 30 }, { width: 22 }, { width: 22 }, { width: 22 }];
+    cover.mergeCells('A1:D1'); cover.getCell('A1').value = `WFM Executive Summary — ${dFrom} → ${dTo}`;
+    cover.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } }; cover.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
+    cover.addRow([]);
+    const kv = (k: string, v: any) => { const r = cover.addRow([k, v]); r.getCell(1).font = { bold: true, color: { argb: 'FF94A3B8' } }; };
+    cover.addRow(['HEADLINE KPIs']).getCell(1).font = { bold: true, size: 12 };
+    kv('Active agents', kpi.agents); kv('Conformance %', kpi.conformance); kv('Worked days', kpi.worked);
+    kv('Late days', `${kpi.latedays} (${hrs(kpi.latemin)}h)`); kv('Overtime (hrs)', hrs(kpi.otmin));
+    kv('Sick days', kpi.sick); kv('Absence days', kpi.absent); kv('Permissions', kpi.permissions);
+    cover.addRow([]);
+    cover.addRow(['SCORE OVERVIEW']).getCell(1).font = { bold: true, size: 12 };
+    kv('Average score', scores.average); kv('Grade A / B / C / D', `${scores.distribution.A} / ${scores.distribution.B} / ${scores.distribution.C} / ${scores.distribution.D}`);
+    const top = scores.agents.slice(0, 3).map((a: any) => `${a.name} (${a.score})`).join(', ');
+    const bot = scores.agents.slice(-3).map((a: any) => `${a.name} (${a.score})`).join(', ');
+    kv('Top performers', top); kv('Needs attention', bot);
+    cover.addRow([]);
+    cover.addRow(['KEY INSIGHTS']).getCell(1).font = { bold: true, size: 12 };
+    for (const i of ins.insights.slice(0, 8)) { const r = cover.addRow([`[${i.severity.toUpperCase()}] ${i.title}`, i.detail]); r.getCell(1).font = { color: { argb: i.severity === 'critical' ? 'FFDC2626' : i.severity === 'warning' ? 'FFD97706' : 'FF0EA5E9' } }; }
+
+    // 2) Insights, 3) Leaderboard, 4) Trends, 5) By function
+    sheet('Insights', [{ header: 'Severity', key: 'severity' }, { header: 'Title', key: 'title', width: 50 }, { header: 'Detail', key: 'detail', width: 60 }], ins.insights, 'FF7C3AED');
+    sheet('Leaderboard', [
+      { header: 'Rank', key: 'rank', width: 6 }, { header: 'Agent', key: 'name', width: 24 }, { header: 'Role', key: 'role' }, { header: 'Team Leader', key: 'tl', width: 18 },
+      { header: 'Score', key: 'score', width: 8 }, { header: 'Grade', key: 'grade', width: 7 }, { header: 'Conf %', key: 'conf' }, { header: 'Worked', key: 'worked' },
+      { header: 'Late days', key: 'lateDays' }, { header: 'Absent', key: 'absent' }, { header: 'Sick', key: 'sick' },
+    ], scores.agents, 'FFF59E0B');
+    sheet('Trends (Monthly)', [
+      { header: 'Period', key: 'label' }, { header: 'From', key: 'start' }, { header: 'Agents', key: 'agents' }, { header: 'Worked', key: 'worked' },
+      { header: 'Conformance %', key: 'conf' }, { header: 'Late days', key: 'latedays' }, { header: 'Late (min)', key: 'latemin' },
+      { header: 'OT (hrs)', key: 'othrs' }, { header: 'Sick', key: 'sick' }, { header: 'Absent', key: 'absent' },
+    ], trend.points.map((p: any) => ({ ...p, othrs: hrs(p.otmin) })), 'FF059669');
+    sheet('By Function', [
+      { header: 'Function', key: 'fn', width: 22 }, { header: 'Agents', key: 'agents' }, { header: 'Worked', key: 'worked' }, { header: 'Conformance %', key: 'conformance' },
+      { header: 'Late days', key: 'latedays' }, { header: 'OT (hrs)', key: 'othrs' }, { header: 'Sick', key: 'sick' }, { header: 'Absent', key: 'absent' },
+    ], byFn.map((r: any) => ({ ...r, othrs: hrs(r.otmin) })), 'FF0EA5E9');
+
+    res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="WFM_Executive_${dFrom}_${dTo}.xlsx"` });
+    res.end(Buffer.from(await wb.xlsx.writeBuffer()));
+  }
+
   /** File-based recon reads server-side source workbooks; fail clean (400) if absent. */
   private assertSources() {
     if (!fs.existsSync(SCHEDULE) || !fs.existsSync(SRC_DIR)) {

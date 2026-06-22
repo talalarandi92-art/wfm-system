@@ -150,8 +150,10 @@ export default function WfmOverviewPage() {
 
         {/* exports */}
         <div className="flex flex-wrap gap-2">
+          <button onClick={async()=>{ const q=new URLSearchParams(); if(from)q.set('from',from); if(to)q.set('to',to); try{ const r:any=await apiClient.get(`/attendance-recon/roster-v2/executive-export?${q}`,{ responseType:'blob' }); const u=URL.createObjectURL(r.data); const a=document.createElement('a'); a.href=u; a.download='WFM_Executive_Summary.xlsx'; a.click(); URL.revokeObjectURL(u);}catch{} }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold" style={{ background:'linear-gradient(135deg,#6366f1,#22c55e)', color:'#fff' }}><FileSpreadsheet size={14}/>{ar?'الملخّص التنفيذي (للإدارة)':'Executive Summary (for management)'}</button>
           <button onClick={async()=>{ try{ const r:any=await apiClient.get('/attendance-recon/roster-v2/master-export',{ responseType:'blob' }); const u=URL.createObjectURL(r.data); const a=document.createElement('a'); a.href=u; a.download='WFM_Master.xlsx'; a.click(); URL.revokeObjectURL(u);}catch{} }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(34,197,94,0.15)', color:'#22c55e' }}><FileSpreadsheet size={14}/>{ar?'تصدير الماستر (11 شيت)':'Master Excel (11 sheets)'}</button>
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(34,197,94,0.15)', color:'#22c55e' }}><FileSpreadsheet size={14}/>{ar?'الماستر (11 شيت)':'Master (11 sheets)'}</button>
           <button onClick={()=>nav('/report-builder')} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(99,102,241,0.15)', color:'#a5b4fc' }}><Wrench size={14}/>{ar?'36 تقرير جاهز':'36 ready reports'}</button>
         </div>
       </>)}
