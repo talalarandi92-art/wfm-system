@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, Search, Download, Home, Building2, UserX, ArrowRight, Upload, BarChart3,
   ChevronRight, ChevronDown, ChevronLeft, CalendarDays, Clock, ShieldCheck, AlertTriangle,
-  LogOut, FileSpreadsheet, UserCog, StickyNote, Timer, Wrench,
+  LogOut, FileSpreadsheet, UserCog, StickyNote, Timer, Wrench, LayoutDashboard,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -111,7 +111,9 @@ export default function RosterPage() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => nav('/roster-dashboard')} className={btn('text-white')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><BarChart3 size={13} />{ar?'لوحة':'Dashboard'}</button>
+          <button onClick={() => nav('/dashboard-builder')} className={btn('')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><LayoutDashboard size={13} />{ar?'باني الداشبورد':'Dashboard Builder'}</button>
           <button onClick={() => nav('/report-builder')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><Wrench size={13} />{ar?'منشئ التقارير':'Report Builder'}</button>
+          <button onClick={() => nav('/data-quality')} className={btn('')} style={{ background:'rgba(245,158,11,0.15)', color:'#fbbf24' }}><ShieldCheck size={13} />{ar?'جودة البيانات':'Data Quality'}</button>
           <button onClick={hrMatrix} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><FileSpreadsheet size={13} />HR Matrix</button>
           <button onClick={() => fileRef.current?.click()} className={btn('')} style={{ background:'rgba(255,255,255,0.06)', color:'#cbd5e1' }}><Upload size={13} />{uploading?'…':(ar?'رفع':'Upload')}</button>
           <input ref={fileRef} type="file" multiple hidden onChange={onUpload} />

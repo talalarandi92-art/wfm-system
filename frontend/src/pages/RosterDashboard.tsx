@@ -13,14 +13,17 @@ const adhC = (v: number) => v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>
 export default function RosterDashboardPage() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
   const nav = useNavigate();
-  const [f, setF] = useState({ from:'2026-06-01', to:'2026-06-20', functionName:'', shift:'', teamManager:'', team:'', presence:'', day:'', search:'' });
+  const [f, setF] = useState({ from:'2026-06-01', to:'2026-06-29', functionName:'', role:'', shift:'', teamManager:'', team:'', presence:'', day:'', search:'' });
+  const [tog, setTog] = useState({ includeInactive:false, includeExcludedRoles:false });
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
     const q = new URLSearchParams(Object.entries(f).filter(([,v])=>v) as any); q.set('limit','10');
+    if (tog.includeInactive) q.set('includeInactive','1');
+    if (tog.includeExcludedRoles) q.set('includeExcludedRoles','1');
     apiClient.get(`/attendance-recon/roster-dashboard?${q}`).then((r:any)=>setD(r.data)).catch(()=>setD(null)).finally(()=>setLoading(false));
-  }, [f]);
+  }, [f, tog]);
   useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
 
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
@@ -70,7 +73,7 @@ export default function RosterDashboardPage() {
         </div>
         <div className="flex items-center gap-1.5 flex-1 min-w-[140px]"><Search size={14} className="text-slate-400"/>
           <input value={f.search} onChange={e=>set('search',e.target.value)} placeholder={ar?'بحث بالاسم/الرقم':'Name / no'} className={`${inputCls} flex-1`}/></div>
-        {([['functionName','functions',ar?'كل الفنكشن':'All functions'],['shift','shifts',ar?'كل الشفتات':'All shifts'],['teamManager','teamManagers',ar?'كل التيم ليدرز':'All team leaders'],['team','teams',ar?'كل الجروبات':'All teams'],['day','days',ar?'كل الأيام':'All days']] as [string,string,string][]).map(([k,o,label])=>(
+        {([['functionName','functions',ar?'كل الفنكشن':'All functions'],['role','roles',ar?'كل الأدوار':'All roles'],['shift','shifts',ar?'كل الشفتات':'All shifts'],['teamManager','teamManagers',ar?'كل التيم ليدرز':'All team leaders'],['team','teams',ar?'كل الجروبات':'All teams'],['day','days',ar?'كل الأيام':'All days']] as [string,string,string][]).map(([k,o,label])=>(
           <select key={k} value={(f as any)[k]} onChange={e=>set(k,e.target.value)} className={inputCls}>
             <option value="">{label}</option>
             {(opt?.[o]||[]).map((v:string)=><option key={v} value={v}>{v}</option>)}
@@ -80,7 +83,27 @@ export default function RosterDashboardPage() {
           <option value="">{ar?'كل الحالات':'All presence'}</option>
           {['office','wfh','off','leave','absent','sick'].map(v=><option key={v} value={v}>{v}</option>)}
         </select>
+        {/* enterprise toggles: include inactive / records-only 8h roles */}
+        {([['includeInactive',ar?'+ غير النشطين':'+ Inactive'],['includeExcludedRoles',ar?'+ أدوار 8 ساعات':'+ 8h roles']] as [string,string][]).map(([k,label])=>(
+          <label key={k} className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer select-none px-2 py-1 rounded-lg" style={{ background:(tog as any)[k]?'rgba(99,102,241,0.18)':'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)' }}>
+            <input type="checkbox" checked={(tog as any)[k]} onChange={e=>setTog(p=>({ ...p, [k]: e.target.checked }))} className="accent-indigo-500"/>{label}
+          </label>
+        ))}
+        <button onClick={()=>nav('/data-quality')} className="text-[11px] text-amber-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.25)' }}>
+          <ShieldCheck size={13}/>{ar?'جودة البيانات':'Data Quality'}</button>
       </div>
+
+      {/* Team-leader verification banner — surfaces ex-TLs / unverified team labels */}
+      {!loading && d?.teamLeaders?.some((t:any)=>!t.verified) && (
+        <div className="rounded-2xl p-3 flex items-start gap-2.5" style={{ background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)' }}>
+          <UserX size={16} className="text-amber-400 flex-shrink-0 mt-0.5"/>
+          <div className="text-[11px] text-amber-200/90">
+            <span className="font-bold">{ar?'تنبيه جودة بيانات — تيم ليدرز غير مؤكدين: ':'Data-quality alert — unverified team leaders: '}</span>
+            {d.teamLeaders.filter((t:any)=>!t.verified).map((t:any)=>`${t.name} (${t.reports} ${ar?'تابع':'reports'}, ${ar?'آخر ظهور':'last'} ${t.lastSeen})`).join('  ·  ')}
+            <span className="text-amber-300/70">{ar?' — غير مدرجين بقائمة التيم ليدرز الحاليين. أكّد إن كانوا تركوا العمل.':' — excluded from the current team-leader list. Confirm if they have left.'}</span>
+          </div>
+        </div>
+      )}
 
       {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}
       {!loading && !d && <p className="text-sm text-rose-400 py-8 text-center">{ar?'تعذّر التحميل':'Failed to load'}</p>}
@@ -118,8 +141,8 @@ export default function RosterDashboardPage() {
           })}
         </div>
 
-        <div className="grid md:grid-cols-3 gap-3">
-          {([['byShift',ar?'حسب الشفت':'By shift'],['byFunction',ar?'حسب الفنكشن':'By function'],['byTeamManager',ar?'حسب التيم ليدر':'By team leader']] as [string,string][]).map(([key,title])=>{
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+          {([['byRole',ar?'حسب الدور':'By role'],['byShift',ar?'حسب الشفت':'By shift'],['byFunction',ar?'حسب الفنكشن':'By function'],['byTeamManager',ar?'حسب التيم ليدر':'By team leader']] as [string,string][]).map(([key,title])=>{
             const list = d.distributions?.[key] || []; const max = Math.max(...list.map((x:any)=>x.n),1);
             return (
               <div key={key} className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
