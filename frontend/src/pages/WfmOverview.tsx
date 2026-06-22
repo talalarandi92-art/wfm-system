@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, ShieldCheck, Clock, Timer, Coffee, UserX, ListChecks, Building2,
-  Wrench, GitCompareArrows, BarChart4, UserSearch, FileSpreadsheet, Table2, AlertTriangle, CalendarDays, Award, ClipboardCheck,
+  Wrench, GitCompareArrows, BarChart4, UserSearch, FileSpreadsheet, Table2, AlertTriangle, CalendarDays, Award, ClipboardCheck, Sparkles, ChevronRight,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -18,6 +18,7 @@ export default function WfmOverviewPage() {
   const [dash, setDash] = useState<any>(null); const [integ, setInteg] = useState<any>(null); const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<{a?:string;b?:string}>({});
   const [from, setFrom] = useState(''); const [to, setTo] = useState('');
+  const [insights, setInsights] = useState<any[]>([]);
 
   useEffect(() => {
     apiClient.get('/attendance-recon/roster-v2/integrity').then((r:any)=>setInteg(r.data)).catch(()=>{});
@@ -27,6 +28,7 @@ export default function WfmOverviewPage() {
     const q = new URLSearchParams(); if (from) q.set('from',from); if (to) q.set('to',to);
     apiClient.get(`/attendance-recon/roster-dashboard?${q}`).then((r:any)=>{ setDash(r.data); if(r.data.range){ setRange(r.data.range); if(!from)setFrom(r.data.from); if(!to)setTo(r.data.to); } })
       .catch(()=>setDash(null)).finally(()=>setLoading(false));
+    apiClient.get(`/attendance-recon/roster-v2/insights?${q}`).then((r:any)=>setInsights(r.data.insights||[])).catch(()=>setInsights([]));
   }, [from, to]);
 
   const s = dash?.summary; const h = integ?.headline;
@@ -77,6 +79,28 @@ export default function WfmOverviewPage() {
           <span className="text-[11px] text-slate-300">{ar?'أيتام':'Orphans'}: <b className="text-white">{integ.orphans?.length||0}</b></span>
           {flaggedTLs.length>0 && <span className="text-[11px] text-amber-300 flex items-center gap-1"><AlertTriangle size={12}/>{ar?'تيم ليدرز للمراجعة':'TLs to review'}: {flaggedTLs.map((t:any)=>`${t.name} (${t.status})`).join(', ')}</span>}
           <button onClick={()=>nav('/data-quality')} className="ms-auto text-[11px] text-emerald-300 px-2.5 py-1 rounded-lg" style={{ background:'rgba(34,197,94,0.12)' }}>{ar?'التفاصيل':'Details →'}</button>
+        </div>
+      )}
+
+      {/* auto-prioritized WFM insights */}
+      {insights.length>0 && (
+        <div className="rounded-2xl p-4" style={{ background:'rgba(139,92,246,0.06)', border:'1px solid rgba(139,92,246,0.2)' }}>
+          <div className="flex items-center gap-2 mb-3"><Sparkles size={15} className="text-violet-300"/><h3 className="text-sm font-bold text-white">{ar?'رؤى وتنبيهات WFM':'WFM Insights'}</h3>
+            <span className="text-[10px] text-slate-500">{ar?'مرتّبة حسب الأهمية — اضغط للتفاصيل':'auto-prioritized — click to drill in'}</span></div>
+          <div className="grid md:grid-cols-2 gap-2">
+            {insights.map((x:any,i:number)=>{ const c={critical:'#f43f5e',warning:'#f59e0b',info:'#06b6d4'}[x.severity as string]||'#64748b';
+              return (
+                <button key={i} onClick={()=>x.link&&nav(x.link)} className="flex items-start gap-2.5 p-2.5 rounded-xl text-start hover:bg-white/[0.03]" style={{ background:`${c}11`, border:`1px solid ${c}33` }}>
+                  <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background:c }}/>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-semibold text-slate-100">{x.title}</p>
+                    <p className="text-[10px] text-slate-400 truncate">{x.detail}</p>
+                  </div>
+                  {x.link && <ChevronRight size={14} className="text-slate-600 flex-shrink-0 mt-0.5"/>}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

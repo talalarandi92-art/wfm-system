@@ -630,6 +630,76 @@ export class ReconController {
     return { from: dFrom, to: dTo, employee: emp, summary, tardinessBands, shiftRate, byMonth, recent };
   }
 
+  /** WFM Insights — auto-prioritized, actionable findings over the clean roster_days:
+   *  coaching candidates (low conformance), tardiness/absence outliers, coverage-risk
+   *  functions, OT concentration, conformance trend vs the previous period, and data
+   *  quality. Each insight carries a severity + a deep-link target. */
+  @Get('roster-v2/insights')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Auto-prioritized WFM insights/alerts (coaching, coverage, OT, trend, data quality)' })
+  async insights(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || (range?.b ? `${range.b.slice(0, 7)}-01` : range?.a), dTo = to || range?.b;
+    const days = Math.max(1, Math.round((+new Date(dTo) - +new Date(dFrom)) / 86400000) + 1);
+    const prevTo = new Date(new Date(dFrom).getTime() - 86400000).toISOString().slice(0, 10);
+    const prevFrom = new Date(new Date(dFrom).getTime() - days * 86400000).toISOString().slice(0, 10);
+    const out: any[] = [];
+    const push = (severity: string, kind: string, title: string, detail: string, link?: string, value?: any) => out.push({ severity, kind, title, detail, link, value });
+
+    // 1) coaching candidates — low conformance, enough working days, tardiness-eligible roles
+    const lowConf = await this.ds.query(
+      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, ROUND(AVG(adherence_pct),1) conf, COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness AND adherence_pct IS NOT NULL
+         GROUP BY person_no HAVING AVG(adherence_pct)<70 AND COUNT(*) FILTER (WHERE presence IN ('office','wfh'))>=10 ORDER BY conf ASC LIMIT 6`, [t, dFrom, dTo]);
+    if (lowConf.length) push('critical', 'coaching', `${lowConf.length} ${lowConf.length === 1 ? 'agent needs' : 'agents need'} coaching (conformance < 70%)`,
+      lowConf.map((r: any) => `${r.name} ${r.conf}%`).join(' · '), '/data-quality');
+
+    // 2) tardiness outliers
+    const late = await this.ds.query(
+      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, COUNT(*) FILTER (WHERE sys_late_min>0) ld, COALESCE(SUM(sys_late_min),0)::int lm
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness
+         GROUP BY person_no HAVING COUNT(*) FILTER (WHERE sys_late_min>0)>=10 ORDER BY ld DESC LIMIT 5`, [t, dFrom, dTo]);
+    if (late.length) push('warning', 'tardiness', `${late.length} agent(s) late ≥ 10 days`, late.map((r: any) => `${r.name} (${r.ld}d)`).join(' · '), '/roster-dashboard');
+
+    // 3) absence outliers
+    const abs = await this.ds.query(
+      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, COUNT(*) FILTER (WHERE presence='absent') ab
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active
+         GROUP BY person_no HAVING COUNT(*) FILTER (WHERE presence='absent')>=5 ORDER BY ab DESC LIMIT 5`, [t, dFrom, dTo]);
+    if (abs.length) push('warning', 'absence', `${abs.length} agent(s) absent ≥ 5 days`, abs.map((r: any) => `${r.name} (${r.ab})`).join(' · '), '/roster-dashboard');
+
+    // 4) coverage-risk functions — high sick+absent share of planned-working
+    const cov = await this.ds.query(
+      `SELECT role_function fn,
+              COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent')) planned,
+              COUNT(*) FILTER (WHERE presence IN ('sick','absent')) lost
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND role_function IS NOT NULL
+         GROUP BY role_function HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent'))>=20
+         AND COUNT(*) FILTER (WHERE presence IN ('sick','absent'))::float / NULLIF(COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent')),0) > 0.12
+         ORDER BY COUNT(*) FILTER (WHERE presence IN ('sick','absent'))::float / NULLIF(COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent')),0) DESC LIMIT 4`, [t, dFrom, dTo]);
+    for (const r of cov) push('warning', 'coverage', `${r.fn}: ${Math.round(100 * r.lost / r.planned)}% of planned days lost to sick/absent`, `${r.lost} of ${r.planned} planned days`, '/interval-headcount');
+
+    // 5) OT concentration — top shift by OT
+    const ot = await this.ds.query(
+      `SELECT shift_code, COALESCE(SUM(ot_min),0)::int otm FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_code IS NOT NULL GROUP BY shift_code ORDER BY otm DESC LIMIT 1`, [t, dFrom, dTo]);
+    if (ot[0]?.otm > 0) push('info', 'overtime', `OT concentrated on the ${ot[0].shift_code} shift`, `${Math.round(ot[0].otm / 60)}h total overtime`, '/report-builder');
+
+    // 6) conformance trend vs previous equal-length period
+    const [cur] = await this.ds.query(`SELECT ROUND(AVG(adherence_pct),1) v FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness`, [t, dFrom, dTo]);
+    const [prev] = await this.ds.query(`SELECT ROUND(AVG(adherence_pct),1) v FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness`, [t, prevFrom, prevTo]);
+    if (cur?.v != null && prev?.v != null) { const delta = Math.round((cur.v - prev.v) * 10) / 10;
+      push(delta < -3 ? 'warning' : 'info', 'trend', `Conformance ${delta >= 0 ? 'up' : 'down'} ${Math.abs(delta)} pts vs previous period`, `${prev.v}% → ${cur.v}%`, '/roster-dashboard', delta); }
+
+    // 7) data quality
+    const [dq] = await this.ds.query(`SELECT COUNT(*) FILTER (WHERE data_quality IS NOT NULL)::int flagged FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [t, dFrom, dTo]);
+    if (dq?.flagged) push('info', 'quality', `${dq.flagged.toLocaleString()} rows carry a data-quality flag`, 'Review in System Audit', '/system-audit');
+
+    const rank: Record<string, number> = { critical: 3, warning: 2, info: 1 };
+    out.sort((a, b) => (rank[b.severity] - rank[a.severity]));
+    return { from: dFrom, to: dTo, count: out.length, insights: out };
+  }
+
   /** Team 360 — a whole team's WFM card for a team leader: team aggregate KPIs +
    *  per-agent breakdown + shift distribution. Excludes hidden TLs' scrubbed labels. */
   @Get('roster-v2/team-360')
