@@ -519,6 +519,55 @@ export class ReconController {
     res.end(Buffer.from(await wb.xlsx.writeBuffer()));
   }
 
+  /** Agent 360 — one agent's complete WFM card from the clean roster_days:
+   *  attendance mix, tardiness bands, OT detail, shift-rate distribution, monthly
+   *  trend, and recent days. Resolve by person_no or name search. */
+  @Get('roster-v2/agent-360')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Agent 360 profile — attendance, tardiness bands, OT, shift-rate, monthly trend' })
+  async agent360(@Req() req: any, @Query('person') person?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    if (!person) throw new BadRequestException('person (no or name) is required');
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const [emp] = await this.ds.query(
+      `SELECT person_no, clean_name, function_name, role_category, expected_hours, include_tardiness, is_active, is_supervisor, gender, team_leader, team_group, employment_type
+         FROM employee_identity WHERE tenant_id=$1 AND is_canonical AND (person_no=$2 OR lower(clean_name) LIKE lower($3)) ORDER BY (person_no=$2) DESC LIMIT 1`,
+      [t, person, `%${person}%`]);
+    if (!emp) throw new BadRequestException('No such agent');
+    const pn = emp.person_no; const p = [t, pn, dFrom, dTo];
+    const W = `tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4`;
+    const [summary] = await this.ds.query(`
+      SELECT COUNT(*)::int scheduledDays,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int workedDays,
+             COUNT(*) FILTER (WHERE presence='office')::int officeDays, COUNT(*) FILTER (WHERE presence='wfh')::int wfhDays,
+             COUNT(*) FILTER (WHERE presence='off')::int offDays, COUNT(*) FILTER (WHERE presence='leave')::int leaveDays,
+             COUNT(*) FILTER (WHERE presence='sick')::int sickDays, COUNT(*) FILTER (WHERE presence='absent')::int absenceDays,
+             COUNT(*) FILTER (WHERE presence='holiday')::int holidayDays,
+             COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)::int compDays,
+             COUNT(*) FILTER (WHERE sys_late_min>0)::int lateDays, COALESCE(SUM(sys_late_min),0)::int totalLateMin,
+             COUNT(*) FILTER (WHERE sys_early_min>0)::int earlyDays, COALESCE(SUM(sys_early_min),0)::int totalEarlyMin,
+             COALESCE(SUM(ot_before_min),0)::int otBefore, COALESCE(SUM(ot_after_min),0)::int otAfter,
+             COALESCE(SUM(ot_min),0)::int otTotal, COALESCE(SUM(offday_ot_min),0)::int offdayOt, COALESCE(SUM(holiday_ot_min),0)::int holidayOt,
+             ROUND(AVG(adherence_pct),1) conformance,
+             COUNT(*) FILTER (WHERE missing_punch)::int missingPunch, COUNT(*) FILTER (WHERE missing_system)::int missingSystem,
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions
+        FROM roster_days WHERE ${W}`, p);
+    const tardinessBands = await this.ds.query(`SELECT COALESCE(late_category,'On time') band, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh') GROUP BY 1`, p);
+    const sr = await this.ds.query(`SELECT ${this.SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh','sick','absent') GROUP BY 1`, p);
+    const shiftRate: Record<string, number> = { Morning: 0, Night: 0, Evening: 0, Midnight: 0, Other: 0 };
+    for (const r of sr) shiftRate[r.cat] = r.n;
+    const byMonth = await this.ds.query(`
+      SELECT month_name "month", COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             COALESCE(SUM(sys_late_min),0)::int lateMin, COALESCE(SUM(ot_min),0)::int otMin, ROUND(AVG(adherence_pct),1) conformance
+        FROM roster_days WHERE ${W} GROUP BY month_name ORDER BY MIN(work_date)`, p);
+    const recent = await this.ds.query(`
+      SELECT work_date::text date, day_name, shift_code, attendance_status, presence,
+             sys_login_min, sys_logout_min, sys_late_min, late_category, ot_before_min, ot_after_min, adherence_pct, data_quality
+        FROM roster_days WHERE ${W} ORDER BY work_date DESC LIMIT 40`, p);
+    return { from: dFrom, to: dTo, employee: emp, summary, tardinessBands, shiftRate, byMonth, recent };
+  }
+
   /** Interval Headcount — half-hourly staffing curve for a date, by function, over
    *  the clean roster_days. Cross-midnight aware: an MD/MN shift staffs the late
    *  hours of its own date AND the early hours of the next date; the previous day's
