@@ -70,6 +70,19 @@ function resolveShift(base, TIMING) {
   return { ss, se, is7h, is20: /20/.test(base) };
 }
 
+// circular minute distance (handles around-midnight)
+const circDiff = (a,b) => Math.abs(((a-b+720+1440)%1440)-720);
+// infer the most likely shift from an actual login/punch minute (closest shift start)
+function nearestShift(min, TIMING) {
+  if (min==null) return null; let best=null;
+  for (const [code, t] of Object.entries(TIMING)) {
+    if (/^(MR|BR|CR|NR|ER|MDR|MNR)$/.test(code)) continue;   // skip Ramadan twins
+    const ss = Math.round(t.start*1440); const diff = circDiff(min, ss);
+    if (!best || diff < best.diff) { let se = Math.round(t.end*1440); if (se<=ss) se+=1440; best = { code, ss, se, diff }; }
+  }
+  return best;
+}
+
 // Saturday-start business week number of the year
 function weekNum(iso) {
   const d = new Date(iso + 'T00:00:00Z'); const sinceSat = (d.getUTCDay()+1)%7;
@@ -167,7 +180,7 @@ function attStatus(presence, pcStatus, code) {
     for (const [iso, code] of Object.entries(rec.days)) {
       const pc = parseCode(code);
       const shift = resolveShift(pc.base, TIMING);
-      const ss = shift?.ss ?? null, se = shift?.se ?? null;
+      let ss = shift?.ss ?? null, se = shift?.se ?? null;
       const p = punch.get(`${rec.no}|${iso}`);
       const sA = sysByLogin.get(`${rec.login}|${iso}`), sS = sysByNo.get(`${rec.no}|${iso}`);
       let li=null, lo=null, src=[]; for (const s of [sA,sS]) if (s){ if(li==null||s.li<li)li=s.li; if(s.lo!=null&&(lo==null||s.lo>lo))lo=s.lo; }
@@ -192,6 +205,19 @@ function attStatus(presence, pcStatus, code) {
       const hasActual = (pin!=null) || (li!=null);   // do we have any login/punch trace?
 
       const inMin=li??pin; let outMin=lo??pout; if(inMin!=null&&outMin!=null&&outMin<inMin)outMin+=1440;
+      // ── outside-the-box: infer shift from actual login when the code carries no shift (P / unknown) ──
+      let inferredShift=null, shiftAlert=null;
+      if ((pc.status==='present' || (pc.status==='work' && ss==null)) && inMin!=null) {
+        const inf = nearestShift(inMin, TIMING);
+        if (inf && inf.diff<=120) { ss=inf.ss; se=inf.se; inferredShift=inf.code; }   // adopt the inferred shift window
+      } else if ((presence==='office'||presence==='wfh') && ss!=null && se!=null && inMin!=null) {
+        // alert ONLY when the login lands OUTSIDE the scheduled shift window (a late login inside the
+        // window is just tardiness). Outside-window + closer to a different shift ⇒ likely wrong roster code.
+        let la=inMin; if (se>1440 && la < ss-180) la+=1440;          // wrap into next-day for cross-midnight shifts
+        const within = la>=ss-30 && la<=se+15;          // 30-min early grace = OT-before, not a mismatch
+        if (!within) { const inf=nearestShift(inMin, TIMING);
+          if (inf && circDiff(inf.ss, ss) > 60) shiftAlert=inf.code; }   // inferred shift starts >1h from the written ⇒ genuinely wrong code
+      }
       const authLate=(odPerm&&/late/i.test(odPerm.type))||(odComp&&/late/i.test(odComp.type));
       const authEarly=(odPerm&&/early/i.test(odPerm.type))||(odComp&&/early/i.test(odComp.type));
       const sysLate=(worked&&ss!=null&&inMin!=null)?Math.max(0,inMin-ss):0;
@@ -234,7 +260,7 @@ function attStatus(presence, pcStatus, code) {
       const missingSystem = worked && !wfhLocFlag && li==null && pin!=null;   // punched but no system (office)
       const workedSys = (li!=null&&outMin!=null&&lo!=null) ? ((lo<li?lo+1440:lo)-li) : null;
       // original shift behind sick/absent
-      const origCode = (pc.status==='sick'||pc.status==='absent') ? (pc.base||null) : (pc.status==='work'? code : null);
+      const origCode = inferredShift || ((pc.status==='sick'||pc.status==='absent') ? (pc.base||null) : (pc.status==='work'? code : null));
       const weekN = weekNum(iso), monthN = MONTHS[+iso.slice(5,7)-1];
       const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(iso+'T00:00:00Z').getUTCDay()];
       const attendanceStatus = attStatus(presence, pc.status, code);
@@ -243,8 +269,10 @@ function attStatus(presence, pcStatus, code) {
       let mismatch=null;
       if (pc.status==='work' && !pc.base?.match(/wfh/i)) { if (pin!=null&&li!=null&&Math.abs(pin-li)>30) mismatch='punch<>system'; }
       let dq=null;
-      if (String(code).toUpperCase()==='TRANSFER') dq='transfer-marker';
-      else if (pc.status==='work' && pc.base && !shift?.ss) dq='unknown-shift-code';
+      if (shiftAlert) dq='roster-shift!=actual->'+shiftAlert;     // written shift doesn't match when they actually logged in
+      else if (inferredShift) dq='shift-inferred->'+inferredShift; // code had no shift; inferred from login time
+      else if (String(code).toUpperCase()==='TRANSFER') dq='transfer-marker';
+      else if (pc.status==='work' && pc.base && !ss) dq='unknown-shift-code';
       else if (noShow) dq='scheduled-no-show';
       else if (missingPunch) dq='missing-punch';
       else if (missingSystem) dq='missing-system';
