@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Users, ShieldCheck, Clock, Timer, Coffee, UserX, ListChecks, CalendarDays, Briefcase, UserSearch,
+  ArrowLeft, Users, ShieldCheck, Clock, Timer, Coffee, UserX, ListChecks, CalendarDays, Briefcase, UserSearch, GitCompareArrows,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -16,12 +16,15 @@ export default function Team360Page() {
   const nav = useNavigate();
   const [tl, setTl] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true); const [sort, setSort] = useState('conformance');
+  const [prog, setProg] = useState<any>(null);
 
   const load = useCallback(() => {
     setLoading(true);
     const qp = new URLSearchParams(); if (tl) qp.set('teamLeader',tl); if (from) qp.set('from',from); if (to) qp.set('to',to);
     apiClient.get(`/attendance-recon/roster-v2/team-360?${qp}`).then((r:any)=>{ setD(r.data); if(!tl) setTl(r.data.teamLeader); if(!from) setFrom(r.data.from); if(!to) setTo(r.data.to); })
       .catch(()=>setD(null)).finally(()=>setLoading(false));
+    if (tl) { const pq=new URLSearchParams({ teamLeader:tl }); if(from)pq.set('from',from); if(to)pq.set('to',to);
+      apiClient.get(`/attendance-recon/roster-v2/team-progress?${pq}`).then((r:any)=>setProg(r.data)).catch(()=>setProg(null)); }
   }, [tl, from, to]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
 
@@ -73,6 +76,40 @@ export default function Team360Page() {
             </div>
           ))}
         </div>
+
+        {/* Team progress over time — improving or declining? */}
+        {prog?.months?.length>1 && (() => {
+          const v = prog.verdict; const OVC:Record<string,[string,string]> = { improving:['#22c55e', ar?'الفريق في تحسّن ↑':'Team improving ↑'], declining:['#f43f5e', ar?'الفريق في تراجع ↓':'Team declining ↓'], mixed:['#f59e0b', ar?'متفاوت':'Mixed'], stable:['#06b6d4', ar?'مستقر':'Stable'] };
+          const [oc,ol] = OVC[v.overall]||OVC.stable;
+          const arrow = (dd:number|null, goodUp=true) => dd==null ? <span className="text-slate-600">·</span> : (()=>{ const good=goodUp?dd>0:dd<0; const c=dd===0?'#64748b':good?'#4ade80':'#f87171'; return <span style={{ color:c }}>{dd>0?'▲':dd<0?'▼':'•'} {Math.abs(dd)}</span>; })();
+          return (
+            <div className="rounded-2xl p-4" style={{ background:`${oc}10`, border:`1px solid ${oc}33` }}>
+              <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <GitCompareArrows size={15} style={{ color:oc }}/><h3 className="text-sm font-bold text-white">{ar?'تطوّر الفريق عبر الزمن':'Team progress over time'}</h3>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold" style={{ background:`${oc}22`, color:oc }}>{ol}</span>
+                {v.conformance && <span className="text-[11px] text-slate-300">{ar?'كونفورمانس':'Conformance'}: {v.conformance.first}% → {v.conformance.last}% <b style={{ color:v.conformance.change>=0?'#4ade80':'#f87171' }}>({v.conformance.change>=0?'+':''}{v.conformance.change})</b></span>}
+                {v.net && <span className="text-[11px] text-slate-300">Net: {v.net.first} → {v.net.last} <b style={{ color:v.net.change>=0?'#4ade80':'#f87171' }}>({v.net.change>=0?'+':''}{v.net.change})</b></span>}
+              </div>
+              <div className="overflow-x-auto"><table className="w-full text-[11px]">
+                <thead><tr className="text-slate-500">{[ar?'الشهر':'Month',ar?'موظفون':'Agents',ar?'كونف%':'Conf%','Δ','Net','Δ',ar?'تأخير':'Late',ar?'غياب':'Abs','OT'].map((h,i)=><th key={i} className={`pb-1.5 font-semibold ${i===0?'text-start':'text-center'}`}>{h}</th>)}</tr></thead>
+                <tbody>{prog.months.map((m:any,i:number)=>(
+                  <tr key={i} className="border-t border-white/5">
+                    <td className="py-1 text-slate-200">{m.label}</td>
+                    <td className="py-1 text-center text-slate-400">{m.agents}</td>
+                    <td className="py-1 text-center font-semibold" style={{ color:adhC(m.conf) }}>{m.conf??'—'}</td>
+                    <td className="py-1 text-center">{m.d?arrow(m.d.conf,true):''}</td>
+                    <td className="py-1 text-center text-slate-300">{m.net??'—'}</td>
+                    <td className="py-1 text-center">{m.d?arrow(m.d.net,true):''}</td>
+                    <td className="py-1 text-center" style={{ color:m.lateDays?'#f59e0b':'#475569' }}>{m.lateDays||'·'}</td>
+                    <td className="py-1 text-center" style={{ color:m.absent?'#f87171':'#475569' }}>{m.absent||'·'}</td>
+                    <td className="py-1 text-center text-emerald-300/80">{m.otMin?dur(m.otMin):'·'}</td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+              <p className="text-[10px] text-slate-500 mt-2">{ar?'▲/▼ مقارنة بالشهر السابق للفريق كامل (أخضر = أفضل).':'▲/▼ vs previous month for the whole team (green = better).'}</p>
+            </div>
+          );
+        })()}
 
         <div className="grid lg:grid-cols-3 gap-3">
           {/* per-agent breakdown */}
