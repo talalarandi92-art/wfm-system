@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Put, Query, Req, Res, StreamableFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Put, Query, Req, Res, StreamableFile, UploadedFiles, UseGuards, UseInterceptors } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -1376,6 +1376,54 @@ export class ReconController {
     return 0;
   }
 
+  /* ── Approved-schedule SOFT LOCK ───────────────────────────────────────────
+   *  The uploaded schedule is the authoritative baseline. Inside its date range,
+   *  manual cell edits are blocked for everyone EXCEPT a supervisor with the
+   *  `schedule.publish` permission (who may edit, fully audited). The only normal
+   *  way to change it is re-uploading the schedule. Range auto-set on upload;
+   *  stored in tenant_settings (no migration). Future dates stay editable. */
+  private async getScheduleLock(t: string): Promise<{ from: string; to: string; lockedAt?: string; lockedBy?: string } | null> {
+    const [r] = await this.ds.query(`SELECT setting_value FROM tenant_settings WHERE tenant_id=$1 AND setting_key='schedule_lock'`, [t]);
+    const v = r?.setting_value; return v ? (typeof v === 'string' ? JSON.parse(v) : v) : null;
+  }
+  private async setScheduleLock(t: string, val: any) {
+    await this.ds.query(
+      `INSERT INTO tenant_settings (tenant_id, setting_key, setting_value, setting_group, updated_at)
+         VALUES ($1,'schedule_lock',$2::jsonb,'schedule', now())
+       ON CONFLICT (tenant_id, setting_key) DO UPDATE SET setting_value=$2::jsonb, updated_at=now()`,
+      [t, JSON.stringify(val)]);
+  }
+  private async assertScheduleEditable(req: any, date: string) {
+    const lock = await this.getScheduleLock(req.user.tenantId);
+    const locked = lock && date >= lock.from && date <= lock.to;
+    const canOverride = (req.user.permissionCodes || []).includes('schedule.publish');
+    if (locked && !canOverride) {
+      throw new ForbiddenException(`Schedule ${date} is inside the approved/locked range (${lock!.from} → ${lock!.to}). Manual edits are not allowed — re-upload the schedule to change it (a supervisor with schedule.publish may override, with audit).`);
+    }
+    return { locked, overridden: locked && canOverride };
+  }
+
+  /** Approved-schedule lock status (range + who can edit). */
+  @Get('roster-v2/schedule-lock')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Approved-schedule soft-lock status (locked range + override capability)' })
+  async scheduleLockStatus(@Req() req: any) {
+    const lock = await this.getScheduleLock(req.user.tenantId);
+    return { lock, canOverride: (req.user.permissionCodes || []).includes('schedule.publish') };
+  }
+
+  /** Manually set / clear the approved-schedule lock (supervisor only). */
+  @Put('roster-v2/schedule-lock')
+  @RequirePermissions('schedule.publish')
+  @ApiOperation({ summary: 'Set or clear the approved-schedule lock range' })
+  async setScheduleLockManual(@Req() req: any, @Body() b: { from?: string; to?: string; clear?: boolean }) {
+    const t = req.user.tenantId;
+    if (b?.clear) { await this.ds.query(`DELETE FROM tenant_settings WHERE tenant_id=$1 AND setting_key='schedule_lock'`, [t]); return { lock: null }; }
+    if (!b?.from || !b?.to) throw new BadRequestException('from and to are required');
+    const val = { from: b.from, to: b.to, lockedAt: new Date().toISOString(), lockedBy: req.user.id || req.user.sub || 'manual' };
+    await this.setScheduleLock(t, val); return { lock: val };
+  }
+
   @Get('roster-v2/schedule-analysis')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Consolidated schedule analysis — shrinkage, shift-rate, OFF/leave/weekend-OFF %, hourly HC, permission hours' })
@@ -1583,6 +1631,7 @@ export class ReconController {
   async scheduleChange(@Req() req: any, @Body() b: { personNo: string; date: string; newShift: string; reason?: string }) {
     const t = req.user.tenantId;
     if (!b?.personNo || !b?.date || !b?.newShift) throw new BadRequestException('personNo, date and newShift are required');
+    await this.assertScheduleEditable(req, b.date);   // soft-lock: blocks non-supervisors in the approved range (audited via changed_by)
     const [cur] = await this.ds.query(
       `SELECT person_no, clean_name, role_function, shift_code FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 LIMIT 1`, [t, b.personNo, b.date]);
     if (!cur) throw new BadRequestException('No roster row for that person/date');
@@ -1611,6 +1660,7 @@ export class ReconController {
   async scheduleSwap(@Req() req: any, @Body() b: { personA: string; personB: string; date: string; reason?: string }) {
     const t = req.user.tenantId;
     if (!b?.personA || !b?.personB || !b?.date) throw new BadRequestException('personA, personB and date are required');
+    await this.assertScheduleEditable(req, b.date);   // soft-lock on the approved schedule range
     const rows = await this.ds.query(
       `SELECT person_no, clean_name, role_function, shift_code, shift_start_min, shift_end_min FROM roster_days
          WHERE tenant_id=$1 AND person_no IN ($2,$3) AND work_date=$4`, [t, b.personA, b.personB, b.date]);
@@ -1919,7 +1969,15 @@ export class ReconController {
     }
     this.svc.clearCache();
     const result = await this.ingestion.ingest(req.user.tenantId, SRC_DIR, SCHEDULE);
-    return { saved, ingested: result.rows, ms: result.ms };
+    // If a schedule file was uploaded, it becomes the AUTHORITATIVE baseline → auto
+    // soft-lock its date range so manual edits are blocked (supervisor override only).
+    let lock: any = null;
+    if (saved.some((s) => s.type === 'schedule')) {
+      const [rng] = await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [req.user.tenantId]);
+      if (rng?.a && rng?.b) { lock = { from: rng.a, to: rng.b, lockedAt: new Date().toISOString(), lockedBy: req.user.id || req.user.sub || 'upload' };
+        await this.setScheduleLock(req.user.tenantId, lock); }
+    }
+    return { saved, ingested: result.rows, ms: result.ms, scheduleLock: lock };
   }
 
   @Get('hr-matrix')

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CalendarRange, CalendarDays, Users, Coffee, Home, AlertTriangle, Clock, TrendingDown } from 'lucide-react';
+import { ArrowLeft, CalendarRange, CalendarDays, Users, Coffee, Home, AlertTriangle, Clock, TrendingDown, Lock } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 
@@ -14,6 +14,9 @@ export default function ScheduleAnalysisPage() {
   const nav = useNavigate();
   const [f, setF] = useState({ from:'2026-01-01', to:'2026-06-19', function:'', teamLeader:'' });
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
+  const [lock, setLock] = useState<any>(null);
+
+  useEffect(() => { apiClient.get('/attendance-recon/roster-v2/schedule-lock').then((r:any)=>setLock(r.data)).catch(()=>{}); }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -48,6 +51,13 @@ export default function ScheduleAnalysisPage() {
         <select value={f.function} onChange={e=>set('function',e.target.value)} className={inputCls}><option value="">{ar?'كل الفنكشن':'All functions'}</option>{(d?.filterOptions?.functions||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
         <select value={f.teamLeader} onChange={e=>set('teamLeader',e.target.value)} className={inputCls}><option value="">{ar?'كل التيم ليدرز':'All TLs'}</option>{(d?.filterOptions?.teamLeaders||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
       </div>
+
+      {lock?.lock && (
+        <div className="flex items-center gap-2 p-2.5 rounded-xl text-[11px]" style={{ background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.22)', color:'#4ade80' }}>
+          <Lock size={13} className="flex-shrink-0"/>
+          <span><b>{ar?'الجدول المعتمد مقفول':'Approved schedule locked'}</b> {lock.lock.from} → {lock.lock.to} — {ar?'التعديل اليدوي مرفوض؛ التغيير الوحيد عبر إعادة الأبلود':'manual edits blocked; the only change is a re-upload'}{lock.canOverride?(ar?' (إنت مشرف تقدر تعدّل مع أوديت)':' (you are a supervisor — may edit with audit)'):''}.</span>
+        </div>
+      )}
 
       {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحليل…':'Analyzing…'}</p>}
       {!loading && S && (<>
