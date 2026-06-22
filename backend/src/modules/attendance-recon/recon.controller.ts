@@ -252,7 +252,7 @@ export class ReconController {
     let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3`;
     const FILT: Record<string, string> = { function:'role_function', role:'role_category', teamLeader:'team_manager', group:'team_group', shift:'shift_code',
       attendanceStatus:'attendance_status', hrStatus:'hr_code', presence:'presence', lateCategory:'late_category', systemSource:'login_src',
-      day:'day_name', month:'month_name', dataQuality:'data_quality' };
+      day:'day_name', month:'month_name', dataQuality:'data_quality', person:'person_no' };
     for (const [k, col] of Object.entries(FILT)) if (q[k]) { p.push(q[k]); w += ` AND ${col}=$${p.length}`; }
     if (q.week) { p.push(Number(q.week)); w += ` AND week_number=$${p.length}`; }
     for (const b of ['wfh','sick','absent']) if (q[b]==='1') w += ` AND presence='${b}'`;

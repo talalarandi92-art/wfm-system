@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, UserSearch, Search, ShieldCheck, Clock, TimerReset, Timer, Coffee, UserX,
-  Building2, CalendarDays, ListChecks, Briefcase, ChevronDown,
+  Building2, CalendarDays, ListChecks, Briefcase, ChevronDown, Wrench, FileSpreadsheet, LayoutList, Table2,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -20,16 +20,32 @@ export default function Agent360Page() {
   const [people, setPeople] = useState<any[]>([]);
   const [person, setPerson] = useState('');
   const [q, setQ] = useState(''); const [open, setOpen] = useState(false);
+  const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(false); const [err, setErr] = useState('');
 
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ setPeople(r.data.rows||[]); if(r.data.rows?.[0]) setPerson(r.data.rows[0].person_no); }).catch(()=>{}); }, []);
 
   const load = useCallback(() => {
     if (!person) return; setLoading(true); setErr('');
-    apiClient.get(`/attendance-recon/roster-v2/agent-360?person=${encodeURIComponent(person)}`)
-      .then((r:any)=>setD(r.data)).catch((e:any)=>{ setD(null); setErr(e?.response?.data?.message||'Failed'); }).finally(()=>setLoading(false));
-  }, [person]);
+    const qp = new URLSearchParams({ person }); if (from) qp.set('from',from); if (to) qp.set('to',to);
+    apiClient.get(`/attendance-recon/roster-v2/agent-360?${qp}`)
+      .then((r:any)=>{ setD(r.data); if(!from) setFrom(r.data.from); if(!to) setTo(r.data.to); })
+      .catch((e:any)=>{ setD(null); setErr(e?.response?.data?.message||'Failed'); }).finally(()=>setLoading(false));
+  }, [person, from, to]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
+
+  // ── per-agent custom report (inline mini report-builder scoped to this agent) ──
+  const RFIELDS: [string,string][] = [['date','Date'],['day','Day'],['week','Week'],['month','Month'],['shiftCode','Shift'],['originalShift','Orig Shift'],['attendanceStatus','Status'],['hrStatus','HR Code'],['sysLogin','Sys In'],['sysLogout','Sys Out'],['workedMin','Worked'],['lateMin','Late'],['lateCategory','Late Band'],['earlyMin','Early'],['otBefore','OT Before'],['otAfter','OT After'],['otTotal','OT Total'],['conformance','Conf %'],['permission','Permission'],['dataQuality','Data Quality']];
+  const RKPIS: [string,string][] = [['scheduledDays','Scheduled'],['workedDays','Worked'],['officeDays','Office'],['wfhDays','WFH'],['sickDays','Sick'],['absenceDays','Absence'],['lateDays','Late days'],['lateMin','Late min'],['earlyMin','Early min'],['otMin','OT'],['otBefore','OT before'],['otAfter','OT after'],['conformance','Conf %'],['permissionCount','Permissions']];
+  const RGROUPS: [string,string][] = [['month','Month'],['week','Week'],['day','Day'],['shift','Shift'],['status','Status'],['lateCategory','Late band']];
+  const [rOpen, setROpen] = useState(false);
+  const [rpt, setRpt] = useState<{ mode:'detail'|'summary'; fields:string[]; kpis:string[]; group:string }>({ mode:'detail', fields:['date','day','shiftCode','attendanceStatus','sysLogin','sysLogout','lateMin','otBefore','otAfter','conformance'], kpis:['scheduledDays','workedDays','lateMin','otMin','conformance'], group:'month' });
+  const [rData, setRData] = useState<any>(null);
+  const rQs = () => { const qp=new URLSearchParams({ person, from, to }); if(rpt.mode==='summary'){ qp.set('groupBy',rpt.group); qp.set('kpis',rpt.kpis.join(',')); } else qp.set('fields',rpt.fields.join(',')); return qp; };
+  const runRpt = useCallback(() => { if(!person) return; apiClient.get(`/attendance-recon/report-builder?${rQs()}`).then((r:any)=>setRData(r.data)).catch(()=>setRData(null)); }, [person, from, to, rpt]);
+  useEffect(() => { if(rOpen){ const t=setTimeout(runRpt,250); return ()=>clearTimeout(t); } }, [rOpen, runRpt]);
+  const exportRpt = async () => { const qp=rQs(); qp.set('format','xlsx'); try{ const r:any=await apiClient.get(`/attendance-recon/report-builder?${qp}`,{responseType:'blob'}); const u=URL.createObjectURL(r.data); const a=document.createElement('a'); a.href=u; a.download=`agent_${person}_report.xlsx`; a.click(); URL.revokeObjectURL(u);}catch{} };
+  const toggleR = (key:'fields'|'kpis', k:string) => setRpt(p=>({ ...p, [key]: p[key].includes(k)?p[key].filter(x=>x!==k):[...p[key],k] }));
 
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
   const s = d?.summary; const e = d?.employee;
@@ -59,6 +75,9 @@ export default function Agent360Page() {
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#8b5cf6,#6366f1)' }}><UserSearch size={20} className="text-white"/></div>
         <div className="flex-1 min-w-[180px]"><h1 className="text-lg font-bold text-white">{ar?'ملف الموظف 360':'Agent 360 Profile'}</h1>
           <p className="text-xs text-slate-500">{ar?'صورة كاملة لأداء وحضور الموظف من الماستر النظيف':'A complete attendance & performance picture from the clean master'}</p></div>
+        <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
+          <input type="date" value={from} onChange={e=>setFrom(e.target.value)} className={inputCls}/><span className="text-xs">→</span>
+          <input type="date" value={to} onChange={e=>setTo(e.target.value)} className={inputCls}/></div>
         <div className="relative" onBlur={()=>setTimeout(()=>setOpen(false),150)}>
           <div className="flex items-center gap-1.5"><Search size={14} className="text-slate-400"/>
             <input
@@ -172,6 +191,51 @@ export default function Agent360Page() {
               </tr>
             ))}</tbody>
           </table>
+        </div>
+
+        {/* ── Custom report for THIS agent (على كيفك) ── */}
+        <div className="rounded-2xl p-4" style={{ background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.18)' }}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Wrench size={15} className="text-indigo-300"/>
+            <h3 className="text-sm font-bold text-white">{ar?'ريبورت مخصّص لهذا الموظف':'Custom report for this agent'}</h3>
+            <span className="text-[10px] text-slate-500">{ar?'اختر الأعمدة أو الـKPIs، ضمن نطاق التاريخ، وصدّر Excel':'pick fields or KPIs within the date range, export Excel'}</span>
+            <button onClick={()=>setROpen(o=>!o)} className="ms-auto text-[11px] text-indigo-300 px-2.5 py-1 rounded-lg" style={{ background:'rgba(99,102,241,0.15)' }}>{rOpen?(ar?'إخفاء':'Hide'):(ar?'افتح المُنشئ':'Open builder')}</button>
+          </div>
+
+          {rOpen && (<div className="mt-3 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex rounded-lg overflow-hidden border border-white/10">
+                <button onClick={()=>setRpt(p=>({...p,mode:'detail'}))} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold" style={rpt.mode==='detail'?{background:'linear-gradient(135deg,#6366f1,#8b5cf6)',color:'#fff'}:{color:'#94a3b8'}}><LayoutList size={13}/>{ar?'تفصيلي':'Detail'}</button>
+                <button onClick={()=>setRpt(p=>({...p,mode:'summary'}))} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold" style={rpt.mode==='summary'?{background:'linear-gradient(135deg,#6366f1,#8b5cf6)',color:'#fff'}:{color:'#94a3b8'}}><Table2 size={13}/>{ar?'ملخّص':'Summary'}</button>
+              </div>
+              {rpt.mode==='summary' && (
+                <select value={rpt.group} onChange={ev=>setRpt(p=>({...p,group:ev.target.value}))} className={inputCls}>
+                  {RGROUPS.map(([k,l])=><option key={k} value={k}>{ar?'جمّع: ':'Group: '}{l}</option>)}
+                </select>
+              )}
+              <button onClick={exportRpt} className="ms-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}><FileSpreadsheet size={13}/>{ar?'تصدير Excel':'Export Excel'}</button>
+            </div>
+            {/* chips */}
+            <div className="flex flex-wrap gap-1.5">
+              {(rpt.mode==='detail'?RFIELDS:RKPIS).map(([k,l])=>{ const sel=(rpt.mode==='detail'?rpt.fields:rpt.kpis).includes(k);
+                return <button key={k} onClick={()=>toggleR(rpt.mode==='detail'?'fields':'kpis',k)} className="px-2.5 py-1 rounded-lg text-[11px] font-medium"
+                  style={sel?{background:'rgba(99,102,241,0.25)',color:'#c7d2fe',border:'1px solid rgba(99,102,241,0.5)'}:{background:'rgba(255,255,255,0.04)',color:'#94a3b8',border:'1px solid rgba(255,255,255,0.08)'}}>{l}</button>;
+              })}
+            </div>
+            {/* preview */}
+            {rData && (
+              <div className="rounded-xl overflow-auto" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)', maxHeight:'40vh' }}>
+                <div className="px-3 py-1.5 text-[10px] text-slate-500 border-b border-white/5">{rData.count} {ar?'صف':'rows'} · {rData.from} → {rData.to}</div>
+                <table className="w-full text-[11px]">
+                  <thead className="sticky top-0" style={{ background:'#11162a' }}><tr className="text-slate-400">{(rData.columns||[]).map((c:any,i:number)=><th key={c.key} className={`px-2 py-1.5 font-semibold whitespace-nowrap ${i===0?'text-start':'text-center'}`}>{c.label}</th>)}</tr></thead>
+                  <tbody>{(rData.rows||[]).slice(0,200).map((row:any,ri:number)=>(
+                    <tr key={ri} className="border-t border-white/5">{(rData.columns||[]).map((c:any,ci:number)=><td key={c.key} className={`px-2 py-1 whitespace-nowrap ${ci===0?'text-start text-white':'text-center text-slate-300'}`}>{row[c.key]??'—'}</td>)}</tr>
+                  ))}</tbody>
+                </table>
+                {(rData.rows||[]).length>200 && <div className="px-3 py-1.5 text-[10px] text-slate-500">{ar?`أول 200 — صدّر Excel للكل (${rData.count})`:`First 200 — export Excel for all (${rData.count})`}</div>}
+              </div>
+            )}
+          </div>)}
         </div>
       </>)}
     </div>
