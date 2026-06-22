@@ -183,10 +183,10 @@ export class ReconController {
           AND replace(lower(i.clean_name),' ','') = replace(lower(r.team_manager),' ','')
         WHERE r.tenant_id=$1 AND r.team_manager IS NOT NULL AND r.team_manager<>''
         GROUP BY r.team_manager, i.person_no, i.is_active ORDER BY reports DESC`, [t]);
-    const { tlActive, tlStatus } = await this.tlResolver(t);
+    const { tlStatus } = await this.tlResolver(t);
     const teamLeaders = tlRows.map((r:any)=>{ const s = tlStatus(r.name, r.matched_active);
-      return { name: r.name, reports: r.reports, firstSeen: r.first_seen, lastSeen: r.last_seen, ...s }; });
-    const teamManagers = teamLeaders.filter(x=>x.verified).map(x=>x.name);  void tlActive;
+      return { name: r.name, reports: r.reports, firstSeen: r.first_seen, lastSeen: r.last_seen, ...s }; }).filter((x:any)=>!x.hidden);
+    const teamManagers = teamLeaders.filter((x:any)=>x.verified).map((x:any)=>x.name);
 
     return {
       from: dFrom, to: dTo, range, summary,
@@ -382,8 +382,50 @@ export class ReconController {
         WHERE r.tenant_id=$1 AND r.team_manager IS NOT NULL AND r.team_manager<>''
         GROUP BY r.team_manager ORDER BY reports DESC`, [t]);
     const { tlStatus } = await this.tlResolver(t);
-    const teamLeaders = tlRows.map((r: any) => ({ name: r.name, reports: r.reports, first_seen: r.first_seen, last_seen: r.last_seen, ...tlStatus(r.name, r.matched) }));
+    const teamLeaders = tlRows.map((r: any) => ({ name: r.name, reports: r.reports, first_seen: r.first_seen, last_seen: r.last_seen, ...tlStatus(r.name, r.matched) })).filter((x: any) => !x.hidden);
     return { headline, duplicates, inactiveIds, orphans, pollution, roleHours, teamLeaders };
+  }
+
+  /** List the editable team-leader status table (with live report counts). */
+  @Get('roster-v2/team-leaders')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Team-leader status table (active/director/left, hidden) + report counts' })
+  async teamLeaderStatus(@Req() req: any) {
+    const t = req.user.tenantId;
+    // every label ever seen on the roster, joined to its editable status
+    const rows = await this.ds.query(
+      `SELECT COALESCE(lbl.name, s.name) name,
+              COALESCE(s.status, 'unset') status,
+              COALESCE(s.hidden, false) hidden, s.note,
+              COALESCE(lbl.reports, 0) reports, lbl.first_seen, lbl.last_seen
+         FROM (SELECT team_manager name, COUNT(DISTINCT person_no)::int reports,
+                      MIN(work_date)::text first_seen, MAX(work_date)::text last_seen
+                 FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>''
+                 GROUP BY team_manager) lbl
+         FULL JOIN team_leader_status s ON s.tenant_id=$1 AND s.name=lbl.name
+        WHERE COALESCE(lbl.name, s.name) IS NOT NULL ORDER BY reports DESC, 1`, [t]);
+    return { rows };
+  }
+
+  /** Set a team-leader's status; hiding immediately scrubs the label from roster_days. */
+  @Put('roster-v2/team-leaders')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Upsert a team-leader status (active/director/left + hidden). Hiding removes the label everywhere.' })
+  async setTeamLeaderStatus(@Req() req: any, @Body() b: { name: string; status?: string; hidden?: boolean; note?: string }) {
+    const t = req.user.tenantId;
+    if (!b?.name) throw new BadRequestException('name is required');
+    const status = ['active', 'director', 'left'].includes(b.status || '') ? b.status : 'active';
+    await this.ds.query(
+      `INSERT INTO team_leader_status (tenant_id, name, status, hidden, note, updated_at)
+       VALUES ($1,$2,$3,$4,$5,now())
+       ON CONFLICT (tenant_id, name) DO UPDATE SET status=EXCLUDED.status, hidden=EXCLUDED.hidden, note=EXCLUDED.note, updated_at=now()`,
+      [t, b.name, status, !!b.hidden, b.note || null]);
+    let scrubbed = 0;
+    if (b.hidden) {  // remove the label from the roster so it isn't mentioned anywhere
+      const r = await this.ds.query(`UPDATE roster_days SET team_manager=NULL WHERE tenant_id=$1 AND team_manager=$2`, [t, b.name]);
+      scrubbed = r.rowCount || 0;
+    }
+    return { ok: true, name: b.name, status, hidden: !!b.hidden, scrubbedRows: scrubbed };
   }
 
   /** Employee_Master_Clean — one row per canonical human with role-hours rules. */
@@ -747,27 +789,30 @@ export class ReconController {
     return { ok: true, reverted: true };
   }
 
-  /** Documented, user-confirmed team-leader resolution (2026-06-22):
-   *  - spelling alias: "Fatme Hassan" → active TL "Fatma Hasan"
-   *  - Aya Ruiz = terminated (left) → excluded from current-TL views
-   *  - Talal Arandi = director/owner (present) → kept as a current management label
-   *  A label is "current" if it maps to an active Team-Leader employee or is the director. */
+  /** Team-leader resolution driven by the editable `team_leader_status` table.
+   *  status: active | director | left ; hidden ⇒ suppressed everywhere. Falls back
+   *  to matching an active Team-Leader employee (spelling-tolerant) for unlisted labels. */
   private async tlResolver(t: string) {
     const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, '');
     const TL_ALIAS: Record<string, string> = { 'fatmehassan': 'fatma hasan' };
-    const TL_LEFT = new Set(['ayaruiz']);            // user-confirmed terminated
-    const TL_DIRECTOR = new Set(['talalarandi']);    // user-confirmed present (director/owner)
+    const statusRows = await this.ds.query(`SELECT name, status, hidden, note FROM team_leader_status WHERE tenant_id=$1`, [t]);
+    const byName = new Map<string, any>(statusRows.map((r: any) => [norm(r.name), r]));
+    const hidden = new Set<string>(statusRows.filter((r: any) => r.hidden).map((r: any) => norm(r.name)));
     const tlActive = new Set((await this.ds.query(
       `SELECT clean_name FROM employee_identity WHERE tenant_id=$1 AND is_canonical AND role_category='Team Leader' AND is_active`, [t]
     )).map((r: any) => norm(r.clean_name)));
     const tlStatus = (name: string, matchedActive?: boolean) => {
-      const n = norm(name);
-      if (TL_LEFT.has(n)) return { verified: false, status: 'left', note: 'left — terminated (confirmed 2026-06-22)' };
-      if (TL_DIRECTOR.has(n)) return { verified: true, status: 'director', note: 'director / management (present)' };
+      const n = norm(name); const st = byName.get(n);
+      if (st) {
+        if (st.hidden) return { verified: false, status: 'left', hidden: true, note: st.note || 'removed' };
+        if (st.status === 'director') return { verified: true, status: 'director', hidden: false, note: st.note || 'director / management (present)' };
+        if (st.status === 'left') return { verified: false, status: 'left', hidden: false, note: st.note || 'left' };
+        return { verified: true, status: 'current', hidden: false, note: null };
+      }
       const active = !!matchedActive || tlActive.has(n) || tlActive.has(norm(TL_ALIAS[n] || ''));
-      return { verified: active, status: active ? 'current' : 'unverified', note: active ? null : 'team label not matched to an active Team-Leader employee — verify if this person left' };
+      return { verified: active, status: active ? 'current' : 'unverified', hidden: false, note: active ? null : 'team label not matched to an active Team-Leader employee — verify if this person left' };
     };
-    return { tlActive, tlStatus };
+    return { tlActive, tlStatus, hidden, norm };
   }
 
   /** File-based recon reads server-side source workbooks; fail clean (400) if absent. */

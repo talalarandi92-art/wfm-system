@@ -157,6 +157,14 @@ function roleOf(fn) {
         FROM roster_days WHERE tenant_id=$1 AND person_no IS NOT NULL GROUP BY person_no
      ) s
      WHERE i.tenant_id=$1 AND i.person_no = s.person_no`, [TENANT]);
+  // 7b) Durability: scrub any hidden team-leader label from the roster (e.g. a TL who
+  //     left and must not be mentioned anywhere). Driven by team_leader_status.hidden.
+  try {
+    const scrub = await c.query(
+      `UPDATE roster_days SET team_manager=NULL WHERE tenant_id=$1 AND team_manager IN
+         (SELECT name FROM team_leader_status WHERE tenant_id=$1 AND hidden)`, [TENANT]);
+    if (scrub.rowCount) console.log(`scrubbed ${scrub.rowCount} hidden-TL roster rows`);
+  } catch (e) { /* table may not exist on older DBs */ }
   await c.query('COMMIT');
 
   // 8) Report

@@ -14,10 +14,24 @@ export default function DataQualityPage() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
   const nav = useNavigate();
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
+  const [tls, setTls] = useState<any[]>([]); const [savingTl, setSavingTl] = useState('');
 
+  const loadTls = () => apiClient.get('/attendance-recon/roster-v2/team-leaders').then((r:any)=>setTls(r.data.rows||[])).catch(()=>setTls([]));
   useEffect(() => {
     apiClient.get('/attendance-recon/roster-v2/integrity').then((r:any)=>setD(r.data)).catch(()=>setD(null)).finally(()=>setLoading(false));
+    loadTls();
   }, []);
+  const saveTl = async (name:string, patch:{status?:string;hidden?:boolean}) => {
+    const cur = tls.find(x=>x.name===name) || {};
+    setSavingTl(name);
+    try {
+      await apiClient.put('/attendance-recon/roster-v2/team-leaders', { name, status: patch.status ?? (cur.status==='unset'?'active':cur.status), hidden: patch.hidden ?? cur.hidden, note: cur.note });
+      await loadTls();
+      // refresh the integrity audit (hidden TLs disappear from it)
+      apiClient.get('/attendance-recon/roster-v2/integrity').then((r:any)=>setD(r.data)).catch(()=>{});
+    } catch { /* */ }
+    setSavingTl('');
+  };
 
   const h = d?.headline;
   const card = (ic:any, label:string, v:any, sub:string, c:string) => (
@@ -56,28 +70,36 @@ export default function DataQualityPage() {
           {card(<Layers size={18}/>, ar?'صفوف الروستر':'Roster rows', (h.roster_rows||0).toLocaleString(), `${h.unstamped} ${ar?'بدون هوية':'unstamped'}`, '#06b6d4')}
         </div>
 
-        {/* Team-leader verification */}
+        {/* Team-leader management (editable) */}
         <div className={panel} style={panelStyle}>
-          <div className="flex items-center gap-2 mb-3"><Users size={15} className="text-amber-400"/><h3 className="text-sm font-bold text-white">{ar?'تدقيق التيم ليدرز':'Team-Leader Verification'}</h3>
-            <span className="text-[10px] text-slate-500">{ar?'الليبل اللي ما ينطبق على موظف تيم ليدر نشط = يحتاج تأكيد (ربما ترك العمل)':'a label not matching an active team-leader employee = verify (may have left)'}</span></div>
+          <div className="flex items-center gap-2 mb-3"><Users size={15} className="text-amber-400"/><h3 className="text-sm font-bold text-white">{ar?'إدارة التيم ليدرز':'Team-Leader Management'}</h3>
+            <span className="text-[10px] text-slate-500">{ar?'عدّل الحالة أو أخفِ من ترك العمل — الإخفاء يشيل اسمه من كل مكان':'set status or hide someone who left — hiding scrubs the label everywhere'}</span></div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {(d.teamLeaders||[]).map((t:any,i:number)=>{
-              const S:Record<string,[string,string,string]> = {
-                current:[ar?'حالي ✓':'Current ✓','#4ade80','rgba(34,197,94,'],
-                director:[ar?'مدير':'Director','#60a5fa','rgba(59,130,246,'],
-                left:[ar?'ترك العمل':'Left','#f87171','rgba(239,68,68,'],
-                unverified:[ar?'غير مؤكد':'Unverified','#fbbf24','rgba(245,158,11,'],
-              };
-              const [label,col,rgb] = S[t.status] || S[t.verified?'current':'unverified'];
+            {tls.map((t:any,i:number)=>{
+              const S:Record<string,[string,string]> = { current:['#4ade80','rgba(34,197,94,'], active:['#4ade80','rgba(34,197,94,'], director:['#60a5fa','rgba(59,130,246,'], left:['#f87171','rgba(239,68,68,'], unset:['#fbbf24','rgba(245,158,11,'] };
+              const [col,rgb] = S[t.status] || S.unset;
               return (
-                <div key={i} className="flex items-center justify-between gap-2 p-2.5 rounded-xl" style={{ background:`${rgb}0.08)`, border:`1px solid ${rgb}0.28)` }}>
-                  <div className="min-w-0"><p className="text-xs font-semibold text-white truncate">{t.name}</p>
-                    <p className="text-[10px] text-slate-400">{t.reports} {ar?'تابع':'reports'} · {ar?'آخر':'last'} {t.last_seen}</p></div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background:`${rgb}0.2)`, color:col }}>{label}</span>
+                <div key={i} className="p-2.5 rounded-xl" style={{ background:`${rgb}${t.hidden?'0.05':'0.08'})`, border:`1px solid ${rgb}0.28)`, opacity:t.hidden?0.7:1 }}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="min-w-0"><p className="text-xs font-semibold text-white truncate">{t.name}{t.hidden?' 🚫':''}</p>
+                      <p className="text-[10px] text-slate-400">{t.reports} {ar?'تابع':'reports'}{t.last_seen?` · ${ar?'آخر':'last'} ${t.last_seen}`:''}</p></div>
+                    {savingTl===t.name && <span className="text-[9px] text-slate-500">…</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <select value={t.status==='unset'?'active':t.status} onChange={e=>saveTl(t.name,{status:e.target.value})} className="text-[10px] px-1.5 py-1 rounded bg-white/5 border border-white/10 text-white outline-none" style={{ color:col }}>
+                      <option value="active" className="bg-slate-800">{ar?'حالي':'Active'}</option>
+                      <option value="director" className="bg-slate-800">{ar?'مدير':'Director'}</option>
+                      <option value="left" className="bg-slate-800">{ar?'ترك':'Left'}</option>
+                    </select>
+                    <label className="flex items-center gap-1 text-[10px] text-slate-300 cursor-pointer ms-auto">
+                      <input type="checkbox" checked={!!t.hidden} onChange={e=>saveTl(t.name,{hidden:e.target.checked})} className="accent-rose-500"/>{ar?'إخفاء':'Hide'}
+                    </label>
+                  </div>
                 </div>
               );
             })}
           </div>
+          <p className="text-[10px] text-slate-500 mt-2">{ar?'«إخفاء» = شطب الاسم من الروستر نهائياً (يظهر التابعون بلا تيم ليدر حتى تُعيد تعيينهم).':'"Hide" = permanently scrub the label from the roster (their reports show with no team leader until reassigned).'}</p>
         </div>
 
         {/* Duplicate Agent Audit */}
