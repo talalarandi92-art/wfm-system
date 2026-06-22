@@ -1216,7 +1216,7 @@ export class ReconController {
       `SELECT work_date::text date, day_name, person_no, employee_no, clean_name,
               role_function, role_category, team_manager, shift_code, shift_start_min, shift_end_min,
               sys_login_min, sys_logout_min, login_src, presence, permission_type, permission_duration,
-              comp_off, comp_worked_min, ot_min, ot_after_min, include_tardiness
+              comp_off, comp_worked_min, ot_min, ot_before_min, ot_after_min, offday_ot_min, holiday_ot_min, include_tardiness
          FROM roster_days
         WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3
           AND punch_in_min IS NULL AND sys_login_min IS NOT NULL
@@ -1238,10 +1238,13 @@ export class ReconController {
       const requiredNet = Math.max(0, gross - breakMin);
       const excludedRole = !r.include_tardiness || this.WFH_EXCLUDE_RE.test(`${r.role_category || ''} ${r.role_function || ''}`);
       const holiday = this.WFH_HOLIDAYS.has(r.date);
-      const onLeave = ['leave', 'sick', 'absent', 'off', 'holiday'].includes(r.presence);
+      // any presence other than a clean 'wfh' (sick/absent/leave/off/holiday/office…) +
+      // no fingerprint is an internal contradiction → route to Data Quality, never HR.
+      const onLeave = r.presence != null && r.presence !== 'wfh';
       const hasPerm = r.permission_type != null;
       const hasComp = r.comp_off != null || Number(r.comp_worked_min || 0) > 0;
-      const hasOT = Number(r.ot_min || 0) > 0 || Number(r.ot_after_min || 0) > 0;
+      const hasOT = Number(r.ot_min || 0) > 0 || Number(r.ot_before_min || 0) > 0 || Number(r.ot_after_min || 0) > 0
+        || Number(r.offday_ot_min || 0) > 0 || Number(r.holiday_ot_min || 0) > 0;
 
       const login = alignTo(Number(r.sys_login_min), start);
       const logout = r.sys_logout_min == null ? null : alignTo(Number(r.sys_logout_min), effEnd);
