@@ -630,6 +630,45 @@ export class ReconController {
     return { from: dFrom, to: dTo, employee: emp, summary, tardinessBands, shiftRate, byMonth, recent };
   }
 
+  /** Team 360 — a whole team's WFM card for a team leader: team aggregate KPIs +
+   *  per-agent breakdown + shift distribution. Excludes hidden TLs' scrubbed labels. */
+  @Get('roster-v2/team-360')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Team 360 — team-leader aggregate + per-agent breakdown + shift distribution' })
+  async team360(@Req() req: any, @Query('teamLeader') tl?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    // default to the team leader with the most reports if none given
+    const tlName = tl || (await this.ds.query(`SELECT team_manager FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' GROUP BY team_manager ORDER BY COUNT(*) DESC LIMIT 1`, [t]))[0]?.team_manager;
+    if (!tlName) throw new BadRequestException('No team leaders found');
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p = [t, tlName, dFrom, dTo]; const W = `tenant_id=$1 AND team_manager=$2 AND work_date BETWEEN $3 AND $4 AND is_active`;
+    const [summary] = await this.ds.query(`
+      SELECT COUNT(DISTINCT person_no)::int agents, COUNT(*)::int records,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int workedDays,
+             COUNT(*) FILTER (WHERE presence='off')::int offDays,
+             COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent,
+             COUNT(*) FILTER (WHERE presence='leave')::int leave,
+             COUNT(*) FILTER (WHERE sys_late_min>0)::int lateDays, COALESCE(SUM(sys_late_min),0)::int lateMin,
+             COUNT(*) FILTER (WHERE sys_early_min>0)::int earlyDays,
+             COALESCE(SUM(ot_before_min),0)::int otBefore, COALESCE(SUM(ot_after_min),0)::int otAfter, COALESCE(SUM(ot_min),0)::int otTotal,
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+             ROUND(AVG(adherence_pct),1) conformance
+        FROM roster_days WHERE ${W}`, p);
+    const agents = await this.ds.query(`
+      SELECT person_no, mode() WITHIN GROUP (ORDER BY clean_name) name, mode() WITHIN GROUP (ORDER BY role_function) function_name,
+             mode() WITHIN GROUP (ORDER BY role_category) role,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+             COUNT(*) FILTER (WHERE sys_late_min>0)::int lateDays, COALESCE(SUM(sys_late_min),0)::int lateMin,
+             COALESCE(SUM(ot_min),0)::int otMin, COUNT(*) FILTER (WHERE presence='sick')::int sick,
+             COUNT(*) FILTER (WHERE presence='absent')::int absent, ROUND(AVG(adherence_pct),1) conformance
+        FROM roster_days WHERE ${W} AND person_no IS NOT NULL GROUP BY person_no ORDER BY conformance ASC NULLS LAST`, p);
+    const byShift = await this.ds.query(`SELECT shift_code k, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh') GROUP BY shift_code ORDER BY n DESC`, p);
+    // team-leader picker options (verified, non-hidden)
+    const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);
+    return { teamLeader: tlName, from: dFrom, to: dTo, range, summary, agents, byShift, teamLeaders: tlOpts.map((r: any) => r.v) };
+  }
+
   /** Interval Headcount — half-hourly staffing curve for a date, by function, over
    *  the clean roster_days. Cross-midnight aware: an MD/MN shift staffs the late
    *  hours of its own date AND the early hours of the next date; the previous day's
