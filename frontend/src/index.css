@@ -592,3 +592,70 @@
 
 /* Number pop on mount */
 .num-pop { animation: countUp .55s cubic-bezier(.34,1.56,.64,1) both; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   AURORA GLASS — optional 3rd theme (dark-based, so all existing text/contrast
+   stays correct — zero breakage). It transforms the *atmosphere*: a living
+   mint/teal/cyan aurora, frosted-glass surfaces, lit top edges, and a teal
+   accent. Toggled via the header button (Dark → Light → Aurora Glass). Inspired
+   by the Enterprise Lab glass design. Frozen under prefers-reduced-motion.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* deeper teal-black base so the mint glows read */
+.theme-glass body { background-color: #061210; }
+
+/* recolor the living background to mint / teal / cyan / soft-violet, more present */
+.theme-glass .living-bg .aurora { opacity: .5; }
+.theme-glass .living-bg .a1 { background: radial-gradient(circle, #14b8a6, transparent 70%); }
+.theme-glass .living-bg .a2 { background: radial-gradient(circle, #06b6d4, transparent 70%); }
+.theme-glass .living-bg .a3 { background: radial-gradient(circle, #22c55e, transparent 70%); }
+.theme-glass .living-bg .a4 { background: radial-gradient(circle, #818cf8, transparent 70%); opacity: .34; }
+.theme-glass .living-bg .gridlines { opacity: .7; }
+.theme-glass .living-bg .mote { background: rgba(45,212,191,.9) !important; box-shadow: 0 0 8px rgba(45,212,191,.8) !important; }
+
+/* frosted depth on the bounded chrome surfaces (limited count → cheap blur) */
+.theme-glass .card, .theme-glass .card-hover, .theme-glass .card-stat {
+  background: linear-gradient(160deg, rgba(45,212,191,.07), rgba(255,255,255,.018));
+  border-color: rgba(45,212,191,.16);
+  backdrop-filter: blur(14px) saturate(1.35);
+  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  position: relative;
+}
+.theme-glass .card-hover:hover, .theme-glass .card-stat:hover {
+  border-color: rgba(45,212,191,.38);
+  box-shadow: var(--elev-2), 0 0 30px rgba(20,184,166,.16);
+}
+/* a lit top edge on the many inline translucent panels — cheap (no blur), purely
+   additive (doesn't touch their background or text, so contrast is untouched) */
+.theme-glass [style*="rgba(255, 255, 255, 0.0"] {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 1px 3px rgba(0,0,0,.18);
+}
+
+/* mint accent identity */
+.theme-glass ::selection { background: rgba(20,184,166,.3); }
+.theme-glass :focus-visible { outline-color: rgba(20,184,166,.7); }
+.theme-glass .text-gradient { background: linear-gradient(135deg, #2dd4bf 0%, #22c55e 50%, #38bdf8 100%); -webkit-background-clip: text; background-clip: text; }
+.theme-glass .glow-indigo { filter: drop-shadow(0 0 12px rgba(20,184,166,.55)); }
+
+/* sidebar → teal-tinted glass */
+.theme-glass { --sidebar-bg: #06140f; }
+.theme-glass .sidebar-item.active { color: #5eead4; background: linear-gradient(90deg, rgba(20,184,166,.20), rgba(20,184,166,.06)); }
+html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(270deg, rgba(20,184,166,.20), rgba(20,184,166,.06)); }
+.theme-glass .sidebar-item.active::after { background: linear-gradient(to bottom, #14b8a6, #22c55e); box-shadow: 0 0 8px rgba(20,184,166,.6); }
+
+/* primary buttons + segmented active pill → teal→cyan */
+.theme-glass .btn-primary { background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%); box-shadow: 0 4px 14px rgba(13,148,136,.4), 0 1px 0 rgba(255,255,255,.15) inset; }
+.theme-glass .btn-primary:hover { box-shadow: 0 8px 22px rgba(13,148,136,.5), 0 1px 0 rgba(255,255,255,.2) inset; }
+.theme-glass .seg-item.active::before { background: linear-gradient(135deg, #0d9488, #0891b2); box-shadow: 0 4px 14px rgba(13,148,136,.4); }
+
+/* the animated gradient ring → mint sweep */
+.theme-glass .glow-border-soft::before {
+  background: linear-gradient(120deg, rgba(20,184,166,.6), rgba(34,197,94,.45), rgba(56,189,248,.5), rgba(45,212,191,.4));
+  background-size: 250% 250%;
+}
+
+/* header + top chrome get a faint teal glass tint (overrides the inline dark bg) */
+.theme-glass header { border-bottom-color: rgba(45,212,191,.12) !important; }
+
+/* scrollbar in teal */
+.theme-glass { --scroll-thumb: #134e4a; --scroll-thumb-hover: #0f766e; }

@@ -1,25 +1,43 @@
 import { create } from 'zustand';
 import { Lang } from '@/i18n';
 
+export type Theme = 'dark' | 'light' | 'glass';
+
 interface UiState {
   lang: Lang;
-  dark: boolean;
+  dark: boolean;          // kept for back-compat: true for dark AND glass (both dark-based)
+  glass: boolean;
+  theme: Theme;
   sidebarOpen: boolean;
   toggleLang: () => void;
-  toggleDark: () => void;
+  toggleDark: () => void;       // back-compat alias → cycles the theme
+  cycleTheme: () => void;
+  setTheme: (t: Theme) => void;
   toggleSidebar: () => void;
   setLang: (lang: Lang) => void;
 }
 
 const savedLang = (localStorage.getItem('lang') as Lang) ?? 'ar';
-// Default to dark; only switch to light if user explicitly saved 'false'
-const savedDark = localStorage.getItem('dark') !== 'false';
-// Apply initial dark/light class to DOM immediately on module load
-document.documentElement.classList.toggle('dark', savedDark);
+// Migrate from the old `dark` boolean key, then prefer the newer `theme` key.
+const legacyDark = localStorage.getItem('dark');
+const savedTheme: Theme =
+  (localStorage.getItem('theme') as Theme) ||
+  (legacyDark === 'false' ? 'light' : 'dark');
+
+function applyTheme(t: Theme) {
+  const root = document.documentElement;
+  root.classList.toggle('dark', t === 'dark' || t === 'glass'); // glass is a dark-based atmosphere
+  root.classList.toggle('theme-glass', t === 'glass');
+}
+applyTheme(savedTheme);   // apply immediately on module load (avoids flash)
+
+const ORDER: Theme[] = ['dark', 'light', 'glass'];
 
 export const useUiStore = create<UiState>((set, get) => ({
   lang: savedLang,
-  dark: savedDark,
+  theme: savedTheme,
+  dark: savedTheme !== 'light',
+  glass: savedTheme === 'glass',
   sidebarOpen: true,
 
   toggleLang: () => {
@@ -30,12 +48,19 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ lang });
   },
 
-  toggleDark: () => {
-    const dark = !get().dark;
-    localStorage.setItem('dark', String(dark));
-    document.documentElement.classList.toggle('dark', dark);
-    set({ dark });
+  setTheme: (theme) => {
+    localStorage.setItem('theme', theme);
+    applyTheme(theme);
+    set({ theme, dark: theme !== 'light', glass: theme === 'glass' });
   },
+
+  cycleTheme: () => {
+    const next = ORDER[(ORDER.indexOf(get().theme) + 1) % ORDER.length];
+    get().setTheme(next);
+  },
+
+  // back-compat: anything still calling toggleDark now advances the theme cycle
+  toggleDark: () => get().cycleTheme(),
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 

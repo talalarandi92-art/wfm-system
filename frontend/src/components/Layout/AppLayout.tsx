@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Bell, Moon, Sun, Globe, LogOut, ChevronDown, Search, X, CheckCheck, KeyRound } from 'lucide-react';
+import { Bell, Moon, Sun, Sparkles, Globe, LogOut, ChevronDown, Search, X, CheckCheck, KeyRound } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
 import LivingBackground from '@/components/LivingBackground';
@@ -71,7 +71,7 @@ function avatarGradient(name: string) {
 /* ── Component ────────────────────────────────────────────────────────────── */
 export default function AppLayout() {
   const { user, logout, hasPermission }   = useAuthStore();
-  const { lang, dark, sidebarOpen, toggleLang, toggleDark } = useUiStore();
+  const { lang, dark, theme, sidebarOpen, toggleLang, cycleTheme } = useUiStore();
   const location           = useLocation();
   const navigate           = useNavigate();
   const ar                 = lang === 'ar';
@@ -240,16 +240,18 @@ export default function AppLayout() {
               <span className="hidden sm:inline">{ar ? 'EN' : 'عر'}</span>
             </button>
 
-            {/* Dark / Light */}
+            {/* Theme cycle: Dark → Light → Aurora Glass */}
             <button
-              onClick={toggleDark}
+              onClick={cycleTheme}
               className="btn-ghost p-2"
-              aria-label={dark ? 'Light mode' : 'Dark mode'}
+              title={theme === 'dark' ? (ar ? 'الوضع: غامق — اضغط للفاتح' : 'Theme: Dark — click for Light')
+                : theme === 'light' ? (ar ? 'الوضع: فاتح — اضغط للزجاجي' : 'Theme: Light — click for Aurora Glass')
+                : (ar ? 'الوضع: زجاجي — اضغط للغامق' : 'Theme: Aurora Glass — click for Dark')}
+              aria-label="Cycle theme"
             >
-              {dark
-                ? <Sun size={16} className="text-amber-400" />
-                : <Moon size={16} />
-              }
+              {theme === 'dark'  && <Moon size={16} />}
+              {theme === 'light' && <Sun size={16} className="text-amber-400" />}
+              {theme === 'glass' && <Sparkles size={16} className="text-teal-300" />}
             </button>
 
             {/* Notifications */}
