@@ -582,3 +582,44 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 
 /* scrollbar in teal */
 .theme-glass { --scroll-thumb: #134e4a; --scroll-thumb-hover: #0f766e; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LIGHT MODE COMFORT — the app is dark-first (hardcoded text-white + white-alpha
+   inline surfaces), so plain Light washes those out. These overrides make Light
+   genuinely readable: dark text where it was white, defined surfaces where they
+   were near-invisible. White text on COLORED backgrounds is preserved.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* dark-first text → readable dark/medium tones on white */
+.theme-light .text-white     { color: #0f172a !important; }
+.theme-light .text-slate-100 { color: #1e293b !important; }
+.theme-light .text-slate-200 { color: #334155 !important; }
+.theme-light .text-slate-300 { color: #475569 !important; }
+.theme-light .text-slate-400 { color: #64748b !important; }
+.theme-light .text-slate-500 { color: #64748b !important; }
+/* …but keep white text when it sits on a solid colored chip/button (not bg-white) */
+.theme-light .text-white[class*="bg-"]:not([class*="bg-white"]) { color: #fff !important; }
+.theme-light .btn-primary, .theme-light .btn-danger { color: #fff !important; }
+
+/* dark-first translucent surfaces → faint light surfaces with a visible hairline */
+.theme-light [style*="background: rgba(255, 255, 255, 0.0"],
+.theme-light [style*="background: rgba(255, 255, 255, 0.1"],
+.theme-light [style*="background:rgba(255,255,255,0.0"] { background: rgba(15, 23, 42, 0.035) !important; }
+.theme-light [style*="solid rgba(255, 255, 255, 0."],
+.theme-light [style*="solid rgba(255, 255, 255, .0"] { border-color: rgba(15, 23, 42, 0.12) !important; }
+.theme-light [class*="bg-white/"]     { background-color: rgba(15, 23, 42, 0.035) !important; }
+.theme-light [class*="border-white/"] { border-color: rgba(15, 23, 42, 0.12) !important; }
+
+/* form controls built dark-first (inline white text + white-alpha bg) → light */
+.theme-light input, .theme-light select, .theme-light textarea { color: #0f172a !important; }
+.theme-light input::placeholder, .theme-light textarea::placeholder { color: #94a3b8 !important; }
+.theme-light option { background: #ffffff !important; color: #0f172a !important; }
+
+/* dark dropdown/popover panels (hardcoded #11162a) → white cards */
+.theme-light [style*="rgb(17, 22, 42)"],
+.theme-light [style*="#11162a"] { background: #ffffff !important; border-color: rgba(15,23,42,0.1) !important; }
+
+/* hover wash that was white-on-dark → subtle dark-on-light */
+.theme-light .hover\:bg-white\/\[0\.03\]:hover,
+.theme-light .hover\:bg-white\/5:hover,
+.theme-light .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 42, 0.04) !important; }

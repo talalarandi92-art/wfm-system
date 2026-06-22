@@ -28,6 +28,7 @@ function applyTheme(t: Theme) {
   const root = document.documentElement;
   root.classList.toggle('dark', t === 'dark' || t === 'glass'); // glass is a dark-based atmosphere
   root.classList.toggle('theme-glass', t === 'glass');
+  root.classList.toggle('theme-light', t === 'light'); // hook for the dark-first→light comfort overrides
 }
 applyTheme(savedTheme);   // apply immediately on module load (avoids flash)
 
