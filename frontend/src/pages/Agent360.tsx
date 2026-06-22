@@ -224,6 +224,21 @@ export default function Agent360Page() {
                 </div>
               </div>
             )}
+            {/* detailed scorecard KPI breakdown (Quality/AHT/FCR/Productivity/CTR/Quiz/PRR/...) */}
+            {perf.scorecardDetail?.kpis?.length>0 && (
+              <div className="mt-3">
+                <p className="text-[10px] text-slate-500 mb-2">{ar?`تفصيل الـKPIs (سكور كارد · ${perf.scorecardDetail.weeks} أسابيع · ترتيب #${perf.scorecardDetail.rank??'—'})`:`Scorecard KPI breakdown (${perf.scorecardDetail.weeks} weeks · rank #${perf.scorecardDetail.rank??'—'})`}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                  {perf.scorecardDetail.kpis.map((k:any,i:number)=>(
+                    <div key={i} className="p-2 rounded-lg" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
+                      <p className="text-[10px] text-slate-400 font-semibold truncate">{k.label}</p>
+                      <p className="text-base font-bold text-white leading-tight">{k.score}<span className="text-[9px] text-slate-500"> {ar?'نقطة':'pts'}</span></p>
+                      <p className="text-[9px] text-slate-500">{k.pct ? `${Math.round((k.actual||0)*1000)/10}%` : (ar?'فعلي':'actual')+' '+k.actual}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

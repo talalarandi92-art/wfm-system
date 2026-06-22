@@ -845,9 +845,36 @@ export class ReconController {
     // FCR (best-effort match by employee id)
     const [fcr] = await this.ds.query(
       `SELECT ROUND(AVG(fcr_pct::numeric),1) pct, COALESCE(SUM(total),0)::int total FROM survey_fcr_monthly WHERE tenant_id=$1 AND employee_id = ANY($2)`, [t, idList]).catch(() => [{ pct: null, total: 0 }]);
+    // detailed scorecard KPIs (per-week breakdown averaged) from scorecard_entries
+    const [sc] = await this.ds.query(
+      `SELECT COUNT(*)::int weeks, ROUND(AVG(net_points),1) net, ROUND(AVG(function_rank),1) rank,
+              ROUND(AVG(quality_score),1) quality_s, ROUND(AVG(quality_actual::numeric),4) quality_a,
+              ROUND(AVG(aht_score),1) aht_s, ROUND(AVG(aht_actual::numeric),4) aht_a,
+              ROUND(AVG(fcr_score),1) fcr_s, ROUND(AVG(fcr_actual::numeric),4) fcr_a,
+              ROUND(AVG(productivity_score),1) prod_s, ROUND(AVG(productivity_actual::numeric),4) prod_a,
+              ROUND(AVG(ctr_score),1) ctr_s, ROUND(AVG(ctr_actual::numeric),4) ctr_a,
+              ROUND(AVG(quiz_score),1) quiz_s, ROUND(AVG(quiz_actual::numeric),4) quiz_a,
+              ROUND(AVG(prr_points),1) prr_s, ROUND(AVG(prr_rate::numeric),4) prr_a,
+              ROUND(AVG(response_time_score),1) rt_s, ROUND(AVG(response_time_actual::numeric),5) rt_a,
+              ROUND(AVG(mistakes_score),1) mist_s, ROUND(AVG(mistakes_actual::numeric),1) mist_a,
+              ROUND(AVG(attendance_score),1) att_s, ROUND(AVG(working_days_pct::numeric),4) wd_a
+         FROM scorecard_entries WHERE tenant_id=$1 AND employee_no = ANY($2)`, [t, idList]);
+    const kpiList = sc && sc.weeks > 0 ? [
+      { key: 'quality', label: 'Quality', score: sc.quality_s, actual: sc.quality_a, pct: true },
+      { key: 'aht', label: 'AHT', score: sc.aht_s, actual: sc.aht_a, pct: false },
+      { key: 'fcr', label: 'FCR', score: sc.fcr_s, actual: sc.fcr_a, pct: true },
+      { key: 'productivity', label: 'Productivity', score: sc.prod_s, actual: sc.prod_a, pct: true },
+      { key: 'ctr', label: 'CTR', score: sc.ctr_s, actual: sc.ctr_a, pct: true },
+      { key: 'quiz', label: 'Quiz', score: sc.quiz_s, actual: sc.quiz_a, pct: true },
+      { key: 'prr', label: 'PRR', score: sc.prr_s, actual: sc.prr_a, pct: true },
+      { key: 'responseTime', label: 'Response Time', score: sc.rt_s, actual: sc.rt_a, pct: false },
+      { key: 'mistakes', label: 'Mistakes', score: sc.mist_s, actual: sc.mist_a, pct: false },
+      { key: 'attendance', label: 'Attendance', score: sc.att_s, actual: sc.wd_a, pct: true },
+    ].filter(k => k.score != null) : [];
     const latest = scorecard.length ? scorecard[scorecard.length - 1] : null;
     return { person, ids: idList, from: dFrom, to: dTo,
              scorecard, latestNet: latest?.net ?? null, scorecardMonths: scorecard.length,
+             scorecardDetail: sc && sc.weeks > 0 ? { weeks: sc.weeks, net: sc.net, rank: sc.rank, kpis: kpiList } : null,
              productivity, fcr: { pct: fcr?.pct ?? null, total: fcr?.total ?? 0 } };
   }
 
