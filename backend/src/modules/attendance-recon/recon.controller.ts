@@ -748,6 +748,20 @@ export class ReconController {
     if (lowConf.length) push('critical', 'coaching', `${lowConf.length} ${lowConf.length === 1 ? 'agent needs' : 'agents need'} coaching (conformance < 70%)`,
       lowConf.map((r: any) => `${r.name} ${r.conf}%`).join(' · '), '/data-quality');
 
+    // 1b) DECLINING agents — conformance dropped sharply in the 2nd half of the period (proactive coaching)
+    const mid = new Date(new Date(dFrom).getTime() + Math.floor(days / 2) * 86400000).toISOString().slice(0, 10);
+    const declining = await this.ds.query(
+      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name,
+              ROUND(AVG(adherence_pct) FILTER (WHERE work_date < $4),1) h1,
+              ROUND(AVG(adherence_pct) FILTER (WHERE work_date >= $4),1) h2
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness AND adherence_pct IS NOT NULL
+         GROUP BY person_no
+        HAVING COUNT(*) FILTER (WHERE work_date < $4) >= 5 AND COUNT(*) FILTER (WHERE work_date >= $4) >= 5
+           AND AVG(adherence_pct) FILTER (WHERE work_date >= $4) - AVG(adherence_pct) FILTER (WHERE work_date < $4) < -15
+        ORDER BY AVG(adherence_pct) FILTER (WHERE work_date >= $4) - AVG(adherence_pct) FILTER (WHERE work_date < $4) ASC LIMIT 6`, [t, dFrom, dTo, mid]);
+    if (declining.length) push('warning', 'declining', `${declining.length} agent(s) declining (conformance dropped ≥15 pts)`,
+      declining.map((r: any) => `${r.name} ${r.h1}%→${r.h2}%`).join(' · '), '/agent-360');
+
     // 2) tardiness outliers
     const late = await this.ds.query(
       `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, COUNT(*) FILTER (WHERE sys_late_min>0) ld, COALESCE(SUM(sys_late_min),0)::int lm
