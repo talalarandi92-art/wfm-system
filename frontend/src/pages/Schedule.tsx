@@ -350,7 +350,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
 
       {/* ── Card ── */}
       <div
-        className="fixed z-50 flex flex-col keep-dark"
+        className="fixed z-50 flex flex-col"
         style={{
           ...modalStyle,
           borderRadius: 20,
@@ -1954,7 +1954,7 @@ export default function SchedulePage() {
 
                 {/* Grid table */}
                 {expanded && (
-                  <div className="overflow-x-auto keep-dark" style={{ background: 'rgba(7,9,15,0.6)' }}>
+                  <div className="overflow-x-auto" style={{ background: 'rgba(7,9,15,0.6)' }}>
                     <table className="w-full border-collapse" style={{ minWidth: 700 }}>
                       <thead>
                         <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>

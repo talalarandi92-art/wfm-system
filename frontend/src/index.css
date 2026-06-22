@@ -648,6 +648,14 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 /* softer, slightly darker light page (less stark than pure white) — cards stay white so they pop */
 .theme-light { --bg: #e7e9f0; --surface-2: #eef0f6; }
 
+/* dark-canvas data surfaces (Schedule grid, Chat shell) → light in Light mode.
+   text/cells on them follow the normal light overrides, so they read crisply. */
+.theme-light [style*="rgba(7, 9, 15, 0.6)"]   { background: #ffffff !important; }   /* schedule grid wrapper */
+.theme-light [style*="rgba(7, 9, 15, 0.95)"]  { background: #eef0f6 !important; }   /* sticky employee column / zebra */
+.theme-light [style*="rgb(15, 21, 39)"]       { background: #ffffff !important; }   /* chat shell #0f1527 */
+.theme-light [style*="rgb(18, 25, 41)"]       { background: #f3f5f9 !important; }   /* chat panel #121929 */
+.theme-light [style*="rgb(13, 20, 36)"]       { background: #ffffff !important; }   /* shift-detail modal gradient #0d1424 */
+
 /* ── keep-dark: opt-OUT for intentionally-dark surfaces (data grids, dark popovers).
    Put class="keep-dark" on a dark container and its subtree keeps the dark look
    (light text + white-alpha surfaces) instead of being flipped to light. ── */
