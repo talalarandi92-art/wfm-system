@@ -248,7 +248,8 @@ module.exports = function build() {
       else if (isWorkingKind)       { hrCode = isWFH ? 'WFH' : (c.norm || raw); attCode = c.norm || raw; }
       else                          { hrCode = raw || 'OFF'; attCode = raw || 'OFF'; }
       const _ingest = {
-        emp: String(e.id), person: String(e.id), name: idn.name || e.name, fn,
+        emp: String(e.id), person: String(e.id), name: idn.name || e.name, fn, username: idn.userId || e.username || null,
+        totalSysMin: (govDur != null ? Math.max(0, govDur) : null),
         date, day: dayName(date), status: holidayLabel ? (holidayLabel + (isWorkingKind ? ' (worked)' : '')) : raw, presence: presenceLive, location: isWFH ? 'WFH' : 'Office',
         shiftCode: c.norm, shiftCat: c.norm, schedStart, schedEnd: (schedEnd != null && schedEnd > 1440 ? schedEnd - 1440 : schedEnd),
         punchIn: hasPunch ? od.punchIn : null, punchOut: (od && od.punchOut != null) ? od.punchOut : null,

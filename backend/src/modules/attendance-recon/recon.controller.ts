@@ -72,7 +72,16 @@ export class ReconController {
     const dFrom = from || (range?.b ? `${range.b.slice(0,7)}-01` : range?.a), dTo = to || range?.b;
     const params: any[] = [t, dFrom, dTo];
     let where = `r.tenant_id=$1 AND r.work_date BETWEEN $2 AND $3`;
-    if (q) { params.push(`%${q.toLowerCase()}%`); where += ` AND (lower(COALESCE(r.clean_name,r.name)) LIKE $${params.length} OR r.employee_no ILIKE $${params.length} OR r.person_no ILIKE $${params.length})`; }
+    if (q) {
+      // prefix-friendly: name matches at start-of-word (so "w" → "Aya Wahab"), username matches anywhere
+      // ("wahab" → a.wahab), employee/person no match as prefix ("118…"). Lets typing a first letter list everyone.
+      const ql = q.toLowerCase();
+      const esc = ql.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      params.push(`(^|[\\s.])${esc}`); const pName = params.length;          // name / word-start regex
+      params.push(`%${ql}%`);          const pHas  = params.length;          // username contains
+      params.push(`${ql}%`);           const pPre  = params.length;          // id prefix
+      where += ` AND (lower(COALESCE(r.clean_name,r.name)) ~ $${pName} OR r.username ILIKE $${pHas} OR r.employee_no ILIKE $${pPre} OR r.person_no ILIKE $${pPre})`;
+    }
     if (presence) { params.push(presence); where += ` AND r.presence=$${params.length}`; }
     if (functionId) { params.push(functionId); where += ` AND r.role_function=(SELECT name FROM functions WHERE id=$${params.length})`; }
     if (includeInactive !== '1') where += ` AND r.is_active`;
@@ -125,14 +134,14 @@ export class ReconController {
     const order = sortMap[sort||'date_desc'] || sortMap.date_desc;
     const lim = Math.min(Number(limit)||40, 50000), off = Number(offset)||0; // cap raised so "Export" can pull the full filtered range, not just one page
     const rows = await this.ds.query(
-      `SELECT r.employee_no, COALESCE(r.person_no,r.employee_no) person_no, COALESCE(r.clean_name,r.name) name,
+      `SELECT r.employee_no, COALESCE(r.person_no,r.employee_no) person_no, COALESCE(r.clean_name,r.name) name, r.username,
               COALESCE(r.role_function,r.function_name) function_name, r.role_category, r.expected_hours,
               r.work_date::text date, COALESCE(r.day_name, TRIM(TO_CHAR(r.work_date,'Day'))) day_name, r.status, r.presence,
-              r.punch_in_min, r.punch_out_min, r.sys_login_min, r.sys_logout_min, r.login_src,
+              r.punch_in_min, r.punch_out_min, r.sys_login_min, r.sys_logout_min, r.sys_login2_min, r.sys_logout2_min, r.total_work_sys_min, r.login_src,
               r.late_min, r.early_min, r.ot_min, r.offday_ot_min, r.holiday_ot_min,
               (COALESCE(r.ot_min,0)+COALESCE(r.offday_ot_min,0)+COALESCE(r.holiday_ot_min,0)) total_ot,
               r.permission, r.permission_type, r.permission_duration, r.comp_off, r.sick, r.conforming,
-              r.shift_code, r.shift_start_min, r.shift_end_min, r.sys_late_min, r.sys_early_min, r.adherence_pct, r.mismatch, r.data_quality,
+              r.shift_code, r.attendance_code, r.hr_code, r.shift_category, r.shift_start_min, r.shift_end_min, r.sys_late_min, r.sys_early_min, r.adherence_pct, r.mismatch, r.data_quality, r.daily_note,
               r.team_manager, r.team_group, r.gender, r.worked_min, n.note
          FROM roster_days r
          LEFT JOIN roster_notes n ON n.tenant_id=r.tenant_id AND n.employee_no=r.employee_no AND n.work_date=r.work_date

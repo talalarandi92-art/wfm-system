@@ -17,6 +17,8 @@ interface Row {
   offday_ot_min?: number|null; holiday_ot_min?: number|null; total_ot?: number|null; data_quality?: string|null;
   permission: string|null; permission_type?: string|null; permission_duration?: string|null; comp_off: string|null; sick: string|null; conforming: boolean|null;
   shift_code: string|null; shift_start_min: number|null; shift_end_min: number|null;
+  attendance_code?: string|null; hr_code?: string|null; shift_category?: string|null; daily_note?: string|null;
+  username?: string|null; total_work_sys_min?: number|null; sys_login2_min?: number|null; sys_logout2_min?: number|null;
   sys_late_min: number; sys_early_min: number; adherence_pct: number|null; mismatch: string|null;
   team_manager: string|null; team_group: string|null; gender: string|null; worked_min: number|null; note: string|null;
 }
@@ -25,6 +27,34 @@ interface Resp { from: string; to: string; total: number; limit: number; offset:
 
 const hhmm = (m: number | null | undefined) => { if (m == null) return '—'; const t=((m%1440)+1440)%1440; let h=Math.floor(t/60); const mm=t%60; const ap=h<12?'AM':'PM'; h=h%12||12; return `${h}:${String(mm).padStart(2,'0')} ${ap}`; };
 const dur = (m: number | null) => { if (!m || m<=0) return '—'; const h=Math.floor(m/60), mm=m%60; return h?`${h}h ${mm}m`:`${mm}m`; };
+// total span between an in and out, cross-midnight aware (out < in ⇒ next day)
+const span = (a: number|null|undefined, b: number|null|undefined): number|null => { if (a==null||b==null) return null; let d=b-a; if (d<0) d+=1440; return d; };
+// friendly status label from the code/category (canonical §3 map) — bilingual
+const statusLabel = (r: Row): { en: string; ar: string } | null => {
+  const code = String(r.shift_code || r.attendance_code || r.hr_code || '').toUpperCase().trim();
+  const base = code.replace(/^WFH[-_]?/, '').replace(/[-_]?WFH$/, '');
+  const cat = String(r.shift_category || '').toLowerCase();
+  // classify by the CODE itself — the holiday overlay (status) is shown separately and, on a leave/off code,
+  // flagged as a conflict; we never let "Official Holiday (worked)" mask a real shift or an L/SL day.
+  if (code==='H') return { en:'Official Holiday', ar:'عطلة رسمية' };
+  if (code==='L' || code==='AL' || code==='ANNUAL') return { en:'Annual Leave', ar:'إجازة سنوية' };
+  if (code==='SL' || code==='S' || r.sick) return { en:'Sick Leave', ar:'إجازة مرضية' };
+  if (code==='A' || code==='ABS') return { en:'Absent', ar:'غياب' };
+  if (code==='DL') return { en:'Death Leave', ar:'إجازة وفاة' };
+  if (code==='UPL') return { en:'Unpaid Leave', ar:'إجازة بدون راتب' };
+  if (code==='COMP') return { en:'Comp Day', ar:'يوم بدل' };
+  if (code==='RES') return { en:'Resignation', ar:'استقالة' };
+  if (code==='TER') return { en:'Termination', ar:'إنهاء خدمة' };
+  if (code==='OFF') return { en:'Day Off', ar:'يوم راحة' };
+  if (['MD','MN','MDR','MNR'].includes(base) || cat==='midnight') return { en:'Midnight Shift', ar:'دوام منتصف الليل' };
+  if (['N','N20'].includes(base) || cat==='night') return { en:'Night Shift', ar:'دوام ليلي' };
+  if (['E','EE20','E20'].includes(base) || cat==='evening') return { en:'Evening Shift', ar:'دوام مسائي' };
+  if (['M','AM','B','C','M20','B20','C20','M7-3','B7','C7'].includes(base) || cat==='morning' || cat==='day') return { en:'Morning Shift', ar:'دوام صباحي' };
+  if (r.presence==='off') return { en:'Day Off', ar:'يوم راحة' };
+  if (r.presence==='absent') return { en:'Absent', ar:'غياب' };
+  if (/holiday/i.test(r.status||'')) return { en:'Official Holiday', ar:'عطلة رسمية' };
+  return null;
+};
 // derive the weekday from the date itself, so the day name is ALWAYS shown even when the DB column is null
 const DOW_ABBR = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 const DOW_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -353,7 +383,7 @@ export default function RosterPage() {
                         <div><p className="text-slate-200 font-semibold leading-tight">{r.date.slice(5)}</p><p className="text-[9px] text-slate-500">{(r.day_name && r.day_name.slice(0,3)) || dayAbbr(r.date)}</p></div>
                       </div>
                     </td>
-                    <td className="px-2 py-2.5 min-w-0"><p className="text-white font-semibold truncate leading-tight">{r.name}</p><p className="text-[10px] text-slate-500 truncate">{r.employee_no} · {r.function_name||'—'}{r.team_group?` · ${r.team_group}`:''}</p></td>
+                    <td className="px-2 py-2.5 min-w-0"><p className="text-white font-semibold truncate leading-tight">{r.name}</p><p className="text-[10px] text-slate-500 truncate">{r.employee_no}{r.username?<> · <span className="text-indigo-300/80 font-medium">{r.username}</span></>:''} · {r.function_name||'—'}{r.team_group?` · ${r.team_group}`:''}</p></td>
                     <td className="px-2 py-2.5 text-center">
                       <span className="px-2 py-0.5 rounded-md text-[11px] font-bold" style={{ background:`${pc}1f`, color:pc }}>{ar?PRES[r.presence]?.ar:PRES[r.presence]?.en||r.presence}</span>
                       {r.mismatch && <span className="ms-1" title={r.mismatch}><AlertTriangle size={11} className="inline text-rose-400" /></span>}
@@ -370,22 +400,28 @@ export default function RosterPage() {
                       <div className="pt-3 space-y-2.5">
                         {/* identity row */}
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-400">
+                          {(() => { const sl = statusLabel(r); return sl ? <span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background:'rgba(99,102,241,0.16)', color:'#a5b4fc' }}>{ar?sl.ar:sl.en}</span> : null; })()}
+                          {r.username && <span className="flex items-center gap-1"><UserCog size={12} className="text-indigo-400/70"/>{ar?'يوزر: ':'User ID: '}<span className="text-indigo-300 font-semibold">{r.username}</span></span>}
                           <span className="flex items-center gap-1"><UserCog size={12} className="text-slate-500"/>{ar?'المدير: ':'Team Mgr: '}<span className="text-slate-200 font-semibold">{r.team_manager||'—'}</span></span>
                           <span>{ar?'الفريق: ':'Team: '}<span className="text-slate-200 font-semibold">{r.team_group||'—'}</span></span>
                           <span>{ar?'الجنس: ':'Gender: '}<span className="text-slate-200 font-semibold">{r.gender||'—'}</span></span>
                           <span className="flex items-center gap-1"><Timer size={12} className="text-emerald-500"/>{ar?'ساعات العمل: ':'Worked: '}<span className="text-emerald-300 font-bold">{dur(r.worked_min)}</span></span>
                           <button onClick={()=>editNote(r)} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] ms-auto" style={{ background:'rgba(245,158,11,0.15)', color:'#fbbf24' }}><StickyNote size={11}/>{r.note?(ar?'تعديل ملاحظة':'Edit note'):(ar?'إضافة ملاحظة':'Add note')}</button>
                         </div>
-                        {/* time cards */}
+                        {/* time cards — each with its TOTAL hours (Σ) + system's 2nd session */}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {([
-                            [ar?'الشفت المجدوَل':'Scheduled shift', r.shift_code, r.shift_start_min, r.shift_end_min, '#8b5cf6'],
-                            [ar?'البصمة':'Punch', null, r.punch_in_min, r.punch_out_min, '#22c55e'],
-                            [ar?'السيستم':'System', r.login_src, r.sys_login_min, r.sys_logout_min, '#06b6d4'],
-                          ] as [string,any,number|null,number|null,string][]).map(([l,tag,a,b,c],i)=>(
+                            { l: ar?'الشفت المجدوَل':'Scheduled shift', tag: r.shift_code, a: r.shift_start_min, b: r.shift_end_min, c:'#8b5cf6', total: span(r.shift_start_min, r.shift_end_min), s2a: null as number|null, s2b: null as number|null },
+                            { l: ar?'البصمة':'Punch', tag: null as string|null, a: r.punch_in_min, b: r.punch_out_min, c:'#22c55e', total: span(r.punch_in_min, r.punch_out_min), s2a: null as number|null, s2b: null as number|null },
+                            { l: ar?'السيستم':'System', tag: r.login_src, a: r.sys_login_min, b: r.sys_logout_min, c:'#06b6d4', total: (r.total_work_sys_min ?? span(r.sys_login_min, r.sys_logout_min)), s2a: r.sys_login2_min ?? null, s2b: r.sys_logout2_min ?? null },
+                          ]).map((card,i)=>(
                             <div key={i} className="px-3 py-2 rounded-xl" style={{ background:'rgba(255,255,255,0.04)' }}>
-                              <p className="text-[10px] text-slate-500 uppercase font-semibold mb-0.5">{l}{tag?` · ${tag}`:''}</p>
-                              <div className="flex items-center gap-1.5 text-sm font-bold" style={{ color:c }}><span>{hhmm(a)}</span><ArrowRight size={13} className="text-slate-500" /><span>{hhmm(b)}</span></div>
+                              <div className="flex items-center justify-between mb-0.5 gap-2">
+                                <p className="text-[10px] text-slate-500 uppercase font-semibold truncate">{card.l}{card.tag?` · ${card.tag}`:''}</p>
+                                {card.total!=null && card.total>0 && <span className="text-[10px] font-bold whitespace-nowrap" style={{ color:card.c }}>Σ {dur(card.total)}</span>}
+                              </div>
+                              <div className="flex items-center gap-1.5 text-sm font-bold" style={{ color:card.c }}><span>{hhmm(card.a)}</span><ArrowRight size={13} className="text-slate-500" /><span>{hhmm(card.b)}</span></div>
+                              {card.s2a!=null && <div className="flex items-center gap-1.5 text-[11px] font-semibold mt-0.5 opacity-80" style={{ color:card.c }}><span className="text-[9px] text-slate-500">{ar?'جلسة٢':'2nd'}</span><span>{hhmm(card.s2a)}</span><ArrowRight size={11} className="text-slate-500" /><span>{hhmm(card.s2b)}</span></div>}
                             </div>
                           ))}
                         </div>
@@ -427,7 +463,17 @@ export default function RosterPage() {
                         )}
                         {(r.permission || r.comp_off || r.sick || r.status || r.note) && (
                           <div className="space-y-1.5">
-                            {r.status && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(255,255,255,0.04)' }}><span className="text-slate-500">{ar?'الحالة الأصلية: ':'Raw status: '}</span><span className="text-slate-200 font-semibold">{r.status}</span></div>}
+                            {(() => { const sl = statusLabel(r); if (!sl && !r.status) return null;
+                              // genuine conflict ONLY = a leave/off code on a day that's an official holiday
+                              // (e.g. coded L but it's Hijri New Year). Working a holiday ("Morning Shift · Holiday (worked)") is NOT a conflict.
+                              const isLeaveOff = !!sl && /Leave|Day Off|Absent|Comp/i.test(sl.en);
+                              const rawDiffers = !!(isLeaveOff && r.status && /holiday/i.test(r.status));
+                              return (<div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(255,255,255,0.04)' }}>
+                                <span className="text-slate-500">{ar?'الحالة: ':'Status: '}</span>
+                                {sl && <span className="font-bold text-indigo-200">{ar?sl.ar:sl.en}</span>}
+                                {r.status && <span className="text-slate-400">{sl?'  ·  ':''}{r.status}</span>}
+                                {rawDiffers && <span className="ms-1" title={ar?'الكود لا يطابق الحالة المكتوبة — راجِع':'Code vs written status differ — review'}><AlertTriangle size={11} className="inline text-amber-400" /></span>}
+                              </div>); })()}
                             {r.permission && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(99,102,241,0.12)' }}><span className="text-indigo-300 font-semibold">{ar?'استئذان: ':'Permission: '}</span><span className="text-slate-200">{[r.permission_type, r.permission_duration, r.permission].filter(Boolean).join(' · ')}</span></div>}
                             {r.comp_off && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(16,185,129,0.12)' }}><span className="text-emerald-300 font-semibold">{ar?'كومب أوف: ':'Comp off: '}</span><span className="text-slate-200">{r.comp_off}</span></div>}
                             {r.sick && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(245,158,11,0.12)' }}><span className="text-amber-300 font-semibold">{ar?'سيك: ':'Sick: '}</span><span className="text-slate-200">{r.sick}</span></div>}

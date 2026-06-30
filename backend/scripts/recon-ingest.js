@@ -22,6 +22,7 @@ const MAP = {
   ot_min: 'otMin', offday_ot_min: 'offdayOt', holiday_ot_min: 'holidayOt', worked_min: 'worked',
   adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_type: 'permType', permission_duration: 'permDur',
   comp_off: 'comp', sick: 'sick', hr_code: 'hrCode', attendance_code: 'attCode', mismatch: 'mismatch', data_quality: 'dq',
+  username: 'username', total_work_sys_min: 'totalSysMin',
   team_manager: 'teamMgr', team_group: 'teamGroup', gender: 'gender', role_category: 'roleCat',
   expected_hours: 'expectedH', is_active: 'active',
 };
@@ -30,6 +31,7 @@ const MAP = {
   const c = getClient();
   await c.connect();
   try {
+    await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS username text`); // User ID (a.wahab) — durable across re-ingest
     if (RESTORE) {
       await c.query('BEGIN');
       await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [TENANT, FROM, TO]);
