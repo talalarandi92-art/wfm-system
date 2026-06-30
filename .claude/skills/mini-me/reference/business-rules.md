@@ -73,5 +73,6 @@ saved schedules go stale. It must show coverage gaps honestly (e.g. limited male
   verify (not auto-absent)"`), never the scheduled net. **Role-blind.**
 - **ALL roles must open the system — leaders included** (supersedes the old "don't scrutinise leaders"). The
   `isExcludedRole` record-only (TL/Senior/RTA/Resolution/WFM) = exempt from tardiness/HR *deductions* ONLY, NOT
-  from opening the system. Full leader tardiness scrutiny = separate open decision.
+  from opening the system. **Decided 2026-06-30: leaders stay record-only for deductions — only the system-open flag
+  applies** (not full scrutiny). Never-closed Sprinklr sessions: login-only recovery deferred (leave-as-is).
 - Maternity-7h (12375/12434) excluded from early-out only. Approved permission covers late/early.

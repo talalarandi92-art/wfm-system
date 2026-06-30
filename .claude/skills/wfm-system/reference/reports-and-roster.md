@@ -93,9 +93,10 @@ Module consts at the top of `recon.controller.ts` so no two reports disagree and
   system login — verify (not auto-absent)"` AND `worked_min = 0` (never the scheduled net). **Role-blind**, fires
   for every role. **Policy 2026-06-30: ALL roles must open the system — leaders included** (supersedes the old
   leaders-blind-eye). `isExcludedRole` (TL/Senior/RTA/Resolution/WFM = record-only) now means exempt from
-  tardiness/HR-action *deductions* ONLY, NOT exempt from opening the system. Full tardiness scrutiny of leaders =
-  separate still-open decision. Caveat: Sprinklr never-closed sessions (logout=1970) drop a real login → "login-only
-  recovery" PENDING before it falsely flags Fatma/Hassan/Noura.
+  tardiness/HR-action *deductions* ONLY, NOT exempt from opening the system. **Decided 2026-06-30: leaders stay
+  record-only for deductions — only the system-open flag applies** (not full scrutiny). Caveat: Sprinklr never-closed
+  sessions (logout=1970) drop a real login → "login-only recovery" deferred (user chose leave-as-is 2026-06-30), so
+  Fatma/Hassan/Noura's flag is over-strict until that's revisited.
 - Applied to: roster-dashboard, agent-360, team-360, agent-progress, agent-period-compare, employee
   list, insights, report-builder agg map, **HR matrix** (appends OT/Worked/Late/Early/Absent/Sick/Perm
   columns). RAW per-row detail + CSV/Excel exports stay RAW (analyst ground truth).

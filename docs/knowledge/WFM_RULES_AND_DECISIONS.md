@@ -218,11 +218,12 @@ corrections came out of it (both now LIVE):
   Everyone — including Team Leader / Senior / RTA / Resolution Specialist / WFM — **must open the system**; a
   no-system-no-punch working day is a real flag for them too (already enforced: the `_ingest.dq` flag is role-blind).
   The `isExcludedRole` "record-only" exclusion now means **exempt from tardiness / HR-action *deductions* ONLY** — it is
-  NOT an exemption from opening the system. (Whether leaders also get pulled into full tardiness/HR scrutiny going
-  forward is a separate, still-open decision — do not assume it.)
+  NOT an exemption from opening the system. **DECIDED 2026-06-30: leaders stay record-only for deductions — only the
+  system-open flag applies to them** (user chose "system-open only", NOT full tardiness scrutiny).
 - **Never-closed Sprinklr sessions (logout=1970, >16h):** a real login that the engine currently drops → can falsely
-  flag someone (Fatma/Hassan/Noura) as "no system" even though they opened it. Under the new all-roles policy this
-  "login-only recovery" matters more (don't penalise a real login). Still PENDING user OK before enabling.
+  flag someone (Fatma/Hassan/Noura) as "no system" even though they opened it. **DECIDED 2026-06-30: leave as-is —
+  login-only recovery NOT enabled** (revisit once the recovery method is verified). Until then their no-evidence flag
+  may be over-strict for those 3.
 - **Canonical foundation** is now the user's latest manual workbook (`Final` sheet, 116 employees); the in-system
   Upload writes to it. NOTE: the live reports' tolerance change covers all months, but the no-punch flag + full-span
   disposition currently apply to June (the recon-engine month); rebuilding Jan–May through the same rule is a follow-up.
