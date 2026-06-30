@@ -112,6 +112,12 @@ export class ReconController {
               COUNT(*) FILTER (WHERE (${TRUE_OT}) > 0)::int ot_days
          FROM roster_days r WHERE ${where} GROUP BY 1 HAVING SUM(${TRUE_OT}) > 0 ORDER BY ot_h DESC LIMIT 8`, params);
 
+    // per-day trend for the hero sparkline: conformance% + present-count over the selected range
+    const dailyTrend = await this.ds.query(
+      `SELECT r.work_date::text date, ROUND(AVG(r.adherence_pct),1)::float conformance,
+              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int present
+         FROM roster_days r WHERE ${where} GROUP BY 1 ORDER BY 1`, params);
+
     const sortMap: Record<string,string> = { date_desc:'r.work_date DESC, r.name', date_asc:'r.work_date ASC, r.name',
       late:'r.sys_late_min DESC', early:'r.sys_early_min DESC', ot:'r.ot_min DESC', name:'r.name ASC, r.work_date DESC',
       adherence:'r.adherence_pct ASC NULLS LAST', mismatch:'(r.mismatch IS NOT NULL) DESC, r.work_date DESC' };
@@ -131,7 +137,7 @@ export class ReconController {
          LEFT JOIN roster_notes n ON n.tenant_id=r.tenant_id AND n.employee_no=r.employee_no AND n.work_date=r.work_date
         WHERE ${where} ORDER BY ${order} LIMIT ${lim} OFFSET ${off}`, params);
 
-    return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, otByFunction, shiftCodes, rows };
+    return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, otByFunction, dailyTrend, shiftCodes, rows };
   }
 
   /** Highly-dynamic agent dashboard over roster_days: KPIs + rankings by every

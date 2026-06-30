@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
-import { StatTile, Donut, Gauge, BarRow } from '@/components/dazzle';
+import { StatTile, Donut, Gauge, BarRow, Sparkline } from '@/components/dazzle';
 
 interface Row {
   employee_no: string; name: string; function_name: string; date: string; day_name: string;
@@ -21,7 +21,7 @@ interface Row {
   team_manager: string|null; team_group: string|null; gender: string|null; worked_min: number|null; note: string|null;
 }
 interface OtFn { fn: string; ot_h: number; offday_h: number; ot_days: number; }
-interface Resp { from: string; to: string; total: number; limit: number; offset: number; summary: any; otByFunction?: OtFn[]; shiftCodes?: string[]; rows: Row[]; }
+interface Resp { from: string; to: string; total: number; limit: number; offset: number; summary: any; otByFunction?: OtFn[]; dailyTrend?: { date: string; conformance: number|null; present: number }[]; shiftCodes?: string[]; rows: Row[]; }
 
 const hhmm = (m: number | null | undefined) => { if (m == null) return '—'; const t=((m%1440)+1440)%1440; let h=Math.floor(t/60); const mm=t%60; const ap=h<12?'AM':'PM'; h=h%12||12; return `${h}:${String(mm).padStart(2,'0')} ${ap}`; };
 const dur = (m: number | null) => { if (!m || m<=0) return '—'; const h=Math.floor(m/60), mm=m%60; return h?`${h}h ${mm}m`:`${mm}m`; };
@@ -162,6 +162,13 @@ export default function RosterPage() {
           <div>
             <h1 className="text-lg font-bold" style={{ color:'var(--text-1)' }}>{ar?'الروستر — الدمج والتسوية':'Roster — Shifts & Reconciliation'}</h1>
             <p className="text-xs" style={{ color:'var(--text-3)' }}>{ar?'بصمة أودو + Ameyo + Sprinklr مدموجة، مقابل الشفت المجدوَل':'Odoo punch + Ameyo + Sprinklr combined, vs the scheduled shift'}</p>
+            {(() => { const tr = (data?.dailyTrend||[]).map(d=>d.conformance).filter((v):v is number => v!=null); return tr.length>=2 ? (
+              <div className="flex items-center gap-2 mt-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color:'var(--text-3)' }}>{ar?'اتجاه الكونفورمانس':'Conformance trend'}</span>
+                <div className="w-32 sm:w-44"><Sparkline data={tr} color={adhColor(conf)} height={24} /></div>
+                {conf!=null && <span className="text-xs font-bold" style={{ color: adhColor(conf) }}>{conf}%</span>}
+              </div>
+            ) : null; })()}
           </div>
         </div>
         <div className="flex items-center gap-2 relative">
