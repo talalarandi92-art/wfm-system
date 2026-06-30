@@ -39,6 +39,12 @@ export default function CommandCenter() {
     ok: { c: '#22c55e', ar: 'مستقرّ', en: 'Stable' }, info: { c: '#64748b', ar: 'معلومة', en: 'Info' },
   };
   const adhC = (v: number) => v >= 95 ? '#22c55e' : v >= 85 ? '#06b6d4' : v >= 70 ? '#f59e0b' : '#f43f5e';
+  // tiny source/time-basis tag so a live-ops number is never read as a corrected-roster number
+  const srcTag = (txt: string, c: string) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: c, boxShadow: `0 0 5px ${c}` }} />{txt}
+    </span>
+  );
 
   // ── derive verified numbers ──
   const coverage = d.cov?.totals?.coverage ?? null;
@@ -118,12 +124,12 @@ export default function CommandCenter() {
 
       {/* ── KPI TILES (count-up, with trends) ── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
-        <StatTile icon={Users} label={ar ? 'القوى العاملة' : 'Headcount'} num={headcount ?? undefined} value={headcount == null ? '—' : undefined} color="#6366f1" delay={0} />
-        <StatTile icon={CheckCircle2} label={ar ? 'مجدول اليوم' : 'Scheduled today'} num={present ?? undefined} value={present == null ? '—' : undefined} color="#22c55e" delay={60} trend={presentTrend.length > 1 ? presentTrend : undefined} />
-        <StatTile icon={FileText} label={ar ? 'على إذن' : 'On permission'} num={onPerm ?? undefined} value={onPerm == null ? '—' : undefined} color="#8b5cf6" delay={120} />
-        <StatTile icon={CalendarClock} label={ar ? 'طلبات معلّقة' : 'Pending requests'} num={pending ?? undefined} value={pending == null ? '—' : undefined} color="#f59e0b" delay={180} onClick={() => nav('/requests')} />
-        <StatTile icon={UserMinus} label={ar ? 'التسرّب السنوي' : 'Annual attrition'} num={attrRate ?? undefined} suffix="%" value={attrRate == null ? '—' : undefined} color={attrRate != null && attrRate >= 35 ? '#ef4444' : attrRate != null && attrRate >= 20 ? '#f59e0b' : '#22c55e'} delay={240} trend={attrTrend.length > 1 ? attrTrend : undefined} onClick={() => nav('/analytics?tab=attrition')} />
-        <StatTile icon={Clock} label={ar ? 'ساعات OT (الفترة)' : 'OT hours (period)'} num={otHours ?? undefined} suffix={ar ? 'س' : 'h'} value={otHours == null ? '—' : undefined} color="#22d3ee" delay={300} onClick={() => nav('/ot-exceptions')} />
+        <StatTile icon={Users} label={ar ? 'القوى العاملة' : 'Headcount'} num={headcount ?? undefined} value={headcount == null ? '—' : undefined} color="#6366f1" delay={0} sub={srcTag(ar ? 'لايف' : 'live', '#06b6d4')} />
+        <StatTile icon={CheckCircle2} label={ar ? 'مجدول اليوم' : 'Scheduled today'} num={present ?? undefined} value={present == null ? '—' : undefined} color="#22c55e" delay={60} trend={presentTrend.length > 1 ? presentTrend : undefined} sub={srcTag(ar ? 'لايف · اليوم' : 'live · today', '#06b6d4')} />
+        <StatTile icon={FileText} label={ar ? 'على إذن' : 'On permission'} num={onPerm ?? undefined} value={onPerm == null ? '—' : undefined} color="#8b5cf6" delay={120} sub={srcTag(ar ? 'مُصحّح' : 'corrected', '#22c55e')} />
+        <StatTile icon={CalendarClock} label={ar ? 'طلبات معلّقة' : 'Pending requests'} num={pending ?? undefined} value={pending == null ? '—' : undefined} color="#f59e0b" delay={180} onClick={() => nav('/requests')} sub={srcTag(ar ? 'لايف' : 'live', '#06b6d4')} />
+        <StatTile icon={UserMinus} label={ar ? 'التسرّب السنوي' : 'Annual attrition'} num={attrRate ?? undefined} suffix="%" value={attrRate == null ? '—' : undefined} color={attrRate != null && attrRate >= 35 ? '#ef4444' : attrRate != null && attrRate >= 20 ? '#f59e0b' : '#22c55e'} delay={240} trend={attrTrend.length > 1 ? attrTrend : undefined} onClick={() => nav('/analytics?tab=attrition')} sub={srcTag(ar ? 'آخر 12 شهر' : 'last 12mo', '#a78bfa')} />
+        <StatTile icon={Clock} label={ar ? 'ساعات OT (الفترة)' : 'OT hours (period)'} num={otHours ?? undefined} suffix={ar ? 'س' : 'h'} value={otHours == null ? '—' : undefined} color="#22d3ee" delay={300} onClick={() => nav('/ot-exceptions')} sub={srcTag(ar ? 'مُصحّح · الفترة' : 'corrected · period', '#22c55e')} />
       </div>
 
       {/* ── COVERAGE RISK + PRESENCE MIX ── */}
@@ -163,7 +169,11 @@ export default function CommandCenter() {
         ))}
       </div>
 
-      <p className="text-[10px]" style={{ color: 'var(--text-3)' }}>{ar ? 'كل الأرقام حيّة ومتحقّقة من النظام (تغطية من coverage-impact · عدالة من fairness · تسرّب من attrition · حضور/OT من roster_days). لا بيانات تجريبية.' : 'every number is live & verified from the system (coverage from coverage-impact · fairness · attrition · attendance/OT from roster_days). No demo data.'}</p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]" style={{ color: 'var(--text-3)' }}>
+        <span className="inline-flex items-center gap-1"><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#06b6d4', display: 'inline-block' }} />{ar ? 'لايف = لحظي من النظام (حضور اليوم/الطلبات)' : 'live = real-time from the system (today’s attendance/requests)'}</span>
+        <span className="inline-flex items-center gap-1"><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{ar ? 'مُصحّح = من التسوية المعتمدة roster_days (إذن/OT/تغطية)' : 'corrected = from the validated reconciliation roster_days (permission/OT/coverage)'}</span>
+        <span>{ar ? '· كل الأرقام متحقّقة، لا بيانات تجريبية.' : '· all numbers verified, no demo data.'}</span>
+      </div>
     </div>
   );
 }
