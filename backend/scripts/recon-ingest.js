@@ -32,6 +32,15 @@ const MAP = {
   await c.connect();
   try {
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS username text`); // User ID (a.wahab) — durable across re-ingest
+    // keep the editable holiday list (recon-config.json) mirrored into the `holidays` table so the leave-balance
+    // calc can exclude holidays that fall inside annual leave (rule: a holiday during leave returns to the balance).
+    try {
+      const cfg = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'recon-config.json'), 'utf8'));
+      await c.query(`CREATE TABLE IF NOT EXISTS holidays (tenant_id uuid NOT NULL, holiday_date date NOT NULL, name text, PRIMARY KEY (tenant_id, holiday_date))`);
+      for (const h of (cfg.holidays || []))
+        await c.query(`INSERT INTO holidays (tenant_id, holiday_date, name) VALUES ($1,$2,$3) ON CONFLICT (tenant_id, holiday_date) DO UPDATE SET name=EXCLUDED.name`, [TENANT, h.date, h.name]);
+      console.log('synced ' + (cfg.holidays || []).length + ' holidays → holidays table');
+    } catch (e) { console.warn('holidays sync skipped: ' + e.message); }
     if (RESTORE) {
       await c.query('BEGIN');
       await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [TENANT, FROM, TO]);

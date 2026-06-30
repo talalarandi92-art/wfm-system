@@ -11,10 +11,18 @@ export class LeaveBalancesService {
 
   private year(y?: number): number { return y && y > 2000 ? y : new Date().getFullYear(); }
 
-  /** Sum of leave days for an employee/type/year at a given request status. */
+  /** Effective leave days that draw down the balance: calendar duration MINUS any official holidays that
+   *  fall inside an ANNUAL-LEAVE span (rule 2026-06-30: a holiday during annual leave returns to the balance,
+   *  not consumed). Other leave types are unaffected. Holidays come from the editable `holidays` table. */
+  private readonly EFFECTIVE_DAYS = `GREATEST(0, rl.duration_days - (
+    CASE WHEN rl.leave_type = 'annual_leave' AND NOT COALESCE(rl.is_half_day, false)
+      THEN (SELECT COUNT(*) FROM holidays h WHERE h.tenant_id = r.tenant_id AND h.holiday_date BETWEEN rl.start_date AND rl.end_date)
+      ELSE 0 END))`;
+
+  /** Sum of leave days for an employee/type/year at a given request status (holiday-adjusted). */
   private async daysAt(tenantId: string, employeeId: string, leaveType: string, year: number, status: string): Promise<number> {
     const [r] = await this.ds.query(
-      `SELECT COALESCE(SUM(rl.duration_days),0)::numeric AS days
+      `SELECT COALESCE(SUM(${this.EFFECTIVE_DAYS}),0)::numeric AS days
          FROM requests r
          JOIN request_leaves rl ON rl.request_id = r.id
         WHERE r.tenant_id = $1 AND r.employee_id = $2 AND rl.leave_type = $3
@@ -69,7 +77,7 @@ export class LeaveBalancesService {
       [tenantId, year]);
     const drawn = await this.ds.query(
       `SELECT r.employee_id, rl.leave_type, r.status,
-              COALESCE(SUM(rl.duration_days),0)::numeric AS days
+              COALESCE(SUM(${this.EFFECTIVE_DAYS}),0)::numeric AS days
          FROM requests r
          JOIN request_leaves rl ON rl.request_id = r.id
         WHERE r.tenant_id = $1 AND EXTRACT(YEAR FROM rl.start_date) = $2

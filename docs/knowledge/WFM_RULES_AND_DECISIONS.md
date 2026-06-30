@@ -242,7 +242,11 @@ corrections came out of it (both now LIVE):
   isHolidayDate && kind==='leave' && not DL/UPL` → presence='holiday', `hr_code='H'` (so HR-matrix/balance don't count
   L as taken), `daily_note` set, original `L` kept in shift_code for audit. Applied in the engine (June) AND back-applied
   to Jan–May existing data (40 rows: New Year/Israa Wal Miraj/National/Liberation/Arafat/Eid ul-Adha). Holidays for the
-  whole of 2026 are now in `recon-config.json` (editable). **Always — every month.**
+  whole of 2026 are now in `recon-config.json` (editable). **Always — every month.** **Leave-balance side (done):** the
+  balance draws down `request_leaves.duration_days` (calendar days) — `leave-balances.service.EFFECTIVE_DAYS` now
+  subtracts any official holiday that falls inside an **annual-leave** span (`GREATEST(0, duration − holidays-in-range)`),
+  so a holiday during leave never costs a leave day. Holidays live in the editable `holidays` table (mirrored from
+  `recon-config.json` on every recon-ingest). Verified: 7-day leave over 6 holidays → 1 day charged.
 - **Status labels (map APPROVED + DONE 2026-06-30):** friendly bilingual labels instead of raw codes — Morning/Day
   (M,B,C,AM,M20,B20,C20,M7-3,B7), Evening (E,EE20), Night (N,N20), Midnight (MD,MN,MDR,MNR) [WFH folds into base cat];
   OFF→Day Off, H→Official Holiday, L→Annual Leave, SL/S→Sick Leave, A→Absent, DL→Death Leave, COMP→Comp Day,
