@@ -33,7 +33,9 @@ const cell = (v) => { if (v == null) return null; if (typeof v === 'object') { i
       r++; if (r === 1) continue;
       const v = row.values || []; // 1-indexed
       const id = cell(v[5]); if (typeof id !== 'number') continue;
-      const date = serialToISO(cell(v[1])); if (!date || date < '2026-06-01' || date > '2026-06-30') continue;
+      // accept any date >= RECON_FROM (default Jun 1) — pre-June rows have no attendance source, so they're excluded;
+      // the upper bound is open so the next upload (more June days, or a new month with its own attendance) just works.
+      const date = serialToISO(cell(v[1])); if (!date || date < (process.env.RECON_FROM || '2026-06-01') || (process.env.RECON_TO && date > process.env.RECON_TO)) continue;
       scanned++; dateSet.add(date);
       const userId = cell(v[6]) ? String(cell(v[6])) : null;
       const email = cell(v[8]) ? String(cell(v[8])) : null;
