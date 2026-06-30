@@ -22,7 +22,7 @@ const MAP = {
   ot_min: 'otMin', offday_ot_min: 'offdayOt', holiday_ot_min: 'holidayOt', worked_min: 'worked',
   adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_type: 'permType', permission_duration: 'permDur',
   comp_off: 'comp', sick: 'sick', hr_code: 'hrCode', attendance_code: 'attCode', mismatch: 'mismatch', data_quality: 'dq',
-  username: 'username', total_work_sys_min: 'totalSysMin',
+  username: 'username', total_work_sys_min: 'totalSysMin', daily_note: 'dailyNote',
   team_manager: 'teamMgr', team_group: 'teamGroup', gender: 'gender', role_category: 'roleCat',
   expected_hours: 'expectedH', is_active: 'active',
 };

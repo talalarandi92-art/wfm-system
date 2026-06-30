@@ -76,3 +76,9 @@ saved schedules go stale. It must show coverage gaps honestly (e.g. limited male
   from opening the system. **Decided 2026-06-30: leaders stay record-only for deductions — only the system-open flag
   applies** (not full scrutiny). Never-closed Sprinklr sessions: login-only recovery deferred (leave-as-is).
 - Maternity-7h (12375/12434) excluded from early-out only. Approved permission covers late/early.
+- **Cross-midnight shift = owned by its START day (always).** A shift starting day D ending D+1 belongs entirely to D —
+  attendance/OT/permission/sick/leave/swaps/all requests. A non-working (H/OFF/leave) day never re-grabs the previous
+  night's session (engine: `prevDayBleed = !isWorkingKind && govLogin<0` → no OT/worked, no session shown). Kills double-count.
+- **Annual leave on an official holiday → counts as the holiday, returns to the leave balance** (NOT a consumed L day).
+  Engine sets presence='holiday', hr_code='H' (balance/HR-matrix skip it), keeps original L in shift_code. Holidays live
+  in `recon-config.json` (editable, full 2026 list). Applies every month.

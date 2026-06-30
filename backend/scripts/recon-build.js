@@ -216,15 +216,23 @@ module.exports = function build() {
       const govDur = (govLogin != null && govLogout != null) ? Math.max(0, govLogout - govLogin) : null;
       const sysEv = sysEvidenceMin || 0;
       const isHolidayDate = holidayDates.has(date) || HOLIDAY_RE.test(odStatus);  // editable config + date-level Odoo auto-detect
+      // RULE B (2026-06-30): a cross-midnight shift is OWNED BY ITS START DAY. A non-working day (H/OFF/leave) must NOT
+      // re-grab the previous night's session (govLogin < 0 ⇒ logged in before this day began) — that double-counts it
+      // on the next day. Only a session that STARTS on this day (login ≥ 00:00) belongs to it.
+      const prevDayBleed = (!isWorkingKind && govLogin != null && govLogin < 0);
+      // RULE A (2026-06-30): an official holiday falling on an ANNUAL-LEAVE (L) day counts as the HOLIDAY, NOT a consumed
+      // leave day — it returns to the leave balance. Treated as holiday (presence/hr_code) below; original L kept raw.
+      const leaveOnHoliday = isHolidayDate && c.kind === 'leave' && !['DL', 'UPL'].includes(String(raw || '').toUpperCase());
       let otMin = 0, offdayOt = 0, holidayOt = 0;
       // off/holiday-day OT: count a plausible 1-12h session (cap 10h); >12h = never-closed bleed → drop, don't inflate
       const plausibleOt = (sysEv >= 60 && sysEv <= 720) ? Math.min(sysEv, 600) : 0;
       if (isHolidayDate && isWorkingKind && govDur != null && govDur >= 60)       // worked a scheduled shift on an official holiday → the WHOLE shift is holiday OT (premium), capped at the scheduled net
         holidayOt = (c.net && c.net > 0) ? Math.min(govDur, c.net) : plausibleOt;
-      else if (c.kind === 'holiday') holidayOt = plausibleOt;                     // holiday code (no shift) worked = holiday OT
+      else if (c.kind === 'holiday' && !prevDayBleed) holidayOt = plausibleOt;    // worked the holiday ITSELF (login on the holiday, not a previous-night bleed) = holiday OT
       else if (computable) otMin = otSystemMin || 0;                              // OT past shift on a working day
-      else if (c.kind === 'off' || c.kind === 'leave' || c.kind === 'comp') offdayOt = plausibleOt;  // OFF/leave day worked = off-day OT (the user's flagged case)
-      const presenceLive = isWorkingKind ? (isWFH ? 'wfh' : 'office')
+      else if ((c.kind === 'off' || c.kind === 'leave' || c.kind === 'comp') && !prevDayBleed) offdayOt = plausibleOt;  // OFF/leave worked SAME day = off-day OT
+      const presenceLive = leaveOnHoliday ? 'holiday'
+        : isWorkingKind ? (isWFH ? 'wfh' : 'office')
         : c.kind === 'sick' ? 'sick' : c.kind === 'leave' ? 'leave' : c.kind === 'absence' ? 'absent'
         : c.kind === 'holiday' ? 'holiday' : 'off';
       const holidayLabel = isHolidayDate ? ('Official Holiday — ' + (HOLIDAY_NAME.get(date) || (HOLIDAY_RE.test(odStatus) ? String(odStatus).replace(/[-–—].*$/, '').replace(/\d{4}/, '').trim() : 'Holiday'))) : null;
@@ -241,7 +249,7 @@ module.exports = function build() {
       if (c.kind === 'sick')        { hrCode = 'SL'; attCode = (raw && String(raw).length > 1) ? raw : 'SL'; }
       else if (c.kind === 'absence'){ hrCode = 'A';  attCode = (raw && String(raw).length > 1) ? raw : 'A'; }
       else if (c.kind === 'off')    { hrCode = /transfer/i.test(RAW) ? 'Transfer' : 'OFF'; attCode = 'OFF'; }
-      else if (c.kind === 'leave')  { hrCode = ['DL', 'UPL'].includes(RAW) ? RAW : 'L'; attCode = hrCode; }
+      else if (c.kind === 'leave')  { hrCode = leaveOnHoliday ? 'H' : (['DL', 'UPL'].includes(RAW) ? RAW : 'L'); attCode = hrCode; }
       else if (c.kind === 'holiday'){ hrCode = 'H'; attCode = 'H'; }
       else if (c.kind === 'comp')   { hrCode = 'COMP'; attCode = 'COMP'; }
       else if (c.kind === 'sep')    { hrCode = RAW || 'RES'; attCode = hrCode; }
@@ -249,11 +257,12 @@ module.exports = function build() {
       else                          { hrCode = raw || 'OFF'; attCode = raw || 'OFF'; }
       const _ingest = {
         emp: String(e.id), person: String(e.id), name: idn.name || e.name, fn, username: idn.userId || e.username || null,
-        totalSysMin: (govDur != null ? Math.max(0, govDur) : null),
+        totalSysMin: (prevDayBleed || govDur == null) ? null : Math.max(0, govDur),
+        dailyNote: leaveOnHoliday ? 'Annual leave on an official holiday — counted as holiday, not deducted from leave balance' : null,
         date, day: dayName(date), status: holidayLabel ? (holidayLabel + (isWorkingKind ? ' (worked)' : '')) : raw, presence: presenceLive, location: isWFH ? 'WFH' : 'Office',
         shiftCode: c.norm, shiftCat: c.norm, schedStart, schedEnd: (schedEnd != null && schedEnd > 1440 ? schedEnd - 1440 : schedEnd),
         punchIn: hasPunch ? od.punchIn : null, punchOut: (od && od.punchOut != null) ? od.punchOut : null,
-        sysLogin: sysLogin != null ? ((sysLogin % 1440) + 1440) % 1440 : null, sysLogout: sysLogout != null ? ((sysLogout % 1440) + 1440) % 1440 : null, loginSrc: sysSource || null,
+        sysLogin: (prevDayBleed || sysLogin == null) ? null : ((sysLogin % 1440) + 1440) % 1440, sysLogout: (prevDayBleed || sysLogout == null) ? null : ((sysLogout % 1440) + 1440) % 1440, loginSrc: prevDayBleed ? null : (sysSource || null),
         lateMin: punchLateMin || 0, earlyMin: punchEarlyMin || 0, sysLate: effLate || 0, sysEarly: effEarly || 0,
         otMin, offdayOt, holidayOt,
         // worked_min: a WORKED day = the gov session (capped at a sane 16h to kill never-logged-out bleed);

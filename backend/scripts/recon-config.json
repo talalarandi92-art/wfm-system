@@ -1,6 +1,20 @@
 {
-  "_note": "Editable reconciliation config. Edit the holidays list whenever needed, then re-run: node scripts/recon-refresh.js. Anyone who worked a SCHEDULED shift on one of these dates gets the whole shift credited as HOLIDAY OT, and the row is labelled 'Official Holiday'.",
+  "_note": "Editable reconciliation config. Edit the holidays list whenever needed, then re-run: node scripts/recon-refresh.js. Anyone who worked a SCHEDULED shift on one of these dates gets the whole shift credited as HOLIDAY OT, the row is labelled 'Official Holiday', and an ANNUAL-LEAVE (L) day on a holiday is counted as the holiday (returns to the leave balance, not deducted). A cross-midnight shift is owned by its START day, so a holiday/OFF day never re-grabs the previous night's session.",
   "holidays": [
+    { "date": "2026-01-01", "name": "New Year" },
+    { "date": "2026-01-18", "name": "Israa Wal Miraj" },
+    { "date": "2026-02-25", "name": "National Day" },
+    { "date": "2026-02-26", "name": "Liberation Day" },
+    { "date": "2026-03-20", "name": "Eid ul-Fitr" },
+    { "date": "2026-03-21", "name": "Eid ul-Fitr" },
+    { "date": "2026-03-22", "name": "Eid ul-Fitr" },
+    { "date": "2026-03-23", "name": "Eid ul-Fitr" },
+    { "date": "2026-05-26", "name": "Arafat Day" },
+    { "date": "2026-05-27", "name": "Eid ul-Adha" },
+    { "date": "2026-05-28", "name": "Eid ul-Adha" },
+    { "date": "2026-05-29", "name": "Eid ul-Adha" },
+    { "date": "2026-05-30", "name": "Eid ul-Adha" },
+    { "date": "2026-05-31", "name": "Eid ul-Adha" },
     { "date": "2026-06-16", "name": "Hijri New Year" }
   ]
 }

@@ -30,29 +30,29 @@ const dur = (m: number | null) => { if (!m || m<=0) return '—'; const h=Math.f
 // total span between an in and out, cross-midnight aware (out < in ⇒ next day)
 const span = (a: number|null|undefined, b: number|null|undefined): number|null => { if (a==null||b==null) return null; let d=b-a; if (d<0) d+=1440; return d; };
 // friendly status label from the code/category (canonical §3 map) — bilingual
+const NW_LABEL: Record<string,{en:string;ar:string}> = {
+  H:{en:'Official Holiday',ar:'عطلة رسمية'}, L:{en:'Annual Leave',ar:'إجازة سنوية'}, AL:{en:'Annual Leave',ar:'إجازة سنوية'},
+  SL:{en:'Sick Leave',ar:'إجازة مرضية'}, S:{en:'Sick Leave',ar:'إجازة مرضية'}, A:{en:'Absent',ar:'غياب'},
+  DL:{en:'Death Leave',ar:'إجازة وفاة'}, UPL:{en:'Unpaid Leave',ar:'إجازة بدون راتب'}, COMP:{en:'Comp Day',ar:'يوم بدل'},
+  OFF:{en:'Day Off',ar:'يوم راحة'}, RES:{en:'Resignation',ar:'استقالة'}, TER:{en:'Termination',ar:'إنهاء خدمة'}, TRANSFER:{en:'Transfer',ar:'نقل'},
+};
 const statusLabel = (r: Row): { en: string; ar: string } | null => {
+  const hr = String(r.hr_code || '').toUpperCase().trim();              // authoritative marker (e.g. annual-leave-on-holiday → 'H')
   const code = String(r.shift_code || r.attendance_code || r.hr_code || '').toUpperCase().trim();
   const base = code.replace(/^WFH[-_]?/, '').replace(/[-_]?WFH$/, '');
   const cat = String(r.shift_category || '').toLowerCase();
-  // classify by the CODE itself — the holiday overlay (status) is shown separately and, on a leave/off code,
-  // flagged as a conflict; we never let "Official Holiday (worked)" mask a real shift or an L/SL day.
-  if (code==='H') return { en:'Official Holiday', ar:'عطلة رسمية' };
-  if (code==='L' || code==='AL' || code==='ANNUAL') return { en:'Annual Leave', ar:'إجازة سنوية' };
-  if (code==='SL' || code==='S' || r.sick) return { en:'Sick Leave', ar:'إجازة مرضية' };
-  if (code==='A' || code==='ABS') return { en:'Absent', ar:'غياب' };
-  if (code==='DL') return { en:'Death Leave', ar:'إجازة وفاة' };
-  if (code==='UPL') return { en:'Unpaid Leave', ar:'إجازة بدون راتب' };
-  if (code==='COMP') return { en:'Comp Day', ar:'يوم بدل' };
-  if (code==='RES') return { en:'Resignation', ar:'استقالة' };
-  if (code==='TER') return { en:'Termination', ar:'إنهاء خدمة' };
-  if (code==='OFF') return { en:'Day Off', ar:'يوم راحة' };
+  // non-working state comes from hr_code first (so an L overridden to H by the holiday rule reads as Holiday)
+  if (hr && NW_LABEL[hr]) return NW_LABEL[hr];
+  if (r.sick) return NW_LABEL.SL;
+  // working shift → category (shift_code keeps the category even when hr_code='WFH')
   if (['MD','MN','MDR','MNR'].includes(base) || cat==='midnight') return { en:'Midnight Shift', ar:'دوام منتصف الليل' };
   if (['N','N20'].includes(base) || cat==='night') return { en:'Night Shift', ar:'دوام ليلي' };
   if (['E','EE20','E20'].includes(base) || cat==='evening') return { en:'Evening Shift', ar:'دوام مسائي' };
   if (['M','AM','B','C','M20','B20','C20','M7-3','B7','C7'].includes(base) || cat==='morning' || cat==='day') return { en:'Morning Shift', ar:'دوام صباحي' };
-  if (r.presence==='off') return { en:'Day Off', ar:'يوم راحة' };
-  if (r.presence==='absent') return { en:'Absent', ar:'غياب' };
-  if (/holiday/i.test(r.status||'')) return { en:'Official Holiday', ar:'عطلة رسمية' };
+  if (NW_LABEL[base]) return NW_LABEL[base];
+  if (r.presence==='off') return NW_LABEL.OFF;
+  if (r.presence==='absent') return NW_LABEL.A;
+  if (r.presence==='holiday' || /holiday/i.test(r.status||'')) return NW_LABEL.H;
   return null;
 };
 // derive the weekday from the date itself, so the day name is ALWAYS shown even when the DB column is null
@@ -474,6 +474,7 @@ export default function RosterPage() {
                                 {r.status && <span className="text-slate-400">{sl?'  ·  ':''}{r.status}</span>}
                                 {rawDiffers && <span className="ms-1" title={ar?'الكود لا يطابق الحالة المكتوبة — راجِع':'Code vs written status differ — review'}><AlertTriangle size={11} className="inline text-amber-400" /></span>}
                               </div>); })()}
+                            {r.daily_note && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(16,185,129,0.10)' }}><span className="text-emerald-300/80 font-semibold">{ar?'ملاحظة: ':'Note: '}</span><span className="text-slate-300">{r.daily_note}</span></div>}
                             {r.permission && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(99,102,241,0.12)' }}><span className="text-indigo-300 font-semibold">{ar?'استئذان: ':'Permission: '}</span><span className="text-slate-200">{[r.permission_type, r.permission_duration, r.permission].filter(Boolean).join(' · ')}</span></div>}
                             {r.comp_off && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(16,185,129,0.12)' }}><span className="text-emerald-300 font-semibold">{ar?'كومب أوف: ':'Comp off: '}</span><span className="text-slate-200">{r.comp_off}</span></div>}
                             {r.sick && <div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(245,158,11,0.12)' }}><span className="text-amber-300 font-semibold">{ar?'سيك: ':'Sick: '}</span><span className="text-slate-200">{r.sick}</span></div>}

@@ -97,6 +97,13 @@ Module consts at the top of `recon.controller.ts` so no two reports disagree and
   record-only for deductions — only the system-open flag applies** (not full scrutiny). Caveat: Sprinklr never-closed
   sessions (logout=1970) drop a real login → "login-only recovery" deferred (user chose leave-as-is 2026-06-30), so
   Fatma/Hassan/Noura's flag is over-strict until that's revisited.
+- **`CROSS_MIDNIGHT_START_DAY`** (2026-06-30) — a shift starting day D, ending D+1 belongs ENTIRELY to D (attendance/OT/
+  permission/sick/leave/swaps/requests). recon-build `prevDayBleed = !isWorkingKind && govLogin<0` → a non-working
+  (H/OFF/leave) day never credits OT/worked nor shows a previous-night session. Killed the 06-16 double-count + 85 OFF
+  bleeds (June −31.6h holOT, −597.7h worked). Engine-enforced for every upload.
+- **`LEAVE_ON_HOLIDAY`** (2026-06-30) — an annual-leave `L` day on an official holiday counts as the HOLIDAY and returns
+  to the leave balance (not consumed): presence='holiday', hr_code='H' (HR-matrix/balance skip L), daily_note set,
+  original L kept in shift_code. Engine (June) + back-applied to Jan–May (40 rows). 2026 holidays in recon-config.json.
 - Applied to: roster-dashboard, agent-360, team-360, agent-progress, agent-period-compare, employee
   list, insights, report-builder agg map, **HR matrix** (appends OT/Worked/Late/Early/Absent/Sick/Perm
   columns). RAW per-row detail + CSV/Excel exports stay RAW (analyst ground truth).

@@ -227,17 +227,28 @@ corrections came out of it (both now LIVE):
 - **Canonical foundation** is now the user's latest manual workbook (`Final` sheet, 116 employees); the in-system
   Upload writes to it. NOTE: the live reports' tolerance change covers all months, but the no-punch flag + full-span
   disposition currently apply to June (the recon-engine month); rebuilding Jan–May through the same rule is a follow-up.
-- **★ CROSS-MIDNIGHT SHIFT = OWNED BY ITS START DAY, FOR EVERYTHING (CONFIRMED 2026-06-30; implementation PENDING).**
+- **★ CROSS-MIDNIGHT SHIFT = OWNED BY ITS START DAY, FOR EVERYTHING (CONFIRMED + DONE 2026-06-30, commit pending).**
   A shift that begins on day D and ends on D+1 belongs **entirely to D** — for attendance, login/logout, worked hours,
   **OT, permission, sick, leave, schedule swaps, and every request type**. The discriminator is the shift's **start
   calendar day**, never the end day. Example: a shift starting 06-15 evening and ending 07:00 on 06-16 (a holiday) is a
   **06-15** shift in full; a 2 AM permission on 06-16 for it is filed under 06-15. A genuine shift that *starts* 06-16
-  00:00→07:00 belongs to 06-16. **This is GENERAL — not holiday/June-specific.** Current bug it fixes: the engine's
-  −3h pre-window lets a holiday/OFF "next day" row re-grab the previous night's session → **double-count** (e.g. Ali
-  Muteb 12937, Habib 11952, Ghadir 13805, Mohammad Sahar 13830 on 06-16). **HELD by user:** do NOT re-ingest/fix these
-  4 yet — finish the requested UI features first, then circle back. Fix = on a non-working (H/OFF/leave) day, only
-  attribute a session whose login is on that same day (login ≥ day-00:00); a cross-midnight session stays on its start day.
-- **Status labels (map APPROVED 2026-06-30):** show friendly labels instead of raw codes — Morning/Day (M,B,C,AM,M20,
-  B20,C20,M7-3,B7), Evening (E,EE20), Night (N,N20), Midnight (MD,MN,MDR,MNR) [+WFH variants fold into base cat +🏠];
+  00:00→07:00 belongs to 06-16. **GENERAL — not holiday/June-specific.** Impl in recon-build: `prevDayBleed =
+  !isWorkingKind && govLogin < 0` → a non-working (H/OFF/leave) day does NOT credit OT/worked and does NOT show a
+  session whose login is before the day began. Fixed the double-count (Ali Muteb 12937, Habib 11952, Ghadir 13805,
+  Mohammad Sahar 13830 on 06-16 → holiday OT 587/226/541/540 → 0) + 85 OFF-day bleeds (June: −31.6h holiday-OT,
+  −597.7h worked). Engine-enforced for every upload; applies to all future months.
+- **★ ANNUAL LEAVE ON AN OFFICIAL HOLIDAY → counts as the HOLIDAY, returns to the leave balance (CONFIRMED + DONE
+  2026-06-30).** An `L` day that lands on an official holiday is NOT a consumed leave day. Impl: `leaveOnHoliday =
+  isHolidayDate && kind==='leave' && not DL/UPL` → presence='holiday', `hr_code='H'` (so HR-matrix/balance don't count
+  L as taken), `daily_note` set, original `L` kept in shift_code for audit. Applied in the engine (June) AND back-applied
+  to Jan–May existing data (40 rows: New Year/Israa Wal Miraj/National/Liberation/Arafat/Eid ul-Adha). Holidays for the
+  whole of 2026 are now in `recon-config.json` (editable). **Always — every month.**
+- **Status labels (map APPROVED + DONE 2026-06-30):** friendly bilingual labels instead of raw codes — Morning/Day
+  (M,B,C,AM,M20,B20,C20,M7-3,B7), Evening (E,EE20), Night (N,N20), Midnight (MD,MN,MDR,MNR) [WFH folds into base cat];
   OFF→Day Off, H→Official Holiday, L→Annual Leave, SL/S→Sick Leave, A→Absent, DL→Death Leave, COMP→Comp Day,
-  RES/TER→Resignation/Termination. On the row badge + detail Raw status, bilingual.
+  RES/TER→Resignation/Termination. Classified by `hr_code` first (so an L-on-holiday reads as Holiday, a worked holiday
+  still shows the shift). On the row + detail. Also added: **User ID** (a.wahab, `roster_days.username`), punch/system
+  **Σ totals**, prefix search. Roster commit 584260b; rules commit next.
+- **REMAINING (Jan–May Rule B):** the cross-midnight double-count is fixed in the recon engine (June + future). Jan–May
+  was built by the OTHER pipeline (import-roster-master) and its 480 non-working-with-worked rows can't be cleanly
+  de-bled via SQL (no session-login sign) — needs a per-month recon rebuild when those months' sources are loaded.
