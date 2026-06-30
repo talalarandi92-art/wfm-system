@@ -210,10 +210,19 @@ corrections came out of it (both now LIVE):
   "Completed required hours" now means `span ≥ gross shift`, not `≥ net`. So leaving early but still logging 8h net
   is a REAL early-out (it was wrongly excused before). Maternity-7h still excluded from early-out; approved
   permissions still cover.
-- **No-punch-AND-no-system days are FLAGGED, never silent.** A working day with neither a punch nor a system login
-  gets `data_quality = "No punch & no system login — verify (not auto-absent)"` so it surfaces for review instead of
-  being silently counted present or absent.
-- **Leaders / seniors:** attendance not scrutinised — if there's data we fill it, no data = blind eye (excluded).
+- **No-punch-AND-no-system days are FLAGGED, never silent — and worth 0 worked hours.** A working day with neither a
+  punch nor a system login gets `data_quality = "No punch & no system login — verify (not auto-absent)"` **AND
+  `worked_min = 0`** (never the scheduled net — we must never show "worked 8h" for a day we can't prove). The flag is
+  **role-blind**: it fires for every role. (June check: 9 employees / 50 days, all → worked 0.)
+- **System-open requirement applies to ALL roles — leaders included (policy 2026-06-30, supersedes the old blind-eye).**
+  Everyone — including Team Leader / Senior / RTA / Resolution Specialist / WFM — **must open the system**; a
+  no-system-no-punch working day is a real flag for them too (already enforced: the `_ingest.dq` flag is role-blind).
+  The `isExcludedRole` "record-only" exclusion now means **exempt from tardiness / HR-action *deductions* ONLY** — it is
+  NOT an exemption from opening the system. (Whether leaders also get pulled into full tardiness/HR scrutiny going
+  forward is a separate, still-open decision — do not assume it.)
+- **Never-closed Sprinklr sessions (logout=1970, >16h):** a real login that the engine currently drops → can falsely
+  flag someone (Fatma/Hassan/Noura) as "no system" even though they opened it. Under the new all-roles policy this
+  "login-only recovery" matters more (don't penalise a real login). Still PENDING user OK before enabling.
 - **Canonical foundation** is now the user's latest manual workbook (`Final` sheet, 116 employees); the in-system
   Upload writes to it. NOTE: the live reports' tolerance change covers all months, but the no-punch flag + full-span
   disposition currently apply to June (the recon-engine month); rebuilding Jan–May through the same rule is a follow-up.

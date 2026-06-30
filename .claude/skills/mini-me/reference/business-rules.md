@@ -64,3 +64,14 @@ Intern productivity default ≈ **70%** (configurable). Scenarios: base / shrink
 The active generator (`generateWeeklySchedule`, UI `/generate`) is **fairness/rotation-based, not
 demand-based** (`generateDemandDriven` exists but is unused). Users must REGENERATE after fixes —
 saved schedules go stale. It must show coverage gaps honestly (e.g. limited male-night pool).
+
+## Attendance reconciliation (confirmed 2026-06-30)
+- **Tardiness tolerance = > 6 min** (≤6 forgiven). `HR_MIN=7`; live `CRED_LATE/EARLY = BETWEEN 7 AND 240`.
+- **Shift span = full gross (9h incl. break)** — system stays open during break, so "completed required hours"
+  means login→logout span ≥ gross shift, NOT net 8h. Leaving early but logging 8h net = real early-out.
+- **No-punch AND no-system working day → FLAG + `worked_min=0`** (`data_quality="No punch & no system login —
+  verify (not auto-absent)"`), never the scheduled net. **Role-blind.**
+- **ALL roles must open the system — leaders included** (supersedes the old "don't scrutinise leaders"). The
+  `isExcludedRole` record-only (TL/Senior/RTA/Resolution/WFM) = exempt from tardiness/HR *deductions* ONLY, NOT
+  from opening the system. Full leader tardiness scrutiny = separate open decision.
+- Maternity-7h (12375/12434) excluded from early-out only. Approved permission covers late/early.

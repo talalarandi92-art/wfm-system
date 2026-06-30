@@ -120,7 +120,10 @@ function classifyCode(rawIn, empId) {
   return mk({ kind: 'unknown', mapped: false, note: 'Unmapped roster code "' + raw + '"' });
 }
 
-// excluded (supervisory) role test — confirmed: TL/Senior/RTA/Resolution Specialist/WFM only
+// excluded (supervisory) role test — confirmed: TL/Senior/RTA/Resolution Specialist/WFM only.
+// SCOPE (policy 2026-06-30): "excluded/record-only" suppresses HR-action + tardiness *deductions* ONLY.
+// It does NOT exempt anyone from opening the system: the no-system-no-punch flag (recon-build _ingest.dq)
+// is role-blind and fires for these roles too — everyone, leaders included, must open the system.
 function isExcludedRole(fn, team) {
   const f = (fn || '').toLowerCase(); const t = (team || '').toLowerCase();
   if (/team leader|senior|resolution specialist/.test(f)) return true;

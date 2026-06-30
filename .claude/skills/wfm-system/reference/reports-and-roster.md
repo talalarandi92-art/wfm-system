@@ -81,13 +81,21 @@ min; pct KPIs are 0–1 fractions ×100.
 Module consts at the top of `recon.controller.ts` so no two reports disagree and no one is wronged:
 - **`TRUE_OT`** = `ot_min + offday_ot_min + holiday_ot_min` — OT is in 3 DISJOINT buckets; summing
   `ot_min` alone undercounts ~28% (live: 446k vs 651k min). Use everywhere "total OT" is meant.
-- **`CRED_LATE`/`CRED_EARLY`** = `sys_late/early_min BETWEEN 1 AND 240` — cross-midnight night shifts
-  (MD/MN/MNR, shift_end>1440) bleed the post-midnight tail into a multi-HOUR false late/early; cap at
-  4h, surface the rest as `excludedDq`. **Ranking gotcha:** `SUM(x) FILTER(...) DESC` sorts NULLS-FIRST
-  → floats null-valued (all-bleed) agents to the top; use `COALESCE(...,0)` + `DESC NULLS LAST`.
+- **`CRED_LATE`/`CRED_EARLY`** = `sys_late/early_min BETWEEN 7 AND 240` — **tolerance is > 6 min** (≤6 forgiven,
+  rule 2026-06-30); upper 240 because cross-midnight night shifts (MD/MN/MNR, shift_end>1440) bleed the post-midnight
+  tail into a multi-HOUR false late/early; cap at 4h, surface the rest as `excludedDq`. **Ranking gotcha:**
+  `SUM(x) FILTER(...) DESC` sorts NULLS-FIRST → floats null-valued (all-bleed) agents to the top; use
+  `COALESCE(...,0)` + `DESC NULLS LAST`.
 - **`MATERNITY_7H`** = person_no `('12375','12434')` (Haya Mohanna, Shaima Saoud) — roster_days does
   NOT flag maternity (they read expected_hours=9), so their ~2h/day early-out (legit 7h day) is
   excluded from **EARLY-OUT only** (late-in + OT still count). Else they wrongly top "most early-out".
+- **`NO_EVIDENCE_FLAG`** — a working day with NO punch AND NO system login → `data_quality = "No punch & no
+  system login — verify (not auto-absent)"` AND `worked_min = 0` (never the scheduled net). **Role-blind**, fires
+  for every role. **Policy 2026-06-30: ALL roles must open the system — leaders included** (supersedes the old
+  leaders-blind-eye). `isExcludedRole` (TL/Senior/RTA/Resolution/WFM = record-only) now means exempt from
+  tardiness/HR-action *deductions* ONLY, NOT exempt from opening the system. Full tardiness scrutiny of leaders =
+  separate still-open decision. Caveat: Sprinklr never-closed sessions (logout=1970) drop a real login → "login-only
+  recovery" PENDING before it falsely flags Fatma/Hassan/Noura.
 - Applied to: roster-dashboard, agent-360, team-360, agent-progress, agent-period-compare, employee
   list, insights, report-builder agg map, **HR matrix** (appends OT/Worked/Late/Early/Absent/Sick/Perm
   columns). RAW per-row detail + CSV/Excel exports stay RAW (analyst ground truth).
