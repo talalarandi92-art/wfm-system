@@ -90,7 +90,9 @@ ormconfig.js
 ormconfig.ts
 
 # --- Claude Code local settings (machine-specific paths) ---
-.claude/
+.claude/*
+# ...but DO version the portable knowledge skills (wfm-system / scorecard-builder / mini-me)
+!.claude/skills/
 
 # --- Duplicate instruction file artifacts ---
 CLAUDE.md.md
