@@ -25,8 +25,9 @@ const cell = (v) => { if (v == null) return null; if (typeof v === 'object') { i
   const reader = new ExcelJS.stream.xlsx.WorkbookReader(SRC, { sharedStrings: 'cache', worksheets: 'emit', entries: 'emit' });
   const employees = {}, identity = {}, byUser = {}, byEmail = {}, schedule = {}, dateSet = new Set();
   let scanned = 0;
+  const SHEET_RE = process.env.MANUAL_SHEET ? new RegExp('^' + process.env.MANUAL_SHEET, 'i') : /^(final|shift)/i;
   for await (const ws of reader) {
-    if (!/^shift/i.test(ws.name || '')) { for await (const _ of ws) {} continue; }
+    if (!SHEET_RE.test(ws.name || '')) { for await (const _ of ws) {} continue; }
     let r = 0;
     for await (const row of ws) {
       r++; if (r === 1) continue;

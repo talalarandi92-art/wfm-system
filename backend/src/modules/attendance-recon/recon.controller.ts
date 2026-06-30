@@ -39,8 +39,9 @@ const RECON_NEW_DIR = process.env.RECON_NEW_DIR || 'C:/Users/t.bassam/Desktop/ne
  *    Same fairness carve-out as the WFH HR report. */
 const MATERNITY_7H = "('12375','12434')";
 const TRUE_OT = '(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))';
-const CRED_LATE = '(sys_late_min BETWEEN 1 AND 240)';
-const CRED_EARLY = `(sys_early_min BETWEEN 1 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`;
+// user rule 2026-06-30: tardiness counts only when > 6 min (<=6 tolerated); upper 240 = cross-midnight bleed guard.
+const CRED_LATE = '(sys_late_min BETWEEN 7 AND 240)';
+const CRED_EARLY = `(sys_early_min BETWEEN 7 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`;
 
 @ApiTags('Attendance Reconciliation')
 @ApiBearerAuth()

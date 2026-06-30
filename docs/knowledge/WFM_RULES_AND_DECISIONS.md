@@ -197,3 +197,23 @@ regressions: a rule that is not in the engine gets overwritten on the next rebui
   holiday cells get a gold ribbon. (editCell/publish still WRITE attendance_records — follow-up.)
 - **Year Jan–May = already consistent** — dry-run vs live diff: 0 changes in hr_code/shift/holiday-OT/late/worked/
   true-OT (only ~3% WFH-detection refinement). No rebuild (a prior refresh regressed). June stays on the recon engine.
+
+## 19. 2026-06-30 — Tardiness / HR-action rules (after the manual-vs-engine review)
+The user reconciled May30–Jun27 by hand and we diffed it vs the engine (login 93% / late 96% / early 95% match;
+**0 cases the engine was clearly wrong**) — verdict: **the engine is the more accurate, trusted source**. Two rule
+corrections came out of it (both now LIVE):
+- **Tardiness tolerance = > 6 min.** A late-in or early-out counts (deduct/HR) only when **strictly greater than 6
+  minutes** (≤6 tolerated). `HR_MIN` = 7 in recon-build; `CRED_LATE`/`CRED_EARLY` = `BETWEEN 7 AND 240` in
+  recon.controller.ts (applies to EVERY month's live reports).
+- **Full-shift span (9h INCLUDING the break).** The agent stays logged in during the 1-hour break, so the
+  system-open span (login→logout) must cover the FULL scheduled shift (e.g. 9h for a 9h shift) — NOT the net 8h.
+  "Completed required hours" now means `span ≥ gross shift`, not `≥ net`. So leaving early but still logging 8h net
+  is a REAL early-out (it was wrongly excused before). Maternity-7h still excluded from early-out; approved
+  permissions still cover.
+- **No-punch-AND-no-system days are FLAGGED, never silent.** A working day with neither a punch nor a system login
+  gets `data_quality = "No punch & no system login — verify (not auto-absent)"` so it surfaces for review instead of
+  being silently counted present or absent.
+- **Leaders / seniors:** attendance not scrutinised — if there's data we fill it, no data = blind eye (excluded).
+- **Canonical foundation** is now the user's latest manual workbook (`Final` sheet, 116 employees); the in-system
+  Upload writes to it. NOTE: the live reports' tolerance change covers all months, but the no-punch flag + full-span
+  disposition currently apply to June (the recon-engine month); rebuilding Jan–May through the same rule is a follow-up.

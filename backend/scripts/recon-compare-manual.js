@@ -10,6 +10,8 @@ const SCRATCH = 'C:/Users/T573E~1.BAS/AppData/Local/Temp/claude/C--Users-t-bassa
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const M = { dayName: (iso) => DOW[new Date(iso + 'T00:00:00Z').getUTCDay()] };
 const SRC = process.env.MANUAL_FILE || 'C:/Users/t.bassam/Desktop/new roster/CC Schedule 26 June..xlsx';
+// the manual reconciliation sheet — the user's latest is named "Final" (older files used "Shifts."); override via MANUAL_SHEET
+const SHEET_RE = process.env.MANUAL_SHEET ? new RegExp('^' + process.env.MANUAL_SHEET, 'i') : /^(final|shift)/i;
 const recs = JSON.parse(fs.readFileSync(SCRATCH + '/records.json', 'utf8'));
 const byKey = {}; for (const r of recs) byKey[r.id + '|' + r.date] = r;
 
@@ -26,7 +28,7 @@ const hhmm = (m) => m == null ? '—' : (String(Math.floor(((m % 1440) + 1440) %
   const diffs = [];
   const allRows = [];
   for await (const ws of reader) {
-    if (!/^shift/i.test(ws.name || '')) { for await (const _ of ws) {} continue; }
+    if (!SHEET_RE.test(ws.name || '')) { for await (const _ of ws) {} continue; }
     let r = 0;
     for await (const row of ws) {
       r++; if (r === 1) continue;

@@ -25,7 +25,7 @@ module.exports = function build() {
   const HOLIDAY_RE = /new year|eid|arafat|national day|liberation|isra|mi'?raj|hijri|public holiday|ascension|prophet/i;
   const holidayDates = new Set(HOLIDAY_NAME.keys());
   try { for (const k in odoo) { const od = odoo[k]; if (od && HOLIDAY_RE.test(String(od.status || ''))) holidayDates.add(k.split('|')[1]); } } catch (e) { /* odoo not keyed id|date */ }
-  const HR_MIN = 5;            // shortage < 5min => not HR
+  const HR_MIN = 7;            // user rule 2026-06-30: tardiness > 6 min => HR/deduct; <= 6 min tolerated
   const CONFLICT_MIN = 60;     // ameyo vs sprinklr disagreement threshold
   const MAX_HR_DEV = 120;      // late/early-out > 2h => likely swap/incomplete capture => Manual Review (fairness)
   const MIN_PRESENCE = 120;    // captured WFH presence < 2h with no punch => incomplete evidence => Manual Review
@@ -163,7 +163,9 @@ module.exports = function build() {
         effLate = coversLate ? 0 : lateMin;
         effEarly = (coversEarly || isMother) ? 0 : earlyMin;            // mothers (Haya/Shaima) excluded from early-out per agreed rule
         presenceMin = govLogout - govLogin;
-        completedReq = reqNet != null && presenceMin >= reqNet;
+        // user rule 2026-06-30: the system-open span must cover the FULL shift (9h INCLUDING the break,
+        // since the agent stays logged in during the break) — NOT just the net 8h. So compare to gross.
+        completedReq = gross != null && presenceMin >= gross;
         shortage = completedReq ? 0 : (effLate + effEarly);
         const paid = schedEnd - schedStart;
         const overlap = Math.max(0, Math.min(govLogout, schedEnd) - Math.max(govLogin, schedStart));
@@ -262,7 +264,10 @@ module.exports = function build() {
         permType: (pm.find(p => p.kind === 'perm') || {}).type || null,
         permDur: (() => { const pr = pm.find(p => p.kind === 'perm'); return (pr && pr.fromMin != null) ? (clock12(pr.fromMin) + ' → ' + clock12(pr.toMin) + (pr.hours != null && pr.hours !== '' ? ' (' + pr.hours + 'h)' : '')) : null; })(),
         hrCode, attCode, comp: compStatus || null, sick: c.kind === 'sick' ? raw : null, mismatch: mismatchLive,
-        dq: (!c.mapped && c.kind === 'unknown') ? c.note : (dqFlag || null),
+        // user rule 2026-06-30: a working day with NO punch AND NO system login must be FLAGGED with a clear
+        // note (not silently treated as present/absent) so it surfaces on the page for verification.
+        dq: (isWorkingKind && !hasSystem && !hasPunch) ? 'No punch & no system login — verify (not auto-absent)'
+          : ((!c.mapped && c.kind === 'unknown') ? c.note : (dqFlag || null)),
         teamMgr: idn.manager || null, teamGroup: idn.team || e.teamCol || null, gender: idn.gender || null,
         roleCat: dayExcluded ? (c.management ? 'Management' : 'Excluded') : 'Agent', expectedH: c.net != null ? +(c.net / 60).toFixed(2) : null,
         active: true,
