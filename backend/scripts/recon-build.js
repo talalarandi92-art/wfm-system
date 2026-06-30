@@ -258,7 +258,9 @@ module.exports = function build() {
         // worked_min: a WORKED day = the gov session (capped at a sane 16h to kill never-logged-out bleed);
         // a non-working day (OFF/leave/holiday-off/absence/sick) has NO scheduled shift, so its raw system
         // bleed must NOT read as worked hours — credit only the validated OT session (else 0).
-        worked: isWorkingKind ? (govDur != null ? Math.min(Math.max(0, govDur), 960) : (c.net || 0)) : (offdayOt || holidayOt || 0),
+        // worked = PROVEN system/punch span (capped 16h). NO evidence (no system AND no punch) => 0, NOT the
+        // scheduled net — we must never show "worked 8h" for a day we can't prove (it carries the no-evidence flag).
+        worked: isWorkingKind ? (govDur != null ? Math.min(Math.max(0, govDur), 960) : 0) : (offdayOt || holidayOt || 0),
         adherence: conf === '' ? null : conf, conforming: conf !== '' && conf >= 90,
         permission: permStatus || null,
         permType: (pm.find(p => p.kind === 'perm') || {}).type || null,
