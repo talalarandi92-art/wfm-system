@@ -269,14 +269,23 @@ function AdherenceChart({ data, dark, ar }: { data: DashData['trend']; dark: boo
   );
 }
 
+/* ─── Count-up inline value (for the live strips) ────────────────────────── */
+function Counted({ n }: { n: number }) {
+  const v = useCountUp(n, 850, true);
+  return <>{v.toLocaleString()}</>;
+}
+
 /* ─── Live stat ──────────────────────────────────────────────────────────── */
 function LiveStat({ label, labelAr, value, color, dark, ar }: {
   label: string; labelAr: string; value: string|number; color?: string; dark: boolean; ar: boolean;
 }) {
+  const isNum = typeof value === 'number';
+  const v = useCountUp(isNum ? (value as number) : 0, 850, isNum);
+  const disp = isNum ? v.toLocaleString() : value;
   return (
     <div style={{ textAlign:'center' }}>
       <div style={{ fontSize:26, fontWeight:800, letterSpacing:'-0.03em', color: color ?? (dark?'#f1f5f9':'#0f172a'), fontVariantNumeric:'tabular-nums' }}>
-        {value}
+        {disp}
       </div>
       <div style={{ fontSize:11, marginTop:3, color: dark?'#475569':'#94a3b8' }}>
         {ar ? labelAr : label}
@@ -559,8 +568,9 @@ export default function Dashboard() {
                   <div key={k.lbl} style={{
                     flex:1, textAlign:'center', minWidth:0,
                     borderInlineStart: i===0?'none':`1px solid ${dark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)'}`,
+                    animation:'nx-slide 0.4s ease both', animationDelay:`${i*55}ms`,
                   }}>
-                    <div style={{ fontSize:19, fontWeight:900, color:k.color, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{k.val}</div>
+                    <div style={{ fontSize:19, fontWeight:900, color:k.color, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{typeof k.val==='number' ? <Counted n={k.val}/> : k.val}</div>
                     <div style={{ fontSize:9, color:ts, marginTop:4, fontWeight:600, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{k.lbl}</div>
                   </div>
                 ))}

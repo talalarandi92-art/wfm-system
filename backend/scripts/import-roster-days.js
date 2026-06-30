@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 /*
+ * ⚠️ DEPRECATED — DO NOT RUN. Superseded by `import-roster-master.js` (the live roster_days builder).
+ *   This older sibling has a cross-midnight tardiness bug (sys_late_min lacks the +1440 wrap, so a
+ *   post-midnight login on a night shift reads as on-time and sys_early_min inflates to ~25h; no 240-cap
+ *   on adherence). master.js already handles all of this. Two writers for one field = the root risk —
+ *   keep ONLY master.js. Kept here for history; if you must populate roster_days, use master.js. See
+ *   docs/knowledge/WFM_RULES_AND_DECISIONS.md §16 (Known Drifts).
+ *
  * Populate roster_days with the CORRECT combined roster (validated logic):
  *   FingerPrint punch + Ameyo & Sprinklr system login/logout (earliest/latest,
  *   Sprinklr = Kuwait LOCAL) + Odoo permission/comp-off/sick.

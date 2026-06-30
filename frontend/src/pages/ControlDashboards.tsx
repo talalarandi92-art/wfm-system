@@ -7,6 +7,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { StatTile, Donut, BarRow, Gauge } from '@/components/dazzle';
 
 interface Bundle {
   period: { from: string; to: string; attendanceDate: string };
@@ -45,16 +46,11 @@ export default function ControlDashboardsPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const Kpi = ({ label, value, color, icon: Icon, sub }: { label: string; value: any; color: string; icon: any; sub?: string }) => (
-    <div style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${color}22`, borderRadius: 16, padding: 16 }}>
-      <div className="flex items-center justify-between mb-2">
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: `${color}15` }}><Icon size={15} style={{ color }} /></div>
-      </div>
-      <div className="text-2xl font-black tabular-nums" style={{ color: tp(dark) }}>{value}</div>
-      <div className="text-[11px] mt-0.5" style={{ color: tsColor(dark) }}>{label}</div>
-      {sub && <div className="text-[10px] mt-1" style={{ color }}>{sub}</div>}
-    </div>
-  );
+  // count-up KPI tile (kit) — keeps all existing call sites; numbers count up, strings show as-is
+  const Kpi = ({ label, value, color, icon: Icon, sub }: { label: string; value: any; color: string; icon: any; sub?: string }) => {
+    const isNum = typeof value === 'number';
+    return <StatTile icon={Icon} label={label} num={isNum ? value : undefined} value={isNum ? undefined : String(value)} sub={sub} color={color} />;
+  };
 
   const FnTable = () => (
     <div className="rounded-2xl overflow-x-auto mt-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -125,23 +121,47 @@ export default function ControlDashboardsPage() {
                 <Kpi label={ar ? 'حملات نشطة' : 'Active campaigns'} value={d.campaignsActive} color="#f59e0b" icon={Megaphone} />
                 <Kpi label={ar ? 'كوتشينج (عالية)' : 'Coaching (high)'} value={d.coaching.high} color="#a855f7" icon={GraduationCap} sub={`${d.coaching.medium + d.coaching.low} ${ar ? 'أخرى' : 'others'}`} />
               </div>
-              {d.byType.length > 0 && (
-                <div className="mt-4 rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="text-xs font-bold mb-3" style={{ color: tp(dark) }}>{ar ? 'الطلبات حسب النوع' : 'Requests by type'}</div>
-                  {d.byType.map(t => {
-                    const max = Math.max(...d.byType.map(x => x.count), 1);
-                    return (
-                      <div key={t.name} className="flex items-center gap-2 mb-1.5">
-                        <span className="text-[11px] w-32 truncate" style={{ color: '#94a3b8' }}>{t.name}</span>
-                        <div className="flex-1 h-2 rounded-full" style={{ background: 'rgba(255,255,255,0.05)' }}>
-                          <div className="h-full rounded-full" style={{ width: `${(t.count / max) * 100}%`, background: '#818cf8' }} />
-                        </div>
-                        <span className="text-[11px] tabular-nums w-8 text-end" style={{ color: '#cbd5e1' }}>{t.count}</span>
-                      </div>
-                    );
-                  })}
+              <div className="mt-4 grid lg:grid-cols-3 gap-3">
+                {/* approval-rate gauge */}
+                {(() => {
+                  const rate = d.requests.total > 0 ? Math.round((d.requests.approved / d.requests.total) * 100) : 0;
+                  const gc = rate >= 90 ? '#22c55e' : rate >= 75 ? '#06b6d4' : rate >= 50 ? '#f59e0b' : '#ef4444';
+                  return (
+                    <div className="rounded-2xl p-4 flex flex-col items-center justify-center" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div className="text-xs font-bold mb-2 self-start" style={{ color: tp(dark) }}>{ar ? 'معدّل الموافقة' : 'Approval rate'}</div>
+                      <Gauge value={rate} label={`${d.requests.approved}/${d.requests.total} ${ar ? 'موافقة' : 'approved'}`} color={gc} size={150} />
+                    </div>
+                  );
+                })()}
+                {/* request-status composition donut */}
+                <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <div className="text-xs font-bold mb-3" style={{ color: tp(dark) }}>{ar ? 'حالة الطلبات' : 'Request status'}</div>
+                  {(() => {
+                    const segs = [
+                      { label: ar ? 'موافق عليها' : 'Approved', value: d.requests.approved, color: '#22c55e' },
+                      { label: ar ? 'مرفوضة' : 'Rejected', value: d.requests.rejected, color: '#f87171' },
+                      { label: ar ? 'قيد الموافقة' : 'Pending', value: d.requests.pending, color: '#fbbf24' },
+                    ];
+                    const other = Math.max(0, d.requests.total - segs.reduce((a, c) => a + c.value, 0));
+                    if (other > 0) segs.push({ label: ar ? 'أخرى' : 'Other', value: other, color: '#64748b' });
+                    return <Donut segments={segs} centerNum={d.requests.total} centerLabel={ar ? 'طلب' : 'requests'} />;
+                  })()}
                 </div>
-              )}
+                {/* requests by type — animated bars */}
+                {d.byType.length > 0 && (() => {
+                  const maxType = Math.max(...d.byType.map(x => x.count), 1);
+                  return (
+                    <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div className="text-xs font-bold mb-3" style={{ color: tp(dark) }}>{ar ? 'الطلبات حسب النوع' : 'Requests by type'}</div>
+                      <div className="space-y-2">
+                        {d.byType.map((t, i) => (
+                          <BarRow key={t.name} label={t.name} value={t.count} max={maxType} color="#818cf8" delay={i * 40} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             </>
           )}
 

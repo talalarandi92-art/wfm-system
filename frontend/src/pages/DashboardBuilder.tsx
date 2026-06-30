@@ -29,6 +29,7 @@ const DIMS: { key:string; ar:string; en:string }[] = [
   { key:'role', ar:'الدور', en:'Role' }, { key:'function', ar:'الفنكشن', en:'Function' }, { key:'shift', ar:'الشفت', en:'Shift' },
   { key:'teamLeader', ar:'التيم ليدر', en:'Team Leader' }, { key:'group', ar:'الجروب', en:'Group' }, { key:'day', ar:'اليوم', en:'Day' },
   { key:'week', ar:'الأسبوع', en:'Week' }, { key:'month', ar:'الشهر', en:'Month' }, { key:'status', ar:'الحالة', en:'Status' }, { key:'lateCategory', ar:'فئة التأخير', en:'Late band' },
+  { key:'shiftStartHour', ar:'ساعة بداية الشفت', en:'Shift Start Hour' },
 ];
 const METRICS: { key:string; ar:string; en:string; time?:boolean; pct?:boolean }[] = [
   { key:'scheduledDays', ar:'أيام مجدولة', en:'Scheduled' }, { key:'workedDays', ar:'أيام عمل', en:'Worked' },
@@ -36,6 +37,8 @@ const METRICS: { key:string; ar:string; en:string; time?:boolean; pct?:boolean }
   { key:'otBefore', ar:'OT قبل', en:'OT before', time:true }, { key:'otAfter', ar:'OT بعد', en:'OT after', time:true },
   { key:'conformance', ar:'كونفورمانس', en:'Conformance', pct:true }, { key:'absenceDays', ar:'غياب', en:'Absence' },
   { key:'sickDays', ar:'سيك', en:'Sick' }, { key:'permissionCount', ar:'استئذانات', en:'Permissions' }, { key:'agents', ar:'موظفين', en:'Agents' },
+  { key:'coveragePct', ar:'التغطية %', en:'Coverage %', pct:true }, { key:'shrinkagePct', ar:'الشرينكج %', en:'Shrinkage %', pct:true },
+  { key:'shrinkageDays', ar:'أيام شرينكج', en:'Shrinkage' }, { key:'lateDays', ar:'أيام تأخير', en:'Late days' }, { key:'earlyDays', ar:'أيام خروج مبكر', en:'Early-out days' },
   // official scorecard (joined per-person)
   { key:'netPoints', ar:'Net Points', en:'Net Points' }, { key:'scQuality', ar:'جودة (نقاط)', en:'Quality (pts)' }, { key:'scAht', ar:'AHT (نقاط)', en:'AHT (pts)' },
   { key:'scFcr', ar:'FCR (نقاط)', en:'FCR (pts)' }, { key:'scProductivity', ar:'إنتاجية (نقاط)', en:'Productivity (pts)' }, { key:'scCtr', ar:'CTR (نقاط)', en:'CTR (pts)' }, { key:'scQuiz', ar:'كويز (نقاط)', en:'Quiz (pts)' },

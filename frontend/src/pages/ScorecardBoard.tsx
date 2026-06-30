@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ClipboardList, Search, ChevronDown, ChevronRight, Trophy } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Search, ChevronDown, ChevronRight, Trophy, Users, Award } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { StatTile, Donut } from '@/components/dazzle';
 
 // score-vs-max colour
 const sc = (v:number|null, max:number|null) => { if (v==null||!max) return '#475569'; const r=v/max; return r>=0.9?'#22c55e':r>=0.7?'#06b6d4':r>=0.5?'#f59e0b':'#f43f5e'; };
@@ -39,6 +40,13 @@ export default function ScorecardBoardPage() {
   const kpis = d?.kpiMeta || [];
   const agents = (d?.agents||[]).filter((a:any)=>{ const s=search.toLowerCase().trim(); return !s || a.name?.toLowerCase().includes(s) || String(a.person_no).includes(s); })
     .sort((a:any,b:any)=> sort==='net' ? (Number(b.net||0)-Number(a.net||0)) : sort==='name' ? (a.name||'').localeCompare(b.name||'') : (Number(b[sort]||0)-Number(a[sort]||0)));
+  const topAgent = [...agents].sort((a:any,b:any)=>Number(b.net||0)-Number(a.net||0))[0];
+  const netBands = [
+    { label: ar?'ممتاز ≥100':'Excellent ≥100', value: agents.filter((a:any)=>Number(a.net)>=100).length, color:'#22c55e' },
+    { label: ar?'جيد 80–99':'Good 80–99',       value: agents.filter((a:any)=>{const n=Number(a.net);return n>=80&&n<100;}).length, color:'#06b6d4' },
+    { label: ar?'مراقبة 60–79':'Watch 60–79',   value: agents.filter((a:any)=>{const n=Number(a.net);return n>=60&&n<80;}).length, color:'#f59e0b' },
+    { label: ar?'خطر <60':'At risk <60',         value: agents.filter((a:any)=>Number(a.net)<60).length, color:'#f43f5e' },
+  ];
 
   return (
     <div className="space-y-4 page-enter">
@@ -56,20 +64,29 @@ export default function ScorecardBoardPage() {
       {!loading && (!d || !agents.length) && <p className="text-sm text-slate-500 py-8 text-center">{ar?'لا بيانات سكور كارد':'No scorecard data'}</p>}
 
       {!loading && agents.length>0 && (<>
-        <div className="flex flex-wrap items-center gap-4 p-3 rounded-2xl" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-          <div className="flex items-center gap-2"><Trophy size={16} className="text-amber-400"/><span className="text-[10px] text-slate-500 uppercase font-semibold">{ar?'متوسط Net':'Avg Net'}</span><span className="text-2xl font-bold" style={{ color:netC(d.avgNet) }}>{d.avgNet}</span></div>
-          <span className="text-[11px] text-slate-400">{agents.length} {ar?'موظف عندهم سكور كارد':'agents with scorecard'}</span>
-          <div className="flex items-center gap-2 ms-auto text-[11px] text-slate-400">{ar?'رتّب:':'Sort:'}
-            <select value={sort} onChange={e=>setSort(e.target.value)} className={inputCls}>
-              <option value="net">Net Points</option><option value="name">{ar?'الاسم':'Name'}</option>
-              {kpis.map((k:any)=><option key={k.key} value={k.key}>{k.label}</option>)}
-            </select>
+        <div className="grid lg:grid-cols-3 gap-3">
+          <div className="lg:col-span-2 grid grid-cols-3 gap-2">
+            <StatTile icon={Trophy} label={ar?'متوسط Net':'Avg Net'} num={Number(d.avgNet)} color={netC(Number(d.avgNet))} delay={0} />
+            <StatTile icon={Users} label={ar?'موظفون':'Agents'} num={agents.length} sub={ar?'عندهم سكور كارد':'with scorecard'} color="#6366f1" delay={60} />
+            <StatTile icon={Award} label={ar?'أعلى Net':'Top Net'} num={topAgent?Number(topAgent.net):undefined} value={topAgent?undefined:'—'} sub={topAgent?.name} color="#22c55e" delay={120} />
+          </div>
+          <div className="rounded-2xl p-3" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-bold text-white">{ar?'توزيع Net':'Net distribution'}</span>
+              <span className="flex items-center gap-1.5 text-[11px] text-slate-400">{ar?'رتّب:':'Sort:'}
+                <select value={sort} onChange={e=>setSort(e.target.value)} className={inputCls}>
+                  <option value="net">Net Points</option><option value="name">{ar?'الاسم':'Name'}</option>
+                  {kpis.map((k:any)=><option key={k.key} value={k.key}>{k.label}</option>)}
+                </select>
+              </span>
+            </div>
+            <Donut segments={netBands} centerNum={agents.length} centerLabel={ar?'موظف':'agents'} size={120} thickness={12} />
           </div>
         </div>
 
         <div className="rounded-2xl overflow-auto" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)', maxHeight:'70vh' }}>
           <table className="w-full text-[11px]">
-            <thead className="sticky top-0 z-10" style={{ background:'#11162a' }}>
+            <thead className="sticky top-0 z-10" style={{ background:'var(--surface-2)' }}>
               <tr className="text-slate-400">
                 <th className="px-2 py-2 text-start font-semibold">#</th><th className="px-2 py-2 text-start font-semibold">{ar?'الموظف':'Agent'}</th>
                 <th className="px-2 py-2 text-start font-semibold">{ar?'الفنكشن':'Function'}</th>

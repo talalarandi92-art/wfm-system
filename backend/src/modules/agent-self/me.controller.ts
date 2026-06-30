@@ -24,4 +24,10 @@ export class MeController {
   attendance(@CurrentUser() user: any) {
     return this.me.getAttendanceDetail(user.tenantId, user.employeeId ?? null);
   }
+
+  @Get('live-performance')
+  @ApiOperation({ summary: 'Own live Sprinklr performance — status + duration + today’s contacts/AHT/idle/hold + timeline (self only)' })
+  livePerformance(@CurrentUser() user: any) {
+    return this.me.getLivePerformance(user.tenantId, user.employeeId ?? null);
+  }
 }

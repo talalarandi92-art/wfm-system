@@ -24,6 +24,20 @@ interface ArticleBody {
 export class KbController {
   constructor(private readonly kb: KbService) {}
 
+  /* ── Reply Helper: paste customer message → matching reply scripts ──────── */
+  @Post('suggest-reply')
+  @ApiOperation({ summary: 'Suggest the best canned-response scripts for a pasted customer message' })
+  suggestReply(@CurrentUser() user: any, @Body() body: { text?: string }) {
+    return this.kb.suggestReply(user.tenantId, body?.text || '');
+  }
+
+  /* ── What's New (continuous-learning change feed) ───────────────────────── */
+  @Get('whats-new')
+  @ApiOperation({ summary: "Recently added / updated KB articles (since last imports)" })
+  whatsNew(@CurrentUser() user: any, @Query('days') days?: string) {
+    return this.kb.whatsNew(user.tenantId, Math.min(365, Math.max(1, +(days || 30))));
+  }
+
   /* ── Categories ─────────────────────────────────────────────────────────── */
   @Get('categories')
   @ApiOperation({ summary: 'List categories with published article counts' })

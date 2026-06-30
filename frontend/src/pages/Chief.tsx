@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import {
   Crown, Loader2, RefreshCw, Target, Activity, ShieldAlert, Server, GraduationCap, Brain,
   Zap, CheckCircle2, XCircle, Undo2, ShieldCheck, FileBarChart, Sparkles, Bot, Power, Award, Telescope, ScrollText, Network,
-  Pause, Info,
+  Pause, Info, MessageSquareReply,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { StatTile } from '@/components/dazzle';
 
 type Sev = 'risk' | 'caution' | 'ok' | 'info';
 interface Domain { key: string; label: string; sev: Sev; line: string }
@@ -30,6 +31,7 @@ const TEAM = [
   { route: '/scorecard-guard', icon: Award, ar: 'السكور كارد', en: 'Scorecard', color: '#f59e0b' },
   { route: '/researcher', icon: Telescope, ar: 'الباحث', en: 'Researcher', color: '#818cf8' },
   { route: '/expert', icon: GraduationCap, ar: 'الخبير', en: 'Expert', color: '#10b981' },
+  { route: '/reply-helper', icon: MessageSquareReply, ar: 'مساعد الرد', en: 'Reply Helper', color: '#14b8a6' },
   { route: '/knowledge-ledger', icon: ScrollText, ar: 'سجلّ المعرفة', en: 'Knowledge Ledger', color: '#14b8a6' },
   { route: '/team-learning', icon: Network, ar: 'تعلّم الفريق', en: 'Team Learning', color: '#a855f7' },
   { route: '/diagnostics', icon: Activity, ar: 'تقرير المشاكل', en: 'Diagnostics', color: '#ef4444' },
@@ -125,6 +127,14 @@ export default function ChiefPage() {
               <Target size={15} style={{ color: '#eab308', flexShrink: 0 }} />
               <p className="text-xs font-bold" style={{ color: '#fde047' }}>{data.directive}</p>
             </div>
+          </div>
+
+          {/* Executive KPI band — animated signals at a glance */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+            <StatTile icon={Brain} label={ar ? 'عيّنات تعلّم' : 'Learned samples'} num={data.learning.learnedSamples} color="#a855f7" delay={0} />
+            <StatTile icon={Network} label={ar ? 'قرارات مُسجّلة' : 'Decisions logged'} num={data.learning.decisionsLogged} color="#818cf8" delay={60} />
+            <StatTile icon={ShieldCheck} label={ar ? 'اختبار ذاتي' : 'Self-test'} value={data.selfTest ? `${data.selfTest.passed}/${data.selfTest.total}` : '—'} color={data.selfTest && data.selfTest.passed === data.selfTest.total ? '#22c55e' : '#f59e0b'} delay={120} />
+            <StatTile icon={Zap} label={ar ? 'تلقائي (24س)' : 'Auto (24h)'} num={data.autoMode?.last24 ?? 0} sub={data.autoMode ? `${data.autoMode.approved} ${ar ? 'موافقة' : 'appr'} · ${data.autoMode.held ?? 0} ${ar ? 'محجوز' : 'held'}` : undefined} color={data.autoMode?.enabled ? '#eab308' : '#64748b'} delay={180} />
           </div>
 
           {/* Domains */}

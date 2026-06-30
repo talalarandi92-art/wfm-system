@@ -1,0 +1,842 @@
+[
+  {
+    "source": "chat",
+    "category": "Order Info",
+    "en": "Please provide us with your order number or your mobile number to assist.",
+    "ar": "الرجاء تزويدنا برقم الطلب أو رقم الهاتف المرفق بالطلب للمتابعة.",
+    "code": "info0 الهاتف0"
+  },
+  {
+    "source": "chat",
+    "category": "Tabby Info",
+    "en": "Dear customer, please download the Tabby application on your phone, then open the application and log in with your information, after that click on your profile the click on support and communicate with Tabby team.",
+    "ar": "عميلنا العزيز، يرجى تحميل تطبيق تابي من خلال الهاتف الخاص بك ومن ثم يرجى فتح التطبيق و تسجيل دخول بالبيانات الخاصة بك ومن ثم ضغط على ملف الشخصي و الضغط على الدعم و التواصل معهم.",
+    "code": "tabby1 تابي1"
+  },
+  {
+    "source": "chat",
+    "category": "Tabby Info",
+    "en": "Please contact Tabby customer service at the following number 96522270163 or via the following mail ID: help@tabby.ai",
+    "ar": "يرجى التواصل مع خدمة عملاء تابي على رقم التالي 96522270163 او عبر الايميل التالي help@tabby.ai-:",
+    "code": "tabby2 تابي2"
+  },
+  {
+    "source": "chat",
+    "category": "Tabby Info",
+    "en": "Dear customer, to pay an installment of the Tabby installments, please download the Tabby application on your phone, then open the application and log in with your information and click on my Payments.",
+    "ar": "عميلنا العزيز، لسداد قسط من أقساط التابي يرجى تحميل تطبيق تابي من خلال الهاتف الخاص بك ومن ثم يرجى فتح التطبيق و تسجيل دخول بالبيانات الخاصة بك ومن ثم ضغط على دفعاتي.",
+    "code": "tabby3 تابي3"
+  },
+  {
+    "source": "chat",
+    "category": "Tabby Info",
+    "en": "Dear customer, we apologize to you, but the order payment method is Tabby, and you cannot exchange the product more than once.",
+    "ar": "عميلنا العزيز،نعتذر منك لكن طريقة الدفع الطلب هي تابي ولا يمكنك إستبدال المنتج أكثر من مرة.",
+    "code": "tabby4 تابي4"
+  },
+  {
+    "source": "chat",
+    "category": "Address Info",
+    "en": "The address registered has been modified and the order will be delivered within 0 working days.",
+    "ar": "تم تعديل العنوان و سيتم توصيل الطلب خلال 0 أيام عمل.",
+    "code": "address0 العنوان0"
+  },
+  {
+    "source": "chat",
+    "category": "Address Info",
+    "en": "Since having a showroom defeats the purpose of a convenient online shopping experience, we do make sure each product is showcased with an adequate number of images along with an extensive and thorough item description that you can always rely on.",
+    "ar": "بما أن وجود معرض للمنتجات على الأرض يعمل على إبطال هدفنا في توفير عملية تسوق سهلة ومريحة عن طريق الانترنت، نعمل على توفير أكثر من صورة لعرض المنتج بصورة كاملة وشاملة بالإضافة إلى توفير وصف دقيق لجميع التفاصيل الخاصة بالمنتج يمكنك الاعتماد عليه.",
+    "code": "address1 عنوان1"
+  },
+  {
+    "source": "chat",
+    "category": "Address Info",
+    "en": "\"Unfortunately, we are unable to disclose our physical address due to privacy and security reasons.     However, I assure you that we are committed to providing the highest level of service and support to our customers. If you have any questions, require assistance, or need information about our products or services, please don't hesitate to reach out to us. Our team is readily available to assist you via phone, live chat and email.    We appreciate your understanding and cooperation in this matter.\"",
+    "ar": "للأسف، نحن غير قادرين على الكشف عن العنوان الفعلي للشركة لأسباب خصوصية والأمان. ومع ذلك، نؤكد لكم أننا ملتزمون بتقديم أعلى مستوى من الخدمة والدعم لعملائنا. إذا كان لديكم أي أسئلة، أو تحتاجون إلى مساعدة، أو ترغبون في الحصول على معلومات حول منتجاتنا أو خدماتنا، فلا تترددوا في التواصل معنا. فريقنا متاح وجاهز لمساعدتكم عبر الهاتف،الدردشة المباشرة و البريد الإلكتروني. نقدر تفهمكم وتعاونكم في هذا الشأن.",
+    "code": "address2 عنوان2"
+  },
+  {
+    "source": "chat",
+    "category": "Security Questions",
+    "en": "Kindly provide us with the order's amount.",
+    "ar": "الرجاء تزويدنا بقيمة الطلب",
+    "code": "q1 س1"
+  },
+  {
+    "source": "chat",
+    "category": "Security Questions",
+    "en": "Kindly provide us with the order's date.",
+    "ar": "الرجاء تزويدنا بتاريخ الطلب",
+    "code": "q2 س2"
+  },
+  {
+    "source": "chat",
+    "category": "Security Questions",
+    "en": "Kindly provide us with the registered address in the order.",
+    "ar": "الرجاء تزويدنا بالعنوان الموجود بالطلب",
+    "code": "q3 س3"
+  },
+  {
+    "source": "chat",
+    "category": "Security Questions",
+    "en": "Kindly provide us with the registered email in the application.",
+    "ar": "الرجاء تزويدنا بالايميل المسجل بحسابكم الشخصي في التطبيق",
+    "code": "q4 س4"
+  },
+  {
+    "source": "chat",
+    "category": "Security Questions",
+    "en": "Kindly provide us with the products in your order.",
+    "ar": "الرجاء تزويدنا بالمنتجات الموجودة بالطلب",
+    "code": "q5 س5"
+  },
+  {
+    "source": "chat",
+    "category": "Security Questions",
+    "en": "Kindly provide us with the registered phone number in the order.",
+    "ar": "الرجاء تزويدنا برقم الهاتف المسجل بالطلب",
+    "code": "q6 س6"
+  },
+  {
+    "source": "chat",
+    "category": "Exchange",
+    "en": "Dear customer, kindly be informed that we have created a replacement for the item. A driver shall pick up the original item and hand over the new one within * working days.",
+    "ar": "عميلنا العزيز، يرجى العلم أنه تم عمل طلب الاستبدال وسيتم إرسال مندوب التوصيل لاستلام المنتج القديم منكم وتسليمكم المنتج الجديد خلال 0-0 أيام عمل.",
+    "code": "ex0 استبدال0"
+  },
+  {
+    "source": "chat",
+    "category": "Exchange",
+    "en": "Dear customer, please note that the replacement request has been made and will be delivered within 0 working days. You have the freedom to dispose the item as it will not be received from you.",
+    "ar": "عميلنا العزيز، يرجى العلم أنه تم عمل طلب الإستبدال للمنتج وسيتم توصيله من 0 إلى 0 أيام عمل. لك حرية التصرف بالمنتج حيث أنه لن يتم إستلامه منكم.",
+    "code": "ex2 استبدال2"
+  },
+  {
+    "source": "chat",
+    "category": "Exchange",
+    "en": "Dear customer, we apologize to you, but the product can not be exchanged with a higher price than the purchased product.",
+    "ar": "عميلنا العزيز، نعتذر منك لكن لا يمكن إستبدال المنتج بسعر أعلى من المنتج الذي تم شراءه حيث لا تتوفر خدمة دفع الفرقية. بإمكانك إسترجاع مبلغ المنتج و إعادة الطلب مرة أخرى.",
+    "code": "ex3 استبدال3"
+  },
+  {
+    "source": "chat",
+    "category": "Exchange",
+    "en": "Dear customer, we apologize to you, as the replacement policy states that you can replace one item for another only.",
+    "ar": "عميلنا العزيز، نعتذر منك لكن سياسة الإستبدال هي إستبدال منتج مقابل منتج واحد فقط.",
+    "code": "ex4 استبدال4"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Since we haven't heard from you in a while, this chat session is going to end. If you still need help, please do not hesitate to contact us anytime and we will be glad to help you.",
+    "ar": "نظراً لأننا لم نتلقى أي رد منكم، سيتم انهاء المحادثة الآن لمساعدة عملاء اخرين على الإنتظار لا تترددوا في إبلاغنا إن كنت تواجه أي مشكلة في أي وقت. نحن هنا لمساعدتك.",
+    "code": "since0 استجابة0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Thank you for contacting Boutiqaat… I am () How may I help you?",
+    "ar": "شكرا لتواصلك مع بوتيكات...معك x. كيف بإمكاني مساعدتك ؟",
+    "code": "greeting0 التحية0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Thank you for your patience, and sorry to keep you waiting.",
+    "ar": "شكراً لإنتظارك ونعتذر عن عن أي تأخير قد حدث.",
+    "code": "waiting0 انتظار0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Please do not hesitate to contact us if you're facing any issues — either here, by calling our customer service at +965 22263400      or visit [https://support.boutiqaat.com/](https://support.boutiqaat.com/) for more information.      Boutiqaat wishes you a wonderful day.",
+    "ar": "لا تتردد في التواصل معنا إذا كنت تواجه أي مشكلة، سواء هنا أو من خلال الاتصال بخدمة العملاء على +965 22263400      أو للمزيد من المعلومات بإمكانكم زيارة    [https://support.boutiqaat.com/ar](https://support.boutiqaat.com/ar)      بوتيكات تتمنى لك يومًا سعيدًا.",
+    "code": "ending0 انهاء0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Any other service I can help you ?",
+    "ar": "أي خدمة ثانية أقدر أساعدك فيها؟",
+    "code": "service0 خدمة0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Boutiqaat wishes you a very good day.",
+    "ar": "بوتيكات تتمنى لك يوم سعيد.",
+    "code": "wish0 سعيد0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Please hold for 2 to 3 minutes while I review your information/request.",
+    "ar": "الرجاء الإنتظار من 2 إلى 3 دقائق كي أتمكن من مراجعة طلبكم.",
+    "code": "hold0 مراجعة0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "Dear customer, please provide us with the phone number with the country code to send the service feedback link. We are very interested to hear your opinion.",
+    "ar": "عميلنا العزيز، يرجى تزويدنا برقم الهاتف مع مفتاح الدولة لإرسال رابط تقييم الخدمة. يهمنا جدا سماع رأيك.",
+    "code": "code0 مفتاح0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "At the end of the conversation a feedback link will be sent through SMS. Please evaluate the service to you through it.",
+    "ar": "سوف يتم ارسال رابط بعد انتهاء المحادثة عن طريق الرسائل النصية برجاء تقييم الخدمة المقدمة اليكم من خلاله.",
+    "code": "Begin0 مقدمة0"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "For confirmation, you would like to cancel the order with the amount..#?",
+    "ar": "للتأكيد، تود الغاء الطلب الذي بقيمة..#؟",
+    "code": "whatsapp1 واتس1"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "For confirmation, you would like to exchange on the order with the amount..#?",
+    "ar": "للتأكيد، تود تغيير العنوان للطلب الذي بقيمة..#؟",
+    "code": "whatsapp2 واتس2"
+  },
+  {
+    "source": "chat",
+    "category": "Protocols",
+    "en": "For confirmation, you would like to change the phone number of the order with the amount..#?",
+    "ar": "للتأكيد، تود تغيير رقم التواصل مع الطلب الذي بقيمة..#؟",
+    "code": "whatsapp3 واتس3"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Dear customer, please note that the amount has been refunded to your bank account. Please check with your bank from 0 to 0 working days.",
+    "ar": "عميلنا العزيز، يرجى العلم أنه تم إسترجاع المبلغ لحسابكم البنكي. برجاء مراجعة البنك الخاص بكم من 0 الى 0 أيام عمل.",
+    "code": "return1 استرجاع1"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Dear customer, please provide us with a picture of the item in its original condition.",
+    "ar": "عميلنا العزيز، يرجى تزويدنا بصورة للمنتج بحالته الأصلية للبدء بالإجراءات.",
+    "code": "original0 اصلية0"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Dear customer, please note that the amount has been refunded to your Boutiqaat wallet. Please check with your account within 24 hours.",
+    "ar": "عميلنا العزيز، يرجى العلم أنه تم إسترجاع المبلغ لرصيدكم في بوتيكات. برجاء مراجعة حسابكم في بوتيكات خلال 24 ساعة.",
+    "code": "return2 استرجاع2"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Dear customer, please inform us where you would like the amount to be returned to Boutiqaat balance or your bank account?",
+    "ar": "عميلنا العزيز، يرجى إبلاغنا أين تود أن يتم إسترجاع المبلغ إلى رصيد بوتيكات او حسابكم البنكي؟",
+    "code": "return3 استرجاع3"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Dear customer, Please note that a return request has been made for the product and a representative will be sent to collect the old product from you within 48 hours, the amount will be returned to your account as soon as the original condition of the product is confirmed. If the product has been used or is not in its original condition, the product will be returned to you.",
+    "ar": "عميلنا العزيز, يرجى العلم تم عمل طلب الاسترجاع للمنتج وسيتم إرسال المندوب لاستلام المنتج القديم منكم خلال 48 ساعة  وسيتم استرجاع المبلغ إلى حسابكم فور التأكد من الحالة الأصلية للمنتج و في حال تم استخدام المنتج أو لم يكون بحالته الأصلية سيتم إرجاع المنتج لكم",
+    "code": "pickup0 استلام0"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Dear Customer, please provide the following bank details to proceed with the bank refund: 1. IBAN number, 2. Bank name, 3. Card holder name as registered on the card.  The amount will be refunded to your bank account within 0 working days.",
+    "ar": "عميلنا العزيز،يرجى إرسال البيانات التالية للبدء في الإجرءات البنكية لإسترجاع المبلغ:- رقم الإيبان - إسم البنك - إسم صاحب البطاقة كما هو مسجل بالبنك( باللغة الانجليزية ) سيتم إسترجاع المبلغ خلال 0 أيام عمل.",
+    "code": "bank0 بنكية"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "We do apologize for what went wrong with your order, Kindly provide us with a picture of the item and the invoice.",
+    "ar": "بداية نود أن نقدم إعتذارنا الشديد لما حدث من خطأ، الرجاء تزويدنا بصورة المنتج الخطأ – التالف للمتابعة.",
+    "code": "defective0 تالف0"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Please be informed that the amount of the items/order can be refunded to your Boutiqaat credit on the application, and can be used on any future order which will make your next order payment quicker and easier.",
+    "ar": "بالنسبة لإسترجاع المبلغ بإمكانك عن طريق خاصية \"رصيد بوتيكات\" أن يتم إيداع المبلغ في رصيد حسابكم ببوتيكات وبإمكانك إستخدامه في أي وقت لجعل عملية الشراء أسرع و أسهل.",
+    "code": "storecredit0 ستور0"
+  },
+  {
+    "source": "chat",
+    "category": "Returns",
+    "en": "Dear customer, The picture should clearly show that the item, its accessories, and any labels are still in their original condition. Kindly note that this image is required for the concerned team to review and proceed with the pickup.  Thank you for your understanding!",
+    "ar": "عزيزي العميل، يجب أن تُظهر الصورة بوضوح أن المنتج، والملحقات، وأي ملصقات مرفقة لا تزال بحالتها الأصلية. نود التنويه إلى أن هذه الصورة ضرورية ليتمكن الفريق المختص من متابعة عملية الاستلام.  شكرًا لتفهمكم!",
+    "code": "original1 اصلية1"
+  },
+  {
+    "source": "chat",
+    "category": "Product",
+    "en": "The prices of the products in Boutiqaat are determined by the authorized reseller in the Middle East. These prices are applied in all major international companies. However, in case of any difference in prices, please note that it's either the product is not original or from a different source other than the authorized reseller.",
+    "ar": "أسعار المنتجات في بوتيكات يتم تحديدها من قبل الوكيل المعتمد في الشرق الأوسط ويتم العمل بهذه الأسعار في جميع الشركات العالمية الكبرى، وفي حال وجود إختلاف كبير في الأسعار لأي منتج، إما المنتج غير أصلي أو من مصدر أخر غير الوكيل المعتمد.",
+    "code": "highprices0 اسعار0"
+  },
+  {
+    "source": "chat",
+    "category": "Product",
+    "en": "Dear customer we would like to inform you that all of our items are purchased from its accredited exclusive agent in the middle east.",
+    "ar": "عميلنا العزيز يرجى العلم أن جميع المنتجات في بوتيكات يتم شراءها من قبل الوكيل الحصري المعتمد لها في الشرق الأوسط.",
+    "code": "agent0 الوكيل0"
+  },
+  {
+    "source": "chat",
+    "category": "Product",
+    "en": "At Boutiqaat your satisfaction is our guarantee. Health wise, customer service cannot recommend any of the products offered in Boutiqaat. Please read the product description or follow a celebrity to learn more about the product.",
+    "ar": "صحياً و حرصاً منا على سلامتكم، يتعذر علينا التوصية بأي من المنتجات المعروضة في بوتيكات من قبل خدمة العملاء. برجاء قراءة وصف المنتج أو متابعة أحد المشاهير لمعرفة المزيد عن المنتج.",
+    "code": "productinfo0 توصيات0"
+  },
+  {
+    "source": "chat",
+    "category": "Product",
+    "en": "The original \"Dukhon\" product is available exclusively at Boutiqaat. The idea and implementation by Sadiq Kassem. The product is registered under the inventor's name and holds patent certificates internationally and in the Gulf in the name of the inventor. There is no other distributor in the world for the original Dukhoon incense burner. If found, it is a copy or fake.",
+    "ar": "منتج \"دخون\" الأصلي متوفر حصرياً فقط في بوتيكات وهو فكرة وتنفيذ المخترع صادق قاسم كما أن المنتج مسجل وحاصل على شهادات براءة إختراع دولياً وخليجياً بإسم المخترع ولا يوجد أي موزع آخر في العالم لمبخر دخون الأصلي وإن وجد فهو نسخه مقلدة.",
+    "code": "dukhon0 دخون0"
+  },
+  {
+    "source": "chat",
+    "category": "Product",
+    "en": "For health and safety reasons, Boutiqaat does not allow the return or exchange this kind of products.",
+    "ar": "صحياً و حرصاً منا على سلامتكم، لا تسمح شركة بوتيكات بإسترجاع او إستبدال هذا النوع من منتجاتها.",
+    "code": "safety0 صحيا0"
+  },
+  {
+    "source": "chat",
+    "category": "App",
+    "en": "The Wishlist feature allows you to save items that you are interested in purchasing but may not be ready to buy at the moment. By adding items to your Wishlist, you can easily keep track of products you like and want to remember for future reference. And you may get back to it anytime you want to purchase your favorites.",
+    "ar": "تتيح لك ميزة قائمة الرغبات حفظ المنتجات التي ترغب في شرائها، وقد لا تكون جاهزا لشراء المنتجات في الوقت الحالي. من خلال إضافة المنتجات إلى قائمة الرغبات الخاصة بك، يمكنك بسهولة تتبع المنتجات التي تعجبك وتريد تذكرها للرجوع إليها في المستقبل.",
+    "code": "wishlist0 الامنيات0"
+  },
+  {
+    "source": "chat",
+    "category": "App",
+    "en": "Kindly click on \"Account\" from the menu button and choose \"My Orders\". You will find all the orders placed on the account registered in the application.",
+    "ar": "يرجى الدخول على قائمة \"حسابي\" ثم إختيار \" الطلبات\" وسوف يظهر لكم جميع الطلبات التي تمت من الحساب المسجل في التطبيق يمكنك تتبع حالة الطلب من خلال التطبيق وسيتم ظهور حالة الطلب هناك.",
+    "code": "account0 حسابي0"
+  },
+  {
+    "source": "chat",
+    "category": "App",
+    "en": "Dear customer, you can change the currency from clicking on \"Account \"then choose \"Switch country\".",
+    "ar": "عميلنا العزيز،يمكنك تغيير العملة عند الدخول إلى قائمة\"حسابي\" ثم إختيار\"تغيير البلد.",
+    "code": "flag0 علم0"
+  },
+  {
+    "source": "chat",
+    "category": "App",
+    "en": "If you'd like to delete a product from your order list, just swipe it to the right and tap \"Delete Item.\"",
+    "ar": "لحذف المنتج من قائمة الطلبات،يرجى سحب المنتج لجهة اليمين ثم إختيار حذف المنتج.",
+    "code": "cart0 لحذف0"
+  },
+  {
+    "source": "chat",
+    "category": "App",
+    "en": "Please provide us with the SKU number which is below the image to assist.",
+    "ar": "يرجى تزويدنا برقم المنتج SKUالموجود أسفل الصورة للمتابعة المكون من عدة أرقام أو حروف.",
+    "code": "skus0 متابعة1"
+  },
+  {
+    "source": "chat",
+    "category": "App",
+    "en": "Dear customer, We apologize for the technical issue you are experiencing due to pressure. on the application. Please try ordering at another time during the day.",
+    "ar": "عميلنا العزيز، نعتذر عن المشكلة التقنية التي تواجهك بسبب الضغط على التطبيق، يرجى محاولة الطلب في وقت آخر خلال اليوم.",
+    "code": "hanging0 معلق0"
+  },
+  {
+    "source": "chat",
+    "category": "App",
+    "en": "Dear customer, if unpaid or duplicated orders are showing in your orders list, please be aware that it's a normal flow in the app because of purchases load and those orders will be removed automatically within 90 minutes. Thank you for your patience and understanding.",
+    "ar": "عميلنا العزيز في حال ظهور طلبات مضاعفة او طلبات لم يتم طلبها مسبقا في التطبيق ولم يتم خصم القيمة من حسابكم، يرجى العلم ان هذا مجرد اجراء في النظام بسبب الضغط وستختفي الطلبات الزائدة خلال 90 دقيقة. شاكرين لصبركم و تفهمكم.",
+    "code": "dup1 متكرر1"
+  },
+  {
+    "source": "chat",
+    "category": "Complaint",
+    "en": "Dear customer, the concerned department has been contacted and we are awaiting their response within 24 hours to complete the procedures.",
+    "ar": "عميلنا العزيز، تم التواصل مع القسم المختص و بإنتظار الرد الخاص بهم خلال 48 ساعة لإستكمال الإجراءات.",
+    "code": "email0 الايميل0"
+  },
+  {
+    "source": "chat",
+    "category": "Complaint",
+    "en": "We would like to offer our apologies for what went wrong with the order. We shall follow up on the matter and we will contact you as soon as possible.",
+    "ar": "بدايةً نود أن نقدم لك إعتذارنا الشديد لما حدث من خطأ، سيتم متابعة الموضوع والتواصل معكم مرة اخرى بأقرب وقت.",
+    "code": "follow0 متابعة0"
+  },
+  {
+    "source": "chat",
+    "category": "Complaint",
+    "en": "At the beginning we would like to offer you our sincere apologies. We will follow up with your order and make sure to deliver it as soon as possible.",
+    "ar": "بداية نود أن نقدم لكم إعتذارنا عن التأخير وسوف يتم متابعة و تسليم الطلب في أقرب وقت ممكن.",
+    "code": "followup0 متابعة2"
+  },
+  {
+    "source": "chat",
+    "category": "Payment",
+    "en": "If you've received a message confirming the deduction and that the amount has reached our Boutiqaat account, please share a screenshot with us so we can assist you further.",
+    "ar": "اذا وجد رسالة تؤكد خصم المبلغ ودخوله حسابنا في بوتيكات، برجاء إرسال صورة الخصم.",
+    "code": "deduction0 الخصم0"
+  },
+  {
+    "source": "chat",
+    "category": "Payment",
+    "en": "Dear customer, we apologize as there is not any new order registered on the provided phone number, please provide us with a picture of the deducted amount.",
+    "ar": "عميلنا العزيز،نعتذر منكم لا يوجد أي طلب على الرقم الذي تم تزويدنا به، برجاء تزويدنا بصورة الخصم البنكي.",
+    "code": "failed0 خصم0"
+  },
+  {
+    "source": "chat",
+    "category": "Payment",
+    "en": "Dear customer, please note that an additional or extra amount has been deducted from your bank account. it will be a commission for the bank or a currency difference, as the amount is withdrawn in Kuwaiti dinars.",
+    "ar": "عميلنا العزيز،يرجى العلم انه في حال تم خصم مبلغ إضافي من حسابكم البنكي يكون عمولة للبنك او فرق عملة حيث انه يتم سحب المبلغ بالدينار الكويتي.",
+    "code": "extra0 فرق0"
+  },
+  {
+    "source": "chat",
+    "category": "Payment",
+    "en": "We are sorry to inform you that the order was not completed due to a failure in the payment transaction. Kindly place a new order.",
+    "ar": "عذراً، عملية الدفع لم تكن مقبولة ولم يتم الطلب بنجاح. الرجاء إعادة الطلب مرة أخرى.",
+    "code": "failed1 فشلت0"
+  },
+  {
+    "source": "chat",
+    "category": "Payment",
+    "en": "We are sorry to inform you that the order was not confirmed due to payment transaction not being successful. Kindly try again and share with us a screenshot if the payment fails.",
+    "ar": "نأسف لإبلاغك بأن عملية الدفع لم تتم بنجاح، وبالتالي لم يتم تأكيد الطلب. نرجو إعادة تقديم الطلب وتزويدنا بصورة لصفحة الدفع لنتمكن من خدمتك.",
+    "code": "failed2 فشلت2"
+  },
+  {
+    "source": "chat",
+    "category": "Payment",
+    "en": "Dear customer, please be informed that the Cash on Delivery payment has been disabled in the meantime, we shall announce once it's available.",
+    "ar": "عميلنا العزيز، يرجى العلم بأن خدمة الدفع عند الإستلام غير متوفرة حاليًا، بإمكانك إتمام عملية الشراء من خلال طرق الدفع المتوفرة حاليًا.",
+    "code": "cash0 كاش0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Currently we are shipping to GCC countries, Iraq and Jordan only. And we will soon start shipping worldwide. We regret to inform you that the application will not be opened for the countries that are not mentioned.",
+    "ar": "حالياً نحن نقوم بالشحن لدول مجلس التعاون الخليجي والعراق والأردن فقط، سيتوفر قريبا الشحن الدولي. نأسف لإبلاغك أن التطبيق لن يعمل خارج البلدان المذكورة.",
+    "code": "GCC0 الخليج0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Please note that customs duties are fees imposed by the country that all shipments are coming to it, as the fees are collected for the taxable country.",
+    "ar": "يرجى العلم أن الرسوم الجمركية هي رسوم تفرضها الدولة على جميع الشحنات القادمة إليها حيث أن الرسوم يتم تحصيلها لصالح الدولة الخاضعة للضرائب.",
+    "code": "fees0 الرسوم0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Dear customer, due to the high demand on orders and pressure on the delivery process, we are unable to submit any rush deliveries. Thank you for your patience and understanding.",
+    "ar": "عميلنا العزيز، بسبب الاقبال الكبير على الطلبات والضغط على شركات التوصيل لا يمكننا تقديم أي استعجال بالطلب. شاكرين صبركم وتفهمكم.",
+    "code": "demand0 ايفنت0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Dear customer, please note that you have been contacted by the delivery representative, but due to no response we were unable to reach you. Delivery will be rescheduled within 48 working hours, and you will be contacted again by the representative.",
+    "ar": "يرجى العلم أنه تم التواصل معكم من قبل مندوب التوصيل ولكن تعذر الوصول إليكم لعدم الرد وسوف يتم التواصل معكم من قبل المندوب لتوصيل الطلب مرة أخرى خلال 48 ساعة عمل.",
+    "code": "resc0 جدولة0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Kindly be informed that your order is out for delivery, and you will be contacted by the driver once it arrives.",
+    "ar": "يرجى العلم أن طلبك الأن جاهز للتوصيل و سوف يتم التواصل معكم من قبل المندوب فور وصوله لمنطقتكم .",
+    "code": "shipped0 شيبد0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Your shipment number is # and is currently with *, you can contact the office on this number * to check shipment's status and schedule a delivery. If you face any difficulties in contacting them, kindly inform us and we will be glad to help you.",
+    "ar": "يرجى العلم أن رقم الشحنة الخاص بكم هي # حالياً مع شركة * ، بإمكانك التواصل معهم على الرقم # للإستفسار عن حالة الشحنة وتحديد موعد للإستلام. في حالة مواجهتك أي صعوبة في التواصل مع شركة الشحن ،سوف نكون سعداء دائماً بمساعدتك.",
+    "code": "intshipped0 مشحون0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Dear customer, Kindly be informed that your order is splitted into 2 shipments. First shipment will be shipped from Kuwait within 0 working days and the second shipment will be shipped from Saudi Arabia and deliver it within 0 working days.",
+    "ar": "عميلنا العزيز، يرجى العلم أن الطلب الخاص بكم سيتم تقسيمه إلى شحنتين. الشحنة الأولى سيتم شحنها من الكويت و توصيلها لكم خلال0 أيام عمل و الشحنة الثانية من المملكة العربية السعودية و توصيلها خلال 0 أيام عمل.",
+    "code": "KSA1 مقسم0"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Your order has been confirmed and will begin the packing process. You can track its status through the app by visiting the \"My Account\" section, then selecting \"Orders\" — the current status will be displayed there.  Once your order is out for delivery, you'll receive a notification via email.",
+    "ar": "عميلنا العزيز، تم تأكيد الطلب، وسيتم تجهيزه في اسرع وقت ممكن. يمكنكم متابعة حالة الطلب من خلال التطبيق، عبر صفحة \"حسابي\"، ثم اختيار \"الطلبات\"، حيث ستظهر لكم الحالة الحالية للطلب.  يرجى العلم أنه بمجرد خروج الطلب للتوصيل، سيتم تنبيهكم عبر البريد الإلكتروني.",
+    "code": "conf1 تأكيد1"
+  },
+  {
+    "source": "chat",
+    "category": "Delivery",
+    "en": "Dear customer, Your order has been packed and is currently awaiting pickup by the delivery team. Once it's out for delivery, you'll receive an email notification, and the order status will be updated in the app.",
+    "ar": "عميلنا العزيز، يرجى العلم أن الطلب تم تغليفه وهو حالياً بانتظار شركة التوصيل. بمجرد خروج الطلب للتوصيل، سيتم تنبيهكم عبر البريد الإلكتروني، كما ستتغير حالة الطلب في التطبيق.",
+    "code": "packed0 تغلف0"
+  },
+  {
+    "source": "chat",
+    "category": "Cancellation",
+    "en": "We apologize, the order has been canceled due to no response to our contact attempts & SMS to complete the required information. You may place a new order and complete the required information.",
+    "ar": "نعتذر منك، تم إلغاء الطلب وذلك لعدم الرد على إتصالاتنا أو رسائلنا لتأكيد واستكمال البيانات– الرجاء معاودة إتمام الطلب مرة أخرى والتأكد من صحة البيانات.",
+    "code": "busy0 الغاء1"
+  },
+  {
+    "source": "chat",
+    "category": "Cancellation",
+    "en": "Your order # has been canceled upon your request.",
+    "ar": "يرجى العلم أن طلبكم رقم # قد تم إلغاؤه بناءً على رغبتكم.",
+    "code": "cancelled0 الغاء2"
+  },
+  {
+    "source": "chat",
+    "category": "Cancellation",
+    "en": "We do apologize that you have decided to cancel the order, please do let us know if the reason was related to Boutiqaat.com or personal reason.",
+    "ar": "نأسف لسماع ذلك، يرجى إبلاغنا هل سبب إلغاء الطلب يخص شركة بوتيكات أم سبب شخصي؟",
+    "code": "reason0 الغاء3"
+  },
+  {
+    "source": "chat",
+    "category": "Cancellation",
+    "en": "We have contacted you through the registered E-mail as the phone number registered was wrong, and the order has been canceled accordingly.",
+    "ar": "تم التواصل معك عن طريق البريد الإلكتروني المسجل بالطلب حيث أن رقم الهاتف المسجل غير صحيح و لم يتم الرد علينا خلال 48 ساعة و بالتالي تم إلغاء الطلب.",
+    "code": "wrong# الغاء4"
+  },
+  {
+    "source": "chat",
+    "category": "Cancellation",
+    "en": "Please provide us with a picture of the product/s you wish to cancel, showing the SKU number in the description.",
+    "ar": "لمساعدتك في إلغاء الطلب، نرجو إرسال صورة للمنتج/المنتجات مع توضيح رقم الـSKU في الوصف.",
+    "code": "cancel5 الغاء5"
+  },
+  {
+    "source": "chat",
+    "category": "Cancellation",
+    "en": "Dear customer, we apologize as there is no editing or adding for the prepaid order. You can cancel the order and refund the amount to Boutiqaat wallet to reorder.",
+    "ar": "عميلنا العزيز،نعتذر منك. لكن لا يمكننا الإضافة أو التعديل على أي طلب مدفوع. بإمكانك إلغاء الطلب و إسترجاع المبلغ لرصيد بوتيكات لعمل طلب جديد.",
+    "code": "paid0 مدفوع0"
+  },
+  {
+    "source": "chat",
+    "category": "Order",
+    "en": "Dear customer, we apologize, we cannot add or modify your order now because your order has been prepared already.",
+    "ar": "نعتذر منكم لا يمكننا الإضافة او التعديل على طلبكم الأن حيث أنه تم تجهيز الطلب.",
+    "code": "invoice0 الفاتورة0"
+  },
+  {
+    "source": "chat",
+    "category": "Order",
+    "en": "To confirm your order please provide us with the following information (full name - ID number - city - area - name or street number - villa or building number)",
+    "ar": "لتأكيد الطلب الرجاء تزويدنا بالبيانات ( اسم ثنائي - رقم الهوية - المدينة - الحي - اسم أو رقم الشارع - رقم الفيلا أو البناء )",
+    "code": "info0 بيانات0"
+  },
+  {
+    "source": "chat",
+    "category": "Order",
+    "en": "Your order has been confirmed and the delivery will be within * business days.",
+    "ar": "تم تأكيد الطلب والتوصيل خلال * أيام عمل.",
+    "code": "conf0 تأكيد0"
+  },
+  {
+    "source": "chat",
+    "category": "Order",
+    "en": "Dear customer, you can place a Cash On Delivery order then we will send for you my fatoorah link to pay.",
+    "ar": "عميلنا العزيز يمكنك اجراء الطلب و اختيار طريقة الدفع عند الاستلام و تزويدنا برقم الطلب لارسال رابط الدفع",
+    "code": "myfatoorah0 رابط0"
+  },
+  {
+    "source": "chat",
+    "category": "Order",
+    "en": "We apologize dear customer, due to the amount of previously canceled/returned shipments, we are unable to confirm the order as \"COD\". Please inform us if you would like for an online payment link to be sent, or re-order as prepaid.",
+    "ar": "نعتذر منك، نظراً لتواجد عدد كبير من الشحنات المسترجعة أوالملغاة سابقاً، نتعذر عن تأكيد طلبكم بإختيار طريقة الدفع عند الإستلام. يرجى إبلاغنا برغبتك في إرسال رابط للدفع عن طريق البطاقة البنكية أو إلغاء الطلب وإعادة إتمام الطلب مع اختيار الدفع عن طريق البطاقة البنكية.",
+    "code": "risky0 ريسكي0"
+  },
+  {
+    "source": "chat",
+    "category": "Order",
+    "en": "No order found under this phone number, kindly provide us with the order number to follow up.",
+    "ar": "عميلنا العزيز لا يوجد طلب على هذا الرقم الرجاء تزويدنا برقم الطلب للمتابعة",
+    "code": "None0 لايوجد0"
+  },
+  {
+    "source": "chat",
+    "category": "Order",
+    "en": "Dear customer, If you would like to download the order invoice, please go to the Account page, then \"Your Orders\" tab, select Details for the order you want the invoice for, and then at the bottom of the page you will have \"View Invoice\" button to download the invoice.  Let us know if you need any further assistance.",
+    "ar": "عميلنا العزيز، إذا كنت ترغب بتحميل فاتورة الطلب، يرجى التوجه إلى صفحة الحساب، ثم إلى قسم \"الطلبات\"، واختيار \"تفاصيل\" للطلب المطلوب. في أسفل الصفحة، ستجد زر \"View Invoice\" لتحميل الفاتورة.  في حال لم يظهر الزر، يرجى إبلاغنا لنقوم بتزويدكم بالفاتورة من خلالنا.",
+    "code": "invoice1 فاتورة1"
+  },
+  {
+    "source": "chat",
+    "category": "Return to shipper",
+    "en": "Dear customer, kindly accept our apology, the shipment has been returned to Kuwait due to no response to office attempts of reaching you within the 14 days of the shipment being in a branch. Please re-order again.",
+    "ar": "نعتذر منك عميلنا العزيز، لقد تعذر الوصول إليكم من خلال شركة * خلال 14 يوم على وجود الشحنة في الفرع ولذلك قد تم إرجاع الشحنة إلى الكويت. برجاء إعادة الطلب مرة أخرى.",
+    "code": "shipper0 المرسل1"
+  },
+  {
+    "source": "chat",
+    "category": "Return to shipper",
+    "en": "We regret to inform you that the shipment # has been returned to us, please inform us where you would like the amount to be refunded, either by Boutiqaat Credit or by bank and you may place a new order.",
+    "ar": "نأسف لإخبارك أن الشحنة رقم # قد تم إرجاعها إلى الكويت، يرجى إبلاغنا أين تود أن يتم إسترجاع المبلغ، إما إلى رصيد بوتيكات أو إلى حسابكم البنكي و يمكنك إتمام طلب جديد.",
+    "code": "shipper2 المرسل2"
+  },
+  {
+    "source": "chat",
+    "category": "Gift Card",
+    "en": "Boutiqaat eGift Cards, the easiest way to win at gifting...  Boutiqaat eGift is the simplest and most convenient way to bring your loved ones their Wishlist. Nothing can touch a soul more than words from the heart, so personalize it with a message and we will take it from there.",
+    "ar": "بطاقة هدايا بوتيكات.. أسهل طريقة لإهداء من تحب. توفر لك بطاقة هدايا بوتيكات إمكانية إهداء الأشخاص المُفضلين لك بسهولة تامة، حيث يمكنهم استخدامها لشراء المنتجات المحفوظة في قائمة الأمنيات وغيرها من المنتجات المتوفر.",
+    "code": "gift1 الهدايا1"
+  },
+  {
+    "source": "chat",
+    "category": "Gift Card",
+    "en": "• Select your eGift Card design. • Select a preset load amount or enter a custom amount • Enter the eGift Card recipient's name and phone number • Once the transaction is complete, the recipient will be sent their eGift Card Code via SMS • Recipient can redeem the gift amount by clicking on the link and entering the code • Once redeemed, it will be added to the recipient Boutiqaat Credit.",
+    "ar": "لأستخدام بطاقة الهدايا،اختر تصميم البطاقة • حدد المبلغ المُراد إرساله من القائمة، او أدخل القيمة المُخصصة. • أضف اسم ورقم الهاتف التابع للشخص المُرسل إليه. • عند إكمال عملية الشراء، سيتم إرسال الكود المُخصص لبطاقة الهدايا خلال رسالة نصية. • يمكن صرف قيمة البطاقة بالضغط على الرابط المُرفق بالرسالة النصية، ثم إدخال كود الإسترداد في الخانة المخصصة له. • عند صرف قيمة البطاقة، سيتم إضافتها إلى رصيد بوتيكات في حساب المُستلم.",
+    "code": "gift2 الهدايا2"
+  },
+  {
+    "source": "chat",
+    "category": "Gift Card",
+    "en": "Terms & Conditions: eGift Cards can be redeemed for credit that can be used on purchases from our website or mobile App. eGift card expiration is 1 year after the date of purchase! You can acquire our eGift Cards with no additional charges or fees; however, once purchased, our eGift Cards are noncancellable and non-refundable. We urge you to make sure all the accurate recipient information is entered, as Boutiqaat will not be responsible for refunding or replacing a misdirected eGift Card code.",
+    "ar": "الشروط والأحكام: • يمكن صرف قيمة بطاقة الهدايا لشراء المنتجات المتوفرة عبر تطبيق بوتيكات، وسوف تستمر صلاحية رمز البطاقة لسنة من تاريخ الشراء، كما لا يترتب دفع أي رسوم أخرى على شراء البطاقة. لكن بعد إتمام العملية، لا يمكن إلغاء عملية الشراء أو طلب إستعادة قيمتها، لذا يُنصح بالتأكد من صحة المعلومات الشخص المُرسل إليه قبل إكمال عملية الشراء. بوتيكات غير مسوؤلة عن إرجاع أو استبدال قيمة كود الإسترداد المُرسل في حال إدخال معلومات غير دقيقة. • للعملاء داخل المملكة العربية السعودية: لا يمكن إرسال أو صرف قيمة بطاقة هدايا بوتيكات إلا من داخل المملكة العربية السعودية. • للعملاء في الدول الأخرى: يمكن إرسال أو صرف قيمة بطاقة هدايا بوتيكات من جميع الدول التي يتوفر فيها بوتيكات ماعدا المملكة العربية السعودية.",
+    "code": "gift3 الهدايا3"
+  },
+  {
+    "source": "chat",
+    "category": "Join Boutiqaat as Celebrity",
+    "en": "If you are willing to join our Boutiqaat team considering that you're a social media Celebrity/Influencer, please send us your details through this E-mail: PR@boutiqaat.com.",
+    "ar": "للإنضمام الى موقع بوتيكات كونكم أحد مشاهيرمواقع التواصل الاجتماعي، يرجى إرسال حساباتكم عبر هذه المواقع الى البريد الإلكتروني. PR@boutiqaat.com",
+    "code": "join0 انضمام0"
+  },
+  {
+    "source": "chat",
+    "category": "Notify Me",
+    "en": "You can subscribe to our \"Notify me\" service, and you will be notified once it's back in stock.",
+    "ar": "يمكنك الإشتراك في خدمة \"بلغني\"، وسوف يتم إبلاغك فور توفر المنتج مرة أخرى.",
+    "code": "notifyme0 بلغني0"
+  },
+  {
+    "source": "chat",
+    "category": "Oman Bayan Fee",
+    "en": "Dear customer, kindly be informed that we have created a replacement for the item. A representative shall pick up the original item and hand over the new item within * working days.",
+    "ar": "يرجى العلم ان قيمة طلبكم اكثر من 300 ريال عماني لذا تطلب إدارة الجمارك العمانية الدخول على موقعها الإلكتروني \"نظام بيان\" وكتابه التفويض اللازم حتى يتم الإفراج عن الشحنة ملاحظة: سوف يتم طلب دفع مبلغ 10 ريال عماني قيمة التسجيل بالموقع \"مرة واحدة فقط.",
+    "code": "bayan بيان0"
+  },
+  {
+    "source": "chat",
+    "category": "Brand Partnership (Offer items)",
+    "en": "If you are willing to be part of our vendors, please contact us through this E-mail Business@boutiqaat.com with the details of the products you wish to display",
+    "ar": "في حال تود الإنضمام إلى موقع بوتيكات، يرجى إرسال جميع تفاصيل العرض عن طريق البريد الإلكتروني. Business@boutiqaat.com",
+    "code": "open0 بيزنيس0"
+  },
+  {
+    "source": "chat",
+    "category": "CRM",
+    "en": "Dear customer, we apologize, please re-contact us back shortly as we are facing system updates.",
+    "ar": "عميلنا العزيز،نعتذر منك، برجاء إعادة التواصل معنا بعد قليل نظراً لوجود تحديث على النظام.",
+    "code": "system0 تحديث0"
+  },
+  {
+    "source": "chat",
+    "category": "Empathy",
+    "en": "Dear customer we are terribly sorry for what happened and will make sure it will not happen again.",
+    "ar": "عميلنا العزيز نعتذر جدا لما حدث و سنحرص على عدم تكرر ذلك.",
+    "code": "empathy1 تعاطف1"
+  },
+  {
+    "source": "chat",
+    "category": "Empathy",
+    "en": "Our sincere apologies for what happened, and we will review and follow up the issue and find the suitable solution.",
+    "ar": "نتأسف جدا لذلك و سيتم مراجعة و متابعة الموضوع من قبلنا ليتم عمل الاجراء المناسب لسيادتكم.",
+    "code": "empathy2 تعاطف2"
+  },
+  {
+    "source": "chat",
+    "category": "Empathy",
+    "en": "We are terribly sorry about that and we will contact with the concerned department to provide us with the suitable solution.",
+    "ar": "عميلنا العزيز نعتذر جدا لذلك و سيتم التواصل مع القسم المختص و بانتظار ردهم لعمل الاجراء المناسب.",
+    "code": "empathy3 تعاطف3"
+  },
+  {
+    "source": "chat",
+    "category": "Reset Password",
+    "en": "Dear customer, A reset password link is sent to you. Please open the link and make sure that the password contains numbers, letters and symbols, taking care not to write repeated or consecutive letters or numbers.",
+    "ar": "عميلنا العزيز، تم إرسال رابط إعادة تعيين كلمة المرور. يرجى فتح الرابط و التأكد من أن كلمة المرور تحتوي على أرقام، حروف و رموز مع الحرص على عدم كتابة حروف أو أرقام مكررة او متتالية.",
+    "code": "reset0 تعيين0"
+  },
+  {
+    "source": "chat",
+    "category": "Tamara",
+    "en": "Dear customer, Please contact Tamara customer service via the following mail ID: support@tamara.co or phone 8001181118, or via live chat.",
+    "ar": "يرجى التواصل مع تمارا عبر الايميل التالي  support@tamara.co-: او الاتصال هاتفياً على 8001181118 او عن طريق الدردشة المباشرة مع فريق تمارا.",
+    "code": "Tamara1 تمارا1"
+  },
+  {
+    "source": "chat",
+    "category": "Tamara",
+    "en": "Dear customer, to pay an installment of the Tamara installments, please download the Tamara application on your phone, then open the application and log in with your information and click on my purchases.",
+    "ar": "لسداد قسط من أقساط تمارا يرجى تحميل تطبيق تمارا من خلال الهاتف الخاص بك ومن ثم يرجى فتح التطبيق و تسجيل دخول بالبيانات الخاصة بك ومن ثم ضغط على مشترياتي.",
+    "code": "Tamara2 تمارا2"
+  },
+  {
+    "source": "chat",
+    "category": "Tamara",
+    "en": "Dear customer, we apologize to you, but the order payment method is Tamara, and you cannot exchange the product more than once.",
+    "ar": "نعتذر منك لكن طريقة دفع الطلب هي تمارا ولا يمكنك إستبدال المنتج أكثر من مرة.",
+    "code": "Tamara3 تمارا3"
+  },
+  {
+    "source": "chat",
+    "category": "Tamara",
+    "en": "Dear customer, we apologize to you, but the order payment method is Tamara, and you can only exchange the item with item that has the same price.",
+    "ar": "نعتذر منك لكن طريقة دفع الطلب هي تمارا ولا يمكنك إلا إستبدال المنتج بمنتج بنفس القيمة.",
+    "code": "Tamara4 تمارا4"
+  },
+  {
+    "source": "chat",
+    "category": "Promotions",
+    "en": "Dear customer, you will be notified via our website or application when discounts and offers are available.",
+    "ar": "عميلنا العزيز، سيتم إبلاغكم بالإشعارات في الموقع أو التطبيق عند توفر الخصومات.",
+    "code": "discounts0 خصومات0"
+  },
+  {
+    "source": "chat",
+    "category": "PNA",
+    "en": "Dear customer, we regret to inform you that item SKU # is currently out of stock, would you like to confirm the remaining products, or would you like to cancel the whole order and reorder later? Noting that the amount of the canceled item will be returned either by Boutiqaat Credit or by bank, please do inform us with the refund method.",
+    "ar": "نأسف لإخبارك بأن المنتج * في طلبك غير متوفر حالياً. هل ترغب في تأكيد باقي الطلب أم إلغاء الطلب بالكامل وإعادة الطلب لاحقاً؟ مع العلم أنه سوف يتم استرجاع قيمة المنتج الغير متوفر إما إلى رصيد بوتيكات أو إلى حسابكم البنكي، يرجى تحديد رغبتك.",
+    "code": "sold0 سولد0"
+  },
+  {
+    "source": "chat",
+    "category": "Winners",
+    "en": "To ensure that your prize reaches you soon, please provide us with the below information to our Email: - Support@boutiqaat.com Full name and Full address. Thank you for participating in our competition. We hope you enjoy your prize!",
+    "ar": "لضمان وصول جائزتك إليك في أقرب وقت، يرجى ارسال البيانات التاية عن طريق الإيميل الخاص بنا:- Support@boutiqaat.com الاسم الكامل و العنوان الكامل. شكراً لك على المشاركة في مسابقتنا. نأمل أن تستمتع بجائزتك!",
+    "code": "winner0 فائز0"
+  },
+  {
+    "source": "chat",
+    "category": "Call Contact",
+    "en": "You have been contacted by our customer service.",
+    "ar": "تم التواصل معكم هاتفياً عن طريق خدمة عملاء بوتيكات",
+    "code": "contact0 هاتفيا1"
+  },
+  {
+    "source": "chat",
+    "category": "Call Contact",
+    "en": "You will be contacted by telephone by a customer service representative.",
+    "ar": "سيتم التواصل معكم هاتفياً من قبل موظف خدمة عملاء بوتيكات.",
+    "code": "phone2 هاتفيا2"
+  },
+  {
+    "source": "chat",
+    "category": "Work with Boutiqaat - Resume or CV",
+    "en": "If you would like to join our company, please send your resume via the following E-mail. Joinus@boutiqaat.com",
+    "ar": "في حال تود الإنضمام إلى فريق عمل بوتيكات، يرجى إرسال السيرة الذاتية عبر البريد الالكتروني التالي. Joinus@boutiqaat.com",
+    "code": "resume0 وظائف0"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Protocols",
+    "en": "Thank you for contacting Boutiqaat… I'm *Agent Name*.",
+    "ar": "شكرا لتواصلك مع بوتيكات...معك *Agent Name*.",
+    "code": "greeting2 التحية2 000"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Protocols",
+    "en": "Thank you for contacting Boutiqaat… I'm *Agent Name* How may I help you?",
+    "ar": "شكرا لتواصلك مع بوتيكات...معك *Agent Name*. كيف بإمكاني مساعدتك ؟",
+    "code": "greeting0 التحية0 1"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Protocols",
+    "en": "Awaiting your response dear, if not possible to respond at the moment, we can have the chat put on hold and you can get back to us anytime during the day. We will pick things up with you from where we left.🌹",
+    "ar": "بانتظارك عميلنا العزيز, في حال لا يمكنكم الرد الآن, سيتم وضع المحادثة على الانتظار و فور الرد علينا خلال اليوم سيتم استكمال نفس المحادثة فوراً .🌹",
+    "code": "awaiting0 بانتظارك0  7"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Returns",
+    "en": "Dear customer,\nPlease note that a return request has been made for the product and a representative will be sent to collect the old product from you within 48 hours.\nThe amount will be returned to your account as soon as the original condition of the product is confirmed. If the product has been used or is not in its original condition, the product will be returned to you.",
+    "ar": "عميلنا العزيز،\nيرجى العلم أنه تم عمل طلب الإسترجاع للمنتج وسيتم إرسال المندوب لاستلام المنتج القديم منكم خلال 48 ساعة.\nسيتم إسترجاع المبلغ إلى حسابكم فور التأكد من الحالة الأصلية للمنتج و في حال تم إستخدام المنتج أو لم يكون بحالته الأصلية سيتم إسترجاع المنتج لكم.",
+    "code": "pickup0 استلام0 11"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Delivery",
+    "en": "Kindly be informed that your order is out for delivery, and you will be contacted by the driver once it arrives.",
+    "ar": "يرجى العلم أن طلبك الآن جاهز للتوصيل و سوف يتم التواصل معكم من قبل المندوب فور وصوله لمنطقتكم .",
+    "code": "shipped0 شيبد0 23"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Order",
+    "en": "Dear customer, we apologize, we cannot add or modify your order now because your order has been prepared already.",
+    "ar": "عميلنا العزيز،\nنعتذر منكم لا يمكننا الإضافة او التعديل على طلبكم الآن حيث أنه تم تجهيز الطلب.",
+    "code": "invoice0 الفاتوري0 26"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Tamara",
+    "en": "Dear customer, we apologize to you, but the order payment method is Tamara, and you cannot exchange the product more than once.",
+    "ar": "عميلنا العزيز،\nنعتذر منك لكن طريقة دفع الطلب هي تمارا ولا يمكنك إستبدال المنتج أكثر من مرة.",
+    "code": "Tamara3 تمارا3 72"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Tamara",
+    "en": "Dear customer, \nPlease contact Tamara customer service via the following mail ID: - nancee.eldeeb@tamara.com",
+    "ar": "عميلنا العزيز،\n  يرجى التواصل مع تمارا عبر الايميل التالي  support@tamara.co-: او الاتصال هاتفياً على 8001181118 او عن طريق الدردشة المباشرة مع فريق تمارا.",
+    "code": "Tamara1 تمارا1 73"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Tamara",
+    "en": "Dear customer, to pay an installment of the Tamara installments, please download the Tamara application on your phone, then open the application and log in with your information and click on my purchases.",
+    "ar": "عميلنا العزيز،\nلسداد قسط من أقساط تمارا يرجى تحميل تطبيق تمارا من خلال الهاتف الخاص بك ومن ثم يرجى فتح التطبيق و تسجيل دخول بالبيانات الخاصة بك ومن ثم ضغط على مشترياتي.",
+    "code": "Tamara2 تمارا2 74"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Gift_Card",
+    "en": "• Select your eGift Card design.\n• Select a preset load amount or enter a custom amount\n• Enter the eGift Card recipient's name and phone number\n• Once the transaction is complete, the recipient will be sent their eGift Card Code via SMS \n• Recipient can redeem the gift amount by clicking on the link and entering the code\n• Once redeemed, it will be added to the recipient Boutiqaat Credit.",
+    "ar": "لأستخدام بطاقة الهدايا،اختر تصميم البطاقة • حدد المبلغ المُراد إرساله من القائمة، او أدخل القيمة المُخصصة. • أضف اسم ورقم الهاتف التابع للشخص المُرسل إليه. • عند إكمال عملية الشراء، سيتم إرسال الكود المُخصص لبطاقة الهدايا خلال رسالة نصية. • يمكن صرف قيمة البطاقة بالضغط على الرابط المُرفق بالرسالة النصية، ثم إدخال كود الإسترداد في الخانة المخصصة له. • عند صرف قيمة البطاقة، سيتم إضافته إلى رصيد بوتيكات في حساب المُستلم.",
+    "code": "gift2 الهدايا2 80"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Gift_Card",
+    "en": "Terms & Conditions:\neGift Cards can be redeemed for credit that can be used on purchases from our website or mobile App. eGift card expiration is 1 year after the date of purchase! You can acquire our eGift Cards with no additional charges or fees; however, once purchased, our eGift Cards are noncancellable and non-refundable. We urge you to make sure all the accurate recipient information is entered, as Boutiqaat will not be responsible for refunding or replacing a misdirected eGift Card code.",
+    "ar": "الشروط والأحكام: \n• يمكن صرف قيمة بطاقة الهدايا لشراء المنتجات المتوفرة عبر تطبيق بوتيكات، وسوف تستمر صلاحية رمز البطاقة لسنة من تاريخ الشراء، كما لا يترتب دفع أي رسوم أخرى على شراء البطاقة. لكن بعد إتمام العملية، لا يمكن إلغاء عملية الشراء أو طلب إستعادة قيمتها، لذا يُنصح بالتأكد من صحة المعلومات الشخص المُرسل إليه قبل إكمال عملية الشراء. بوتيكات غير مسؤولة عن إرجاع أو استبدال قيمة كود الإسترداد المُرسل في حال إدخال معلومات غير دقيقة. \n• للعملاء داخل المملكة العربية السعودية: لا يمكن إرسال أو صرف قيمة بطاقة هدايا بوتيكات إلا من داخل المملكة العربية السعودية.\n• للعملاء في الدول الأخرى: يمكن إرسال أو صرف قيمة بطاقة هدايا بوتيكات من جميع الدول التي يتوفر فيها بوتيكات ماعدا المملكة العربية السعودية.",
+    "code": "gift3 الهدايا3 81"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Reset_Password",
+    "en": "Dear customer,\nA reset password link is sent to you.\nPlease open the link and make sure that the password contains numbers, letters and symbols, taking care not to write repeated or consecutive letters or numbers.",
+    "ar": "عميلنا العزيز، تم إرسال رابط إعادة تعيين كلمة المرور. يرجى فتح الرابط و التأكد من أن كلمة المرور تحتوي على أرقام، حروف و رموز مع الحرص على عدم كتابة حروف أو أرقام مكررة او متتالية.",
+    "code": "reset0 تعيين0 88"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Celebrity",
+    "en": "If you are willing to join our Boutiqaat team considering that you're a social media Celebrity/Influencer, please send us your details through this E-mail: PR@boutiqaat.com.",
+    "ar": "للإنضمام الى موقع بوتيكات كونكم أحد مشاهير مواقع التواصل الاجتماعي، يرجى إرسال حساباتكم عبر هذه المواقع الى البريد الإلكتروني. PR@boutiqaat.com",
+    "code": "join0 انضمام0 90"
+  },
+  {
+    "source": "sprinklr",
+    "category": "Company_Address",
+    "en": "Unfortunately, we are unable to disclose our physical address due to privacy and security reasons.\n\nHowever, I assure you that we are committed to providing the highest level of service and support to our customers. If you have any questions, require assistance, or need information about our products or services, please don't hesitate to reach out to us. Our team is readily available to assist you via phone, live chat and email.\nWe appreciate your understanding and cooperation in this matter.",
+    "ar": "للأسف، نحن غير قادرين على الكشف عن العنوان الفعلي للشركة لأسباب خصوصية والأمان. ومع ذلك، نؤكد لكم أننا ملتزمون بتقديم أعلى مستوى من الخدمة والدعم لعملائنا. إذا كان لديكم أي أسئلة، أو تحتاجون إلى مساعدة، أو ترغبون في الحصول على معلومات حول منتجاتنا أو خدماتنا، فلا تترددوا في التواصل معنا. فريقنا متاح وجاهز لمساعدتكم عبر الهاتف،الدردشة المباشرة و البريد الإلكتروني. نقدر تفهمكم وتعاونكم في هذا الشأن.",
+    "code": "address2 عنوان1 93"
+  }
+]

@@ -138,6 +138,50 @@ export class SprinklrController {
   }
 
   /**
+   * GET /integrations/sprinklr/status-now
+   * Every agent's CURRENT status + how long they've been in it (live, from the
+   * status-transition engine). Powers "on break for 12m" / "idle 8m" counters.
+   */
+  @Get('status-now')
+  @ApiOperation({ summary: 'Live current status + duration per agent (status-transition engine)' })
+  getStatusNow(@Request() req: any) {
+    return this.sprinklr.getStatusNow(req.user.tenantId);
+  }
+
+  /**
+   * GET /integrations/sprinklr/status-timeline?agentId=...&date=YYYY-MM-DD
+   * Full status timeline (segments) for one agent on a Kuwait day.
+   */
+  @Get('status-timeline')
+  @ApiOperation({ summary: 'Per-agent status timeline for a day (status-transition engine)' })
+  getStatusTimeline(@Request() req: any, @Query('agentId') agentId: string, @Query('date') date?: string) {
+    return this.sprinklr.getStatusTimeline(req.user.tenantId, agentId, date);
+  }
+
+  /**
+   * GET /integrations/sprinklr/agent-360?agentId=...&date=YYYY-MM-DD
+   * Everything about one agent: live status + duration, today's full daily stats
+   * (logins, idle/hold/busy/break splits, AHT/FRT/contacts/utilization, per-status
+   * minutes, break breakdown) and the status timeline. Powers the Agent 360 drawer.
+   */
+  @Get('agent-360')
+  @ApiOperation({ summary: 'Agent 360 — live status + daily stats + timeline for one agent' })
+  getAgent360(@Request() req: any, @Query('agentId') agentId: string, @Query('date') date?: string) {
+    return this.sprinklr.getAgent360(req.user.tenantId, agentId, date);
+  }
+
+  /**
+   * GET /integrations/sprinklr/agent-board
+   * One live row per agent: status + duration + today's contacts/AHT/idle/hold/
+   * break/working + adherence/conformance. Powers the rich live agent board.
+   */
+  @Get('agent-board')
+  @ApiOperation({ summary: 'Live agent board — status + duration + today’s stats per agent' })
+  getAgentBoard(@Request() req: any) {
+    return this.sprinklr.getAgentBoard(req.user.tenantId);
+  }
+
+  /**
    * GET /integrations/sprinklr/queue/:queueId
    * Detail for a specific queue: agents, overflow suggestions.
    */
@@ -171,17 +215,20 @@ export class SprinklrController {
     if (format === 'csv') {
       const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
       const tm  = (v: any) => (v ? new Date(v).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kuwait', hour: '2-digit', minute: '2-digit' }) : '');
-      const headers = ['Date', 'Agent', 'Employee No', 'Email', 'First Login', 'Last Logout',
-        'Working Min', 'Idle (no case) Min', 'Idle (with case) Min', 'Busy Min',
-        'Break Total Min', 'Tea', 'Lunch', 'Bio', 'Prayer',
-        'AHT Sec', 'Response Sec', 'Contacts'];
+      const headers = ['Date', 'Agent', 'Employee No', 'Function', 'Email', 'First Login', 'Last Logout',
+        'Working Min', 'Busy Min', 'Idle (no case) Min', 'Hold (case held) Min', 'Offline Min', 'Utilization %',
+        'Break Total Min', 'Tea', 'Lunch', 'Bio', 'Prayer', 'Meeting', 'Training', 'Manual Dial',
+        'AHT Sec', 'First Response Sec', 'Contacts'];
       const lines = report.rows.map((r: any) => {
         const b = typeof r.break_breakdown === 'object' ? (r.break_breakdown || {}) : {};
+        const work = Number(r.total_working_minutes) || 0;
+        const util = work > 0 ? Math.round((Number(r.busy_minutes) / work) * 100) : '';
         return [
           String(r.stat_date).slice(0, 10), esc(r.employee_name || r.agent_name), esc(r.employee_no),
-          esc(r.agent_email), tm(r.first_login), tm(r.last_logout),
-          r.total_working_minutes, r.idle_no_case_minutes, r.idle_with_case_minutes, r.busy_minutes,
+          esc(r.function_name), esc(r.agent_email), tm(r.first_login), tm(r.last_logout),
+          r.total_working_minutes, r.busy_minutes, r.idle_no_case_minutes, r.idle_with_case_minutes, r.offline_minutes, util,
           b.total_break ?? r.break_minutes, b.tea_break ?? 0, b.lunch_break ?? 0, b.bio_break ?? 0, b.prayer_break ?? 0,
+          b.meeting ?? 0, b.training ?? 0, b.manual_dial ?? 0,
           r.aht_seconds ?? '', r.avg_response_seconds ?? '', r.contacts_received ?? '',
         ].join(',');
       });

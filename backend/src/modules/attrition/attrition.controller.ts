@@ -7,12 +7,17 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 /**
- * Attrition rate from the schedule's separation markers. A `RES` shift code =
- * resignation (voluntary), `TER` = termination (involuntary). The day BEFORE the
- * marker is the employee's last working day; their shifts go empty after it.
+ * Attrition from the schedule's separation markers, over the canonical roster
+ * (`roster_days`, deduped by person_no so an old↔new intern-id pair counts once).
  *
- * Attrition rate (period)   = separations ÷ average headcount × 100
- * Annualized                = period rate × (12 ÷ months in period)   (Bersin/SHRM)
+ *   RES = resignation (voluntary)      → attrition
+ *   TER = termination (involuntary)    → attrition
+ *   Transfer = INTERNAL move to another department → NOT attrition (the person
+ *              stays with the company; surfaced separately as internal mobility).
+ *
+ * The day BEFORE the marker is the last working day; shifts go empty after it.
+ * Attrition rate (period) = separations ÷ average headcount × 100; annualized =
+ * period rate × (12 ÷ months)  (Bersin/SHRM).
  */
 @ApiTags('Attrition')
 @ApiBearerAuth()
@@ -22,50 +27,71 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 export class AttritionController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
+  // a row's separation/transfer marker, regardless of which column carries it
+  private readonly MARK = `UPPER(COALESCE(NULLIF(r.shift_code,''), r.attendance_code, ''))`;
+
   @Get()
-  @ApiOperation({ summary: 'Attrition rate + separations from RES/TER schedule markers' })
+  @ApiOperation({ summary: 'Attrition (RES/TER) + internal transfers from the roster, deduped by person' })
   async report(@CurrentUser() user: any, @Query('from') from?: string, @Query('to') to?: string) {
     const tid = user.tenantId;
+    const MARK = this.MARK;
 
-    // Default the window to the full span of any RES/TER markers we have.
+    // Default the window to the span of any separation/transfer marker we have.
     const [span] = await this.ds.query(
-      `SELECT MIN(a.attendance_date)::text mn, MAX(a.attendance_date)::text mx
-         FROM attendance_records a JOIN shift_codes sc ON sc.id = a.scheduled_shift_code_id
-        WHERE a.tenant_id = $1 AND sc.code IN ('RES','TER')`, [tid]).catch(() => [{}]);
+      `SELECT MIN(work_date)::text mn, MAX(work_date)::text mx
+         FROM roster_days r
+        WHERE r.tenant_id = $1 AND ${MARK} IN ('RES','TER','TRANSFER')`, [tid]).catch(() => [{}]);
     const fromD = from ?? span?.mn ?? new Date().toISOString().slice(0, 10);
     const toD   = to   ?? span?.mx ?? new Date().toISOString().slice(0, 10);
 
-    // Each separated employee: first RES/TER date in window + last actual working day before it.
+    // Separations: one per canonical person (is_active dedupes old↔new intern ids).
+    // function = the person's last real function before they left (per-month aware).
     const separations = await this.ds.query(
       `WITH sep AS (
-         SELECT a.employee_id,
-                MIN(a.attendance_date) AS sep_date,
-                (ARRAY_AGG(sc.code ORDER BY a.attendance_date))[1] AS code
-           FROM attendance_records a JOIN shift_codes sc ON sc.id = a.scheduled_shift_code_id
-          WHERE a.tenant_id = $1 AND sc.code IN ('RES','TER')
-            AND a.attendance_date BETWEEN $2::date AND $3::date
-          GROUP BY a.employee_id)
-       SELECT e.employee_no,
-              (e.first_name_en || ' ' || COALESCE(e.last_name_en,'')) AS name,
-              COALESCE(f.name,'—') AS function_name,
+         SELECT r.person_no,
+                MIN(r.work_date) AS sep_date,
+                (ARRAY_AGG(${MARK} ORDER BY r.work_date))[1] AS code,
+                MAX(r.clean_name) AS name
+           FROM roster_days r
+          WHERE r.tenant_id = $1 AND r.is_active AND ${MARK} IN ('RES','TER')
+            AND r.work_date BETWEEN $2::date AND $3::date
+          GROUP BY r.person_no)
+       SELECT s.person_no AS employee_no, s.name,
+              COALESCE((SELECT r2.role_function FROM roster_days r2
+                         WHERE r2.tenant_id=$1 AND r2.person_no=s.person_no
+                           AND r2.work_date < s.sep_date AND r2.role_function IS NOT NULL
+                         ORDER BY r2.work_date DESC LIMIT 1), '—') AS function_name,
               s.code,
               s.sep_date::text AS separation_date,
-              (SELECT MAX(w.attendance_date) FROM attendance_records w
-                WHERE w.tenant_id = $1 AND w.employee_id = s.employee_id
-                  AND w.scheduled_start IS NOT NULL AND w.attendance_date < s.sep_date)::text AS last_working_day
-         FROM sep s
-         JOIN employees e ON e.id = s.employee_id
-         LEFT JOIN functions f ON f.id = e.function_id
-        ORDER BY s.sep_date`,
+              (SELECT MAX(w.work_date) FROM roster_days w
+                WHERE w.tenant_id=$1 AND w.person_no=s.person_no
+                  AND w.presence IN ('office','wfh') AND w.work_date < s.sep_date)::text AS last_working_day
+         FROM sep s ORDER BY s.sep_date`,
       [tid, fromD, toD]).catch(() => []);
 
-    // Average monthly headcount across the window (distinct employees with a working shift).
+    // Internal transfers — NOT attrition. Surfaced so the move is visible.
+    const transfers = await this.ds.query(
+      `WITH tr AS (
+         SELECT r.person_no, MIN(r.work_date) AS t_date, MAX(r.clean_name) AS name
+           FROM roster_days r
+          WHERE r.tenant_id = $1 AND r.is_active AND ${MARK} = 'TRANSFER'
+            AND r.work_date BETWEEN $2::date AND $3::date
+          GROUP BY r.person_no)
+       SELECT t.person_no AS employee_no, t.name, t.t_date::text AS transfer_date,
+              COALESCE((SELECT r2.role_function FROM roster_days r2
+                         WHERE r2.tenant_id=$1 AND r2.person_no=t.person_no
+                           AND r2.work_date < t.t_date AND r2.role_function IS NOT NULL
+                         ORDER BY r2.work_date DESC LIMIT 1), '—') AS from_function
+         FROM tr t ORDER BY t.t_date`,
+      [tid, fromD, toD]).catch(() => []);
+
+    // Average monthly headcount across the window (distinct canonical persons present).
     const [hc] = await this.ds.query(
       `SELECT COALESCE(ROUND(AVG(n)), 0)::int AS avg_hc, COUNT(*)::int AS months FROM (
-         SELECT date_trunc('month', attendance_date) m, COUNT(DISTINCT employee_id) n
-           FROM attendance_records
-          WHERE tenant_id = $1 AND scheduled_start IS NOT NULL
-            AND attendance_date BETWEEN $2::date AND $3::date
+         SELECT date_trunc('month', work_date) m, COUNT(DISTINCT person_no) n
+           FROM roster_days
+          WHERE tenant_id = $1 AND is_active AND presence IN ('office','wfh')
+            AND work_date BETWEEN $2::date AND $3::date
           GROUP BY 1) x`, [tid, fromD, toD]).catch(() => [{ avg_hc: 0, months: 0 }]);
 
     const total = separations.length;
@@ -76,7 +102,6 @@ export class AttritionController {
     const ratePeriod = avgHc > 0 ? +((total / avgHc) * 100).toFixed(1) : 0;
     const rateAnnualized = +(ratePeriod * (12 / months)).toFixed(1);
 
-    // Breakdowns
     const byFunction = this.group(separations, (s: any) => s.function_name);
     const byMonth = this.group(separations, (s: any) => s.separation_date.slice(0, 7));
 
@@ -88,8 +113,10 @@ export class AttritionController {
         attritionRatePeriod: ratePeriod,
         attritionRateAnnualized: rateAnnualized,
         voluntaryRateAnnualized: avgHc > 0 ? +(((voluntary / avgHc) * 100) * (12 / months)).toFixed(1) : 0,
+        internalTransfers: transfers.length,   // moved internally — NOT counted in attrition
       },
       byFunction, byMonth, separations,
+      transfers, // internal moves, shown separately
     };
   }
 

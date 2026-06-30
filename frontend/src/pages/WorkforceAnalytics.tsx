@@ -411,7 +411,7 @@ export default function WorkforceAnalyticsPage() {
                   <div className="flex items-end gap-1.5 h-44" dir="ltr">
                     {pts.map((p, i) => (
                       <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 group relative" style={{ minWidth: 24 }}>
-                        <div className="absolute hidden group-hover:block z-10 px-2 py-1 rounded text-[9px] whitespace-nowrap" style={{ background: '#0f1527', color: '#fff', bottom: 150 }}>
+                        <div className="absolute hidden group-hover:block z-10 px-2 py-1 rounded text-[9px] whitespace-nowrap" style={{ background: 'var(--surface-2)', color: 'var(--text-1)', border: '1px solid var(--border)', bottom: 150 }}>
                           {p.bucket} · {ar ? 'إجمالي' : 'total'} {p.totalPct}% ({ar ? 'مخطط' : 'planned'} {p.plannedPct} / {ar ? 'غير' : 'unplanned'} {p.unplannedPct})
                         </div>
                         {/* stacked: planned (indigo) + unplanned (red) */}
@@ -454,7 +454,7 @@ export default function WorkforceAnalyticsPage() {
                     <div key={h.hour} onClick={() => under && setCoverHour(h.hour)}
                       className={`flex-1 flex flex-col items-center justify-end gap-1 group relative ${under ? 'cursor-pointer' : ''}`}
                       title={under ? (ar ? 'اضغط لتغطية الفجوة' : 'Click to cover the gap') : undefined}>
-                      <div className="absolute hidden group-hover:block z-10 px-2 py-1 rounded text-[9px] whitespace-nowrap" style={{ background: '#0f1527', color: '#fff', bottom: 168 }}>
+                      <div className="absolute hidden group-hover:block z-10 px-2 py-1 rounded text-[9px] whitespace-nowrap" style={{ background: 'var(--surface-2)', color: 'var(--text-1)', border: '1px solid var(--border)', bottom: 168 }}>
                         {h.hour}:00 · sched {h.avgScheduled} · present {h.avgPresent} · gap {h.shrinkagePct}%{under ? (ar ? ' · اضغط للتغطية' : ' · click to cover') : ''}
                       </div>
                       <div className="flex items-end gap-0.5" style={{ height: 160 }}>

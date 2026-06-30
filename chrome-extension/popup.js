@@ -31,6 +31,30 @@ const I18N = {
     pushSent: '✓ أُرسل', pushFail: '✗ فشل',
     stAvailable: 'متاح', stIdle: 'خامل', stBusy: 'مشغول', stBreak: 'استراحة', stAway: 'استراحة', stOffline: 'غير متصل', stUnknown: '—',
     agoNow: 'الآن', agoSec: (s) => `${s}ث`, agoMin: (m) => `${m}د`, agoHr: (h) => `${h}س`,
+    // doctor
+    docTitle: 'تشخيص الجسر', docRun: '⟳ فحص مباشر', docCopy: '⧉ نسخ التقرير',
+    docRunning: '⏳ جاري الفحص المباشر...', docCopied: '✓ تم نسخ التقرير', docCopyFail: '✗ تعذّر النسخ',
+    docOkTitle: 'كل شيء تمام', docOkFix: 'الجسر يلتقط بيانات سبرينكلر ويُرسلها للمنصة بنجاح.',
+    docWarnTitle: 'شبه جاهز — خطوة بسيطة', docBadTitle: 'وجدت المشكلة',
+    chkSync: 'المزامنة', chkSyncOk: 'مفعّلة', chkSyncOff: 'متوقفة مؤقتاً',
+    chkSyncFix: 'المزامنة موقوفة — افتح الإعدادات واضغط «تفعيل».',
+    chkTab: 'تبويب سبرينكلر', chkTabOk: 'نشط الآن', chkTabBg: 'مفتوح لكنه بالخلفية',
+    chkTabBgFix: 'التبويب بالخلفية — افتحه واتركه ظاهراً لحظة حتى يلتقط أحدث البيانات.',
+    chkTabNone: 'غير مفتوح', chkTabFix: 'افتح Sprinklr Supervisor / Live Console في تبويب.',
+    chkOps: 'التقاط البيانات', chkOpsOk: (n) => `${n} عملية ملتقطة`, chkOpsNone: 'لا بيانات ملتقطة',
+    chkOpsFix: 'التبويب مفتوح لكن لا تتدفق بيانات — تنقّل داخل الـ Console (Live/Supervisor) لتبدأ.',
+    chkOpsWait: 'بانتظار فتح التبويب',
+    chkData: 'الطوابير والموظفون', chkDataOk: (q, a) => `${q} طابور · ${a} موظف`, chkDataNone: 'لم تُستخرج بعد',
+    chkDataFix: 'افتح Supervisor Console (تظهر الطوابير) وتنقّل بين الـ views لتجميع أسماء الموظفين.',
+    chkDataWait: 'بانتظار البيانات',
+    chkAuth: 'تسجيل دخول WFM', chkAuthOk: 'جلسة فعّالة', chkAuthExpired: 'انتهت الجلسة',
+    chkAuthExpFix: 'انتهت صلاحية الجلسة — افتح الإعدادات وأعد إدخال كلمة المرور مرة واحدة.',
+    chkAuthNone: 'غير مُسجّل', chkAuthNoneFix: 'أدخل بريد WFM وكلمة المرور في الإعدادات ثم احفظ.',
+    chkAuthWait: 'بانتظار أول تسجيل دخول',
+    chkPush: 'الإرسال للمنصة', chkPushOk: (t) => `يُرسل بنجاح · آخر إرسال ${t}`, chkPushNever: 'لم يُرسل بعد',
+    chkPushNeverFix: 'لم تصل أي لقطة بعد — تأكد أن سبرينكلر مفتوح والمزامنة مفعّلة.',
+    chkPushNet: 'تعذّر الوصول للخادم', chkPushNetFix: (u) => `الخادم لا يردّ على ${u} — تأكد أنه يعمل وأن الرابط صحيح.`,
+    chkPushHttp: (s) => `الخادم ردّ بخطأ ${s}`, chkPushHttpFix: 'راجع الرابط وصلاحيات الحساب (RTA) في المنصة.',
   },
   en: {
     tagline: 'Sprinklr ← → WFM Platform',
@@ -60,6 +84,30 @@ const I18N = {
     pushSent: '✓ Sent', pushFail: '✗ Failed',
     stAvailable: 'Available', stIdle: 'Idle', stBusy: 'Busy', stBreak: 'Break', stAway: 'Break', stOffline: 'Offline', stUnknown: '—',
     agoNow: 'now', agoSec: (s) => `${s}s`, agoMin: (m) => `${m}m`, agoHr: (h) => `${h}h`,
+    // doctor
+    docTitle: 'Bridge diagnostics', docRun: '⟳ Live check', docCopy: '⧉ Copy report',
+    docRunning: '⏳ Running live check...', docCopied: '✓ Report copied', docCopyFail: '✗ Copy failed',
+    docOkTitle: 'All good', docOkFix: 'The bridge is capturing Sprinklr data and pushing it to the platform successfully.',
+    docWarnTitle: 'Almost there — one small step', docBadTitle: 'Found the problem',
+    chkSync: 'Sync', chkSyncOk: 'Enabled', chkSyncOff: 'Paused',
+    chkSyncFix: 'Sync is paused — open Settings and press “Enable”.',
+    chkTab: 'Sprinklr tab', chkTabOk: 'Active now', chkTabBg: 'Open but in background',
+    chkTabBgFix: 'The tab is backgrounded — bring it to the front for a moment so it captures fresh data.',
+    chkTabNone: 'Not open', chkTabFix: 'Open the Sprinklr Supervisor / Live Console in a tab.',
+    chkOps: 'Data capture', chkOpsOk: (n) => `${n} ops captured`, chkOpsNone: 'Nothing captured',
+    chkOpsFix: 'Tab is open but no data is flowing — navigate inside the Console (Live/Supervisor) to start it.',
+    chkOpsWait: 'Waiting for the tab',
+    chkData: 'Queues & agents', chkDataOk: (q, a) => `${q} queues · ${a} agents`, chkDataNone: 'Not parsed yet',
+    chkDataFix: 'Open the Supervisor Console (queues appear) and switch between views to collect agent names.',
+    chkDataWait: 'Waiting for data',
+    chkAuth: 'WFM sign-in', chkAuthOk: 'Active session', chkAuthExpired: 'Session expired',
+    chkAuthExpFix: 'The session expired — open Settings and re-enter your password once.',
+    chkAuthNone: 'Not signed in', chkAuthNoneFix: 'Enter your WFM email and password in Settings, then save.',
+    chkAuthWait: 'Waiting for first sign-in',
+    chkPush: 'Push to platform', chkPushOk: (t) => `Pushing OK · last push ${t}`, chkPushNever: 'Not pushed yet',
+    chkPushNeverFix: 'No snapshot has arrived yet — make sure Sprinklr is open and sync is enabled.',
+    chkPushNet: 'Server unreachable', chkPushNetFix: (u) => `The server is not responding at ${u} — check it is running and the URL is correct.`,
+    chkPushHttp: (s) => `Server returned error ${s}`, chkPushHttpFix: 'Check the URL and the account permissions (RTA) on the platform.',
   },
 };
 let lang = 'ar';
@@ -228,11 +276,111 @@ async function render(status) {
   document.getElementById('toggleSyncBtn').textContent = cfg.enabled === false ? t.enable : t.pause;
 }
 
+/* ── Doctor: self-diagnosis of the whole pipeline ────────────────────────────── */
+let lastStatus = null;
+const DOC_ICON = { ok: '✓', warn: '!', bad: '✗' };
+const isAuthErr = (st = '') => /401|auth|login failed|login network/i.test(st);
+
+function buildDoctor(status) {
+  const t = T();
+  const cfg = status?.config || {};
+  const snap = status?.lastSnapshot || {};
+  const ops = Array.isArray(snap.opsDetected) ? snap.opsDetected.length : 0;
+  const q = snap.queues?.length || 0;
+  const a = snap.agents?.length || 0;
+  const connected = !!status?.connected;
+  const everTab = !!status?.lastHeartbeat;
+  const pushSt = status?.lastPushStatus || 'never';
+  const apiUrl = cfg.wfmApiUrl || 'http://localhost:3000/api/v1';
+  const c = [];
+
+  // 1) Sync enabled
+  if (cfg.enabled === false) c.push({ level: 'warn', label: `${t.chkSync}: ${t.chkSyncOff}`, hint: t.chkSyncFix });
+  else c.push({ level: 'ok', label: `${t.chkSync}: ${t.chkSyncOk}` });
+
+  // 2) Sprinklr tab
+  if (connected) c.push({ level: 'ok', label: `${t.chkTab}: ${t.chkTabOk}` });
+  else if (everTab) c.push({ level: 'warn', label: `${t.chkTab}: ${t.chkTabBg}`, hint: t.chkTabBgFix });
+  else c.push({ level: 'bad', label: `${t.chkTab}: ${t.chkTabNone}`, hint: t.chkTabFix });
+
+  // 3) Interceptor capturing ops
+  if (ops > 0) c.push({ level: 'ok', label: `${t.chkOps}: ${t.chkOpsOk(ops)}` });
+  else if (connected) c.push({ level: 'bad', label: `${t.chkOps}: ${t.chkOpsNone}`, hint: t.chkOpsFix });
+  else c.push({ level: 'warn', label: `${t.chkOps}: ${t.chkOpsWait}`, hint: t.chkTabFix });
+
+  // 4) Queues / agents parsed
+  if (q > 0 || a > 0) c.push({ level: 'ok', label: `${t.chkData}: ${t.chkDataOk(q, a)}` });
+  else if (ops > 0) c.push({ level: 'bad', label: `${t.chkData}: ${t.chkDataNone}`, hint: t.chkDataFix });
+  else c.push({ level: 'warn', label: `${t.chkData}: ${t.chkDataWait}`, hint: t.chkDataFix });
+
+  // 5) WFM auth
+  if (isAuthErr(pushSt)) c.push({ level: 'bad', label: `${t.chkAuth}: ${t.chkAuthExpired}`, hint: t.chkAuthExpFix });
+  else if (status?.hasToken || status?.hasRefreshToken) c.push({ level: 'ok', label: `${t.chkAuth}: ${t.chkAuthOk}` });
+  else if (cfg.wfmEmail) c.push({ level: 'warn', label: `${t.chkAuth}: ${t.chkAuthWait}`, hint: t.chkAuthNoneFix });
+  else c.push({ level: 'bad', label: `${t.chkAuth}: ${t.chkAuthNone}`, hint: t.chkAuthNoneFix });
+
+  // 6) Push to backend
+  if (pushSt === 'ok') c.push({ level: 'ok', label: `${t.chkPush}: ${t.chkPushOk(timeAgo(status.lastPushAt))}` });
+  else if (pushSt === 'never') c.push({ level: 'warn', label: `${t.chkPush}: ${t.chkPushNever}`, hint: t.chkPushNeverFix });
+  else if (/network/i.test(pushSt)) c.push({ level: 'bad', label: `${t.chkPush}: ${t.chkPushNet}`, hint: t.chkPushNetFix(apiUrl) });
+  else if (isAuthErr(pushSt)) c.push({ level: 'bad', label: `${t.chkPush}: ${t.chkPushHttp(pushSt)}`, hint: t.chkAuthExpFix });
+  else c.push({ level: 'bad', label: `${t.chkPush}: ${t.chkPushHttp(pushSt)}`, hint: t.chkPushHttpFix });
+
+  const firstBad = c.find(x => x.level === 'bad');
+  const firstWarn = c.find(x => x.level === 'warn');
+  let verdict;
+  if (firstBad) verdict = { level: 'bad', emoji: '🔴', title: t.docBadTitle, fix: firstBad.hint || firstBad.label };
+  else if (firstWarn) verdict = { level: 'warn', emoji: '🟡', title: t.docWarnTitle, fix: firstWarn.hint || firstWarn.label };
+  else verdict = { level: 'ok', emoji: '🟢', title: t.docOkTitle, fix: t.docOkFix };
+
+  return { verdict, checks: c };
+}
+
+function renderDoctor(status) {
+  const panel = document.getElementById('doctorPanel');
+  if (!panel || panel.classList.contains('hidden') || !status) return;
+  const { verdict, checks } = buildDoctor(status);
+  const v = document.getElementById('docVerdict');
+  v.className = `doc-verdict ${verdict.level}`;
+  v.innerHTML = `<span class="dv-emoji">${verdict.emoji}</span><div class="dv-body"><div class="dv-title">${verdict.title}</div><div class="dv-fix">${verdict.fix}</div></div>`;
+  document.getElementById('docChecks').innerHTML = checks.map(x => `
+    <div class="doc-check ${x.level}">
+      <span class="dc-icon">${DOC_ICON[x.level] || '•'}</span>
+      <div class="dc-body"><div class="dc-label">${x.label}</div>${x.hint ? `<div class="dc-hint">${x.hint}</div>` : ''}</div>
+    </div>`).join('');
+}
+
+function doctorReport(status) {
+  const cfg = status?.config || {};
+  const snap = status?.lastSnapshot || {};
+  const iso = (ts) => (ts ? new Date(ts).toISOString() : 'never');
+  const { verdict, checks } = buildDoctor(status);
+  const lines = [
+    `WFM Bridge diagnostics — ${new Date().toISOString()}`,
+    `API URL: ${cfg.wfmApiUrl || ''}`,
+    `Sync enabled: ${cfg.enabled !== false}`,
+    `Connected: ${!!status?.connected} | last heartbeat: ${iso(status?.lastHeartbeat)}`,
+    `Sprinklr URL: ${status?.sprinklrUrl || ''}`,
+    `Ops detected (${(snap.opsDetected || []).length}): ${(snap.opsDetected || []).join(', ') || 'none'}`,
+    `Capture method: ${snap.captureMethod || '—'}`,
+    `Queues: ${snap.queues?.length || 0} | Agents: ${snap.agents?.length || 0}`,
+    `Auth: token=${!!status?.hasToken} refresh=${!!status?.hasRefreshToken} lastLogin=${iso(status?.lastLoginAt)}`,
+    `Push: ${status?.lastPushStatus || 'never'} | last push: ${iso(status?.lastPushAt)} | pending: ${!!status?.hasPending}`,
+    '',
+    `Verdict: ${verdict.title} — ${verdict.fix}`,
+    '',
+    ...checks.map(x => `[${x.level.toUpperCase()}] ${x.label}${x.hint ? ` — ${x.hint}` : ''}`),
+  ];
+  return lines.join('\n');
+}
+
 /* ── Load & Poll ─────────────────────────────────────────────────────────────── */
 async function refresh() {
   try {
     const status = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+    lastStatus = status;
     render(status);
+    renderDoctor(status);
   } catch {
     document.getElementById('statusText').innerHTML = T().extError;
   }
@@ -258,7 +406,44 @@ document.querySelectorAll('.tab').forEach(btn => {
 });
 
 document.getElementById('gearBtn').addEventListener('click', () => {
+  document.getElementById('doctorPanel').classList.add('hidden');
   document.getElementById('settingsPanel').classList.toggle('hidden');
+});
+
+/* ── Doctor panel ─────────────────────────────────────────────────────────────── */
+document.getElementById('doctorBtn').addEventListener('click', () => {
+  document.getElementById('settingsPanel').classList.add('hidden');
+  const panel = document.getElementById('doctorPanel');
+  panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden')) {
+    renderDoctor(lastStatus);
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+});
+
+document.getElementById('docRunBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('docRunBtn');
+  const msg = document.getElementById('docMsg');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  msg.className = 'save-msg'; msg.textContent = T().docRunning;
+  // Force a fresh pull-from-tab + push, then re-read status so the checklist is live.
+  await chrome.runtime.sendMessage({ type: 'PUSH_NOW' }).catch(() => {});
+  await new Promise(r => setTimeout(r, 600));
+  await refresh();
+  btn.disabled = false; btn.textContent = orig;
+  setTimeout(() => { msg.textContent = ''; }, 2500);
+});
+
+document.getElementById('docCopyBtn').addEventListener('click', async () => {
+  const msg = document.getElementById('docMsg');
+  try {
+    await navigator.clipboard.writeText(doctorReport(lastStatus || {}));
+    msg.className = 'save-msg ok'; msg.textContent = T().docCopied;
+  } catch {
+    msg.className = 'save-msg err'; msg.textContent = T().docCopyFail;
+  }
+  setTimeout(() => { msg.textContent = ''; }, 2500);
 });
 
 document.getElementById('saveBtn').addEventListener('click', async () => {

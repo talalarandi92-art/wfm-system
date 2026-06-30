@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "WFM Bridge — Sprinklr Connector",
-  "version": "1.4.0",
-  "description": "Reads Sprinklr queue data and syncs it to the WFM Platform in real-time.",
+  "version": "1.5.0",
+  "description": "Reads Sprinklr queue data and syncs it to the WFM Platform in real-time, with a built-in Doctor that diagnoses the whole pipeline.",
 
   "permissions": [
     "storage",

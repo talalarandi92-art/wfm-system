@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   BookOpen, Search, Plus, Folder, FileText, Eye, Clock, Tag,
   Edit3, Trash2, X, Save, ChevronRight, History, ArrowLeft,
-  CheckCircle2, FileEdit, Globe,
+  CheckCircle2, FileEdit, Globe, Sparkles,
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -270,6 +270,7 @@ export default function KnowledgeBasePage() {
   const [reading, setReading]       = useState<string | null>(null);
   const [editor, setEditor]         = useState<Partial<ArticleFull> | null | undefined>(undefined);
   const [loading, setLoading]       = useState(false);
+  const [whatsNew, setWhatsNew]     = useState<any>(null);
 
   const loadCategories = useCallback(() => {
     apiClient.get('/knowledge-base/categories').then((r: any) => setCategories(r.data)).catch(() => {});
@@ -287,6 +288,17 @@ export default function KnowledgeBasePage() {
 
   useEffect(() => { loadCategories(); }, []);
   useEffect(() => { const t = setTimeout(loadArticles, search ? 300 : 0); return () => clearTimeout(t); }, [loadArticles]);
+  useEffect(() => { apiClient.get('/knowledge-base/whats-new?days=45').then((r: any) => setWhatsNew(r.data)).catch(() => {}); }, []);
+
+  // article_id -> change_type (NEW takes priority over UPDATED) for badging cards
+  const changeMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    (whatsNew?.items ?? []).forEach((it: any) => {
+      if (!it.article_id) return;
+      if (it.change_type === 'new' || !m[it.article_id]) m[it.article_id] = it.change_type;
+    });
+    return m;
+  }, [whatsNew]);
 
   const totalArticles = categories.reduce((s, c) => s + Number(c.article_count), 0);
 
@@ -351,6 +363,39 @@ export default function KnowledgeBasePage() {
         )}
       </div>
 
+      {/* What's New / Updated — continuous-learning feed */}
+      {whatsNew && (Number(whatsNew.counts?.new || 0) + Number(whatsNew.counts?.updated || 0)) > 0 && (
+        <div className="rounded-2xl p-4"
+          style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.07), rgba(59,130,246,0.07))', border: '1px solid rgba(99,102,241,0.18)' }}>
+          <div className="flex items-center justify-between mb-2.5 flex-wrap gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Sparkles size={15} className="text-emerald-400" />
+              <span className="text-sm font-bold text-white">{ar ? 'الجديد والمحدّث' : "What's New"}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full text-emerald-300" style={{ background: 'rgba(34,197,94,0.15)' }}>
+                {whatsNew.counts.new} {ar ? 'جديد' : 'new'}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full text-blue-300" style={{ background: 'rgba(59,130,246,0.15)' }}>
+                {whatsNew.counts.updated} {ar ? 'محدّث' : 'updated'}</span>
+            </div>
+            {whatsNew.lastImport && (
+              <span className="text-[10px] text-slate-500">{ar ? 'آخر مزامنة' : 'Last sync'}: {fmtD(whatsNew.lastImport.created_at)}</span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {whatsNew.items.slice(0, 12).map((it: any, i: number) => (
+              <button key={i} onClick={() => it.article_id && setReading(it.article_id)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] text-slate-200 hover:bg-white/[0.06] transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
+                  style={{ background: it.change_type === 'new' ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.15)', color: it.change_type === 'new' ? '#6ee7b7' : '#93c5fd' }}>
+                  {it.change_type === 'new' ? (ar ? 'جديد' : 'NEW') : (ar ? 'محدّث' : 'UPD')}</span>
+                {it.category_icon && <span>{it.category_icon}</span>}
+                <span className="truncate max-w-[210px]">{it.title}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Categories sidebar */}
         <div className="space-y-1">
@@ -398,6 +443,11 @@ export default function KnowledgeBasePage() {
                       {a.status === 'draft' && (
                         <span className="flex-shrink-0 text-[9px] font-bold text-amber-300 px-1.5 py-0.5 rounded"
                           style={{ background: 'rgba(245,158,11,0.12)' }}>{ar ? 'مسودة' : 'DRAFT'}</span>
+                      )}
+                      {changeMap[a.id] && (
+                        <span className="flex-shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded"
+                          style={{ background: changeMap[a.id] === 'new' ? 'rgba(34,197,94,0.14)' : 'rgba(59,130,246,0.14)', color: changeMap[a.id] === 'new' ? '#6ee7b7' : '#93c5fd' }}>
+                          {changeMap[a.id] === 'new' ? (ar ? 'جديد' : 'NEW') : (ar ? 'محدّث' : 'UPDATED')}</span>
                       )}
                     </div>
                     {a.excerpt && <p className="text-[11px] text-slate-500 line-clamp-2 mb-2">{a.excerpt.trim()}</p>}

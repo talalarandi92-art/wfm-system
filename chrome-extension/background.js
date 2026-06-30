@@ -270,10 +270,12 @@ async function getStatus() {
     'config', 'lastSnapshot', 'lastSnapshotAt',
     'lastPushAt', 'lastPushStatus', 'lastHeartbeat',
     'lastPushQueueCount', 'lastPushAgentCount', 'sprinklrUrl',
+    'wfmRefreshToken', 'lastLoginAt', 'pendingSnapshot',
   ]);
 
+  const cfg = data.config ?? DEFAULT_CONFIG;
   return {
-    config:          data.config ?? DEFAULT_CONFIG,
+    config:          cfg,
     lastSnapshot:    data.lastSnapshot ?? null,
     lastSnapshotAt:  data.lastSnapshotAt ?? null,
     lastPushAt:      data.lastPushAt ?? null,
@@ -285,6 +287,12 @@ async function getStatus() {
     // 90s window: heartbeats throttle in background tabs; the 1-min alarm pull
     // refreshes lastHeartbeat, so anything under 90s means the bridge is alive.
     connected:       Date.now() - (data.lastHeartbeat ?? 0) < 90_000,
+    // ── Doctor signals (booleans only — never leak the token) ──
+    hasToken:        !!cfg.wfmApiToken,
+    hasRefreshToken: !!data.wfmRefreshToken,
+    hasCredentials:  !!(cfg.wfmEmail && (cfg.wfmPassword || data.wfmRefreshToken || cfg.wfmApiToken)),
+    lastLoginAt:     data.lastLoginAt ?? null,
+    hasPending:      !!data.pendingSnapshot,
   };
 }
 

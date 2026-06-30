@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
+import { StatTile, Gauge } from '@/components/dazzle';
 import {
   Phone, MessageSquare, Mail, Zap, Users, TrendingUp, TrendingDown,
   AlertTriangle, CheckCircle, BarChart3, RefreshCw, ChevronDown, ChevronUp,
@@ -248,23 +249,29 @@ function ResultsTable({ result, dark, ar }: { result: CapacityResult; dark: bool
           { label: ar ? 'المجدول' : 'Scheduled', value: result.totalScheduled, sub: ar ? 'موظفون على الشيفت' : 'agents on shift', icon: Users, accent: dark ? '#64748b' : '#94a3b8' },
           { label: result.totalGap > 0 ? (ar ? 'نقص تغطية' : 'Understaffed') : (ar ? 'فائض' : 'Surplus'), value: Math.abs(result.totalGap), sub: result.totalGap > 0 ? (ar ? 'أضف موظفين / أوفرتايم' : 'add staff / OT') : (ar ? 'متوازن' : 'balanced'), icon: result.totalGap > 0 ? TrendingDown : TrendingUp, accent: result.totalGap > 0 ? '#ef4444' : '#22c55e' },
           { label: ar ? 'متوسط الإشغال' : 'Avg Occupancy', value: `${(result.avgOccupancy * 100).toFixed(0)}%`, sub: result.avgOccupancy > 0.9 ? (ar ? 'محمّل زيادة' : 'overloaded') : (ar ? 'صحي' : 'healthy'), icon: Activity, accent: result.avgOccupancy > 0.9 ? '#ef4444' : result.avgOccupancy > 0.8 ? '#f59e0b' : '#22c55e' },
-        ].map(card => {
-          const Icon = card.icon;
+        ].map((card, i) => {
+          const isNum = typeof card.value === 'number';
           return (
-            <div key={card.label} className="relative rounded-2xl border p-3.5 overflow-hidden"
-              style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: dark ? 'rgba(255,255,255,0.08)' : '#e2e8f0' }}>
-              <div className="absolute top-0 left-0 h-full w-1" style={{ background: card.accent }} />
-              <div className="flex items-center gap-2 mb-1.5">
-                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${card.accent}22`, color: card.accent }}>
-                  <Icon size={14} />
-                </div>
-                <span className={`text-[10px] font-semibold uppercase tracking-wide ${dark ? 'text-slate-400' : 'text-slate-500'}`}>{card.label}</span>
-              </div>
-              <div className="text-2xl font-bold leading-none" style={{ color: card.accent }}>{card.value}</div>
-              <div className={`text-[10px] mt-1 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>{card.sub}</div>
-            </div>
+            <StatTile key={card.label} icon={card.icon} label={card.label}
+              num={isNum ? (card.value as number) : undefined} value={isNum ? undefined : String(card.value)}
+              sub={card.sub} color={card.accent} delay={i * 60} />
           );
         })}
+      </div>
+
+      {/* occupancy dial — the headline staffing-health metric, interpreted */}
+      <div className="rounded-2xl border p-4 mb-4 flex flex-col items-center sm:flex-row sm:items-center sm:gap-5"
+        style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: dark ? 'rgba(255,255,255,0.08)' : '#e2e8f0' }}>
+        <Gauge value={Math.round(result.avgOccupancy * 100)} label={ar ? 'متوسط الإشغال' : 'Avg Occupancy'}
+          color={result.avgOccupancy > 0.9 ? '#ef4444' : result.avgOccupancy > 0.8 ? '#f59e0b' : '#22c55e'} size={150} />
+        <div className="flex-1 text-xs leading-relaxed mt-2 sm:mt-0" style={{ color: dark ? '#94a3b8' : '#64748b' }}>
+          <div className="font-bold mb-1" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{ar ? 'صحّة الإشغال' : 'Occupancy health'}</div>
+          {result.avgOccupancy > 0.9
+            ? (ar ? 'الفريق محمّل فوق 90% — خطر إرهاق وتدهور SLA؛ أضف تغطية أو أوفرتايم.' : 'Loaded above 90% — burnout & SLA risk; add coverage or OT.')
+            : result.avgOccupancy > 0.8
+              ? (ar ? 'إشغال مرتفع لكنه ضمن المدى — راقب فترات الذروة.' : 'High but within range — watch the peak intervals.')
+              : (ar ? 'إشغال صحّي — هامش كافٍ لتقلّبات الحجم.' : 'Healthy occupancy — enough headroom for volume swings.')}
+        </div>
       </div>
 
       {/* SLA warning */}

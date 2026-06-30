@@ -7,10 +7,10 @@ describe('reconcileDay — presence', () => {
   it('system + punch = office', () => {
     expect(reconcileDay({ ...SHIFT, systemStartMin: 540, systemEndMin: 1080, punchInMin: 540, punchOutMin: 1080 }).presence).toBe('office');
   });
-  it('system, no punch = WFH (not missing punch)', () => {
+  it('system, no punch = office (MISSING PUNCH, not WFH — WFH only from a WFH code/location)', () => {
     const r = reconcileDay({ ...SHIFT, systemStartMin: 540, systemEndMin: 1080, punchInMin: null, punchOutMin: null });
-    expect(r.presence).toBe('wfh');
-    expect(r.flags).toContain('wfh');
+    expect(r.presence).toBe('office');
+    expect(r.flags).toContain('missing_punch');
   });
   it('punch, no system = anomaly', () => {
     expect(reconcileDay({ ...SHIFT, systemStartMin: null, systemEndMin: null, punchInMin: 540, punchOutMin: 1080 }).presence).toBe('anomaly');
@@ -43,10 +43,10 @@ describe('reconcileDay — late: compensation always, deduction after 20', () =>
   });
 });
 
-describe('reconcileDay — WFH uses system late', () => {
-  it('WFH late 10 → governed by system', () => {
+describe('reconcileDay — system-only (no punch) uses system late', () => {
+  it('system-only late 10 → governed by system (office / missing-punch, not WFH)', () => {
     const r = reconcileDay({ ...SHIFT, systemStartMin: 550, systemEndMin: 1080, punchInMin: null, punchOutMin: null });
-    expect(r.presence).toBe('wfh');
+    expect(r.presence).toBe('office');
     expect(r.effectiveLateMin).toBe(10);
   });
 });

@@ -319,6 +319,44 @@
     .save-msg.ok  { color: #4ade80; }
     .save-msg.err { color: #f87171; }
 
+    /* ── DOCTOR (self-diagnosis) ──────────────────────────────────────────── */
+    .doctor {
+      border-top: 1px solid var(--border);
+      padding: 14px 16px 16px;
+      background: rgba(0,0,0,0.15);
+    }
+    .doctor h2 {
+      font-size: 11px; font-weight: 700; color: var(--muted2);
+      letter-spacing: .05em; margin-bottom: 11px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .doc-verdict {
+      border-radius: 12px; padding: 11px 13px; margin-bottom: 12px;
+      border: 1px solid var(--border); background: var(--panel);
+      display: flex; gap: 10px; align-items: flex-start;
+    }
+    .doc-verdict.ok   { border-color: rgba(34,197,94,0.3);  background: rgba(34,197,94,0.06); }
+    .doc-verdict.warn { border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.06); }
+    .doc-verdict.bad  { border-color: rgba(239,68,68,0.32); background: rgba(239,68,68,0.06); }
+    .doc-verdict .dv-emoji { font-size: 19px; line-height: 1.1; flex-shrink: 0; }
+    .doc-verdict .dv-body { flex: 1; min-width: 0; }
+    .doc-verdict .dv-title { font-size: 12px; font-weight: 700; color: var(--text); }
+    .doc-verdict .dv-fix { font-size: 10.5px; color: var(--muted2); margin-top: 3px; line-height: 1.55; }
+
+    .doc-checks { display: flex; flex-direction: column; gap: 6px; }
+    .doc-check {
+      display: flex; align-items: flex-start; gap: 9px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 9px 11px;
+    }
+    .dc-icon { font-size: 12px; line-height: 1.3; flex-shrink: 0; width: 15px; text-align: center; }
+    .dc-body { flex: 1; min-width: 0; }
+    .dc-label { font-size: 11px; font-weight: 600; color: var(--text); }
+    .dc-hint { font-size: 9.5px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+    .doc-check.ok   .dc-label { color: #4ade80; }
+    .doc-check.warn .dc-label { color: #fbbf24; }
+    .doc-check.bad  .dc-label { color: #f87171; }
+
     .hidden { display: none !important; }
 
     /* ── SHIMMER ──────────────────────────────────────────────────────────── */
@@ -337,7 +375,7 @@
   <div class="hdr">
     <div class="logo">W</div>
     <div class="hdr-info">
-      <h1>WFM Bridge <span class="hdr-ver">v12</span></h1>
+      <h1>WFM Bridge <span class="hdr-ver">v13</span></h1>
       <p data-i18n="tagline">Sprinklr ← → منصة WFM</p>
     </div>
     <button class="icon-btn" id="langBtn" title="AR / EN" style="font-size:10px;font-weight:700;letter-spacing:.04em;">EN</button>
@@ -396,9 +434,22 @@
   <div class="footer">
     <span class="footer-left" id="footerTime"></span>
     <div class="footer-right">
+      <button class="icon-btn" id="doctorBtn" title="تشخيص الجسر">🩺</button>
       <button class="icon-btn" id="pushNowBtn" title="إرسال فوري" data-i18n="pushBtn">↑ إرسال</button>
       <button class="icon-btn" id="refreshBtn" title="تحديث">↻</button>
     </div>
+  </div>
+
+  <!-- Doctor (self-diagnosis) panel -->
+  <div class="doctor hidden" id="doctorPanel">
+    <h2><span>🩺</span> <span data-i18n="docTitle">تشخيص الجسر</span></h2>
+    <div class="doc-verdict" id="docVerdict"></div>
+    <div class="doc-checks" id="docChecks"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="docRunBtn" data-i18n="docRun">فحص مباشر</button>
+      <button class="btn btn-ghost" id="docCopyBtn" data-i18n="docCopy">نسخ التقرير</button>
+    </div>
+    <div class="save-msg" id="docMsg"></div>
   </div>
 
   <!-- Settings panel -->

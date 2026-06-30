@@ -117,3 +117,53 @@ The user loves the polish and wants to keep going. Candidate next steps:
 - Real animated count-up on headline KPI numbers; micro-interactions on approve/reject, publish.
 - A cohesive chart style (the schedule/coverage bars, trends) tuned per theme.
 - Keep using the contrast auditor as a pre-commit gate for any new page in light/glass.
+
+## The Dazzle kit — `frontend/src/components/dazzle.tsx` (added 2026-06-23)
+
+A reusable, **theme-aware** (reads `var(--surface/-2)`, `var(--border)`, `var(--text-1/2/3)` so it's
+correct in Dark/Light/Glass with zero per-theme code) and **reduced-motion-respecting** primitive set —
+the canonical way to add premium motion. PREFER it over hand-rolled tiles/bars for new KPI/visual work.
+
+- `useReducedMotion()` — honors the OS "reduce motion" setting; every animation below checks it.
+- `useCountUp(target, ms?, run?)` — ease-out count-up; snaps to target if reduced or zero; auto-keeps 1
+  decimal when the target isn't whole.
+- `<StatTile icon label num|value suffix? sub? color delay? onClick?/>` — KPI tile: count-up value
+  (`num`) or static `value`, accent top-edge, soft corner glow, hover-lift, staggered entrance via `delay`.
+- `<Donut segments[{label,value,color}] centerNum centerSuffix? centerLabel/>` — animated SVG ring
+  (arcs grow via `stroke-dasharray`) + count-up center + legend with %; great for disjoint splits
+  (e.g. the regular/off-day/holiday OT buckets).
+- `<BarRow label value max color suffix? delay?/>` — a single growing horizontal bar.
+
+Applied first to **OT-Exceptions** (7 StatTiles + a 3-arc OT-split Donut + BarRows), then
+**RosterDashboard** and **Agent360** KPI bands. Verified live in all three themes.
+
+## Light-mode net — the inline-dark-HEX gap (closed 2026-06-23)
+
+The `.theme-light` comfort net (in `index.css`) remaps dark-first values to light by matching the
+**serialized** form of inline styles — React turns `style={{color:'#f1f5f9'}}` into
+`style="color: rgb(241, 245, 249)"` (note the spaces), and the net targets that `rgb()` substring.
+It originally covered `text-white`/`text-slate-*`/`bg-white/`/`border-white/` and translucent
+`rgba(255,255,255,0.0x)` surfaces — but **NOT inline solid near-black HEX backgrounds**
+(`#11162a`, `#0f1527`, `#0f172a`, `#0b0f1c`, `#0b1120`, `#080f1a`, `rgba(7,9,15,…)`), which ~12 report
+pages used for table heads/panels → they stayed black in light mode. Fixed by adding
+`.theme-light [style*="background: rgb(17, 22, 42)"]…{ background:#e9edf4 !important }` for each
+near-black rgb form (scoped to `.theme-light` only, so Glass keeps them dark). **Rule of thumb for new
+pages: use the CSS vars (or the dazzle kit) — don't hardcode a dark hex; if you must, add its serialized
+`rgb()` to the net.** Verify by switching theme in the preview and confirming no element has an
+opaque (alpha>0.5) near-black computed `backgroundColor`.
+
+## Schedule grid — the reconciliation visual language (added 2026-06-30)
+
+When the Schedule grid started reading the corrected `roster_days` overlay, the cell (`Schedule.tsx` ShiftCell)
+got a small, legible visual language so a TL reads status at a glance:
+- **Shift code is DIRECT** — `E / M / B / C / MD / C7 …` with **no `-WFH` suffix** (user pref). WFH is conveyed
+  ONLY by a 🏠 icon + a soft **dotted texture** (`backgroundImage: radial-gradient(circle at 2px 2px, <text>33 1px,
+  transparent 1.6px); backgroundSize: 7px 7px`). Don't put location info in the code text.
+- **Reconciled vs Planned** — a corrected cell (`source:'roster'`) is solid; a planned/future cell (`source:'schedule'`,
+  no roster row yet) is **dashed border + opacity 0.8** so "actual" vs "plan" reads instantly.
+- **Holiday** — a gold top ribbon: `boxShadow: inset 0 2.5px 0 0 #fbbf24, 0 0 10px rgba(251,191,36,0.22)`.
+- **Time must match the code** — the time pill comes from `roster_days.shift_start_min/shift_end_min` (canonical:
+  M 07-16, B 09-18, C 11-20, N 13-22, E 16-01, MD 22-07), NOT `attendance_records.scheduled_start` (stale). A code
+  and a time from different sources is a bug (it once showed MD as "7am–4pm").
+- The Legend (toggle) documents Reconciled / Planned / Holiday chips. Late = rose dot (top-end), OT = amber dot
+  (bottom-end), edited = blue dot. Grid is collapsed-by-function-group; expand a group to see cells.

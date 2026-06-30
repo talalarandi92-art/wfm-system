@@ -637,7 +637,7 @@ export default function OutagesPage() {
           style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)' }}
           onClick={() => !detailLoading && setDetail(null)}>
           <div className="w-full flex flex-col overflow-hidden"
-            style={{ maxWidth: 1100, maxHeight: '92vh', background: '#07111f', borderRadius: 24, border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 40px 100px rgba(0,0,0,0.7)' }}
+            style={{ maxWidth: 1100, maxHeight: '92vh', background: '#0f172a', borderRadius: 24, border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 40px 100px rgba(0,0,0,0.7)' }}
             onClick={e => e.stopPropagation()}>
 
             {detailLoading ? (

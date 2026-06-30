@@ -120,6 +120,7 @@ export default function AgentHome() {
   const [notifs, setNotifs]       = useState<MyNotif[]>([]);
   const [overview, setOverview]   = useState<Overview | null>(null);
   const [myAtt, setMyAtt]         = useState<MyAttendance | null>(null);
+  const [livePerf, setLivePerf]   = useState<any>(null);
   const [loading, setLoading]     = useState(true);
 
   useEffect(() => {
@@ -129,15 +130,23 @@ export default function AgentHome() {
       apiClient.get('/notifications').catch(() => ({ data: [] })),
       apiClient.get('/me/overview').catch(() => ({ data: null })),
       apiClient.get('/me/attendance').catch(() => ({ data: null })),
+      apiClient.get('/me/live-performance').catch(() => ({ data: null })),
     ];
-    Promise.all(calls).then(([att, reqs, nts, ov, mine]: any[]) => {
+    Promise.all(calls).then(([att, reqs, nts, ov, mine, lp]: any[]) => {
       if (att?.data) { setSummary(att.data.summary); setRecent(att.data.recentDays ?? []); }
       setRequests(Array.isArray(reqs?.data) ? reqs.data.slice(0, 5) : (reqs?.data?.data ?? []).slice(0, 5));
       setNotifs((Array.isArray(nts?.data) ? nts.data : []).slice(0, 5));
       setOverview(ov?.data ?? null);
       setMyAtt(mine?.data ?? null);
+      setLivePerf(lp?.data ?? null);
     }).catch(() => {}).finally(() => setLoading(false));
   }, [employeeId]);
+
+  // Refresh live performance every 30s (own live status + today's stats).
+  useEffect(() => {
+    const t = setInterval(() => { apiClient.get('/me/live-performance').then(r => setLivePerf(r.data)).catch(() => {}); }, 30000);
+    return () => clearInterval(t);
+  }, []);
 
   const greeting = (() => {
     const h = new Date().getHours();
@@ -197,6 +206,80 @@ export default function AgentHome() {
           <AlertCircle size={14} /> {ar ? 'حسابك غير مرتبط بسجل موظف — تواصل مع المشرف لعرض بيانات الحضور.' : 'Your account is not linked to an employee record — contact your supervisor.'}
         </div>
       )}
+
+      {/* ── MY LIVE PERFORMANCE (own Sprinklr stats, live) ── */}
+      {(() => {
+        const stC: Record<string, string> = { available: '#22c55e', idle: '#84cc16', busy: '#f59e0b', break: '#a855f7', away: '#a855f7', offline: '#64748b', unknown: '#64748b' };
+        const stL: Record<string, { ar: string; en: string }> = { available: { ar: 'متاح', en: 'Available' }, idle: { ar: 'خامل', en: 'Idle' }, busy: { ar: 'مشغول', en: 'Busy' }, break: { ar: 'بريك', en: 'Break' }, away: { ar: 'بعيد', en: 'Away' }, offline: { ar: 'غير متصل', en: 'Offline' }, unknown: { ar: '—', en: '—' } };
+        const fM = (m: number | null | undefined) => (m == null ? '—' : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
+        const fS = (s: number | null | undefined) => (s == null || s <= 0 ? '—' : s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`);
+        const fSince = (s: number | null | undefined) => (s == null ? '' : s < 60 ? `${s}${ar ? 'ث' : 's'}` : s < 3600 ? `${Math.floor(s / 60)}${ar ? 'د' : 'm'}` : `${Math.floor(s / 3600)}${ar ? 'س' : 'h'} ${Math.floor((s % 3600) / 60)}${ar ? 'د' : 'm'}`);
+        const fClock = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleTimeString(ar ? 'ar-KW' : 'en-GB', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kuwait' }) : '—');
+        if (!livePerf) return null;
+        if (!livePerf.linked) {
+          return (
+            <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <p className="text-sm font-bold text-white mb-1">{ar ? '⚡ أدائي اللحظي' : '⚡ My Live Performance'}</p>
+              <p className="text-xs text-slate-500">{ar ? 'حسابك غير مربوط بحساب سبرينكلر بعد — سيظهر أداؤك اللحظي تلقائياً بمجرد الربط.' : 'Your account is not linked to a Sprinklr agent yet — your live performance will appear automatically once linked.'}</p>
+            </div>
+          );
+        }
+        const d = livePerf.daily; const lv = livePerf.live; const m = stC[lv?.status] || '#64748b';
+        const tl = (livePerf.timeline ?? []) as { status: string; duration_sec: number }[];
+        const tlTotal = tl.reduce((s, x) => s + (x.duration_sec || 0), 0) || 1;
+        return (
+          <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+              <p className="text-sm font-bold text-white">{ar ? '⚡ أدائي اللحظي' : '⚡ My Live Performance'}{d?.stat_date ? <span className="text-[11px] text-slate-500 font-normal"> · {d.stat_date}</span> : null}</p>
+              {lv && (
+                <span className="flex items-center gap-2 px-3 py-1 rounded-xl text-xs font-bold" style={{ background: `${m}1a`, border: `1px solid ${m}40`, color: m }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: m, boxShadow: `0 0 8px ${m}` }} />
+                  {ar ? (stL[lv.status]?.ar ?? lv.status) : (stL[lv.status]?.en ?? lv.status)}{lv.seconds != null ? ` · ${fSince(lv.seconds)}` : ''}
+                </span>
+              )}
+            </div>
+            {d ? (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                  {[
+                    { l: ar ? 'كونتاكت' : 'Contacts', v: d.contacts_received ?? '—', c: '#22c55e' },
+                    { l: 'AHT', v: fS(d.aht_seconds), c: '#818cf8' },
+                    { l: ar ? 'الإشغال' : 'Utilization', v: d.utilizationPct != null ? `${d.utilizationPct}%` : '—', c: '#f59e0b' },
+                    { l: ar ? 'زمن أول رد' : 'First Response', v: fS(d.avg_response_seconds), c: '#06b6d4' },
+                  ].map(k => (
+                    <div key={k.l} className="rounded-xl p-2.5" style={{ background: 'rgba(0,0,0,0.2)' }}>
+                      <div className="text-lg font-bold tabular-nums" style={{ color: k.c }}>{k.v}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{k.l}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-2">
+                  {[
+                    { l: ar ? 'عمل' : 'Working', v: fM(d.total_working_minutes), c: '#e2e8f0' },
+                    { l: ar ? 'مشغول' : 'Busy', v: fM(d.busy_minutes), c: '#818cf8' },
+                    { l: ar ? 'خامل' : 'Idle', v: fM(d.idle_no_case_minutes), c: '#f59e0b' },
+                    { l: ar ? 'هولد' : 'Hold', v: fM(d.idle_with_case_minutes), c: '#22d3ee' },
+                    { l: ar ? 'بريك' : 'Break', v: fM(d.break_minutes), c: '#a855f7' },
+                    { l: ar ? 'أول دخول' : 'Login', v: fClock(d.first_login), c: '#86efac' },
+                  ].map(k => (
+                    <div key={k.l} className="text-center">
+                      <div className="text-sm font-bold tabular-nums" style={{ color: k.c }}>{k.v}</div>
+                      <div className="text-[9px] text-slate-500 mt-0.5">{k.l}</div>
+                    </div>
+                  ))}
+                </div>
+                {tl.length > 0 && (
+                  <div className="flex h-2.5 rounded-full overflow-hidden mt-2" title={ar ? 'خط حالاتي اليوم' : 'My status timeline today'}>
+                    {tl.map((x, i) => <span key={i} style={{ width: `${(x.duration_sec / tlTotal) * 100}%`, background: stC[x.status] || '#475569' }} />)}
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-slate-500">{ar ? 'لا توجد إحصائيات اليوم بعد — تظهر مع تدفّق البيانات.' : 'No stats yet today — they appear as data flows.'}</p>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── This-month metrics ── */}
       {summary && (

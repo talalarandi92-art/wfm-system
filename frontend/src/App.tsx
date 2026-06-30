@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { authApi } from '@/api/client';
 import Login from '@/pages/Login';
 import Dashboard from '@/pages/Dashboard';
+import CommandCenter from '@/pages/CommandCenter';
 import ImportPage          from '@/pages/Import';
 import AttendanceHub        from '@/pages/AttendanceHub';
 import SchedulingHub          from '@/pages/SchedulingHub';
@@ -21,6 +22,7 @@ import RosterDashboardPage     from '@/pages/RosterDashboard';
 import ReportBuilderPage       from '@/pages/ReportBuilder';
 import WfhHrReportPage          from '@/pages/WfhHrReport';
 import ScheduleAnalysisPage     from '@/pages/ScheduleAnalysis';
+import OtExceptionsPage          from '@/pages/OtExceptions';
 import DataQualityPage         from '@/pages/DataQuality';
 import DashboardBuilderPage    from '@/pages/DashboardBuilder';
 import ScheduleChangeLogPage   from '@/pages/ScheduleChangeLog';
@@ -49,6 +51,7 @@ import AdvisorPage               from '@/pages/Advisor';
 import SecurityGuardPage         from '@/pages/SecurityGuard';
 import ExpertPage                from '@/pages/Expert';
 import ChiefPage                 from '@/pages/Chief';
+import ReplyHelperPage           from '@/pages/ReplyHelper';
 import ScorecardGuardPage        from '@/pages/ScorecardGuard';
 import ResearcherPage            from '@/pages/Researcher';
 import KnowledgeLedgerPage       from '@/pages/KnowledgeLedger';
@@ -97,6 +100,7 @@ export default function App() {
           <Route index element={<LandingRedirect />} />
           <Route path="my"         element={<AgentHome />} />
           <Route path="dashboard"  element={<Dashboard />} />
+          <Route path="command-center" element={<CommandCenter />} />
           <Route path="schedule"     element={<SchedulingHub />} />
           <Route path="generator"   element={<Navigate to="/schedule?tab=generator" replace />} />
           <Route path="rotation"    element={<Navigate to="/schedule?tab=rotation" replace />} />
@@ -128,6 +132,7 @@ export default function App() {
           <Route path="data-quality" element={<DataQualityPage />} />
           <Route path="wfh-hr-report" element={<WfhHrReportPage />} />
           <Route path="schedule-analysis" element={<ScheduleAnalysisPage />} />
+          <Route path="ot-exceptions" element={<OtExceptionsPage />} />
           <Route path="dashboard-builder" element={<DashboardBuilderPage />} />
           <Route path="schedule-change-log" element={<ScheduleChangeLogPage />} />
           <Route path="interval-headcount" element={<IntervalHeadcountPage />} />
@@ -151,6 +156,7 @@ export default function App() {
           <Route path="advisor" element={<AdvisorPage />} />
           <Route path="security-guard" element={<SecurityGuardPage />} />
           <Route path="expert" element={<ExpertPage />} />
+          <Route path="reply-helper" element={<ReplyHelperPage />} />
           <Route path="chief" element={<ChiefPage />} />
           <Route path="scorecard-guard" element={<ScorecardGuardPage />} />
           <Route path="researcher" element={<ResearcherPage />} />

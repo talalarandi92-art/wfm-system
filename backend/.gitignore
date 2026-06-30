@@ -1,0 +1,3 @@
+# Detached dev server logs
+server.out.log
+server.err.log

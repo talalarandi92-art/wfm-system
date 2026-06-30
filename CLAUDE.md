@@ -1,6 +1,10 @@
 # WFM PROJECT INSTRUCTIONS — FULL MASTER VERSION
 
 > **Durable knowledge base (read these before UI / roster / reports work — they ship with the repo):**
+> - ⭐ `docs/knowledge/WFM_RULES_AND_DECISIONS.md` — **THE single source of truth for every business rule &
+>   decision** (identity, week/cut-off, the ONE shift-category mapping, the CORRECTED WFH rule, reconciliation,
+>   TRUE_OT, maternity/female, fairness, scorecard grain, demand→schedule, data-tables map, design net,
+>   TypeORM gotchas, known drifts). Read this FIRST; if code conflicts with it, the rule wins — fix the code.
 > - `docs/knowledge/DESIGN_SYSTEM.md` — the UI "magic": 3 themes (Dark / Light / Aurora-Glass), the
 >   light-mode comfort layer for this dark-first app, the grey/light-grey mix, keep-dark, neon-hover
 >   schedule cells, roster zebra + contrasting detail, per-type request colours, **NO animated
@@ -10,8 +14,13 @@
 >   tardiness↔conformance, OT bleed guards, cross-midnight, maternity), scorecard data shape, the
 >   `roster-v2/*` endpoints, the Custom Report/Dashboard Builders, SLA/workflow & data-quality reports,
 >   and the PostgreSQL gotchas.
+> - `docs/RECON_PIPELINE.md` — **THE base reconciliation pipeline runbook**: the one-command
+>   `node scripts/recon-refresh.js` (foundation→engine→ingest→live `roster_days`), the in-system
+>   "Upload & Rebuild" button, where the month sources go, editable holidays (`recon-config.json`),
+>   the master-HR-code + holiday-OT rules that live IN the engine, and restore. Run/refer to this for
+>   any roster refresh — every business rule is re-applied each run so reports never silently regress.
 >
-> The same two docs (plus architecture / business-rules / data-sources / modules / conventions) live in
+> The same docs (plus architecture / business-rules / data-sources / modules / conventions) live in
 > the invocable **`wfm-system`** skill under `.claude/skills/wfm-system/reference/` for local use.
 
 ## 0. Purpose of This File

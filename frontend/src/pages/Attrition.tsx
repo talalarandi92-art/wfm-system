@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { UserMinus, Loader2, RefreshCw, TrendingDown, LogOut, Ban } from 'lucide-react';
+import { UserMinus, Loader2, RefreshCw, TrendingDown, LogOut, Ban, ArrowLeftRight } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { StatTile, Donut, BarRow } from '@/components/dazzle';
 
 interface Sep { employee_no: string; name: string; function_name: string; code: string; separation_date: string; last_working_day: string | null }
+interface Transfer { employee_no: string; name: string; transfer_date: string; from_function: string }
 interface Grp { key: string; total: number; voluntary: number; involuntary: number }
 interface Report {
   from: string; to: string; months: number;
-  summary: { separations: number; voluntary: number; involuntary: number; avgHeadcount: number; attritionRatePeriod: number; attritionRateAnnualized: number; voluntaryRateAnnualized: number };
-  byFunction: Grp[]; byMonth: Grp[]; separations: Sep[];
+  summary: { separations: number; voluntary: number; involuntary: number; avgHeadcount: number; attritionRatePeriod: number; attritionRateAnnualized: number; voluntaryRateAnnualized: number; internalTransfers: number };
+  byFunction: Grp[]; byMonth: Grp[]; separations: Sep[]; transfers: Transfer[];
 }
 
 export default function AttritionPage() {
@@ -33,6 +35,13 @@ export default function AttritionPage() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const rateColor = (r: number) => r >= 35 ? '#ef4444' : r >= 20 ? '#f59e0b' : '#22c55e';
+  const maxFn = Math.max(1, ...(data?.byFunction?.map(f => f.total) ?? []));
+  const maxMonth = Math.max(1, ...(data?.byMonth?.map(m => m.total) ?? []));
+  // monthly trends (chronological) to draw inside the count tiles
+  const monthsSorted = [...(data?.byMonth ?? [])].sort((a, b) => a.key.localeCompare(b.key));
+  const trendTotal = monthsSorted.map(m => m.total);
+  const trendVol = monthsSorted.map(m => m.voluntary);
+  const trendInv = monthsSorted.map(m => m.involuntary);
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
@@ -69,30 +78,44 @@ export default function AttritionPage() {
               <div className="text-3xl font-bold tabular-nums" style={{ color: rateColor(data.summary.attritionRateAnnualized) }}>{data.summary.attritionRateAnnualized}%</div>
               <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>{data.summary.attritionRatePeriod}% {ar ? 'خلال الفترة' : 'in period'}</div>
             </div>
-            {[
+            {([
               [ar ? 'إجمالي المغادرين' : 'Separations', data.summary.separations, '#cbd5e1', UserMinus],
               [ar ? 'استقالات (طوعي)' : 'Resignations (vol.)', data.summary.voluntary, '#f59e0b', LogOut],
               [ar ? 'تيرمينيشن (إجباري)' : 'Terminations (invol.)', data.summary.involuntary, '#ef4444', Ban],
-            ].map(([l, v, c, Ic], i) => (
-              <div key={i} className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <div className="flex items-center gap-1.5 text-[11px] mb-1" style={{ color: '#94a3b8' }}>{(() => { const I = Ic as any; return <I size={12} />; })()} {l as string}</div>
-                <div className="text-3xl font-bold tabular-nums" style={{ color: c as string }}>{v as number}</div>
-              </div>
+              [ar ? 'انتقال داخلي (مش تسرّب)' : 'Internal transfers (not attrition)', data.summary.internalTransfers ?? 0, '#22d3ee', ArrowLeftRight],
+            ] as [string, number, string, any][]).map(([l, v, c, Ic], i) => (
+              <StatTile key={i} icon={Ic} label={l} num={v} color={c} delay={i * 60}
+                trend={[trendTotal, trendVol, trendInv, undefined][i]} />
             ))}
           </div>
 
           <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))' }}>
-            {/* By function */}
-            <Panel title={ar ? 'حسب القسم' : 'By function'} dark={dark}>
-              {data.byFunction.map(f => (
-                <Row key={f.key} a={f.key} vol={f.voluntary} inv={f.involuntary} total={f.total} />
-              ))}
+            {/* Composition donut: voluntary vs involuntary */}
+            <Panel title={ar ? 'تركيبة المغادرة' : 'Separation mix'} dark={dark}>
+              <div className="p-3">
+                <Donut
+                  segments={[
+                    { label: ar ? 'استقالة (طوعي)' : 'Resignation (vol.)', value: data.summary.voluntary, color: '#f59e0b' },
+                    { label: ar ? 'تيرمينيشن (إجباري)' : 'Termination (invol.)', value: data.summary.involuntary, color: '#ef4444' },
+                  ]}
+                  centerNum={data.summary.separations} centerLabel={ar ? 'مغادر' : 'left'} />
+              </div>
             </Panel>
-            {/* By month */}
+            {/* By function — magnitude bars (which department bleeds most) */}
+            <Panel title={ar ? 'حسب القسم' : 'By function'} dark={dark}>
+              <div className="px-2 py-2 space-y-2">
+                {[...data.byFunction].sort((a, b) => b.total - a.total).map((f, i) => (
+                  <BarRow key={f.key} label={f.key} value={f.total} max={maxFn} color="#ef4444" delay={i * 40} />
+                ))}
+              </div>
+            </Panel>
+            {/* By month — seasonal attrition curve */}
             <Panel title={ar ? 'حسب الشهر' : 'By month'} dark={dark}>
-              {[...data.byMonth].sort((a, b) => a.key.localeCompare(b.key)).map(m => (
-                <Row key={m.key} a={m.key} vol={m.voluntary} inv={m.involuntary} total={m.total} />
-              ))}
+              <div className="px-2 py-2 space-y-2">
+                {[...data.byMonth].sort((a, b) => a.key.localeCompare(b.key)).map((m, i) => (
+                  <BarRow key={m.key} label={m.key} value={m.total} max={maxMonth} color="#f59e0b" delay={i * 40} />
+                ))}
+              </div>
             </Panel>
           </div>
 
@@ -124,6 +147,34 @@ export default function AttritionPage() {
               </table>
             </div>
           </div>
+
+          {/* Internal transfers — NOT attrition (moved to another department) */}
+          {data.transfers && data.transfers.length > 0 && (
+            <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(34,211,238,0.04)', border: '1px solid rgba(34,211,238,0.2)' }}>
+              <div className="px-4 py-3 text-sm font-bold flex items-center gap-2" style={{ color: tp(dark), borderBottom: '1px solid rgba(34,211,238,0.15)' }}>
+                <ArrowLeftRight size={15} style={{ color: '#22d3ee' }} />
+                {ar ? 'انتقالات داخلية — ليست تسرّباً' : 'Internal transfers — not attrition'} ({data.transfers.length})
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px]">
+                  <thead><tr style={{ background: 'rgba(0,0,0,0.15)' }}>
+                    {[ar ? 'الموظف' : 'Employee', ar ? 'القسم السابق' : 'From department', ar ? 'تاريخ الانتقال' : 'Transfer date'].map((h, i) => (
+                      <th key={i} className="text-start px-3 py-2 text-[10px] uppercase tracking-wider" style={{ color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {data.transfers.map((t, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                        <td className="px-3 py-1.5" style={{ color: '#cbd5e1' }}>{t.name} <span style={{ color: '#475569' }}>#{t.employee_no}</span></td>
+                        <td className="px-3 py-1.5" style={{ color: '#94a3b8' }}>{t.from_function}</td>
+                        <td className="px-3 py-1.5 tabular-nums" style={{ color: '#67e8f9' }}>{t.transfer_date}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -135,17 +186,6 @@ function Panel({ title, dark, children }: { title: string; dark: boolean; childr
     <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
       <div className="px-4 py-2.5 text-xs font-bold" style={{ color: tp(dark), borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{title}</div>
       <div className="px-2 py-1">{children}</div>
-    </div>
-  );
-}
-function Row({ a, vol, inv, total }: { a: string; vol: number; inv: number; total: number }) {
-  const ar = useUiStore(s => s.lang) === 'ar';
-  return (
-    <div className="flex items-center gap-2 px-2 py-1.5 text-[11px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-      <span className="flex-1 min-w-0 truncate" style={{ color: '#cbd5e1' }}>{a}</span>
-      {vol > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(245,158,11,0.12)', color: '#fbbf24' }}>{vol} {ar ? 'استقالة' : 'RES'}</span>}
-      {inv > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'rgba(239,68,68,0.12)', color: '#f87171' }}>{inv} TER</span>}
-      <span className="tabular-nums font-bold" style={{ color: '#f87171' }}>{total}</span>
     </div>
   );
 }

@@ -30,6 +30,7 @@ interface DayEntry {
   editCount: number;
   lastEditBy: string | null;
   notes: string | null;
+  source?: 'roster' | 'schedule';   // 'roster' = corrected reconciliation overlay; 'schedule' = plan/future
 }
 
 interface Employee {
@@ -150,7 +151,7 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
   onHistoryClick?: (emp: Employee, date: string) => void;
 }) {
   const tdStyle: React.CSSProperties = {
-    borderColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'var(--border)',
     minWidth: colWidth,
     padding: '2px 3px',
   };
@@ -162,9 +163,9 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
         <button
           onClick={() => onCellClick(emp, date, day)}
           className="w-full h-14 rounded-lg flex items-center justify-center
-                     hover:bg-white/[0.03] transition-colors"
+                     hover:bg-slate-900/[0.04] dark:hover:bg-white/[0.03] transition-colors"
           style={{
-            border: isSelected ? '2px solid rgba(99,102,241,0.7)' : '1px dashed rgba(255,255,255,0.05)',
+            border: isSelected ? '2px solid rgba(99,102,241,0.7)' : '1px dashed var(--border)',
             boxShadow: isSelected ? '0 0 0 3px rgba(99,102,241,0.18), inset 0 0 12px rgba(99,102,241,0.08)' : undefined,
           }}
         />
@@ -178,6 +179,9 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
   const hasTime = !isOff && !isLeave && day.start && day.end;
   const timeRange = hasTime ? `${fmt12(day.start)} – ${fmt12(day.end)}` : null;
   const wasEdited = (day.editCount ?? 0) > 0;
+  const isPlanned = !!day.source && day.source !== 'roster';   // future/plan cell — not yet reconciled
+  const isHoliday = day.marker === 'holiday';
+  const isWfhCell = day.isWfh && !isOff && !isLeave;
 
   return (
     <td className="border-b border-e" style={tdStyle}>
@@ -186,8 +190,15 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
         className="shift-cell w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5 relative"
         style={{
           background: isSelected ? `${style.bg}` : style.bg,
-          border: isSelected ? `2px solid rgba(99,102,241,0.8)` : `1px solid ${style.border}`,
-          boxShadow: isSelected ? `0 0 0 3px rgba(99,102,241,0.2), 0 0 16px rgba(99,102,241,0.15)` : undefined,
+          // WFH cells get a soft dotted texture so office vs home reads at a glance
+          backgroundImage: isWfhCell ? `radial-gradient(circle at 2px 2px, ${style.text}33 1px, transparent 1.6px)` : undefined,
+          backgroundSize: isWfhCell ? '7px 7px' : undefined,
+          // corrected (roster) cells are solid; planned/future cells are dashed + faded = "not yet reconciled"
+          border: isSelected ? `2px solid rgba(99,102,241,0.8)` : isPlanned ? `1px dashed ${style.border}` : `1px solid ${style.border}`,
+          opacity: isPlanned && !isSelected ? 0.8 : 1,
+          boxShadow: isSelected
+            ? `0 0 0 3px rgba(99,102,241,0.2), 0 0 16px rgba(99,102,241,0.15)`
+            : isHoliday ? `inset 0 2.5px 0 0 #fbbf24, 0 0 10px rgba(251,191,36,0.22)` : undefined,   // holiday gold ribbon
           transform: isSelected ? 'scale(1.05)' : undefined,
           zIndex: isSelected ? 10 : undefined,
           ['--cell-accent' as any]: style.text,
@@ -1710,6 +1721,17 @@ export default function SchedulePage() {
           <span className="flex items-center gap-1 text-xs text-slate-500">
             🏠 {ar ? 'بيت' : 'WFH'}
           </span>
+          {/* visual language added with the roster_days overlay */}
+          <span className="w-px h-4 self-center mx-1" style={{ background: 'var(--border)' }} />
+          <span className="flex items-center gap-1 text-xs text-slate-500" title={ar ? 'خلية مدمجة من التسوية المعتمدة' : 'Cell from the corrected reconciliation'}>
+            <span className="w-3 h-3 rounded inline-block" style={{ border: '1px solid var(--text-3)' }} /> {ar ? 'مُسوّى (معتمد)' : 'Reconciled'}
+          </span>
+          <span className="flex items-center gap-1 text-xs text-slate-500" title={ar ? 'مجدول/مستقبلي — لم يُسوَّ بعد' : 'Planned/future — not yet reconciled'}>
+            <span className="w-3 h-3 rounded inline-block" style={{ border: '1px dashed var(--text-3)', opacity: 0.8 }} /> {ar ? 'مجدول' : 'Planned'}
+          </span>
+          <span className="flex items-center gap-1 text-xs text-slate-500" title={ar ? 'عطلة رسمية' : 'Official holiday'}>
+            <span className="w-3 h-3 rounded inline-block" style={{ boxShadow: 'inset 0 2.5px 0 0 #fbbf24', border: '1px solid var(--border)' }} /> {ar ? 'عطلة' : 'Holiday'}
+          </span>
         </div>
       )}
 
@@ -1954,17 +1976,17 @@ export default function SchedulePage() {
 
                 {/* Grid table */}
                 {expanded && (
-                  <div className="overflow-x-auto" style={{ background: 'rgba(7,9,15,0.6)' }}>
+                  <div className="overflow-x-auto" style={{ background: 'var(--surface-2)' }}>
                     <table className="w-full border-collapse" style={{ minWidth: 700 }}>
                       <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
                           {/* Employee column */}
                           <th
                             className="text-start px-3 py-2.5 sticky start-0 z-10"
                             style={{
                               minWidth: 160,
-                              background: 'rgba(7,9,15,0.95)',
-                              borderInlineEnd: '1px solid rgba(255,255,255,0.06)',
+                              background: 'var(--surface)',
+                              borderInlineEnd: '1px solid var(--border)',
                             }}
                           >
                             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
@@ -1980,7 +2002,7 @@ export default function SchedulePage() {
                                 className="text-center px-1 py-2"
                                 style={{
                                   minWidth: colWidth,
-                                  borderInlineEnd: '1px solid rgba(255,255,255,0.04)',
+                                  borderInlineEnd: '1px solid var(--border)',
                                 }}
                               >
                                 <div
@@ -2005,15 +2027,15 @@ export default function SchedulePage() {
                         {func.employees.map((emp, idx) => (
                           <tr
                             key={emp.employeeId}
-                            className="group hover:bg-white/[0.02] transition-colors"
-                            style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}
+                            className="group hover:bg-slate-900/[0.03] dark:hover:bg-white/[0.02] transition-colors"
+                            style={{ borderBottom: '1px solid var(--border)' }}
                           >
                             {/* Employee cell */}
                             <td
                               className="px-3 py-1.5 sticky start-0 z-10"
                               style={{
-                                background: idx % 2 === 0 ? 'rgba(7,9,15,0.95)' : 'rgba(10,12,20,0.95)',
-                                borderInlineEnd: '1px solid rgba(255,255,255,0.06)',
+                                background: idx % 2 === 0 ? 'var(--surface)' : 'var(--surface-2)',
+                                borderInlineEnd: '1px solid var(--border)',
                               }}
                             >
                               <div className="flex items-center gap-2">
@@ -2030,7 +2052,7 @@ export default function SchedulePage() {
                                   {emp.name.charAt(0).toUpperCase()}
                                 </div>
                                 <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-slate-200 truncate max-w-[120px]">{emp.name}</p>
+                                  <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[120px]">{emp.name}</p>
                                   <p className="text-[9px] text-slate-500 truncate">
                                     #{emp.employeeNo}
                                     {emp.employmentType === 'intern' && (

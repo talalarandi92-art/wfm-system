@@ -73,10 +73,36 @@ improve/decline verdict; sick/OT shown as neutral context), `team-360`/`team-pro
 `scorecard` board (per-agent avg of weeks + weekly drill, all KPIs, unit-aware actuals),
 `agent-scores` (adherence composite + grade), `insights`, `hr-matrix`, `integrity`,
 `employee-master`, `coverage-impact`, `interval-headcount`, `schedule-change/swap/changes/revert`,
-`team-leaders`. Unit handling: AHT actual = minutes; Response-Time actual = Excel day-fraction ×1440 =
+`team-leaders`, `schedule-analysis`, `ot-exceptions` (+`/export`), `wfh-hr-report` (+`/export`),
+`schedule-lock`. Unit handling: AHT actual = minutes; Response-Time actual = Excel day-fraction ×1440 =
 min; pct KPIs are 0–1 fractions ×100.
 
+## Canonical metric definitions (ONE source of truth — every report must agree)
+Module consts at the top of `recon.controller.ts` so no two reports disagree and no one is wronged:
+- **`TRUE_OT`** = `ot_min + offday_ot_min + holiday_ot_min` — OT is in 3 DISJOINT buckets; summing
+  `ot_min` alone undercounts ~28% (live: 446k vs 651k min). Use everywhere "total OT" is meant.
+- **`CRED_LATE`/`CRED_EARLY`** = `sys_late/early_min BETWEEN 1 AND 240` — cross-midnight night shifts
+  (MD/MN/MNR, shift_end>1440) bleed the post-midnight tail into a multi-HOUR false late/early; cap at
+  4h, surface the rest as `excludedDq`. **Ranking gotcha:** `SUM(x) FILTER(...) DESC` sorts NULLS-FIRST
+  → floats null-valued (all-bleed) agents to the top; use `COALESCE(...,0)` + `DESC NULLS LAST`.
+- **`MATERNITY_7H`** = person_no `('12375','12434')` (Haya Mohanna, Shaima Saoud) — roster_days does
+  NOT flag maternity (they read expected_hours=9), so their ~2h/day early-out (legit 7h day) is
+  excluded from **EARLY-OUT only** (late-in + OT still count). Else they wrongly top "most early-out".
+- Applied to: roster-dashboard, agent-360, team-360, agent-progress, agent-period-compare, employee
+  list, insights, report-builder agg map, **HR matrix** (appends OT/Worked/Late/Early/Absent/Sick/Perm
+  columns). RAW per-row detail + CSV/Excel exports stay RAW (analyst ground truth).
+
 ## Reports intelligence
+- **OT & Exceptions** (`/ot-exceptions`, `roster-v2/ot-exceptions` + `/export`): overtime, tardiness,
+  permissions, absence — by agent (sortable/searchable) / function / hours. **Two HR-grade gotchas
+  baked in:** (1) **OT buckets are DISJOINT** — `ot_min` (regular workday) vs `offday_ot_min` (OT on
+  an OFF day) vs `holiday_ot_min` (public-holiday OT); each row is in exactly one. **Total = the SUM
+  of all three**, never `total − holiday`. Public-holiday-OT % = `holiday_ot_min / total`. (2)
+  **Cross-midnight bleed**: night shifts (MD/MN/MNR, `shift_end_min`>1440) make `sys_early_min` read
+  as a multi-hour false early-out (saw 29h). **Cap late-in/early-out at 240 min**; rows above the cap
+  → `excludedDq` (NOT held against the agent). Tardiness counts exclude permission-covered days
+  (`permission_type IS NULL`); excused days reported separately. `permission_duration` is a
+  TIME-WINDOW string → `parsePermMin` (end−start).
 - **Custom Report Builder** (`/report-builder`, `report-builder` endpoint): three maps — **F** fields
   / **K** KPIs / **G** groups. **Detail** mode = raw rows; **Summary** mode = grouped aggregates.
   Scorecard KPIs (Quality/AHT/FCR/Productivity/CTR/Quiz/PRR/Response-Time/Mistakes/Net Points) join via
@@ -94,3 +120,26 @@ min; pct KPIs are 0–1 fractions ×100.
 - Heavy report/export/recalc operations run as **async jobs** (don't block the request).
 - Honesty: never fabricate KPI granularity beyond the data (single-month entries); label any
   estimated/mock data; round half-up on percentages per the scorecard rules.
+
+## 2026-06-30 — Engine writes the master codes; schedule reads roster_days; in-system rebuild
+**Rules live in the engine, not in the data.** The recurring "report was right, then a refresh broke it" bug was
+caused by the corrected-June ingest leaving `hr_code`/`attendance_code` NULL — so the HR-Matrix `COALESCE(hr_code,
+attendance_code, shift_code,'OFF')` lost its SL/A/L/H/WFH semantics. FIX: `backend/scripts/recon-build.js` now
+computes the master codes (sick→`SL`, absence→`A`, off→`OFF`, leave→`L`/DL/UPL, holiday→`H`, comp→`COMP`,
+sep→`RES`/`TER`, WFH-working→`WFH`, office-working incl. forgot-to-punch→shift code) and `recon-ingest.js` MAPs
+`hr_code`/`attendance_code`. Every `recon-refresh.js` (or the in-system Upload) re-applies them → no report can
+silently regress. Rule of thumb: **if a report looks wrong after a refresh, the rule belongs in `recon-build.js`,
+not patched into the data.**
+- **Holiday-worked OT** in the engine: worked-a-scheduled-shift-on-an-official-holiday → whole shift = `holiday_ot_min`
+  (capped at net), regular OT=0, status "Official Holiday — <name> (worked)". Holidays auto-detect from Odoo Status
+  (HOLIDAY_RE) date-wide + editable `recon-config.json`.
+- **worked_min** zeroed/clamped on non-working presence (no rest-day system bleed); working ≤16h.
+- **In-system rebuild**: `POST /attendance-recon/recon-refresh` (perm `schedule.publish`) + Roster "Upload & Rebuild"
+  button drop the 5 month sources into `Desktop/new roster/` then spawn `recon-refresh.js`. Runbook: `docs/RECON_PIPELINE.md`.
+- **Schedule grid is now connected**: `schedule.service.ts` getGrid LEFT JOINs `roster_days` (person_no=employee_no,
+  work_date) and overlays the corrected cell — real WFH/holiday/SL/A, true-OT/late, and CANONICAL shift times
+  (`shift_start_min`/`shift_end_min`, not stale `attendance_records.scheduled_start`). Cell shows the shift code
+  DIRECT (no `-WFH` suffix; WFH via icon/texture); `source:'roster'|'schedule'`. Known follow-up: editCell/publish
+  still WRITE attendance_records; legacy `/attendance-recon` (dashboard/metric/overtime) still read the thin
+  `roster_daily`; Command Center mixes corrected + `/dashboard/summary` (attendance_records) — badge or retarget.
+- **Year Jan–May already consistent** (dry-run vs live = 0 material diffs); no rebuild. June = recon engine.

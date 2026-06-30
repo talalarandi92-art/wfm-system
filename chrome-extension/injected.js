@@ -88,7 +88,7 @@
       try {
         const clone = response.clone();
         const text  = await clone.text();
-        if (text && text[0] === '{' || text[0] === '[') {
+        if (text && (text[0] === '{' || text[0] === '[')) {
           const json   = JSON.parse(text);
           const opName = extractOpName(url, bodyText, json);
           dispatch('fetch_response', { url, opName, data: json, bodyText });

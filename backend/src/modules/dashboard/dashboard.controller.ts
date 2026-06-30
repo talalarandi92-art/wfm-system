@@ -38,7 +38,7 @@ export class DashboardController {
            SELECT CASE
              WHEN EXISTS (SELECT 1 FROM attendance_records WHERE attendance_date = CURRENT_DATE AND tenant_id = $1)
              THEN CURRENT_DATE
-             ELSE (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1)
+             ELSE (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE)
            END AS d
          )
          SELECT
@@ -76,9 +76,12 @@ export class DashboardController {
            COUNT(*) FILTER (WHERE attendance_marker = 'leave')            AS on_leave
          FROM attendance_records
          WHERE tenant_id = $1
+           -- never trend on future-dated SCHEDULE rows (attendance_records runs
+           -- ahead of real attendance); anchor strictly to data up to today.
+           AND attendance_date <= CURRENT_DATE
            AND attendance_date >= (
              SELECT MAX(attendance_date) - INTERVAL '13 days'
-             FROM attendance_records WHERE tenant_id = $1
+             FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE
            )
          GROUP BY attendance_date
          ORDER BY attendance_date`, [tid],
@@ -89,7 +92,7 @@ export class DashboardController {
         `WITH ref AS (
            SELECT COALESCE(
              (SELECT CURRENT_DATE WHERE EXISTS (SELECT 1 FROM attendance_records WHERE attendance_date = CURRENT_DATE AND tenant_id = $1)),
-             (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1)
+             (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE)
            ) AS d
          )
          SELECT f.name AS function_name,
@@ -109,11 +112,11 @@ export class DashboardController {
         `SELECT
            (SELECT COUNT(*) FROM attendance_records
             WHERE tenant_id = $1
-              AND attendance_date = (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1)
+              AND attendance_date = (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE)
               AND is_missing_punch = true AND attendance_marker = 'present') AS missing_punch_today,
            (SELECT COUNT(*) FROM attendance_records
             WHERE tenant_id = $1
-              AND attendance_date = (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1)
+              AND attendance_date = (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE)
               AND punch_late_minutes > 30) AS late_over_30,
            (SELECT COUNT(*) FROM employees
             WHERE tenant_id = $1 AND status = 'active'
@@ -134,8 +137,9 @@ export class DashboardController {
          COUNT(*) FILTER (WHERE ot_minutes > 0)                             AS ot_records
        FROM attendance_records
        WHERE tenant_id = $1
+         AND attendance_date <= CURRENT_DATE
          AND attendance_date >= DATE_TRUNC('month', (
-           SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1
+           SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE
          ))`,
       [tid],
     );

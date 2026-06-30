@@ -24,6 +24,8 @@ function isSyntheticAgent(agent: { agentId?: string; agentName?: string }): bool
   return !!agent.agentName && isSyntheticName(agent.agentName) && !id.match(/^\d/);
 }
 
+interface StatusState { status: string; statusRaw?: string; startedAt: number; name?: string; email?: string }
+
 @Injectable()
 export class SprinklrService {
   private readonly logger = new Logger(SprinklrService.name);
@@ -31,15 +33,38 @@ export class SprinklrService {
   // In-memory cache per tenant: tenantId → latest snapshot
   private readonly snapshotCache = new Map<string, SprinklrSnapshot & { receivedAt: number }>();
 
+  // ── Status-transition engine ──────────────────────────────────────────────
+  // Live current-status per agent: tenant → agentId → {status, since, …}.
+  // Rebuilt from the open rows of agent_status_events after a backend restart.
+  private readonly statusState = new Map<string, Map<string, StatusState>>();
+  private readonly statusHydrated = new Set<string>();
+  // Per-tenant ingest serialization (prevents status-engine races on concurrent pushes).
+  private readonly ingestChains = new Map<string, Promise<void>>();
+
   constructor(private readonly dataSource: DataSource) {}
 
   // ── Receive snapshot from Chrome Extension (or internal poller) ────────────
+  // Serialize ingests PER TENANT: two interleaved pushes for the same tenant
+  // could otherwise race the status-transition engine (close+insert are separate
+  // queries) and desync the in-memory "since". A per-tenant promise chain keeps
+  // each tenant's ingests strictly ordered without blocking other tenants.
   async ingestSnapshot(tenantId: string, snapshot: SprinklrSnapshot): Promise<void> {
+    const prev = this.ingestChains.get(tenantId) ?? Promise.resolve();
+    const run = prev.catch(() => {}).then(() => this.doIngestSnapshot(tenantId, snapshot));
+    this.ingestChains.set(tenantId, run.catch(() => {}));
+    return run;
+  }
+
+  private async doIngestSnapshot(tenantId: string, snapshot: SprinklrSnapshot): Promise<void> {
     const enriched = { ...snapshot, receivedAt: Date.now() };
     this.snapshotCache.set(tenantId, enriched);
 
     // Persist to DB for history + RTA integration
     await this.persistSnapshot(tenantId, snapshot);
+
+    // Diff agent statuses vs the previous snapshot → status-transition event log
+    // (powers live "in status for X min" counters + per-agent timeline). Never fatal.
+    await this.trackTransitions(tenantId, snapshot).catch(() => undefined);
 
     // Update headcount_intervals with live Sprinklr data
     await this.updateLiveCoverage(tenantId, snapshot);
@@ -55,6 +80,230 @@ export class SprinklrService {
     );
   }
 
+  // ── Status-transition engine ───────────────────────────────────────────────
+  // Rehydrate the live current-status map from the open event rows (after restart).
+  private async hydrateStatusState(tenantId: string): Promise<void> {
+    if (this.statusHydrated.has(tenantId)) return;
+    this.statusHydrated.add(tenantId);
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT sprinklr_agent_id, status, status_raw, agent_name, email, started_at
+           FROM agent_status_events WHERE tenant_id = $1 AND ended_at IS NULL`,
+        [tenantId],
+      );
+      const m = this.statusState.get(tenantId) ?? new Map<string, StatusState>();
+      for (const r of rows) {
+        m.set(r.sprinklr_agent_id, {
+          status: r.status, statusRaw: r.status_raw ?? undefined,
+          startedAt: new Date(r.started_at).getTime(),
+          name: r.agent_name ?? undefined, email: r.email ?? undefined,
+        });
+      }
+      this.statusState.set(tenantId, m);
+    } catch { /* table may not exist yet — engine stays in-memory only */ }
+  }
+
+  // Diff this snapshot's agent statuses against the in-memory map; on any change,
+  // close the agent's open event and open a new one (so durations are exact).
+  private async trackTransitions(tenantId: string, snapshot: SprinklrSnapshot): Promise<void> {
+    await this.hydrateStatusState(tenantId);
+    const m = this.statusState.get(tenantId) ?? new Map<string, StatusState>();
+    this.statusState.set(tenantId, m);
+
+    const capMs = (() => { const t = Date.parse(snapshot.capturedAt); return isNaN(t) ? Date.now() : t; })();
+    const capIso = new Date(capMs).toISOString();
+    const agents = (snapshot.agents || []).filter(a => a && a.agentId && a.status && !isSyntheticAgent(a));
+
+    for (const a of agents) {
+      const prev = m.get(a.agentId);
+      if (prev && prev.status === a.status) {
+        if (a.agentName && !prev.name) prev.name = a.agentName;     // enrich in place
+        if (a.email && !prev.email) prev.email = a.email;
+        continue;                                                   // unchanged → no DB write
+      }
+      // Status changed (or new agent): close the open row, open a fresh one.
+      if (prev) {
+        await this.dataSource.query(
+          `UPDATE agent_status_events
+              SET ended_at = $3::timestamptz,
+                  duration_sec = GREATEST(0, EXTRACT(EPOCH FROM ($3::timestamptz - started_at))::int)
+            WHERE tenant_id = $1 AND sprinklr_agent_id = $2 AND ended_at IS NULL`,
+          [tenantId, a.agentId, capIso],
+        ).catch(() => {});
+      }
+      await this.dataSource.query(
+        `INSERT INTO agent_status_events
+           (tenant_id, sprinklr_agent_id, agent_name, email, status, status_raw, started_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz)
+         ON CONFLICT (tenant_id, sprinklr_agent_id) WHERE ended_at IS NULL DO NOTHING`,
+        [tenantId, a.agentId, a.agentName ?? null, a.email ?? null, a.status, a.statusRaw ?? null, capIso],
+      ).catch(() => {});
+      m.set(a.agentId, { status: a.status, statusRaw: a.statusRaw, startedAt: capMs, name: a.agentName, email: a.email });
+    }
+  }
+
+  // Live current status + how long each agent has been in it (from the in-memory map).
+  async getStatusNow(tenantId: string) {
+    await this.hydrateStatusState(tenantId); // serve open events even right after a restart
+    const m = this.statusState.get(tenantId);
+    if (!m) return [];
+    const now = Date.now();
+    return [...m.entries()]
+      .map(([agentId, s]) => ({
+        agentId, name: s.name ?? '', email: s.email ?? '',
+        status: s.status, statusRaw: s.statusRaw ?? '',
+        since: new Date(s.startedAt).toISOString(),
+        seconds: Math.max(0, Math.round((now - s.startedAt) / 1000)),
+      }))
+      .sort((a, b) => b.seconds - a.seconds);
+  }
+
+  // Full status timeline for one agent on a given Kuwait day (defaults to today).
+  async getStatusTimeline(tenantId: string, agentId: string, date?: string) {
+    if (!agentId) return [];
+    const day = date || new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+    // Include any event that OVERLAPS the Kuwait day (not only ones starting in it)
+    // so an overnight/MD agent in one status since before midnight still shows; the
+    // duration is clamped to the day window.
+    return this.dataSource.query(
+      `SELECT status, status_raw, started_at, ended_at,
+              GREATEST(0, EXTRACT(EPOCH FROM (
+                LEAST(COALESCE(ended_at, NOW()), (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Kuwait'))
+                - GREATEST(started_at, ($3::date::timestamp AT TIME ZONE 'Asia/Kuwait'))
+              ))::int) AS duration_sec
+         FROM agent_status_events
+        WHERE tenant_id = $1 AND sprinklr_agent_id = $2
+          AND started_at < (($3::date + 1)::timestamp AT TIME ZONE 'Asia/Kuwait')
+          AND (ended_at IS NULL OR ended_at >= ($3::date::timestamp AT TIME ZONE 'Asia/Kuwait'))
+        ORDER BY started_at`,
+      [tenantId, agentId, day],
+    ).catch(() => []);
+  }
+
+  // ── Agent 360 — one call, everything about one agent ───────────────────────
+  // Live status (+ how long), today's daily stats (logins, idle/hold/busy/break
+  // splits, AHT/FRT/contacts/utilization, per-status minutes, break breakdown),
+  // and the full status timeline. Powers the Live-page Agent 360 drawer.
+  async getAgent360(tenantId: string, agentId: string, date?: string) {
+    if (!agentId) return { agentId, date: null, daily: null, live: null, timeline: [] };
+    const day = date || new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+    const [daily] = await this.dataSource.query(
+      `SELECT s.stat_date::text AS stat_date, s.sprinklr_agent_id, s.agent_name, s.agent_email,
+              s.employee_id, e.employee_no,
+              TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en, ''))) AS employee_name,
+              COALESCE(f.name, '—') AS function_name,
+              s.first_login, s.last_logout,
+              s.total_working_minutes, s.idle_no_case_minutes, s.idle_with_case_minutes,
+              s.busy_minutes, s.break_minutes, s.offline_minutes,
+              s.contacts_received, s.aht_seconds, s.avg_response_seconds,
+              s.status_minutes, s.break_breakdown
+         FROM agent_daily_stats s
+         LEFT JOIN employees e ON e.id = s.employee_id
+         LEFT JOIN functions f ON f.id = e.function_id
+        WHERE s.tenant_id = $1 AND s.sprinklr_agent_id = $3
+        ORDER BY (s.stat_date = $2::date AND s.total_working_minutes > 0) DESC,
+                 (s.total_working_minutes > 0) DESC,
+                 (s.stat_date = $2::date) DESC,
+                 s.stat_date DESC
+        LIMIT 1`,
+      [tenantId, day, agentId],
+    ).catch(() => []);
+
+    // utilization = busy / working (handle time share of logged-in productive time)
+    let utilizationPct: number | null = null;
+    if (daily && daily.total_working_minutes > 0) {
+      utilizationPct = Math.round((Number(daily.busy_minutes) / Number(daily.total_working_minutes)) * 100);
+    }
+
+    await this.hydrateStatusState(tenantId); // live status survives a backend restart
+    const st = this.statusState.get(tenantId)?.get(agentId);
+    const live = st
+      ? { status: st.status, statusRaw: st.statusRaw ?? null,
+          since: new Date(st.startedAt).toISOString(),
+          seconds: Math.max(0, Math.round((Date.now() - st.startedAt) / 1000)),
+          name: st.name ?? null, email: st.email ?? null }
+      : null;
+
+    // Align the timeline to the day we actually selected for the daily stats.
+    const tlDay = daily?.stat_date ? String(daily.stat_date).slice(0, 10) : day;
+    const timeline = await this.getStatusTimeline(tenantId, agentId, tlDay);
+    return { agentId, date: day, daily: daily ? { ...daily, utilizationPct } : null, live, timeline };
+  }
+
+  // ── Agent Board — one live row per agent: status + duration + today's stats ──
+  // Merges the live snapshot (status, statusSec) with each agent's latest daily
+  // stats (contacts, AHT, idle, hold, busy, break, working) and adherence/
+  // conformance. Powers the rich Wallboard agent table + the in-app agent board.
+  async getAgentBoard(tenantId: string) {
+    await this.hydrateStatusState(tenantId);
+    const snap = await this.getLatestSnapshot(tenantId);
+    const stMap = this.statusState.get(tenantId);
+    const nowMs = Date.now();
+
+    // Latest daily-stats row per agent.
+    const dailyRows = await this.dataSource.query(
+      `SELECT DISTINCT ON (s.sprinklr_agent_id)
+              s.sprinklr_agent_id, s.stat_date::text AS stat_date, s.agent_name, s.agent_email,
+              e.employee_no, TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en, ''))) AS employee_name,
+              COALESCE(f.name, '—') AS function_name,
+              s.contacts_received, s.aht_seconds, s.avg_response_seconds,
+              s.idle_no_case_minutes, s.idle_with_case_minutes, s.busy_minutes,
+              s.break_minutes, s.total_working_minutes
+         FROM agent_daily_stats s
+         LEFT JOIN employees e ON e.id = s.employee_id
+         LEFT JOIN functions f ON f.id = e.function_id
+        WHERE s.tenant_id = $1
+        ORDER BY s.sprinklr_agent_id, s.stat_date DESC`,
+      [tenantId],
+    ).catch(() => []);
+    const dailyMap = new Map<string, any>(dailyRows.map((r: any) => [r.sprinklr_agent_id, r]));
+
+    // Latest adherence/conformance per agent.
+    const adhRows = await this.dataSource.query(
+      `SELECT DISTINCT ON (sprinklr_agent_id) sprinklr_agent_id, adherence_pct, conformance_pct
+         FROM adherence_daily
+        WHERE tenant_id = $1 AND sprinklr_agent_id IS NOT NULL
+        ORDER BY sprinklr_agent_id, stat_date DESC`,
+      [tenantId],
+    ).catch(() => []);
+    const adhMap = new Map<string, any>(adhRows.map((r: any) => [r.sprinklr_agent_id, r]));
+
+    // Base the board on the live agents (who is on right now), enriched with stats.
+    const liveAgents = snap?.agents ?? [];
+    const board = liveAgents
+      .filter(a => a && a.agentId && !isSyntheticAgent(a))
+      .map(a => {
+        const d = dailyMap.get(a.agentId);
+        const adh = adhMap.get(a.agentId);
+        const st = stMap?.get(a.agentId);
+        const statusSec = st && st.status === a.status ? Math.max(0, Math.round((nowMs - st.startedAt) / 1000)) : null;
+        return {
+          agentId: a.agentId,
+          name: d?.employee_name || a.agentName || d?.agent_name || a.agentId,
+          email: a.email || d?.agent_email || null,
+          employeeNo: d?.employee_no ?? null,
+          functionName: d?.function_name ?? null,
+          status: a.status,
+          statusRaw: a.statusRaw ?? null,
+          statusSec,
+          contacts: d?.contacts_received ?? null,
+          ahtSec: d?.aht_seconds != null ? Math.round(Number(d.aht_seconds)) : null,
+          frtSec: d?.avg_response_seconds != null ? Math.round(Number(d.avg_response_seconds)) : null,
+          idleMin: d?.idle_no_case_minutes ?? null,
+          holdMin: d?.idle_with_case_minutes ?? null,
+          busyMin: d?.busy_minutes ?? null,
+          breakMin: d?.break_minutes ?? null,
+          workingMin: d?.total_working_minutes ?? null,
+          adherencePct: adh?.adherence_pct != null ? Number(adh.adherence_pct) : null,
+          conformancePct: adh?.conformance_pct != null ? Number(adh.conformance_pct) : null,
+        };
+      });
+
+    const order: Record<string, number> = { available: 0, idle: 1, busy: 2, break: 3, away: 3, offline: 4, unknown: 5 };
+    board.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || String(a.name).localeCompare(String(b.name)));
+    return { capturedAt: snap?.capturedAt ?? null, isStale: snap?.isStale ?? true, count: board.length, agents: board };
+  }
+
   // ── Get latest cached snapshot (memory first, DB fallback after restart) ───
   async getLatestSnapshot(tenantId: string) {
     let snap = this.snapshotCache.get(tenantId);
@@ -62,11 +311,24 @@ export class SprinklrService {
     // Memory cache empty (e.g. backend restarted) → hydrate from DB
     if (!snap) {
       try {
+        // Prefer the newest RICH snapshot. A bridge that dies mid-page-load leaves
+        // degenerate tail captures (e.g. 1 queue / 2 agents) as the literal newest
+        // rows; taking those made the Live page look "empty" after a restart even
+        // though a full, slightly-older capture exists. "Rich" = agent_count within
+        // 50% of the recent max — so a 137-agent capture beats a 2-agent tail, but
+        // if only small captures exist we still serve the best available.
         const rows = await this.dataSource.query(
-          `SELECT captured_at, queues_json, agents_json
-           FROM integration_snapshots
-           WHERE tenant_id = $1 AND source = 'sprinklr'
-           ORDER BY captured_at DESC LIMIT 1`,
+          `WITH recent AS (
+             SELECT captured_at, queues_json, agents_json, agent_count
+               FROM integration_snapshots
+              WHERE tenant_id = $1 AND source = 'sprinklr'
+              ORDER BY captured_at DESC LIMIT 500
+           ), mx AS (SELECT MAX(agent_count) m FROM recent)
+           SELECT captured_at, queues_json, agents_json
+             FROM recent, mx
+            WHERE agent_count >= GREATEST(1, mx.m * 0.5)
+            ORDER BY captured_at DESC
+            LIMIT 1`,
           [tenantId],
         );
         if (rows?.length) {
@@ -156,6 +418,22 @@ export class SprinklrService {
 
     const atRisk = queues.filter(q => (q.slaPct ?? 100) < 80);
 
+    // Enrich each agent with how long they've been in their CURRENT status
+    // (from the live status-transition map). Only attached when the tracked
+    // status matches the snapshot status — so stale/hydrated data stays honest.
+    await this.hydrateStatusState(tenantId); // populate the map even right after a restart
+    const stMap = this.statusState.get(tenantId);
+    const nowMs = Date.now();
+    const agentsEnriched = stMap
+      ? snap.agents.map(a => {
+          const st = stMap.get(a.agentId);
+          if (st && st.status === a.status) {
+            return { ...a, statusSince: new Date(st.startedAt).toISOString(), statusSec: Math.max(0, Math.round((nowMs - st.startedAt) / 1000)) };
+          }
+          return a;
+        })
+      : snap.agents;
+
     return {
       capturedAt: snap.capturedAt,
       staleSec:   snap.staleSec,
@@ -163,7 +441,7 @@ export class SprinklrService {
       summary: { totalWaiting, totalInProgress, totalAvailable, totalBusy, avgSla: +avgSla.toFixed(1) },
       atRisk,
       queues,
-      agents:  snap.agents,
+      agents:  agentsEnriched,
       // Faithful mirror of the Sprinklr station right-rail (Queue Summary +
       // Agent Status + Agent State) scraped by the extension.
       stationSummary: (snap as any).stationSummary ?? null,
@@ -288,11 +566,29 @@ export class SprinklrService {
       // stats are already extracted into daily tables. With the bridge now near-live
       // (~5s) the table would grow unbounded, so prune snapshots older than 48h.
       // Run occasionally (not every insert) to keep ingest cheap.
+      // SAFETY: never prune the most-recent meaningful capture. If the bridge has
+      // been offline for >48h, an unguarded prune would DELETE the last full
+      // snapshot and the Live page would collapse to all-zeros. We always keep the
+      // newest row that carries data (agents, or >1 queue) so there is always
+      // something to hydrate + show (flagged stale), even after a long outage.
       if (Math.random() < 0.05) {
+        // Only delete rows OLDER than the most-recent RICH snapshot (agent_count
+        // within 50% of the max). When the bridge is healthy this is ~now, so old
+        // rows prune normally (bounded). When the bridge has been offline for days,
+        // the most-recent rich row is that last full capture — so it (and anything
+        // newer) is preserved and the Live page never collapses to all-zeros.
         await this.dataSource.query(
           `DELETE FROM integration_snapshots
             WHERE tenant_id = $1 AND source = 'sprinklr'
-              AND captured_at < NOW() - INTERVAL '48 hours'`,
+              AND captured_at < NOW() - INTERVAL '48 hours'
+              AND captured_at < (
+                SELECT MAX(captured_at) FROM integration_snapshots
+                 WHERE tenant_id = $1 AND source = 'sprinklr'
+                   AND agent_count >= GREATEST(1, (
+                     SELECT MAX(agent_count) * 0.5 FROM integration_snapshots
+                      WHERE tenant_id = $1 AND source = 'sprinklr'
+                   ))
+              )`,
           [tenantId],
         ).catch(() => {});
       }
@@ -1836,6 +2132,7 @@ export class SprinklrService {
               s.employee_id,
               e.employee_no,
               TRIM(CONCAT(e.first_name_en, ' ', COALESCE(e.last_name_en,''))) AS employee_name,
+              COALESCE(f.name, '—') AS function_name,
               s.first_login, s.last_logout,
               s.total_working_minutes, s.idle_no_case_minutes, s.idle_with_case_minutes,
               s.busy_minutes, s.break_minutes, s.offline_minutes,
@@ -1843,6 +2140,7 @@ export class SprinklrService {
               s.status_minutes, s.extra, s.break_breakdown
        FROM agent_daily_stats s
        LEFT JOIN employees e ON e.id = s.employee_id
+       LEFT JOIN functions f ON f.id = e.function_id
        WHERE s.tenant_id = $1 AND s.stat_date BETWEEN $2::date AND $3::date
        ORDER BY s.stat_date DESC, s.total_working_minutes DESC`,
       [tenantId, from, to],
@@ -1877,13 +2175,14 @@ export class SprinklrService {
   //  CONTACT FORECAST — weekday-seasonal moving average over daily history
   // ═══════════════════════════════════════════════════════════════════════════
   async getContactForecast(tenantId: string, daysAhead = 7) {
-    // Two volume sources, take the stronger per day:
-    //  1. agent_daily_stats.contacts_received (per-agent widget metrics)
-    //  2. channel_demand_daily.contacts (queue cumulative counters — broader)
+    // Volume sources, take the strongest per day:
+    //  1. agent_daily_stats.contacts_received (per-agent Sprinklr widget metrics)
+    //  2. channel_demand_daily.contacts (Sprinklr queue cumulative counters)
+    //  3. contact_volume_daily.offered (Ameyo/imported daily volume — the real, dense source)
     const history: { stat_date: string; contacts: string; agents: string; working: string }[] =
       await this.dataSource.query(
         `SELECT d.stat_date,
-                GREATEST(COALESCE(a.contacts, 0), COALESCE(q.contacts, 0)) AS contacts,
+                GREATEST(COALESCE(a.contacts, 0), COALESCE(q.contacts, 0), COALESCE(v.offered, 0)) AS contacts,
                 COALESCE(a.agents, 0)  AS agents,
                 COALESCE(a.working, 0) AS working
          FROM (
@@ -1892,6 +2191,9 @@ export class SprinklrService {
            UNION
            SELECT DISTINCT demand_date FROM channel_demand_daily
            WHERE tenant_id = $1 AND demand_date >= CURRENT_DATE - INTERVAL '28 days'
+           UNION
+           SELECT DISTINCT vol_date FROM contact_volume_daily
+           WHERE tenant_id = $1 AND vol_date >= CURRENT_DATE - INTERVAL '28 days'
          ) d(stat_date)
          LEFT JOIN (
            SELECT stat_date, SUM(contacts_received) AS contacts, COUNT(*) AS agents,
@@ -1902,6 +2204,10 @@ export class SprinklrService {
            SELECT demand_date, SUM(contacts) AS contacts
            FROM channel_demand_daily WHERE tenant_id = $1 GROUP BY demand_date
          ) q ON q.demand_date = d.stat_date
+         LEFT JOIN (
+           SELECT vol_date, SUM(offered) AS offered
+           FROM contact_volume_daily WHERE tenant_id = $1 GROUP BY vol_date
+         ) v ON v.vol_date = d.stat_date
          ORDER BY d.stat_date ASC`,
         [tenantId],
       );
@@ -1917,56 +2223,68 @@ export class SprinklrService {
     const overallAvg = withData.length
       ? withData.reduce((s, h) => s + h.contacts, 0) / withData.length : 0;
 
-    // ── Methodology (Cleveland, "Call Center Management on Fast Forward"):
-    //  - weekday seasonality index over trailing window
-    //  - linear trend on day index (least squares)
-    //  - P50 (median) and P90 bands per weekday — size staffing to P90, not P50
-    //  - MAPE backtest (one-day-ahead) when ≥14 days to report honest accuracy
-    const weekday: Record<number, number[]> = {};
-    withData.forEach(h => {
-      const wd = new Date(h.date).getDay();
-      (weekday[wd] = weekday[wd] || []).push(h.contacts);
-    });
-
-    const pct = (arr: number[], p: number) => {
-      if (!arr.length) return 0;
-      const s = [...arr].sort((a, b) => a - b);
-      const idx = Math.min(s.length - 1, Math.max(0, Math.ceil((p / 100) * s.length) - 1));
-      return s[idx];
-    };
-
-    // Linear trend (least squares over day index)
-    let slope = 0;
-    if (withData.length >= 7) {
-      const n = withData.length;
-      const xs = withData.map((_, i) => i);
-      const ys = withData.map(h => h.contacts);
-      const xb = xs.reduce((a, b) => a + b, 0) / n;
-      const yb = ys.reduce((a, b) => a + b, 0) / n;
-      const num = xs.reduce((s, x, i) => s + (x - xb) * (ys[i] - yb), 0);
-      const den = xs.reduce((s, x) => s + (x - xb) ** 2, 0);
-      slope = den > 0 ? num / den : 0;
+    // Avg handle time (last 28d) → translate forecast volume into required HC.
+    // required HC ≈ contacts × AHT(sec) / 3600 / productiveHoursPerAgent.
+    const [ahtRow] = await this.dataSource.query(
+      `SELECT AVG(aht_seconds)::float a FROM agent_daily_stats
+        WHERE tenant_id = $1 AND aht_seconds > 0 AND stat_date >= CURRENT_DATE - INTERVAL '28 days'`,
+      [tenantId],
+    ).catch(() => [{ a: null }]);
+    let avgAhtSec: number | null = ahtRow?.a ? Math.round(ahtRow.a) : null;
+    // Fallback: derive AHT from the Ameyo daily volume (talk_seconds / handled).
+    if (!avgAhtSec) {
+      const [t] = await this.dataSource.query(
+        `SELECT SUM(talk_seconds)::float ts, SUM(handled)::float h FROM contact_volume_daily
+          WHERE tenant_id = $1 AND vol_date >= CURRENT_DATE - INTERVAL '28 days'`,
+        [tenantId],
+      ).catch(() => [{}]);
+      if (t?.h > 0 && t?.ts > 0) avgAhtSec = Math.round(t.ts / t.h);
     }
+    const PRODUCTIVE_HOURS = 6.5; // 9h shift − 1h break − ~20% shrinkage
+    const reqHc = (contacts: number): number | null =>
+      avgAhtSec ? Math.ceil((contacts * avgAhtSec) / 3600 / PRODUCTIVE_HOURS) : null;
+
+    // ── Methodology: anchor MAGNITUDE to the recent level, apply a day-of-week
+    //    SHAPE. A flat trailing average over-forecasts after a downward level
+    //    shift (e.g. a campaign/peak ending): the 28-day mean can be ~2× the
+    //    current daily volume. So we take the recent median as the level and
+    //    multiply by a scale-free weekday index — predictions track reality now.
+    const median = (arr: number[]) => {
+      if (!arr.length) return 0;
+      const s = [...arr].sort((a, b) => a - b); const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+    // Recent level = median of the last 14 days with data (robust to partial days).
+    const recent = withData.slice(-14).map(h => h.contacts);
+    const recentLevel = recent.length ? median(recent) : overallAvg;
+
+    // Day-of-week shape = weekday mean / overall mean (scale-free → unaffected by
+    // the absolute level), clamped so a thin/noisy weekday can't swing it wildly.
+    const weekday: Record<number, number[]> = {};
+    withData.forEach(h => { const wd = new Date(h.date).getDay(); (weekday[wd] = weekday[wd] || []).push(h.contacts); });
+    const wdIndex = (wd: number) => {
+      const v = weekday[wd];
+      if (!v?.length || overallAvg <= 0) return 1;
+      return Math.min(1.4, Math.max(0.7, (v.reduce((s, x) => s + x, 0) / v.length) / overallAvg));
+    };
 
     const forecast: {
       date: string; predictedContacts: number; p50: number; p90: number; method: string;
+      requiredHc: number | null; requiredHcP90: number | null;
     }[] = [];
     for (let i = 1; i <= daysAhead; i++) {
       const d  = new Date(Date.now() + 3 * 3600e3 + i * 86400e3);
       const ds = d.toISOString().slice(0, 10);
-      const wd = d.getDay();
-      const wdVals = weekday[wd] ?? [];
-      const base = wdVals.length
-        ? wdVals.reduce((s, v) => s + v, 0) / wdVals.length
-        : overallAvg;
-      const trendAdj = slope * (withData.length - 1 + i);
-      const predicted = Math.max(0, base + (withData.length >= 7 ? trendAdj - slope * (withData.length - 1) : 0));
+      const predicted = Math.max(0, Math.round(recentLevel * wdIndex(d.getDay())));
+      const p90v = Math.round(predicted * 1.3);   // ~+30% SLA peak buffer over the point forecast
       forecast.push({
         date: ds,
-        predictedContacts: Math.round(predicted),
-        p50: Math.round(wdVals.length ? pct(wdVals, 50) : overallAvg),
-        p90: Math.round(wdVals.length ? pct(wdVals, 90) : overallAvg * 1.3),
-        method: wdVals.length ? `weekday-seasonal+trend(${wdVals.length})` : 'overall-avg',
+        predictedContacts: predicted,
+        p50: predicted,
+        p90: p90v,
+        method: `recent-level(${recent.length}d, med ${Math.round(recentLevel)}) × dow-shape`,
+        requiredHc: reqHc(predicted),
+        requiredHcP90: reqHc(p90v),
       });
     }
 
@@ -1988,6 +2306,8 @@ export class SprinklrService {
     return {
       history: hist,
       forecast,
+      staffing: { avgAhtSec, productiveHoursPerAgent: PRODUCTIVE_HOURS, approximate: true,
+                  note: avgAhtSec ? 'Approximate: required HC ≈ contacts × AHT / 3600 / productive-hours (volume and AHT may come from different sources). requiredHcP90 sizes to the P90 day.' : 'No AHT data yet — required HC unavailable.' },
       accuracy: { mape, backtestDays: withData.length >= 14 ? withData.length - 7 : 0,
                   note: 'MAPE = mean absolute % error of one-day-ahead backtest. <15% strong, <25% usable.' },
       confidence: withData.length >= 28 ? 'high'

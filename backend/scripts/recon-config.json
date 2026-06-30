@@ -1,0 +1,6 @@
+{
+  "_note": "Editable reconciliation config. Edit the holidays list whenever needed, then re-run: node scripts/recon-refresh.js. Anyone who worked a SCHEDULED shift on one of these dates gets the whole shift credited as HOLIDAY OT, and the row is labelled 'Official Holiday'.",
+  "holidays": [
+    { "date": "2026-06-16", "name": "Hijri New Year" }
+  ]
+}

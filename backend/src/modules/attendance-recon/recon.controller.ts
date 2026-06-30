@@ -4,6 +4,8 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -16,6 +18,29 @@ import { RosterIngestionService } from './roster-ingestion.service';
 // falls back to the analyst's working folder for local verification.
 const SRC_DIR = process.env.RECON_SOURCE_DIR || 'C:/Users/t.bassam/Desktop/WFM System/My work/Oddo Ameyo Sprinkler';
 const SCHEDULE = process.env.RECON_SCHEDULE_FILE || 'C:/Users/t.bassam/Desktop/WFM System/My work/WFM/CC Schedule 26 V3.0 (24).xlsx';
+// The CORRECTED engine (recon-refresh.js) reads its 5 monthly sources from here. In-system
+// "rebuild" uploads land here (matched by filename) before the engine runs.
+const RECON_NEW_DIR = process.env.RECON_NEW_DIR || 'C:/Users/t.bassam/Desktop/new roster/';
+
+/* ── Canonical roster_days metric expressions — ONE source of truth so every report
+ *  agrees (no report should silently undercount or inflate).
+ *  TRUE_OT: OT lives in THREE DISJOINT buckets — ot_min (regular workday) +
+ *    offday_ot_min (OT worked on the employee's OFF day) + holiday_ot_min (OT on a
+ *    public holiday). Each roster_days row sits in exactly one bucket, so the real
+ *    total is their SUM. Summing ot_min alone undercounts (~28% on the live data).
+ *  CRED_LATE/CRED_EARLY: a credible late-in/early-out is 1..240 min. Cross-midnight
+ *    night shifts (MD/MN/MNR, shift_end>1440) make the post-midnight session tail
+ *    read as a multi-hour false late/early — an artifact, not the agent leaving early
+ *    — so values >4h are excluded from credible-tardiness counts (HR-safe).
+ *  MATERNITY: the maternity-7h mothers (Haya Mohanna 12375, Shaima Saoud 12434) work a
+ *    legitimate 7h day, so their ~2h/day early-out is STRUCTURAL/approved, not a
+ *    violation — roster_days stores it vs the 9h end (it does not flag maternity), so we
+ *    exclude these two from credible EARLY-OUT everywhere (late-in is still counted).
+ *    Same fairness carve-out as the WFH HR report. */
+const MATERNITY_7H = "('12375','12434')";
+const TRUE_OT = '(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))';
+const CRED_LATE = '(sys_late_min BETWEEN 1 AND 240)';
+const CRED_EARLY = `(sys_early_min BETWEEN 1 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`;
 
 @ApiTags('Attendance Reconciliation')
 @ApiBearerAuth()
@@ -37,6 +62,7 @@ export class ReconController {
     @Req() req: any,
     @Query('from') from?: string, @Query('to') to?: string, @Query('q') q?: string,
     @Query('functionId') functionId?: string, @Query('presence') presence?: string,
+    @Query('shift') shift?: string,
     @Query('includeInactive') includeInactive?: string,
     @Query('sort') sort?: string, @Query('limit') limit = '40', @Query('offset') offset = '0',
   ) {
@@ -50,6 +76,12 @@ export class ReconController {
     if (functionId) { params.push(functionId); where += ` AND r.role_function=(SELECT name FROM functions WHERE id=$${params.length})`; }
     if (includeInactive !== '1') where += ` AND r.is_active`;
 
+    // distinct shift codes available in the current scope (for the shift filter dropdown) — before the shift filter itself
+    const shiftCodes = (await this.ds.query(
+      `SELECT DISTINCT shift_code FROM roster_days r WHERE ${where} AND shift_code IS NOT NULL AND shift_code <> '' ORDER BY shift_code`, params)).map((r: any) => r.shift_code);
+    // now apply the shift filter to summary + rows
+    if (shift) { params.push(shift.toUpperCase()); where += ` AND upper(r.shift_code) = $${params.length}`; }
+
     const summary = (await this.ds.query(
       `SELECT COUNT(*)::int days,
               COUNT(*) FILTER (WHERE presence='office')::int office,
@@ -57,33 +89,49 @@ export class ReconController {
               COUNT(*) FILTER (WHERE presence='off')::int off,
               COUNT(*) FILTER (WHERE presence='leave')::int leave,
               COUNT(*) FILTER (WHERE presence='absent')::int absent,
-              COUNT(*) FILTER (WHERE sys_late_min>0)::int late_days,
-              COUNT(*) FILTER (WHERE sys_early_min>0)::int early_days,
+              COUNT(*) FILTER (WHERE ${CRED_LATE})::int late_days,
+              COUNT(*) FILTER (WHERE ${CRED_EARLY})::int early_days,
               COUNT(*) FILTER (WHERE mismatch IS NOT NULL)::int mismatches,
-              ROUND(SUM(ot_min)/60.0)::int ot_hours,
+              ROUND(SUM(${TRUE_OT})/60.0)::int ot_hours,
+              ROUND(SUM(COALESCE(ot_min,0))/60.0)::int regular_ot_hours,
+              ROUND(SUM(COALESCE(offday_ot_min,0))/60.0)::int offday_ot_hours,
+              ROUND(SUM(COALESCE(holiday_ot_min,0))/60.0)::int holiday_ot_hours,
+              COUNT(*) FILTER (WHERE COALESCE(offday_ot_min,0) > 0)::int offday_ot_days,
+              COUNT(*) FILTER (WHERE (${TRUE_OT}) > 0)::int ot_days,
               ROUND(SUM(worked_min)/60.0)::int worked_hours,
               COUNT(*) FILTER (WHERE permission IS NOT NULL)::int permissions,
+              COUNT(*) FILTER (WHERE sick IS NOT NULL)::int sick_days,
               ROUND(AVG(adherence_pct),1) conformance_pct
          FROM roster_days r WHERE ${where}`, params))[0];
+
+    // OT by function (so the OT spotlight can highlight the heavy teams — e.g. Refund this month)
+    const otByFunction = await this.ds.query(
+      `SELECT COALESCE(r.role_function, r.function_name, '—') fn,
+              ROUND(SUM(${TRUE_OT})/60.0)::int ot_h,
+              ROUND(SUM(COALESCE(offday_ot_min,0))/60.0)::int offday_h,
+              COUNT(*) FILTER (WHERE (${TRUE_OT}) > 0)::int ot_days
+         FROM roster_days r WHERE ${where} GROUP BY 1 HAVING SUM(${TRUE_OT}) > 0 ORDER BY ot_h DESC LIMIT 8`, params);
 
     const sortMap: Record<string,string> = { date_desc:'r.work_date DESC, r.name', date_asc:'r.work_date ASC, r.name',
       late:'r.sys_late_min DESC', early:'r.sys_early_min DESC', ot:'r.ot_min DESC', name:'r.name ASC, r.work_date DESC',
       adherence:'r.adherence_pct ASC NULLS LAST', mismatch:'(r.mismatch IS NOT NULL) DESC, r.work_date DESC' };
     const order = sortMap[sort||'date_desc'] || sortMap.date_desc;
-    const lim = Math.min(Number(limit)||40, 200), off = Number(offset)||0;
+    const lim = Math.min(Number(limit)||40, 50000), off = Number(offset)||0; // cap raised so "Export" can pull the full filtered range, not just one page
     const rows = await this.ds.query(
       `SELECT r.employee_no, COALESCE(r.person_no,r.employee_no) person_no, COALESCE(r.clean_name,r.name) name,
               COALESCE(r.role_function,r.function_name) function_name, r.role_category, r.expected_hours,
-              r.work_date::text date, r.day_name, r.status, r.presence,
+              r.work_date::text date, COALESCE(r.day_name, TRIM(TO_CHAR(r.work_date,'Day'))) day_name, r.status, r.presence,
               r.punch_in_min, r.punch_out_min, r.sys_login_min, r.sys_logout_min, r.login_src,
-              r.late_min, r.early_min, r.ot_min, r.permission, r.comp_off, r.sick, r.conforming,
-              r.shift_code, r.shift_start_min, r.shift_end_min, r.sys_late_min, r.sys_early_min, r.adherence_pct, r.mismatch,
+              r.late_min, r.early_min, r.ot_min, r.offday_ot_min, r.holiday_ot_min,
+              (COALESCE(r.ot_min,0)+COALESCE(r.offday_ot_min,0)+COALESCE(r.holiday_ot_min,0)) total_ot,
+              r.permission, r.permission_type, r.permission_duration, r.comp_off, r.sick, r.conforming,
+              r.shift_code, r.shift_start_min, r.shift_end_min, r.sys_late_min, r.sys_early_min, r.adherence_pct, r.mismatch, r.data_quality,
               r.team_manager, r.team_group, r.gender, r.worked_min, n.note
          FROM roster_days r
          LEFT JOIN roster_notes n ON n.tenant_id=r.tenant_id AND n.employee_no=r.employee_no AND n.work_date=r.work_date
         WHERE ${where} ORDER BY ${order} LIMIT ${lim} OFFSET ${off}`, params);
 
-    return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, rows };
+    return { from: dFrom, to: dTo, range, total: summary.days, limit: lim, offset: off, summary, otByFunction, shiftCodes, rows };
   }
 
   /** Highly-dynamic agent dashboard over roster_days: KPIs + rankings by every
@@ -127,9 +175,9 @@ export class ReconController {
              COUNT(*) FILTER (WHERE presence='office')::int office, COUNT(*) FILTER (WHERE presence='wfh')::int wfh,
              COUNT(*) FILTER (WHERE presence='off')::int off, COUNT(*) FILTER (WHERE presence='leave')::int leave,
              COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int late_days, COALESCE(SUM(sys_late_min),0)::int late_min,
-             COUNT(*) FILTER (WHERE sys_early_min>0)::int early_days, COALESCE(SUM(sys_early_min),0)::int early_min,
-             COALESCE(SUM(ot_before_min),0)::int ot_before, COALESCE(SUM(ot_after_min),0)::int ot_after,
+             COUNT(*) FILTER (WHERE ${CRED_LATE})::int late_days, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int late_min,
+             COUNT(*) FILTER (WHERE ${CRED_EARLY})::int early_days, COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}),0)::int early_min,
+             COALESCE(SUM(ot_before_min),0)::int ot_before, COALESCE(SUM(ot_after_min),0)::int ot_after, COALESCE(SUM(${TRUE_OT}),0)::int ot_total,
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
              ROUND(AVG(adherence_pct),1) conformance
         FROM roster_days r WHERE ${w}`, p))[0];
@@ -145,8 +193,8 @@ export class ReconController {
     const rank = (sel: string, order: string) => rankW(w, sel, order);
 
     const [mostLate, mostEarly, otAfter, otBefore, mostAbsent, mostSick, lowestConf, mostPerm] = await Promise.all([
-      rankW(wTardy, `SUM(sys_late_min)::int`, `SUM(sys_late_min) DESC`),   // tardiness: 8h roles excluded by default
-      rankW(wTardy, `SUM(sys_early_min)::int`, `SUM(sys_early_min) DESC`),
+      rankW(wTardy, `COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int`, `SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}) DESC NULLS LAST`),   // 8h roles excluded + cross-midnight bleed capped at 240min
+      rankW(wTardy, `COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}),0)::int`, `SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}) DESC NULLS LAST`),
       rank(`SUM(ot_after_min)::int`, `SUM(ot_after_min) DESC`),
       rank(`SUM(ot_before_min)::int`, `SUM(ot_before_min) DESC`),
       rank(`COUNT(*) FILTER (WHERE presence='absent')::int`, `COUNT(*) FILTER (WHERE presence='absent') DESC`),
@@ -157,7 +205,7 @@ export class ReconController {
 
     const dist = async (col: string) => this.ds.query(
       `SELECT COALESCE(${col},'—') k, COUNT(*)::int n, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
-              ROUND(AVG(adherence_pct),1) conformance, COALESCE(SUM(sys_late_min),0)::int late, COALESCE(SUM(ot_after_min),0)::int ot_after
+              ROUND(AVG(adherence_pct),1) conformance, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int late, COALESCE(SUM(ot_after_min),0)::int ot_after
          FROM roster_days r WHERE ${w} GROUP BY ${col} ORDER BY n DESC`, p);
     const [byShift, byFunction, byRole, byTeamManager, byPresence] = await Promise.all([
       dist('shift_code'), dist('role_function'), dist('role_category'), dist('team_manager'), dist('presence'),
@@ -214,6 +262,7 @@ export class ReconController {
       gender:{col:'gender',label:'Gender'}, location:{col:'location',label:'Location'},
       shiftCode:{col:'shift_code',label:'Shift'}, originalShift:{col:'original_shift_code',label:'Original Shift'},
       shiftStart:{col:'shift_start_min',label:'Shift Start',time:true}, shiftEnd:{col:'shift_end_min',label:'Shift End',time:true},
+      shiftStartHour:{col:'FLOOR((shift_start_min%1440)/60.0)::int',label:'Shift Start Hour'},
       attendanceStatus:{col:'attendance_status',label:'Attendance Status'}, hrStatus:{col:'hr_code',label:'HR Code'},
       punchIn:{col:'punch_in_min',label:'Punch In',time:true}, punchOut:{col:'punch_out_min',label:'Punch Out',time:true},
       sysLogin:{col:'sys_login_min',label:'Sys Login',time:true}, sysLogout:{col:'sys_logout_min',label:'Sys Logout',time:true},
@@ -236,12 +285,16 @@ export class ReconController {
       leaveDays:{agg:`COUNT(*) FILTER (WHERE presence='leave')`,label:'Leave Days'}, sickDays:{agg:`COUNT(*) FILTER (WHERE presence='sick')`,label:'Sick Days'},
       absenceDays:{agg:`COUNT(*) FILTER (WHERE presence='absent')`,label:'Absence Days'}, wfhDays:{agg:`COUNT(*) FILTER (WHERE presence='wfh')`,label:'WFH Days'},
       officeDays:{agg:`COUNT(*) FILTER (WHERE presence='office')`,label:'Office Days'},
+      shrinkageDays:{agg:`COUNT(*) FILTER (WHERE presence IN ('absent','sick','leave'))`,label:'Shrinkage Days'},
+      earlyDays:{agg:`COUNT(*) FILTER (WHERE ${CRED_EARLY})`,label:'Early-Out Days'},
+      coveragePct:{agg:`ROUND(100.0*COUNT(*) FILTER (WHERE presence IN ('office','wfh'))/NULLIF(COUNT(*) FILTER (WHERE shift_start_min IS NOT NULL),0),1)`,label:'Coverage %'},
+      shrinkagePct:{agg:`ROUND(100.0*COUNT(*) FILTER (WHERE presence IN ('absent','sick','leave'))/NULLIF(COUNT(*) FILTER (WHERE shift_start_min IS NOT NULL),0),1)`,label:'Shrinkage %'},
       permissionCount:{agg:`COUNT(*) FILTER (WHERE permission_type IS NOT NULL)`,label:'Permissions'}, compDays:{agg:`COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)`,label:'COMP Days'},
-      lateMin:{agg:'SUM(sys_late_min)',label:'Late (min)'}, lateDays:{agg:'COUNT(*) FILTER (WHERE sys_late_min>0)',label:'Late Days'},
-      earlyMin:{agg:'SUM(sys_early_min)',label:'Early Out (min)'}, otMin:{agg:'SUM(ot_min)',label:'OT (min)'},
+      lateMin:{agg:'SUM(sys_late_min) FILTER (WHERE sys_late_min BETWEEN 1 AND 240)',label:'Late (min)'}, lateDays:{agg:'COUNT(*) FILTER (WHERE sys_late_min BETWEEN 1 AND 240)',label:'Late Days'},
+      earlyMin:{agg:`SUM(sys_early_min) FILTER (WHERE sys_early_min BETWEEN 1 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`,label:'Early Out (min)'}, otMin:{agg:'SUM(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))',label:'OT (min)'},
       otBefore:{agg:'SUM(ot_before_min)',label:'OT Before (min)'}, otAfter:{agg:'SUM(ot_after_min)',label:'OT After (min)'},
       offdayOt:{agg:'SUM(offday_ot_min)',label:'OFF-day OT'}, holidayOt:{agg:'SUM(holiday_ot_min)',label:'Holiday OT'},
-      avgLate:{agg:'ROUND(AVG(sys_late_min) FILTER (WHERE sys_late_min>0))',label:'Avg Late'}, avgWorked:{agg:'ROUND(AVG(worked_min) FILTER (WHERE worked_min>0))',label:'Avg Worked (min)'},
+      avgLate:{agg:'ROUND(AVG(sys_late_min) FILTER (WHERE sys_late_min BETWEEN 1 AND 240))',label:'Avg Late'}, avgWorked:{agg:'ROUND(AVG(worked_min) FILTER (WHERE worked_min>0))',label:'Avg Worked (min)'},
       conformance:{agg:'ROUND(AVG(adherence_pct),1)',label:'Conformance %'}, missingPunch:{agg:'COUNT(*) FILTER (WHERE missing_punch)',label:'Missing Punch'},
       missingSystem:{agg:'COUNT(*) FILTER (WHERE missing_system)',label:'Missing System'}, mismatch:{agg:'COUNT(*) FILTER (WHERE mismatch IS NOT NULL)',label:'Mismatch'},
       agents:{agg:'COUNT(DISTINCT COALESCE(person_no,employee_no))',label:'Agents'},
@@ -256,6 +309,7 @@ export class ReconController {
       day:{col:'day_name',label:'Day'}, week:{col:'week_number',label:'Week'}, month:{col:'month_name',label:'Month'}, date:{col:'work_date::text',label:'Date'},
       agent:{col:'COALESCE(clean_name,name)',label:'Agent'}, function:{col:'COALESCE(role_function,function_name)',label:'Function'}, role:{col:'role_category',label:'Role'}, teamLeader:{col:'team_manager',label:'Team Leader'},
       group:{col:'team_group',label:'Group'}, shift:{col:'shift_code',label:'Shift'}, status:{col:'attendance_status',label:'Attendance Status'}, lateCategory:{col:'late_category',label:'Late Category'},
+      shiftStartHour:{col:'FLOOR((shift_start_min%1440)/60.0)::int',label:'Shift Start Hour'},
     };
 
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
@@ -327,6 +381,601 @@ export class ReconController {
     return { ok: true };
   }
 
+  /** Shift FAIRNESS over the canonical roster (roster_days): per-person morning/
+   *  evening/night/midnight load + weekend-OFF fairness, with an optional dedicated
+   *  NIGHT TEAM carve-out (the user's choice — fixed team vs fair distribution), and a
+   *  rebalance proposal for the fair-rotation pool (female-midnight aware). Source =
+   *  the uploaded schedule (roster_days), deduped by person_no via is_active. */
+  @Get('roster-v2/fairness')
+  @RequirePermissions('attendance.view_team')
+  async fairness(
+    @Req() req: any, @Query('from') from?: string, @Query('to') to?: string,
+    @Query('function') functionName?: string, @Query('teamLeader') teamLeader?: string,
+  ) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo];
+    let w = `r.tenant_id=$1 AND r.work_date BETWEEN $2 AND $3 AND r.is_active`;
+    const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
+    if (functionName) w += ` AND ${add('r.role_function=$$', functionName)}`;
+    if (teamLeader)   w += ` AND ${add('r.team_manager=$$', teamLeader)}`;
+
+    // shift CODE (held in shift_category) → category. midnight = MD*/MN*, night = N*,
+    // evening = E*/C*/EE*, morning = M*/B*/AM*.
+    const catExpr = `CASE WHEN U ~ '^(MD|MN)' THEN 'midnight' WHEN U ~ '^N' THEN 'night' WHEN U ~ '^(E|C|EE)' THEN 'evening' WHEN U ~ '^(M|B|AM)' THEN 'morning' ELSE 'other' END`
+      .replace(/U/g, `upper(coalesce(shift_category,shift_code,''))`);
+    const work = `r.presence IN ('office','wfh')`;
+    const rows: any[] = await this.ds.query(`
+      WITH r AS (SELECT *, ${catExpr} cat FROM roster_days)
+      SELECT r.person_no, MAX(r.clean_name) name, MAX(r.role_function) fn, MAX(r.gender) gender,
+             COUNT(*) FILTER (WHERE ${work})::int wd,
+             COUNT(*) FILTER (WHERE ${work} AND cat='morning')::int morning,
+             COUNT(*) FILTER (WHERE ${work} AND cat='evening')::int evening,
+             COUNT(*) FILTER (WHERE ${work} AND cat='night')::int night,
+             COUNT(*) FILTER (WHERE ${work} AND cat='midnight')::int midnight,
+             COUNT(*) FILTER (WHERE r.presence='off')::int off_days,
+             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) IN (5,6))::int weekend_off,
+             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) NOT IN (5,6))::int weekday_off,
+             (nt.person_no IS NOT NULL) night_team
+        FROM r LEFT JOIN fairness_night_team nt ON nt.tenant_id=$1 AND nt.person_no=r.person_no
+       WHERE ${w}
+       GROUP BY r.person_no, nt.person_no
+      HAVING COUNT(*) FILTER (WHERE ${work}) >= 1`, p);
+
+    const mean = (a: number[]) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0;
+    const sdev = (a: number[]) => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(mean(a.map(x => (x - m) ** 2))); };
+    // currently-employed persons (employee_identity.is_active = any employee row active) — used to
+    // keep the FORWARD rebalance proposal to schedulable staff while the report keeps full history.
+    const activeNow = new Set((await this.ds.query(`SELECT person_no FROM employee_identity WHERE tenant_id=$1 AND is_active`, [t])).map((x: any) => x.person_no));
+    // total weekend (Fri/Sat) dates in the window — the denominator for "what share of
+    // available weekends did this person actually get off".
+    const totalWeekendDays = Number((await this.ds.query(
+      `SELECT COUNT(DISTINCT work_date)::int n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND EXTRACT(DOW FROM work_date) IN (5,6)`, [t, dFrom, dTo]))[0]?.n || 0);
+    const agents = rows.map(r => {
+      const wd = r.wd || 1, nm = r.night + r.midnight, off = r.off_days || 0;
+      // dominant shift category + how "stuck" on it (never rotates) — rotation health
+      const cats: [string, number][] = [['morning', r.morning], ['evening', r.evening], ['night', r.night], ['midnight', r.midnight]];
+      const dom = cats.reduce((a, b) => b[1] > a[1] ? b : a, ['none', 0] as [string, number]);
+      const distinctCats = cats.filter(c => c[1] > 0).length;
+      return {
+        personNo: r.person_no, name: r.name, fn: r.fn, gender: r.gender, nightTeam: r.night_team,
+        currentlyActive: activeNow.has(r.person_no),
+        workedDays: r.wd, morning: r.morning, evening: r.evening, night: r.night, midnight: r.midnight,
+        // shift mix (% of working days) — for the per-person distribution / heatmap bar
+        morningPct: Math.round(100 * r.morning / wd), eveningPct: Math.round(100 * r.evening / wd),
+        nightPct: Math.round(100 * r.night / wd), midOnlyPct: Math.round(100 * r.midnight / wd),
+        // rotation health: which category dominates, by how much, and how many categories they touch
+        dominantCat: dom[0], dominantPct: Math.round(100 * dom[1] / wd), distinctCats,
+        nightMidPct: Math.round(100 * nm / wd), midnightPct: Math.round(100 * r.midnight / wd),
+        // OFF distribution: weekday vs weekend split + share of all weekends in the period
+        off, weekdayOff: r.weekday_off, weekendOff: r.weekend_off,
+        weekdayOffPct: off ? Math.round(100 * r.weekday_off / off) : 0,
+        weekendOffPct: off ? Math.round(100 * r.weekend_off / off) : 0,
+        weekendOffShare: totalWeekendDays ? Math.round(100 * r.weekend_off / totalWeekendDays) : 0,
+      };
+    }).sort((a, b) => b.nightMidPct - a.nightMidPct);
+
+    const fairPool = agents.filter(a => !a.nightTeam);
+    const team = agents.filter(a => a.nightTeam);
+    const poolPcts = fairPool.map(a => a.nightMidPct);
+    const poolAvg = Math.round(mean(poolPcts) * 10) / 10;
+    const sd = sdev(poolPcts);
+    const woff = agents.map(a => a.weekendOff);
+    const woffSd = sdev(woff);
+
+    // The rebalance proposal is FORWARD-looking → only currently-employed people
+    // (a leaver's historical load stays in the report, but we won't propose re-balancing them).
+    const withDelta = fairPool.filter(a => a.currentlyActive).map(a => ({ ...a, delta: Math.round(a.nightMidPct - poolAvg) }));
+    const reduceNights = withDelta.filter(a => a.delta >= 15).sort((a, b) => b.delta - a.delta).slice(0, 10)
+      .map(a => ({ name: a.name, fn: a.fn, nightMidPct: a.nightMidPct, midnight: a.midnight, over: a.delta }));
+    const addNights = withDelta.filter(a => a.delta <= -15).sort((a, b) => a.delta - b.delta).slice(0, 10)
+      .map(a => ({ name: a.name, fn: a.fn, gender: a.gender, nightMidPct: a.nightMidPct, under: -a.delta, canMidnight: String(a.gender || '').toLowerCase().startsWith('m') }));
+    const weekendOffDeprived = agents.filter(a => a.off > 0 && activeNow.has(a.personNo)).sort((a, b) => a.weekendOff - b.weekendOff).slice(0, 8)
+      .map(a => ({ name: a.name, fn: a.fn, weekendOff: a.weekendOff, off: a.off, weekendOffPct: a.weekendOffPct, weekendOffShare: a.weekendOffShare }));
+
+    // OFF distribution — weekday vs weekend split per current person, most weekend-deprived first.
+    const poolWeekendShares = fairPool.filter(a => a.currentlyActive).map(a => a.weekendOffShare);
+    const weekendShareAvg = Math.round(mean(poolWeekendShares) * 10) / 10;
+    const offDistribution = agents.filter(a => a.currentlyActive && a.off > 0)
+      .sort((a, b) => a.weekendOffShare - b.weekendOffShare)
+      .map(a => ({ name: a.name, fn: a.fn, nightTeam: a.nightTeam, off: a.off, weekdayOff: a.weekdayOff, weekendOff: a.weekendOff, weekdayOffPct: a.weekdayOffPct, weekendOffPct: a.weekendOffPct, weekendOffShare: a.weekendOffShare }));
+
+    // JUSTICE INDEX — who deserves relief in the NEXT schedule: carrying MORE night/mid than the fair
+    // average AND getting FEWER weekends off than average. Higher debt = compensate first.
+    const justice = fairPool.filter(a => a.currentlyActive).map(a => {
+      const nightExcess = Math.max(0, a.nightMidPct - poolAvg);
+      const weekendDeficit = Math.max(0, weekendShareAvg - a.weekendOffShare);
+      return { name: a.name, fn: a.fn, nightMidPct: a.nightMidPct, weekendOffShare: a.weekendOffShare, nightExcess: Math.round(nightExcess), weekendDeficit: Math.round(weekendDeficit), debt: Math.round(nightExcess + weekendDeficit) };
+    }).filter(a => a.debt > 0).sort((a, b) => b.debt - a.debt).slice(0, 12);
+
+    // ROTATION HEALTH — fair-pool current staff stuck ≥80% on ONE shift category (rarely rotate).
+    const stuckOnOneShift = fairPool.filter(a => a.currentlyActive && a.dominantPct >= 80)
+      .sort((a, b) => b.dominantPct - a.dominantPct)
+      .map(a => ({ name: a.name, fn: a.fn, dominantCat: a.dominantCat, dominantPct: a.dominantPct, distinctCats: a.distinctCats, workedDays: a.workedDays }));
+
+    // REBALANCE PLAN — concrete "apply" suggestion: pair the most over-loaded with the most under-loaded
+    // (night/mid), female-aware (females take NIGHT only), and pair weekend-deprived with weekend-rich.
+    const over = fairPool.filter(a => a.currentlyActive && a.nightMidPct - poolAvg >= 15).sort((a, b) => b.nightMidPct - a.nightMidPct);
+    const under = fairPool.filter(a => a.currentlyActive && poolAvg - a.nightMidPct >= 15).sort((a, b) => a.nightMidPct - b.nightMidPct);
+    const nightMoves = Array.from({ length: Math.min(over.length, under.length, 8) }, (_, i) => {
+      const o = over[i], u = under[i];
+      const female = !String(u.gender || '').toLowerCase().startsWith('m');
+      // suggested # of night/mid days to shift = half the gap between them, in working-day terms
+      const shifts = Math.max(1, Math.round((o.nightMidPct - u.nightMidPct) / 100 * Math.min(o.workedDays, u.workedDays) / 2));
+      return { fromName: o.name, fromFn: o.fn, fromPct: o.nightMidPct, toName: u.name, toFn: u.fn, toPct: u.nightMidPct, take: female ? 'night-only' : 'night/midnight', shifts };
+    });
+    const wkRich = fairPool.filter(a => a.currentlyActive && a.weekendOffShare > weekendShareAvg).sort((a, b) => b.weekendOffShare - a.weekendOffShare);
+    const weekendMoves = weekendOffDeprived.slice(0, 6).map((dep: any, i: number) => ({
+      giveName: dep.name, giveFn: dep.fn, giveShare: dep.weekendOffShare,
+      fromName: wkRich[i]?.name || null, fromShare: wkRich[i]?.weekendOffShare ?? null,
+    })).filter((m: any) => m.fromName);
+    const rebalancePlan = { nightMoves, weekendMoves };
+
+    return {
+      from: dFrom, to: dTo,
+      summary: {
+        activeAgents: agents.length, nightTeamCount: team.length, fairPoolCount: fairPool.length,
+        fairPoolAvgNightMidPct: poolAvg, nightMidStdev: Math.round(sd * 10) / 10,
+        fairnessScore: Math.max(0, Math.round(100 - sd)),               // lower spread = fairer
+        weekendOffAvg: Math.round(mean(woff) * 10) / 10,
+        weekendOffMin: woff.length ? Math.min(...woff) : 0, weekendOffMax: woff.length ? Math.max(...woff) : 0,
+        weekendFairnessScore: Math.max(0, Math.round(100 - woffSd * 3)),
+        totalWeekendDays, weekendShareAvg,                              // weekend-OFF share denominators
+      },
+      agents, nightTeam: team,
+      proposal: { poolAvgNightMidPct: poolAvg, weekendShareAvg, reduceNights, addNights, weekendOffDeprived },
+      offDistribution, justice, stuckOnOneShift, rebalancePlan,
+    };
+  }
+
+  /** List the designated night-team members. */
+  @Get('roster-v2/fairness/night-team')
+  @RequirePermissions('attendance.view_team')
+  async fairnessNightTeamList(@Req() req: any) {
+    const rows = await this.ds.query(`SELECT person_no, clean_name FROM fairness_night_team WHERE tenant_id=$1 ORDER BY clean_name`, [req.user.tenantId]);
+    return { members: rows };
+  }
+
+  /** Add/remove a person from the night team (the user's choice: fixed team vs fair pool). */
+  @Put('roster-v2/fairness/night-team')
+  @RequirePermissions('attendance.view_team')
+  async fairnessNightTeamSet(@Req() req: any, @Body() body: { personNo: string; name?: string; member: boolean }) {
+    const t = req.user.tenantId;
+    if (!body?.personNo) throw new BadRequestException('personNo required');
+    if (body.member)
+      await this.ds.query(`INSERT INTO fairness_night_team(tenant_id,person_no,clean_name) VALUES($1,$2,$3)
+        ON CONFLICT (tenant_id,person_no) DO UPDATE SET clean_name=EXCLUDED.clean_name`, [t, body.personNo, body.name || null]);
+    else
+      await this.ds.query(`DELETE FROM fairness_night_team WHERE tenant_id=$1 AND person_no=$2`, [t, body.personNo]);
+    return { ok: true };
+  }
+
+  /** Excel export of the full shift-fairness picture (reuses the fairness() compute):
+   *  per-agent load+mix+OFF split, relief priority, stuck-on-one-shift, night team. */
+  @Get('roster-v2/fairness/export')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Shift Fairness → multi-sheet Excel (load/mix/OFF split + relief + stuck + night team)' })
+  async fairnessExport(
+    @Req() req: any, @Res() res: Response, @Query('from') from?: string, @Query('to') to?: string,
+    @Query('function') functionName?: string, @Query('teamLeader') teamLeader?: string,
+  ) {
+    const d: any = await this.fairness(req, from, to, functionName, teamLeader);
+    const wb = new ExcelJS.Workbook(); wb.creator = 'WFM System';
+    const sheet = (name: string, cols: { header: string; key: string; width?: number }[], rows: any[], color = 'FF6366F1') => {
+      const ws = wb.addWorksheet(name); ws.columns = cols.map(c => ({ ...c, width: c.width || 14 }));
+      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
+      ws.views = [{ state: 'frozen', ySplit: 1 }]; ws.autoFilter = { from: 'A1', to: { row: 1, column: cols.length } };
+      rows.forEach(r => ws.addRow(r));
+    };
+    sheet('Shift_Fairness', [
+      { header: 'Employee', key: 'name', width: 24 }, { header: 'Function', key: 'fn', width: 20 },
+      { header: 'Active', key: 'currentlyActive', width: 8 }, { header: 'Night Team', key: 'nightTeam', width: 10 },
+      { header: 'Worked', key: 'workedDays', width: 8 }, { header: 'Morning%', key: 'morningPct' }, { header: 'Evening%', key: 'eveningPct' },
+      { header: 'Night%', key: 'nightPct' }, { header: 'Midnight%', key: 'midOnlyPct' }, { header: 'Night+Mid%', key: 'nightMidPct' },
+      { header: 'Dominant', key: 'dominantCat' }, { header: 'Dominant%', key: 'dominantPct' }, { header: '#Cats', key: 'distinctCats' },
+      { header: 'OFF', key: 'off' }, { header: 'Weekday OFF', key: 'weekdayOff' }, { header: 'Weekend OFF', key: 'weekendOff' },
+      { header: 'Weekday OFF%', key: 'weekdayOffPct' }, { header: 'Weekend OFF%', key: 'weekendOffPct' }, { header: 'Weekend Share%', key: 'weekendOffShare' },
+    ], d.agents);
+    sheet('Relief_Priority', [
+      { header: 'Rank', key: 'rank', width: 6 }, { header: 'Employee', key: 'name', width: 24 }, { header: 'Function', key: 'fn', width: 20 },
+      { header: 'Night+Mid%', key: 'nightMidPct' }, { header: 'Weekend Share%', key: 'weekendOffShare' },
+      { header: 'Night Excess', key: 'nightExcess' }, { header: 'Weekend Deficit', key: 'weekendDeficit' }, { header: 'Debt', key: 'debt' },
+    ], d.justice.map((r: any, i: number) => ({ ...r, rank: i + 1 })), 'FFA78BFA');
+    sheet('Stuck_On_One_Shift', [
+      { header: 'Employee', key: 'name', width: 24 }, { header: 'Function', key: 'fn', width: 20 },
+      { header: 'Stuck On', key: 'dominantCat', width: 12 }, { header: 'Share%', key: 'dominantPct' }, { header: '#Cats', key: 'distinctCats' }, { header: 'Worked', key: 'workedDays' },
+    ], d.stuckOnOneShift, 'FFF59E0B');
+    sheet('Night_Team', [
+      { header: 'Employee', key: 'name', width: 24 }, { header: 'Function', key: 'fn', width: 20 }, { header: 'Night+Mid%', key: 'nightMidPct' }, { header: 'Midnight days', key: 'midnight' },
+    ], d.nightTeam, 'FF0EA5E9');
+    sheet('Summary', [{ header: 'Metric', key: 'k', width: 32 }, { header: 'Value', key: 'v', width: 18 }],
+      Object.entries(d.summary).map(([k, v]) => ({ k, v })), 'FF22C55E');
+
+    res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="Shift_Fairness_${d.from}_${d.to}.xlsx"` });
+    res.end(Buffer.from(await wb.xlsx.writeBuffer()));
+  }
+
+  /** HOURLY analytics (0-23) per function over the canonical roster (roster_days):
+   *  coverage (scheduled/working/%), permissions, shrinkage (count/%), tardiness count,
+   *  and OT (before/after) per hour — with a TOTAL row. Cross-midnight aware. The
+   *  professional hour-by-hour staffing + exception picture HR/RTA asks for. */
+  @Get('roster-v2/hourly')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Per-hour (0-23) coverage / permissions / shrinkage / tardiness / OT by function' })
+  async hourly(
+    @Req() req: any, @Query('from') from?: string, @Query('to') to?: string,
+    @Query('function') functionName?: string, @Query('teamLeader') teamLeader?: string,
+  ) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo];
+    let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL`;
+    const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
+    if (functionName) w += ` AND ${add('COALESCE(role_function,function_name)=$$', functionName)}`;
+    if (teamLeader)   w += ` AND ${add('team_manager=$$', teamLeader)}`;
+
+    // a person covers hour h (its [h*60,h*60+60) bucket) if the window [start,start+len)
+    // — normalized to minute-of-day, cross-midnight & negative aware — overlaps it. One
+    // helper for EVERY window: the shift, the OT-before/after extensions, and the
+    // late-arrival / early-departure gaps. So the headcount truly reflects who is at seat.
+    const cov = (start: string, len: string) => {
+      const a0 = `(((${start})%1440+1440)%1440)`, b0 = `(${a0}+(${len}))`;
+      return `((${a0} < h.hh*60+60 AND LEAST(${b0},1440) > h.hh*60) OR (${b0}>1440 AND (${b0}-1440) > h.hh*60))`;
+    };
+    // overlap MINUTES of a window [start,start+len) with hour h's bucket — exact "how many
+    // OT / permission minutes happened in this hour" (cross-midnight wrap handled as two segments).
+    const covMin = (start: string, len: string) => {
+      const a0 = `(((${start})%1440+1440)%1440)`, e = `(${a0}+(${len}))`, h0 = `h.hh*60`, h1 = `(h.hh*60+60)`;
+      const s1 = `GREATEST(0, LEAST(LEAST(${e},1440), ${h1}) - GREATEST(${a0}, ${h0}))`;
+      const s2 = `(CASE WHEN ${e}>1440 THEN GREATEST(0, LEAST(${e}-1440, ${h1}) - ${h0}) ELSE 0 END)`;
+      return `(${s1} + ${s2})`;
+    };
+    const SHIFT = cov('r.ss', 'r.se-r.ss');
+    const pres = `r.presence IN ('office','wfh')`;
+    const credL = `r.sys_late_min BETWEEN 1 AND 240`;
+    const credE = `r.sys_early_min BETWEEN 1 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
+    const grid = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      r AS (SELECT COALESCE(role_function,function_name) fn, person_no, employee_no, shift_start_min ss, shift_end_min se,
+                   presence, permission_type, sys_late_min, sys_early_min, ot_before_min, ot_after_min, adherence_pct
+              FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL)
+      SELECT r.fn, h.hh AS "hour",
+        COUNT(*) FILTER (WHERE ${SHIFT})::int scheduled,
+        COUNT(*) FILTER (WHERE ${SHIFT} AND ${pres})::int working,
+        COUNT(*) FILTER (WHERE ${SHIFT} AND r.presence IN ('absent','sick','leave'))::int shrinkage,
+        COUNT(*) FILTER (WHERE ${SHIFT} AND r.permission_type IS NOT NULL)::int permission,
+        ROUND(AVG(r.adherence_pct) FILTER (WHERE ${SHIFT} AND ${pres}),1) conformance,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NULL AND ${cov('r.ss', 'r.sys_late_min')})::int tardiness,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NOT NULL AND ${cov('r.ss', 'r.sys_late_min')})::int perm_late,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NULL AND ${cov('r.se-r.sys_early_min', 'r.sys_early_min')})::int early_out,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NOT NULL AND ${cov('r.se-r.sys_early_min', 'r.sys_early_min')})::int perm_early,
+        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0 AND ${cov('r.ss-r.ot_before_min', 'r.ot_before_min')})::int ot_before_hc,
+        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_after_min,0)>0 AND ${cov('r.se', 'r.ot_after_min')})::int ot_after_hc,
+        COALESCE(SUM(${covMin('r.ss-r.ot_before_min', 'r.ot_before_min')}) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0),0)::int ot_before_min,
+        COALESCE(SUM(${covMin('r.se', 'r.ot_after_min')}) FILTER (WHERE ${pres} AND COALESCE(r.ot_after_min,0)>0),0)::int ot_after_min,
+        COALESCE(SUM(${covMin('r.ss', 'r.sys_late_min')}) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NOT NULL),0)::int perm_late_min,
+        COALESCE(SUM(${covMin('r.se-r.sys_early_min', 'r.sys_early_min')}) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NOT NULL),0)::int perm_early_min
+      FROM r CROSS JOIN h
+      GROUP BY r.fn, h.hh`, p);
+    const [{ days }] = await this.ds.query(`SELECT COUNT(DISTINCT work_date)::int days FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL`, p);
+    // OT hours (and %) per function — the "كم ساعة" summary; per-hour we show the headcount boost.
+    const otAgg = await this.ds.query(`SELECT COALESCE(role_function,function_name) fn,
+        COALESCE(SUM(ot_before_min) FILTER (WHERE presence IN ('office','wfh')),0)::int ob,
+        COALESCE(SUM(ot_after_min)  FILTER (WHERE presence IN ('office','wfh')),0)::int oa
+      FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL GROUP BY 1`, p);
+    const otByFn: Record<string, { ob: number; oa: number }> = {}; let obAll = 0, oaAll = 0;
+    for (const r of otAgg) { otByFn[r.fn || '—'] = { ob: r.ob, oa: r.oa }; obAll += r.ob; oaAll += r.oa; }
+
+    const FLD = ['scheduled', 'working', 'shrinkage', 'permission', 'tardiness', 'perm_late', 'early_out', 'perm_early', 'ot_before_hc', 'ot_after_hc', 'ot_before_min', 'ot_after_min', 'perm_late_min', 'perm_early_min'];
+    const blank = () => Array.from({ length: 24 }, (_, hour) => { const o: any = { hour, _cs: 0, _cw: 0 }; FLD.forEach(f => o[f] = 0); return o; });
+    const fnMap: Record<string, any[]> = {}; const all = blank();
+    for (const g of grid) {
+      const fn = g.fn || '—'; if (!fnMap[fn]) fnMap[fn] = blank();
+      const c = fnMap[fn][g.hour], a = all[g.hour];
+      for (const f of FLD) { c[f] += g[f]; a[f] += g[f]; }
+      if (g.conformance != null) { const wgt = g.working || 1; c._cs += g.conformance * wgt; c._cw += wgt; a._cs += g.conformance * wgt; a._cw += wgt; }
+    }
+    const enrich = (hours: any[], ot: { ob: number; oa: number }) => {
+      const av = (n: number) => days ? +(n / days).toFixed(1) : 0;
+      const rows = hours.map(h => {
+        // running cascade: base working → after OT (boosted) → after permission → effective
+        const hcWithOt = h.working + h.ot_before_hc + h.ot_after_hc;     // ← headcount AFTER overtime
+        const hcAfterPerm = hcWithOt - h.perm_late - h.perm_early;        // ← headcount AFTER permissions
+        const effective = Math.max(0, hcAfterPerm - h.tardiness - h.early_out);
+        return {
+          hour: h.hour, scheduled: h.scheduled, working: h.working,
+          hcWithOt, hcAfterPerm, effective,
+          shrinkage: h.shrinkage, permission: h.permission,
+          tardiness: h.tardiness, permLate: h.perm_late, earlyOut: h.early_out, permEarly: h.perm_early,
+          otBeforeHc: h.ot_before_hc, otAfterHc: h.ot_after_hc,
+          otHours: +((h.ot_before_min + h.ot_after_min) / 60).toFixed(1),     // OT hours actually worked in this hour
+          permHours: +((h.perm_late_min + h.perm_early_min) / 60).toFixed(1), // permission hours lost in this hour
+          conformance: h._cw ? Math.round(h._cs / h._cw) : null,
+          avgScheduled: av(h.scheduled), avgWorking: av(h.working),
+          avgHcWithOt: av(hcWithOt), avgHcAfterPerm: av(hcAfterPerm), avgEffective: av(effective),
+          coveragePct: h.scheduled ? Math.round(100 * effective / h.scheduled) : 0,
+          shrinkagePct: h.scheduled ? Math.round(100 * h.shrinkage / h.scheduled) : 0,
+        };
+      });
+      const sum = (k: string) => rows.reduce((s, r: any) => s + (r[k] || 0), 0);
+      const tSched = sum('scheduled'), tEff = sum('effective'), tShr = sum('shrinkage');
+      const cw = hours.reduce((s, h) => s + h._cw, 0), csum = hours.reduce((s, h) => s + h._cs, 0);
+      const otTot = ot.ob + ot.oa;
+      const total = {
+        scheduled: tSched, working: sum('working'), hcWithOt: sum('hcWithOt'), hcAfterPerm: sum('hcAfterPerm'), effective: tEff,
+        shrinkage: tShr, permission: sum('permission'),
+        tardiness: sum('tardiness'), permLate: sum('permLate'), earlyOut: sum('earlyOut'), permEarly: sum('permEarly'),
+        otBeforeHc: sum('otBeforeHc'), otAfterHc: sum('otAfterHc'),
+        otHours: +sum('otHours').toFixed(1), permHours: +sum('permHours').toFixed(1),
+        coveragePct: tSched ? Math.round(100 * tEff / tSched) : 0, shrinkagePct: tSched ? Math.round(100 * tShr / tSched) : 0,
+        conformance: cw ? Math.round(csum / cw) : null,
+        otBeforeHours: +(ot.ob / 60).toFixed(1), otAfterHours: +(ot.oa / 60).toFixed(1),
+        otBeforePct: otTot ? Math.round(100 * ot.ob / otTot) : 0, otAfterPct: otTot ? Math.round(100 * ot.oa / otTot) : 0,
+      };
+      const peak = rows.reduce((mx, r) => r.effective > mx.effective ? r : mx, rows[0]);
+      return { hours: rows, total, peakHour: peak?.hour };
+    };
+
+    const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0 }) }))
+      .sort((a, b) => b.total.scheduled - a.total.scheduled);
+    return { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll }) };
+  }
+
+  /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the
+   *  hourly need per function, then greedy set-cover the standard shift windows (real start/end
+   *  taken from the data) to cover every hour — and check we have enough active staff. The
+   *  "build a schedule that covers all hours" core. Read-only proposal. */
+  @Get('roster-v2/generate')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Demand-driven shift-mix that covers the hourly need per function (set-cover)' })
+  async generateMix(@Req() req: any, @Query('function') functionName?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    // pick the function (busiest if not given)
+    let fn = functionName;
+    if (!fn) {
+      const top = await this.ds.query(`SELECT COALESCE(role_function,function_name) fn, COUNT(*) n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND presence IN ('office','wfh') GROUP BY 1 ORDER BY n DESC LIMIT 1`, [t, dFrom, dTo]);
+      fn = top[0]?.fn;
+    }
+    const p = [t, dFrom, dTo, fn];
+    const w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND COALESCE(role_function,function_name)=$4`;
+    const cov = (start: string, len: string) => {
+      const a0 = `(((${start})%1440+1440)%1440)`, b0 = `(${a0}+(${len}))`;
+      return `((${a0} < h.hh*60+60 AND LEAST(${b0},1440) > h.hh*60) OR (${b0}>1440 AND (${b0}-1440) > h.hh*60))`;
+    };
+    const [{ days }] = await this.ds.query(`SELECT COUNT(DISTINCT work_date)::int days FROM roster_days WHERE ${w}`, p);
+    // 1) DEMAND = avg daily scheduled headcount covering each hour (the need to replicate).
+    const dem = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh), r AS (SELECT shift_start_min ss, shift_end_min se FROM roster_days WHERE ${w})
+      SELECT h.hh, COUNT(*) FILTER (WHERE ${cov('r.ss', 'r.se-r.ss')}) sched FROM r CROSS JOIN h GROUP BY h.hh ORDER BY h.hh`, p);
+    const demand = Array(24).fill(0); dem.forEach((r: any) => { demand[r.hh] = days ? Math.round(r.sched / days) : 0; });
+    // 2) SHIFT DEFINITIONS = the function's real shift windows (mode start/end per code).
+    const defs = await this.ds.query(`
+      SELECT UPPER(shift_code) code, MODE() WITHIN GROUP (ORDER BY shift_start_min) ss, MODE() WITHIN GROUP (ORDER BY shift_end_min) se, COUNT(*) n
+      FROM roster_days WHERE ${w} AND presence IN ('office','wfh')
+        AND UPPER(shift_code) !~ '^(OFF|H|L|SL|DL|RES|TER|TRANSFER|COMP|UPL|A)$'
+      GROUP BY UPPER(shift_code) HAVING COUNT(*) >= 5 ORDER BY n DESC LIMIT 12`, p);
+    const covHours = (ss: number, se: number) => { const a = (((ss % 1440) + 1440) % 1440), e = a + (se - ss), out: number[] = []; for (let h = 0; h < 24; h++) { const h0 = h * 60; if ((a < h0 + 60 && Math.min(e, 1440) > h0) || (e > 1440 && e - 1440 > h0)) out.push(h); } return out; };
+    const shifts = defs.map((d: any) => ({ code: d.code, ss: d.ss, se: d.se, hrs: covHours(d.ss, d.se), used: d.n }));
+    // 3) GREEDY set-cover: add the shift that covers the most still-under-covered demand.
+    const assigned = Array(24).fill(0); const mix: Record<string, number> = {}; let guard = 0;
+    while (guard++ < 600) {
+      let best: any = null, bestGain = 0;
+      for (const s of shifts) { const gain = s.hrs.reduce((g: number, h: number) => g + (demand[h] - assigned[h] > 0 ? 1 : 0), 0); if (gain > bestGain) { bestGain = gain; best = s; } }
+      if (!best || bestGain <= 0) break;
+      mix[best.code] = (mix[best.code] || 0) + 1; best.hrs.forEach((h: number) => assigned[h]++);
+    }
+    // 4) coverage result + verdict + staff availability
+    const coverageByHour = demand.map((d, h) => ({ hour: h, demand: d, covered: assigned[h], gap: assigned[h] - d }));
+    const openHours = coverageByHour.filter(c => c.demand > 0);
+    const shortHours = openHours.filter(c => c.gap < 0);
+    const totalUnits = Object.values(mix).reduce((s, n) => s + n, 0);
+    const [{ active }] = await this.ds.query(`SELECT COUNT(DISTINCT person_no)::int active FROM roster_days WHERE ${w}`, p);
+    const tFn = (m: number) => `${String(Math.floor(((m % 1440) + 1440) % 1440 / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const mixRows = Object.entries(mix).map(([code, count]) => { const s = shifts.find((x: any) => x.code === code); return { code, count, start: tFn(s.ss), end: tFn(s.se % 1440) }; }).sort((a, b) => b.count - a.count);
+    const allFns = await this.ds.query(`SELECT DISTINCT COALESCE(role_function,function_name) fn FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND presence IN ('office','wfh') ORDER BY 1`, [t, dFrom, dTo]);
+    return {
+      from: dFrom, to: dTo, function: fn, functions: allFns.map((r: any) => r.fn).filter(Boolean), days,
+      demand, coverageByHour,
+      shiftMix: mixRows, shiftDefs: shifts.map((s: any) => ({ code: s.code, start: tFn(s.ss), end: tFn(s.se % 1440), used: s.used })),
+      staffing: { shiftsPerDay: totalUnits, activeStaff: active, needWithOff: Math.ceil(totalUnits * 7 / 6), enough: active >= Math.ceil(totalUnits * 7 / 6) },
+      verdict: { coversAllHours: shortHours.length === 0, shortHours: shortHours.map(c => ({ hour: c.hour, demand: c.demand, covered: c.covered, gap: c.gap })), worstGap: openHours.length ? Math.min(...openHours.map(c => c.gap)) : 0 },
+    };
+  }
+
+  /** PER-EMPLOYEE weekly assignment over the demand mix (the final piece): assign each active
+   *  person in the function a WEEKLY shift code + an OFF day so the daily mix is covered, females
+   *  never take midnight, night/midnight goes to the LEAST historically-loaded (fair rotation),
+   *  and weekend-OFF goes to the most weekend-deprived. Weekly rotation ⇒ ≥10h rest by construction.
+   *  Read-only proposal (writing into the editable grid is a separate, confirmed step). */
+  @Get('roster-v2/generate-week')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Per-employee weekly shift + OFF assignment covering the demand mix (fair, female-aware)' })
+  async generateWeek(@Req() req: any, @Query('function') functionName?: string, @Query('from') from?: string, @Query('to') to?: string) {
+    const t = req.user.tenantId;
+    const mixData: any = await this.generateMix(req, functionName, from, to);
+    const fn = mixData.function, dFrom = mixData.from, dTo = mixData.to;
+    const cat = (code: string) => /^(MD|MN)/.test(code) ? 'midnight' : /^N/.test(code) ? 'night' : 'day';
+
+    // active people in the function with gender + historical night/mid load + weekend-off share
+    const emps = (await this.ds.query(`
+      WITH r AS (SELECT person_no, clean_name, gender, presence, work_date, UPPER(COALESCE(shift_category,shift_code,'')) sc FROM roster_days
+                  WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND COALESCE(role_function,function_name)=$4)
+      SELECT person_no, MAX(clean_name) name, MAX(gender) gender,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd,
+             COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND sc ~ '^(N|MD|MN)') nm,
+             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (5,6)) woff
+        FROM r WHERE person_no IS NOT NULL GROUP BY person_no
+       HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh')) >= 1`, [t, dFrom, dTo, fn]))
+      .map((e: any) => ({ personNo: e.person_no, name: e.name, male: String(e.gender || '').toLowerCase().startsWith('m'),
+        nightLoad: e.wd ? e.nm / e.wd : 0, weekendOff: +e.woff, code: null as string | null, off: null as number | null }));
+
+    // order shift codes: fill midnight → night → day (hardest constraint first)
+    const order = (c: string) => cat(c) === 'midnight' ? 0 : cat(c) === 'night' ? 1 : 2;
+    const codes = [...mixData.shiftMix].sort((a: any, b: any) => order(a.code) - order(b.code));
+    const need = (count: number) => Math.ceil(count * 7 / 6);   // people per code to keep `count` working with 1 OFF each
+    let pool = emps.slice();
+    const groups: any[] = [];
+    for (const m of codes) {
+      const c = cat(m.code), want = need(m.count);
+      let cands = pool.filter(e => c === 'midnight' ? e.male : true);
+      // night/midnight → least-loaded first (fair rotation); day → most-loaded first (relieve them)
+      cands.sort((a, b) => c === 'day' ? b.nightLoad - a.nightLoad : a.nightLoad - b.nightLoad);
+      let take = cands.slice(0, want);
+      const femaleNight = c === 'night' ? take.filter(e => !e.male).length : 0;
+      take.forEach(e => { e.code = m.code; });
+      pool = pool.filter(e => !e.code);
+      groups.push({ code: m.code, category: c, perDay: m.count, assigned: take.length, want, femaleNight, members: take });
+    }
+    // leftover pool → spare (extra OFF / standby)
+    const spares = pool.map(e => ({ ...e, code: 'OFF/Spare' }));
+
+    // OFF days: within each group round-robin a day 0-6 (Sat-based), so each day keeps `perDay` working.
+    // bias: give weekend (idx 5,6) OFF to the most weekend-deprived in the group first.
+    for (const g of groups) {
+      const sorted = [...g.members].sort((a, b) => a.weekendOff - b.weekendOff);
+      sorted.forEach((e, i) => { e.off = i % 7; });
+      g.dailyCovered = Array.from({ length: 7 }, (_, d) => g.members.filter((e: any) => e.off !== d).length);
+      g.coversEveryDay = g.dailyCovered.every((n: number) => n >= g.perDay);
+    }
+
+    const dayNames = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    const assignments = [...groups.flatMap(g => g.members.map((e: any) => ({ personNo: e.personNo, name: e.name, code: e.code, category: g.category, off: dayNames[e.off ?? 0], nightLoadPct: Math.round(100 * e.nightLoad) }))),
+      ...spares.map(e => ({ personNo: e.personNo, name: e.name, code: 'OFF/Spare', category: 'spare', off: '—', nightLoadPct: Math.round(100 * e.nightLoad) }))]
+      .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+
+    const peopleNeeded = codes.reduce((s: number, m: any) => s + need(m.count), 0);
+    const warnings: string[] = [];
+    for (const g of groups) { if (g.assigned < g.want) warnings.push(`${g.code}: need ${g.want}, only ${g.assigned} eligible`); if (!g.coversEveryDay) warnings.push(`${g.code}: OFF buffer too thin — some day drops below ${g.perDay}`); if (g.femaleNight > 0) warnings.push(`${g.code}: ${g.femaleNight} female(s) placed on night (no males left) — flag`); }
+
+    return {
+      from: dFrom, to: dTo, function: fn,
+      staffing: { ...mixData.staffing, peopleNeeded, spares: spares.length },
+      groups: groups.map(g => ({ code: g.code, category: g.category, perDay: g.perDay, assigned: g.assigned, want: g.want, femaleNight: g.femaleNight, coversEveryDay: g.coversEveryDay, dailyCovered: g.dailyCovered })),
+      assignments, spares: spares.map(e => ({ name: e.name })),
+      warnings, coversDemand: mixData.verdict.coversAllHours, shiftMix: mixData.shiftMix,
+    };
+  }
+
+  private weekDays = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  /** Expand the weekly assignment into a 7-day grid (employee × Sat→Fri → code/OFF). */
+  private weekGrid(wk: any) {
+    return wk.assignments.map((a: any) => ({
+      name: a.name, code: a.code, category: a.category, off: a.off, nightLoadPct: a.nightLoadPct,
+      days: this.weekDays.map(dn => (a.off === dn || a.code === 'OFF/Spare') ? 'OFF' : a.code),
+    }));
+  }
+
+  /** SAVE the generated weekly roster as a reviewable DRAFT (held outside the live grid). */
+  @Post('roster-v2/generate-week/save')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Save the demand-driven weekly roster as a reviewable draft' })
+  async saveWeekDraft(@Req() req: any, @Body() body: { function?: string; from?: string; to?: string; weekStart?: string; label?: string }) {
+    const t = req.user.tenantId;
+    const wk: any = await this.generateWeek(req, body?.function, body?.from, body?.to);
+    const grid = this.weekGrid(wk);
+    // default week-start = the Saturday AFTER the data horizon (a fresh future week).
+    let weekStart = body?.weekStart;
+    if (!weekStart) {
+      const [{ mx }] = await this.ds.query(`SELECT MAX(work_date)::text mx FROM roster_days WHERE tenant_id=$1`, [t]);
+      const dt = new Date(`${mx}T00:00:00Z`); let add = (6 - dt.getUTCDay() + 7) % 7; if (add === 0) add = 7;
+      dt.setUTCDate(dt.getUTCDate() + add); weekStart = dt.toISOString().slice(0, 10);
+    }
+    const label = body?.label || `${wk.function} · ${weekStart}`;
+    const payload = { weekStart, function: wk.function, days: this.weekDays, mix: wk.shiftMix, staffing: wk.staffing, warnings: wk.warnings, grid };
+    const [row] = await this.ds.query(
+      `INSERT INTO schedule_drafts(tenant_id, function, week_start, label, payload, created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
+      [t, wk.function, weekStart, label, JSON.stringify(payload), req.user.sub || null]);
+    return { ok: true, id: row.id, weekStart, label, function: wk.function, days: this.weekDays, grid, staffing: wk.staffing, warnings: wk.warnings, mix: wk.shiftMix };
+  }
+
+  /** List recent saved roster drafts. */
+  @Get('roster-v2/drafts')
+  @RequirePermissions('attendance.view_team')
+  async listDrafts(@Req() req: any) {
+    const drafts = await this.ds.query(`SELECT id, function, week_start::text "weekStart", label, created_at FROM schedule_drafts WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 20`, [req.user.tenantId]);
+    return { drafts };
+  }
+
+  /** Fetch one saved draft (the full week grid) by id. */
+  @Get('roster-v2/draft')
+  @RequirePermissions('attendance.view_team')
+  async getDraft(@Req() req: any, @Query('id') id: string) {
+    if (!id) throw new BadRequestException('id required');
+    const [row] = await this.ds.query(`SELECT id, function, week_start::text "weekStart", label, payload, created_at FROM schedule_drafts WHERE tenant_id=$1 AND id=$2`, [req.user.tenantId, id]);
+    if (!row) throw new BadRequestException('draft not found');
+    return { id: row.id, ...row.payload, label: row.label, createdAt: row.created_at };
+  }
+
+  /** PUBLISH the generated weekly roster into the live editable grid (attendance_records).
+   *  SAFE BY DESIGN: targets an EMPTY future week by default (the Saturday after the last existing
+   *  schedule), and uses ON CONFLICT DO NOTHING so it NEVER overwrites an existing schedule — it only
+   *  fills empty employee×date cells. Rows are tagged in `notes` so unpublish can cleanly remove them. */
+  @Post('roster-v2/publish')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Publish the generated weekly roster into attendance_records (empty week, non-overwriting)' })
+  async publishWeek(@Req() req: any, @Body() body: { function?: string; from?: string; to?: string; weekStart?: string }) {
+    const t = req.user.tenantId;
+    const wk: any = await this.generateWeek(req, body?.function, body?.from, body?.to);
+    let weekStart = body?.weekStart;
+    if (!weekStart) {
+      const [{ mx }] = await this.ds.query(`SELECT MAX(attendance_date)::text mx FROM attendance_records WHERE tenant_id=$1`, [t]);
+      const dt = new Date(`${mx || new Date().toISOString().slice(0, 10)}T00:00:00Z`); let add = (6 - dt.getUTCDay() + 7) % 7; if (add === 0) add = 7;
+      dt.setUTCDate(dt.getUTCDate() + add); weekStart = dt.toISOString().slice(0, 10);
+    }
+    // resolve canonical person_no → employees.id, and shift code → shift_codes (id/start/end)
+    const persons = [...new Set(wk.assignments.map((a: any) => a.personNo).filter(Boolean))] as string[];
+    const empMap: Record<string, string> = {};
+    (await this.ds.query(`SELECT employee_no, id FROM employees WHERE tenant_id=$1 AND employee_no = ANY($2)`, [t, persons])).forEach((r: any) => { empMap[r.employee_no] = r.id; });
+    const codes = [...new Set(wk.assignments.map((a: any) => a.code).filter((c: string) => c && c !== 'OFF/Spare'))] as string[];
+    const scMap: Record<string, any> = {};
+    (await this.ds.query(`SELECT UPPER(code) code, id, start_time ss, end_time se FROM shift_codes WHERE tenant_id=$1 AND UPPER(code)=ANY($2)`, [t, codes.map((c: string) => c.toUpperCase())])).forEach((r: any) => { scMap[r.code] = r; });
+    const note = `[generated ${weekStart}]`;
+    const addDays = (iso: string, n: number) => { const dd = new Date(`${iso}T00:00:00Z`); dd.setUTCDate(dd.getUTCDate() + n); return dd.toISOString().slice(0, 10); };
+    const rows: any[][] = []; let noEmp = 0;
+    for (const a of wk.assignments) {
+      const eid = empMap[a.personNo]; if (!eid) { noEmp++; continue; }
+      for (let dI = 0; dI < 7; dI++) {
+        const off = (a.off === this.weekDays[dI]) || a.code === 'OFF/Spare';
+        const sc = off ? null : scMap[String(a.code).toUpperCase()];
+        rows.push([t, eid, addDays(weekStart, dI), sc?.id || null, sc?.ss || null, sc?.se || null, off ? 'off' : 'present', note]);
+      }
+    }
+    let written = 0;
+    if (rows.length) {
+      const C = 8;
+      const values = rows.map((_, i) => `($${i * C + 1},$${i * C + 2},$${i * C + 3},$${i * C + 4},$${i * C + 5},$${i * C + 6},$${i * C + 7},false,$${i * C + 8})`).join(',');
+      const res = await this.ds.query(
+        `INSERT INTO attendance_records (tenant_id, employee_id, attendance_date, scheduled_shift_code_id, scheduled_start, scheduled_end, attendance_marker, is_wfh, notes)
+         VALUES ${values} ON CONFLICT (tenant_id, employee_id, attendance_date) DO NOTHING RETURNING employee_id`, rows.flat());
+      // TypeORM .query() returns the RETURNING rows array — its length = rows actually inserted (ON CONFLICT skips don't return).
+      written = Array.isArray(res) ? res.length : (res?.rowCount || 0);
+    }
+    const skipped = rows.length - written;
+    return { ok: true, weekStart, function: wk.function, written, skipped, unmappedPeople: noEmp, note,
+      message: skipped > 0 ? `${skipped} cell(s) already had a schedule and were preserved (not overwritten).` : (written ? `published ${written} cells into week ${weekStart}.` : 'nothing to publish.') };
+  }
+
+  /** Reverse a publish: delete ONLY the generated rows for a week (tagged in notes). Safe. */
+  @Post('roster-v2/unpublish')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Remove the generated rows for a week (only rows this engine wrote)' })
+  async unpublishWeek(@Req() req: any, @Body() body: { weekStart: string }) {
+    if (!body?.weekStart) throw new BadRequestException('weekStart required');
+    const r = await this.ds.query(
+      `DELETE FROM attendance_records WHERE tenant_id=$1 AND attendance_date BETWEEN $2::date AND ($2::date + 6) AND notes LIKE '[generated %' RETURNING employee_id`,
+      [req.user.tenantId, body.weekStart]);
+    // TypeORM returns DELETE..RETURNING as a [rows[], affectedCount] tuple — read the count off whichever shape we got.
+    const deleted = Array.isArray(r)
+      ? (typeof r[1] === 'number' ? r[1] : (Array.isArray(r[0]) ? r[0].length : r.length))
+      : (r?.rowCount || 0);
+    return { ok: true, deleted };
+  }
+
   /** HR matrix: employee rows × date columns → presence/status code, as CSV. */
   @Get('roster-v2/hr-matrix')
   @RequirePermissions('attendance.view_team')
@@ -340,12 +989,27 @@ export class ReconController {
               COALESCE(hr_code, attendance_code, shift_code, 'OFF') code   -- master HR code (SL/A/shift/OFF/L/H/WFH/DL/COMP) — never invents P
          FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active   -- exclude superseded/inactive ids (dedupes old↔new intern IDs)
          ORDER BY name, work_date`, [t, dFrom, dTo]);
+    // Per-employee OT & exceptions roll-up over the window — same canonical rules as
+    // every other report: TRUE_OT (regular+off-day+holiday) and credible (≤4h) tardiness.
+    const agg = await this.ds.query(
+      `SELECT COALESCE(person_no, employee_no) person_no,
+              ROUND(SUM(${TRUE_OT})/60.0,1) ot_h,
+              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked_d,
+              COUNT(*) FILTER (WHERE ${CRED_LATE})::int late_d,
+              COUNT(*) FILTER (WHERE ${CRED_EARLY})::int early_d,
+              COUNT(*) FILTER (WHERE presence='absent')::int absent_d,
+              COUNT(*) FILTER (WHERE presence='sick')::int sick_d,
+              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int perm_d
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active GROUP BY 1`, [t, dFrom, dTo]);
+    const aggMap = new Map<string, any>(agg.map((r: any) => [r.person_no, r]));
     const dates: string[] = []; { const d = new Date(dFrom + 'T00:00:00Z'), end = new Date(dTo + 'T00:00:00Z');
       for (; d <= end; d.setUTCDate(d.getUTCDate()+1)) dates.push(d.toISOString().slice(0,10)); }
     const byEmp = new Map<string, any>();
     for (const r of data) { let e = byEmp.get(r.person_no); if (!e) { e = { no: r.person_no, name: r.name, fn: r.function_name, days: {} }; byEmp.set(r.person_no, e); } e.days[r.date] = r.code; }
-    const head = ['Employee No', 'Name', 'Function', ...dates.map(d => d.slice(5))];
-    const lines = [...byEmp.values()].map(e => [e.no, `"${e.name}"`, `"${e.fn||''}"`, ...dates.map(d => e.days[d] || '')].join(','));
+    const head = ['Employee No', 'Name', 'Function', ...dates.map(d => d.slice(5)), 'OT (h)', 'Worked', 'Late', 'Early', 'Absent', 'Sick', 'Perm'];
+    const lines = [...byEmp.values()].map(e => { const a = aggMap.get(e.no) || {};
+      return [e.no, `"${e.name}"`, `"${e.fn||''}"`, ...dates.map(d => e.days[d] || ''),
+              a.ot_h ?? 0, a.worked_d ?? 0, a.late_d ?? 0, a.early_d ?? 0, a.absent_d ?? 0, a.sick_d ?? 0, a.perm_d ?? 0].join(','); });
     res.set('Content-Type', 'text/csv; charset=utf-8');
     res.set('Content-Disposition', `attachment; filename="hr-matrix_${dFrom}_${dTo}.csv"`);
     res.send('﻿' + [head.join(','), ...lines].join('\n'));
@@ -513,7 +1177,7 @@ export class ReconController {
       { a: 'HR codes', r: 'SL = Sick Leave, A = Absence. "P" is NOT an approved code — never emitted; any source "P" is a data-quality exception.' },
       { a: 'Sick by shift', r: 'MS/BS/CS/NS/ES/EES/MDS/MNS = Sick on that shift; keep original shift start/end for reporting.' },
       { a: 'Absent by shift', r: 'MA/BA/CA/NA/EA/EEA/MDA/MNA = Absent on that shift; keep original shift start/end.' },
-      { a: 'WFH', r: 'System login + no fingerprint punch + system matches the scheduled shift = WFH (not a missing-punch anomaly).' },
+      { a: 'WFH', r: 'WFH = a WFH shift code OR an explicit WFH location only. It is NEVER inferred from "system login + no punch" — an office-located shift with a system session but no fingerprint is a MISSING PUNCH (counts as office), not WFH.' },
       { a: 'Identity', r: 'Old internship ID (6xxx) and new full-time ID (13xxx) for the same person are collapsed to one canonical person_no.' },
       { a: 'Active', r: 'Inactive/superseded IDs are excluded from default KPIs (toggle to include); kept for historical audit.' },
       { a: 'Tardiness KPI', r: '8h roles (RTA/Customer Care/Resolution/TL) excluded from default tardiness/adherence; records kept.' },
@@ -627,10 +1291,10 @@ export class ReconController {
              COUNT(*) FILTER (WHERE presence='sick')::int "sickDays", COUNT(*) FILTER (WHERE presence='absent')::int "absenceDays",
              COUNT(*) FILTER (WHERE presence='holiday')::int "holidayDays",
              COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)::int "compDays",
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int "lateDays", COALESCE(SUM(sys_late_min),0)::int "totalLateMin",
-             COUNT(*) FILTER (WHERE sys_early_min>0)::int "earlyDays", COALESCE(SUM(sys_early_min),0)::int "totalEarlyMin",
+             COUNT(*) FILTER (WHERE ${CRED_LATE})::int "lateDays", COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int "totalLateMin",
+             COUNT(*) FILTER (WHERE ${CRED_EARLY})::int "earlyDays", COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}),0)::int "totalEarlyMin",
              COALESCE(SUM(ot_before_min),0)::int "otBefore", COALESCE(SUM(ot_after_min),0)::int "otAfter",
-             COALESCE(SUM(ot_min),0)::int "otTotal", COALESCE(SUM(offday_ot_min),0)::int "offdayOt", COALESCE(SUM(holiday_ot_min),0)::int "holidayOt",
+             COALESCE(SUM(${TRUE_OT}),0)::int "otTotal", COALESCE(SUM(offday_ot_min),0)::int "offdayOt", COALESCE(SUM(holiday_ot_min),0)::int "holidayOt",
              ROUND(AVG(adherence_pct),1) conformance,
              COUNT(*) FILTER (WHERE missing_punch)::int "missingPunch", COUNT(*) FILTER (WHERE missing_system)::int "missingSystem",
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions
@@ -641,7 +1305,7 @@ export class ReconController {
     for (const r of sr) shiftRate[r.cat] = r.n;
     const byMonth = await this.ds.query(`
       SELECT month_name "month", COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
-             COALESCE(SUM(sys_late_min),0)::int "lateMin", COALESCE(SUM(ot_min),0)::int "otMin", ROUND(AVG(adherence_pct),1) conformance
+             COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int "lateMin", COALESCE(SUM(${TRUE_OT}),0)::int "otMin", ROUND(AVG(adherence_pct),1) conformance
         FROM roster_days WHERE ${W} GROUP BY month_name ORDER BY MIN(work_date)`, p);
     const recent = await this.ds.query(`
       SELECT work_date::text date, day_name, shift_code, attendance_status, presence,
@@ -665,8 +1329,8 @@ export class ReconController {
       SELECT EXTRACT(YEAR FROM work_date)::int yr, EXTRACT(MONTH FROM work_date)::int mo, MIN(month_name) month_name,
              COUNT(DISTINCT person_no)::int agents, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf,
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
-             COALESCE(SUM(ot_min),0)::int otmin, COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick
+             COUNT(*) FILTER (WHERE ${CRED_LATE})::int latedays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int latemin,
+             COALESCE(SUM(${TRUE_OT}),0)::int otmin, COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick
         FROM roster_days WHERE tenant_id=$1 AND team_manager=$2 AND work_date BETWEEN $3 AND $4 AND is_active
         GROUP BY 1,2 ORDER BY 1,2`, [t, tlName, dFrom, dTo]);
     const netM = await this.ds.query(`
@@ -709,8 +1373,8 @@ export class ReconController {
               COUNT(DISTINCT person_no)::int agents,
               COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
               COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
-              COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
-              COALESCE(SUM(ot_min),0)::int otmin, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf
+              COUNT(*) FILTER (WHERE ${CRED_LATE})::int latedays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int latemin,
+              COALESCE(SUM(${TRUE_OT}),0)::int otmin, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf
          FROM roster_days r WHERE ${w} GROUP BY ${bucket} ORDER BY MIN(work_date)`, p);
     // options for the filters
     const [functions, teamLeaders] = await Promise.all([
@@ -742,8 +1406,8 @@ export class ReconController {
               mode() WITHIN GROUP (ORDER BY role_category) role, mode() WITHIN GROUP (ORDER BY team_manager) tl,
               COUNT(*) FILTER (WHERE presence IN ('office','wfh')) worked,
               COUNT(*) FILTER (WHERE presence='absent') absent, COUNT(*) FILTER (WHERE presence='sick') sick,
-              COUNT(*) FILTER (WHERE sys_late_min>0) latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
-              COUNT(*) FILTER (WHERE missing_system) misssys, ROUND(AVG(adherence_pct),1) conf, COALESCE(SUM(ot_min),0)::int otmin
+              COUNT(*) FILTER (WHERE ${CRED_LATE}) latedays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int latemin,
+              COUNT(*) FILTER (WHERE missing_system) misssys, ROUND(AVG(adherence_pct),1) conf, COALESCE(SUM(${TRUE_OT}),0)::int otmin
          FROM roster_days r WHERE ${w} AND person_no IS NOT NULL
          GROUP BY person_no HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh'))>=5`, p);
     const clamp = (v: number) => Math.max(0, Math.min(100, v));
@@ -812,9 +1476,9 @@ export class ReconController {
 
     // 2) tardiness outliers
     const late = await this.ds.query(
-      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, COUNT(*) FILTER (WHERE sys_late_min>0) ld, COALESCE(SUM(sys_late_min),0)::int lm
+      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, COUNT(*) FILTER (WHERE ${CRED_LATE}) ld, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int lm
          FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness
-         GROUP BY person_no HAVING COUNT(*) FILTER (WHERE sys_late_min>0)>=10 ORDER BY ld DESC LIMIT 5`, [t, dFrom, dTo]);
+         GROUP BY person_no HAVING COUNT(*) FILTER (WHERE ${CRED_LATE})>=10 ORDER BY ld DESC LIMIT 5`, [t, dFrom, dTo]);
     if (late.length) push('warning', 'tardiness', `${late.length} agent(s) late ≥ 10 days`, late.map((r: any) => `${r.name} (${r.ld}d)`).join(' · '), '/roster-dashboard');
 
     // 3) absence outliers
@@ -837,7 +1501,7 @@ export class ReconController {
 
     // 5) OT concentration — top shift by OT
     const ot = await this.ds.query(
-      `SELECT shift_code, COALESCE(SUM(ot_min),0)::int otm FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_code IS NOT NULL GROUP BY shift_code ORDER BY otm DESC LIMIT 1`, [t, dFrom, dTo]);
+      `SELECT shift_code, COALESCE(SUM(${TRUE_OT}),0)::int otm FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_code IS NOT NULL GROUP BY shift_code ORDER BY otm DESC LIMIT 1`, [t, dFrom, dTo]);
     if (ot[0]?.otm > 0) push('info', 'overtime', `OT concentrated on the ${ot[0].shift_code} shift`, `${Math.round(ot[0].otm / 60)}h total overtime`, '/report-builder');
 
     // 6) conformance trend vs previous equal-length period
@@ -874,9 +1538,9 @@ export class ReconController {
              COUNT(*) FILTER (WHERE presence='off')::int offDays,
              COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent,
              COUNT(*) FILTER (WHERE presence='leave')::int leave,
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int lateDays, COALESCE(SUM(sys_late_min),0)::int lateMin,
-             COUNT(*) FILTER (WHERE sys_early_min>0)::int earlyDays,
-             COALESCE(SUM(ot_before_min),0)::int otBefore, COALESCE(SUM(ot_after_min),0)::int otAfter, COALESCE(SUM(ot_min),0)::int otTotal,
+             COUNT(*) FILTER (WHERE ${CRED_LATE})::int lateDays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int lateMin,
+             COUNT(*) FILTER (WHERE ${CRED_EARLY})::int earlyDays,
+             COALESCE(SUM(ot_before_min),0)::int otBefore, COALESCE(SUM(ot_after_min),0)::int otAfter, COALESCE(SUM(${TRUE_OT}),0)::int otTotal,
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
              ROUND(AVG(adherence_pct),1) conformance
         FROM roster_days WHERE ${W}`, p);
@@ -884,8 +1548,8 @@ export class ReconController {
       SELECT person_no, mode() WITHIN GROUP (ORDER BY clean_name) name, mode() WITHIN GROUP (ORDER BY role_function) function_name,
              mode() WITHIN GROUP (ORDER BY role_category) role,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int lateDays, COALESCE(SUM(sys_late_min),0)::int lateMin,
-             COALESCE(SUM(ot_min),0)::int otMin, COUNT(*) FILTER (WHERE presence='sick')::int sick,
+             COUNT(*) FILTER (WHERE ${CRED_LATE})::int lateDays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int lateMin,
+             COALESCE(SUM(${TRUE_OT}),0)::int otMin, COUNT(*) FILTER (WHERE presence='sick')::int sick,
              COUNT(*) FILTER (WHERE presence='absent')::int absent, ROUND(AVG(adherence_pct),1) conformance
         FROM roster_days WHERE ${W} AND person_no IS NOT NULL GROUP BY person_no ORDER BY conformance ASC NULLS LAST`, p);
     const byShift = await this.ds.query(`SELECT shift_code k, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh') GROUP BY shift_code ORDER BY n DESC`, p);
@@ -974,9 +1638,9 @@ export class ReconController {
       SELECT EXTRACT(YEAR FROM work_date)::int yr, EXTRACT(MONTH FROM work_date)::int mo, MIN(month_name) month_name,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf,
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
-             COUNT(*) FILTER (WHERE sys_early_min>0)::int earlydays, COALESCE(SUM(sys_early_min),0)::int earlymin,
-             COALESCE(SUM(ot_min),0)::int otmin,
+             COUNT(*) FILTER (WHERE ${CRED_LATE})::int latedays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int latemin,
+             COUNT(*) FILTER (WHERE ${CRED_EARLY})::int earlydays, COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}),0)::int earlymin,
+             COALESCE(SUM(${TRUE_OT}),0)::int otmin,
              COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
              COUNT(*) FILTER (WHERE missing_punch)::int missingpunch, COUNT(*) FILTER (WHERE missing_system)::int missingsystem,
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions
@@ -1111,9 +1775,9 @@ export class ReconController {
                COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int "workedDays",
                COUNT(*) FILTER (WHERE presence='sick')::int "sickDays",
                COUNT(*) FILTER (WHERE presence='absent')::int "absenceDays",
-               COUNT(*) FILTER (WHERE sys_late_min>0)::int "lateDays", COALESCE(SUM(sys_late_min),0)::int "totalLateMin",
-               COUNT(*) FILTER (WHERE sys_early_min>0)::int "earlyDays", COALESCE(SUM(sys_early_min),0)::int "totalEarlyMin",
-               COALESCE(SUM(ot_min),0)::int "otTotal",
+               COUNT(*) FILTER (WHERE ${CRED_LATE})::int "lateDays", COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int "totalLateMin",
+               COUNT(*) FILTER (WHERE ${CRED_EARLY})::int "earlyDays", COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}),0)::int "totalEarlyMin",
+               COALESCE(SUM(${TRUE_OT}),0)::int "otTotal",
                COUNT(*) FILTER (WHERE missing_punch)::int "missingPunch", COUNT(*) FILTER (WHERE missing_system)::int "missingSystem",
                COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
                ROUND(AVG(adherence_pct),1) conformance
@@ -1424,6 +2088,151 @@ export class ReconController {
     await this.setScheduleLock(t, val); return { lock: val };
   }
 
+  /* ── OT & EXCEPTIONS analytics — the "stories" in the data: overtime (incl.
+   *  public-holiday split), tardiness & early-out WITHOUT permission, permissions
+   *  (by type/shift/day), and absences — by agent / function / hours. ── */
+  @Get('roster-v2/ot-exceptions')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'OT (holiday vs non-holiday) + tardiness/early-out (no permission) + permissions + absences, by agent/function' })
+  async otExceptions(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('function') fn?: string, @Query('teamLeader') tl?: string) {
+    return this.buildOtExceptions(req.user.tenantId, from, to, fn, tl);
+  }
+
+  private async buildOtExceptions(t: string, from?: string, to?: string, fn?: string, tl?: string) {
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
+    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (tl) { p.push(tl); w += ` AND team_manager=$${p.length}`; }
+
+    // Tardiness plausibility cap (240 min). Cross-midnight night shifts (MD/MN/MNR,
+    // shift_end_min>1440) make the post-midnight session tail read as a multi-HOUR
+    // "early-out" — a measurement artifact, not the agent leaving early. A real
+    // late-in/early-out is bounded, so values >4h are excluded from the counts and
+    // surfaced as `excludedDq` instead of being held against night agents (HR-safe;
+    // mirrors the WFH report's ">3h short → data quality" rule).
+    const [s] = await this.ds.query(`
+      SELECT COALESCE(SUM(ot_min),0)::int ot, COALESCE(SUM(holiday_ot_min),0)::int "holOt",
+             COALESCE(SUM(offday_ot_min),0)::int "offOt", COALESCE(SUM(ot_before_min),0)::int "befOt",
+             COALESCE(SUM(ot_after_min),0)::int "aftOt",
+             COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays",
+             COUNT(DISTINCT person_no) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otAgents",
+             COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL)::int "lateDays",
+             COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL),0)::int "lateMin",
+             COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL)::int "earlyDays",
+             COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL),0)::int "earlyMin",
+             COUNT(*) FILTER (WHERE presence='absent')::int "absentDays",
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+             COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NOT NULL)::int "lateExcused",
+             COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NOT NULL)::int "earlyExcused",
+             COUNT(*) FILTER (WHERE (sys_late_min>240 OR sys_early_min>240) AND permission_type IS NULL)::int "excludedDq"
+        FROM roster_days WHERE ${w}`, p);
+    const byAgent = await this.ds.query(`
+      SELECT person_no, mode() WITHIN GROUP (ORDER BY clean_name) name, mode() WITHIN GROUP (ORDER BY role_function) fn,
+             COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min),0)::int "otMin",
+             COALESCE(SUM(ot_min),0)::int "regOtMin", COALESCE(SUM(holiday_ot_min),0)::int "holOtMin", COALESCE(SUM(offday_ot_min),0)::int "offOtMin",
+             COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays",
+             COALESCE(SUM(COALESCE(expected_hours,9)*60) FILTER (WHERE presence IN ('office','wfh')),0)::int "workMin",
+             COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL)::int "lateDays",
+             COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL)::int "earlyDays",
+             COUNT(*) FILTER (WHERE presence='absent')::int "absentDays",
+             COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int perms
+        FROM roster_days WHERE ${w} GROUP BY person_no ORDER BY "otMin" DESC`, p);
+    const byFn = await this.ds.query(`
+      SELECT role_function fn, COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min),0)::int "otMin",
+             COALESCE(SUM(holiday_ot_min),0)::int "holOtMin", COALESCE(SUM(offday_ot_min),0)::int "offOtMin",
+             COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays",
+             COUNT(DISTINCT person_no)::int people,
+             COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL)::int "lateDays",
+             COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL)::int "earlyDays",
+             COUNT(*) FILTER (WHERE presence='absent')::int "absentDays", COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int perms
+        FROM roster_days WHERE ${w} GROUP BY role_function ORDER BY "otMin" DESC`, p);
+    const permByType = await this.ds.query(`SELECT permission_type k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY permission_type ORDER BY n DESC`, p);
+    const permByShift = await this.ds.query(`SELECT COALESCE(shift_code,'—') k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY shift_code ORDER BY n DESC LIMIT 12`, p);
+    const permByDate = await this.ds.query(`SELECT work_date::text k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY work_date ORDER BY n DESC LIMIT 12`, p);
+    const absByDate = await this.ds.query(`SELECT work_date::text k, COUNT(*)::int n FROM roster_days WHERE ${w} AND presence='absent' GROUP BY work_date ORDER BY n DESC LIMIT 12`, p);
+    // permission hours (parse the TEXT time-window)
+    const perms = await this.ds.query(`SELECT permission_duration d FROM roster_days WHERE ${w} AND permission_type IS NOT NULL AND permission_duration IS NOT NULL`, p);
+    const permMin = perms.reduce((a: number, r: any) => a + this.parsePermMin(r.d), 0);
+    const fnOpts = await this.ds.query(`SELECT DISTINCT role_function v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]);
+    const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);
+
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    // OT buckets are DISJOINT in roster_days: ot_min = regular workday OT, offday_ot_min
+    // = OT on the agent's OFF day, holiday_ot_min = OT on a public holiday (each row sits
+    // in exactly one bucket). True total = sum of all three. Non-holiday = regular + off-day.
+    const totalOt = s.ot + s.offOt + s.holOt;
+    const nonHolOt = s.ot + s.offOt;
+    return {
+      from: dFrom, to: dTo, function: fn || null, teamLeader: tl || null,
+      ot: { totalHrs: r1(totalOt / 60), regularHrs: r1(s.ot / 60), offdayHrs: r1(s.offOt / 60), holidayHrs: r1(s.holOt / 60),
+            nonHolidayHrs: r1(nonHolOt / 60),
+            holidayPct: totalOt > 0 ? r1(100 * s.holOt / totalOt) : 0, nonHolidayPct: totalOt > 0 ? r1(100 * nonHolOt / totalOt) : 0,
+            beforeShiftHrs: r1(s.befOt / 60), afterShiftHrs: r1(s.aftOt / 60),
+            days: s.otDays, agents: s.otAgents },
+      tardiness: { lateDays: s.lateDays, lateHrs: r1(s.lateMin / 60), earlyDays: s.earlyDays, earlyHrs: r1(s.earlyMin / 60), lateExcused: s.lateExcused, earlyExcused: s.earlyExcused, excludedDq: s.excludedDq, cap: 240 },
+      permissions: { count: s.permissions, hrs: r1(permMin / 60), avgHrs: s.permissions > 0 ? r1(permMin / 60 / s.permissions) : 0, byType: permByType, byShift: permByShift, byDate: permByDate },
+      absence: { days: s.absentDays, byDate: absByDate },
+      byAgent: byAgent.map((a: any) => ({ ...a, otHrs: r1(a.otMin / 60), regOtHrs: r1(a.regOtMin / 60), holOtHrs: r1(a.holOtMin / 60), offOtHrs: r1(a.offOtMin / 60),
+        otPctOfWork: a.workMin > 0 ? r1(100 * a.otMin / a.workMin) : 0 })).slice(0, 300),
+      byFunction: byFn.map((a: any) => ({ ...a, otHrs: r1(a.otMin / 60), holOtHrs: r1(a.holOtMin / 60), offOtHrs: r1(a.offOtMin / 60) })),
+      filterOptions: { functions: fnOpts.map((r: any) => r.v), teamLeaders: tlOpts.map((r: any) => r.v) },
+    };
+  }
+
+  /** OT & Exceptions → Excel (Summary + By_Agent + By_Function + Permissions + Absences). */
+  @Get('roster-v2/ot-exceptions/export')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'OT & Exceptions report → .xlsx' })
+  async otExceptionsExport(@Req() req: any, @Res() res: Response, @Query('from') from?: string, @Query('to') to?: string, @Query('function') fn?: string, @Query('teamLeader') tl?: string) {
+    const d = await this.buildOtExceptions(req.user.tenantId, from, to, fn, tl);
+    const wb = new ExcelJS.Workbook(); wb.creator = 'WFM System';
+    const bold = (ws: any) => { ws.getRow(1).font = { bold: true }; ws.views = [{ state: 'frozen', ySplit: 1 }]; };
+    // Summary
+    const sum = wb.addWorksheet('Summary');
+    sum.columns = [{ header: 'Metric', key: 'm', width: 38 }, { header: 'Value', key: 'v', width: 18 }];
+    [['Period', `${d.from} → ${d.to}`], ['Function', d.function || 'All'], ['Team Leader', d.teamLeader || 'All'],
+     ['— OVERTIME —', ''], ['Total OT (hrs)', d.ot.totalHrs], ['Regular workday OT (hrs)', d.ot.regularHrs],
+     ['Off-day OT (hrs)', d.ot.offdayHrs], ['Public-holiday OT (hrs)', d.ot.holidayHrs],
+     ['Public-holiday OT %', `${d.ot.holidayPct}%`], ['Non-holiday OT %', `${d.ot.nonHolidayPct}%`],
+     ['Before-shift OT (hrs)', d.ot.beforeShiftHrs], ['After-shift OT (hrs)', d.ot.afterShiftHrs],
+     ['OT days', d.ot.days], ['Agents with OT', d.ot.agents],
+     ['— TARDINESS (no permission) —', ''], ['Late-in days', d.tardiness.lateDays], ['Late-in (hrs)', d.tardiness.lateHrs],
+     ['Early-out days', d.tardiness.earlyDays], ['Early-out (hrs)', d.tardiness.earlyHrs],
+     ['Late excused by permission', d.tardiness.lateExcused], ['Early excused by permission', d.tardiness.earlyExcused],
+     ['Excluded — data quality (cross-midnight bleed)', d.tardiness.excludedDq],
+     ['— PERMISSIONS —', ''], ['Permissions count', d.permissions.count], ['Permission hours', d.permissions.hrs], ['Avg per permission (hrs)', d.permissions.avgHrs],
+     ['— ABSENCE —', ''], ['Absence days', d.absence.days]].forEach(([m, v]) => sum.addRow({ m, v }));
+    bold(sum);
+    // By agent
+    const ag = wb.addWorksheet('By_Agent');
+    ag.columns = [{ header: 'Employee', key: 'name', width: 22 }, { header: 'Function', key: 'fn', width: 16 },
+      { header: 'OT hrs', key: 'otHrs' }, { header: 'Regular OT', key: 'regOtHrs' }, { header: 'Off-day OT', key: 'offOtHrs' }, { header: 'Holiday OT', key: 'holOtHrs' },
+      { header: 'OT days', key: 'otDays' }, { header: 'OT % of work', key: 'otPctOfWork' },
+      { header: 'Late days', key: 'lateDays' }, { header: 'Early days', key: 'earlyDays' }, { header: 'Absent days', key: 'absentDays' }, { header: 'Permissions', key: 'perms' }];
+    d.byAgent.forEach((r: any) => ag.addRow(r)); bold(ag);
+    // By function
+    const fns = wb.addWorksheet('By_Function');
+    fns.columns = [{ header: 'Function', key: 'fn', width: 20 }, { header: 'People', key: 'people' }, { header: 'OT hrs', key: 'otHrs' },
+      { header: 'Off-day OT', key: 'offOtHrs' }, { header: 'Holiday OT', key: 'holOtHrs' }, { header: 'OT days', key: 'otDays' },
+      { header: 'Late days', key: 'lateDays' }, { header: 'Early days', key: 'earlyDays' }, { header: 'Absent days', key: 'absentDays' }, { header: 'Permissions', key: 'perms' }];
+    d.byFunction.forEach((r: any) => fns.addRow(r)); bold(fns);
+    // Permissions breakdowns
+    const pt = wb.addWorksheet('Permissions');
+    pt.columns = [{ header: 'By Type', key: 'k', width: 26 }, { header: 'Count', key: 'n' }];
+    d.permissions.byType.forEach((r: any) => pt.addRow(r));
+    pt.addRow({}); pt.addRow({ k: 'By Shift code', n: '' });
+    d.permissions.byShift.forEach((r: any) => pt.addRow(r));
+    pt.addRow({}); pt.addRow({ k: 'Top days', n: '' });
+    d.permissions.byDate.forEach((r: any) => pt.addRow(r)); bold(pt);
+    // Absences
+    const ab = wb.addWorksheet('Absences_By_Date');
+    ab.columns = [{ header: 'Date', key: 'k', width: 16 }, { header: 'Absent count', key: 'n' }];
+    d.absence.byDate.forEach((r: any) => ab.addRow(r)); bold(ab);
+    res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="OT_Exceptions_${d.from}_${d.to}.xlsx"` });
+    res.end(Buffer.from(await wb.xlsx.writeBuffer()));
+  }
+
   @Get('roster-v2/schedule-analysis')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Consolidated schedule analysis — shrinkage, shift-rate, OFF/leave/weekend-OFF %, hourly HC, permission hours' })
@@ -1508,7 +2317,11 @@ export class ReconController {
   @ApiOperation({ summary: 'Half-hourly headcount by function for a date (scheduled vs present), cross-midnight aware' })
   async intervalHeadcount(@Req() req: any, @Query('date') date?: string, @Query('function') fn?: string, @Query('step') step = '30') {
     const t = req.user.tenantId;
-    const d = date || (await this.ds.query(`SELECT MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0]?.b;
+    // latest day with real coverage (≥20 working rows), skipping marker-only tail days (lone RES/TER)
+    const d = date || (await this.ds.query(
+      `SELECT work_date::text b FROM roster_days WHERE tenant_id=$1 AND is_active AND presence IN ('office','wfh')
+       GROUP BY work_date HAVING COUNT(*) > 20 ORDER BY work_date DESC LIMIT 1`, [t]))[0]?.b
+      || (await this.ds.query(`SELECT MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0]?.b;
     const prev = new Date(d + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1); const dPrev = prev.toISOString().slice(0, 10);
     const stepMin = Math.max(15, Math.min(60, Number(step) || 30));
     const p: any[] = [t, dPrev, d]; let w = `tenant_id=$1 AND work_date IN ($2,$3) AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`;
@@ -1558,7 +2371,13 @@ export class ReconController {
   @ApiOperation({ summary: 'Per-function daily coverage vs permission/sick/absent/no-show impact + risk' })
   async coverageImpact(@Req() req: any, @Query('date') date?: string, @Query('function') fn?: string) {
     const t = req.user.tenantId;
-    const d = date || (await this.ds.query(`SELECT MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0]?.b;
+    // default to the latest day with REAL coverage (≥20 working rows), not the absolute MAX —
+    // marker-only tail days (e.g. a lone RES/TER resignation marker) would otherwise show all-zeros.
+    const d = date || (await this.ds.query(
+      `SELECT work_date::text b FROM roster_days WHERE tenant_id=$1 AND is_active
+         AND presence IN ('office','wfh','sick','absent')
+       GROUP BY work_date HAVING COUNT(*) > 20 ORDER BY work_date DESC LIMIT 1`, [t]))[0]?.b
+      || (await this.ds.query(`SELECT MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0]?.b;
     const p: any[] = [t, d]; let w = `tenant_id=$1 AND work_date=$2 AND is_active`;
     if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
     const rows = await this.ds.query(`
@@ -1760,14 +2579,14 @@ export class ReconController {
       SELECT COUNT(DISTINCT person_no)::int agents, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              COUNT(*) FILTER (WHERE presence='off')::int off, COUNT(*) FILTER (WHERE presence='sick')::int sick,
              COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='leave')::int leave,
-             COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays, COALESCE(SUM(sys_late_min),0)::int latemin,
-             COALESCE(SUM(ot_min),0)::int otmin, COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
+             COUNT(*) FILTER (WHERE ${CRED_LATE})::int latedays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int latemin,
+             COALESCE(SUM(${TRUE_OT}),0)::int otmin, COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`, [t, dFrom, dTo]);
     const byFn = await this.ds.query(`
       SELECT role_function fn, COUNT(DISTINCT person_no)::int agents, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
-             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance, COUNT(*) FILTER (WHERE sys_late_min>0)::int latedays,
-             COALESCE(SUM(ot_min),0)::int otmin, COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent
+             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance, COUNT(*) FILTER (WHERE ${CRED_LATE})::int latedays,
+             COALESCE(SUM(${TRUE_OT}),0)::int otmin, COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent
         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND role_function IS NOT NULL
         GROUP BY role_function ORDER BY agents DESC`, [t, dFrom, dTo]);
 
@@ -1978,6 +2797,65 @@ export class ReconController {
         await this.setScheduleLock(req.user.tenantId, lock); }
     }
     return { saved, ingested: result.rows, ms: result.ms, scheduleLock: lock };
+  }
+
+  /* ── THE corrected base, from inside the system ──────────────────────────────────
+   * Runs the validated reconciliation engine (foundation → corrected engine → ingest)
+   * and refreshes roster_days, the SAME pipeline as `node scripts/recon-refresh.js`.
+   * Every business rule lives in the engine, so each run re-applies them all — nothing
+   * a later refresh can silently wipe. Optional uploaded files replace the engine's
+   * monthly sources first (matched by filename). Reversible: scripts/recon-ingest.js --restore. */
+  @Post('recon-refresh')
+  @RequirePermissions('schedule.publish')
+  @UseInterceptors(FilesInterceptor('files', 12, {
+    limits: { fileSize: 160 * 1024 * 1024 }, // CC Schedule / Ameyo exports are large
+    fileFilter: (_req, file, cb) => {
+      if (/\.(xlsx|xls|xlsm|csv)$/i.test(file.originalname)) cb(null, true);
+      else cb(new BadRequestException(`File type not allowed: ${file.originalname}`), false);
+    },
+  }))
+  @ApiOperation({ summary: 'Run the CORRECTED reconciliation engine and refresh roster_days (optional source files replace the engine inputs first)' })
+  async reconRefresh(@Req() req: any, @UploadedFiles() files: Array<{ originalname: string; buffer: Buffer }>) {
+    // 1) Optional: drop uploaded files into the engine's source folder, matched by name → canonical name.
+    const targets = [
+      { rx: /cc schedule|shifts/i, name: 'CC Schedule 26 June..xlsx', role: 'Roster (authority)' },
+      { rx: /odoo|fingerprint/i, name: 'Odoo Fingerprint June.xlsx', role: 'Odoo fingerprints' },
+      { rx: /permission|compo/i, name: 'Permission & Compo June.xlsx', role: 'Permissions + comp' },
+      { rx: /ameyo/i, name: 'Ameyo login and logout.xlsx', role: 'Ameyo sessions' },
+      { rx: /sprinklr/i, name: 'Login and Logout sprinklr.xlsx', role: 'Sprinklr sessions' },
+    ];
+    const saved: { uploaded: string; storedAs: string; role: string }[] = [];
+    const unmatched: string[] = [];
+    fs.mkdirSync(RECON_NEW_DIR, { recursive: true });
+    for (const f of files || []) {
+      const t = targets.find((x) => x.rx.test(f.originalname));
+      if (!t) { unmatched.push(f.originalname); continue; }
+      fs.writeFileSync(path.join(RECON_NEW_DIR, t.name), f.buffer);
+      saved.push({ uploaded: f.originalname, storedAs: t.name, role: t.role });
+    }
+    // 2) Locate + run the pipeline (foundation → engine → ingest).
+    const scriptsDir = [path.join(process.cwd(), 'scripts'), path.join(__dirname, '../../../scripts'), path.join(__dirname, '../../../../scripts')]
+      .find((d) => fs.existsSync(path.join(d, 'recon-refresh.js')));
+    if (!scriptsDir) throw new BadRequestException('recon-refresh.js not found on the server');
+    let log = '', ok = false, error: string | null = null;
+    try {
+      const { stdout, stderr } = await promisify(execFile)(process.execPath,
+        ['--max-old-space-size=4096', path.join(scriptsDir, 'recon-refresh.js')],
+        { cwd: path.dirname(scriptsDir), timeout: 8 * 60 * 1000, maxBuffer: 48 * 1024 * 1024, env: process.env });
+      const lines = (stdout + '\n' + stderr).split('\n');
+      log = lines.filter((l) => /▶|INGEST OK|✅|❌|FAILED|horizon/.test(l)).slice(-24).join('\n');
+      ok = /INGEST OK/.test(stdout) && /✅ DONE/.test(stdout);
+    } catch (e: any) {
+      error = String(e?.message || e).slice(0, 600);
+      log = String((e?.stdout || '') + '\n' + (e?.stderr || '')).split('\n').slice(-24).join('\n');
+    }
+    // 3) Clear caches + report the fresh June roster_days summary so the page reflects it immediately.
+    this.svc.clearCache();
+    const [roster] = await this.ds.query(
+      `SELECT COUNT(*)::int rows, COUNT(DISTINCT person_no)::int people, MIN(work_date)::text "from", MAX(work_date)::text "to",
+              ROUND(SUM(${TRUE_OT})/60.0)::int ot_hours
+         FROM roster_days WHERE tenant_id=$1 AND work_date >= date '2026-06-01' AND work_date < date '2026-07-01'`, [req.user.tenantId]);
+    return { ok, error, saved, unmatched, sourceDir: RECON_NEW_DIR, log, roster };
   }
 
   @Get('hr-matrix')

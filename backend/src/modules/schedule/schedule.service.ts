@@ -122,6 +122,12 @@ function deriveShiftLabel(
   return { code: `MN${wfh}`, category: 'midnight', color: '#4f46e5', label: isWfh ? 'فجر (بيت)' : 'فجر' };
 }
 
+// minutes-of-day → "HH:MM" so a corrected roster_days.shift_start_min can feed deriveShiftLabel unchanged.
+function minToHHMM(m: number): string {
+  const t = ((m % 1440) + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
 @Injectable()
 export class ScheduleService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
@@ -173,6 +179,8 @@ export class ScheduleService {
     const whereClauses: string[] = [
       `ar.tenant_id = '${tenantId}'`,
       `ar.attendance_date BETWEEN '${from}' AND '${to}'`,
+      // exclude resigned / terminated / inactive humans — a current schedule shows only active staff
+      `e.status = 'active'`,
     ];
     if (functionId) whereClauses.push(`e.function_id = '${functionId}'`);
     if (teamId)     whereClauses.push(`e.team_id = '${teamId}'`);
@@ -199,11 +207,25 @@ export class ScheduleService {
         f.id   AS function_id,
         f.name AS function_name,
         t.id   AS team_id,
-        t.name AS team_name
+        t.name AS team_name,
+        -- corrected reconciliation overlay (today's canonical roster_days) — wins over attendance_records when present
+        rd.shift_code      AS rd_code,
+        rd.hr_code         AS rd_hr,
+        rd.presence        AS rd_presence,
+        rd.shift_start_min AS rd_start_min,
+        rd.shift_end_min   AS rd_end_min,
+        rd.location        AS rd_location,
+        rd.sys_late_min    AS rd_late,
+        (COALESCE(rd.ot_min,0)+COALESCE(rd.offday_ot_min,0)+COALESCE(rd.holiday_ot_min,0)) AS rd_ot
       FROM attendance_records ar
       JOIN employees e ON ar.employee_id = e.id
       LEFT JOIN functions f ON e.function_id = f.id
       LEFT JOIN teams t ON e.team_id = t.id
+      LEFT JOIN roster_days rd
+        ON rd.tenant_id = '${tenantId}'
+        AND rd.person_no = e.employee_no
+        AND rd.work_date = ar.attendance_date
+        AND rd.is_active
       WHERE ${whereClauses.join(' AND ')}
       ORDER BY f.name, e.first_name_en, ar.attendance_date
     `);
@@ -241,7 +263,28 @@ export class ScheduleService {
         });
       }
       const emp = empMap.get(r.employee_id)!;
-      const shift = deriveShiftLabel(r.scheduled_start, r.scheduled_end, r.attendance_marker, r.is_wfh);
+      // OVERLAY: when the corrected roster (roster_days) covers this employee/day, the grid shows the
+      // canonical reconciliation (real WFH / holiday / SL / A + true OT/late) instead of the raw
+      // attendance_records marker. Future weeks (no roster_days row) fall back to the schedule plan unchanged.
+      const hasRoster = r.rd_hr != null || r.rd_code != null;
+      let cellMarker = r.attendance_marker, cellWfh = r.is_wfh, shift;
+      if (hasRoster) {
+        const hr = String(r.rd_hr || '').toUpperCase();
+        cellMarker = (r.rd_presence === 'off' || hr === 'OFF' || hr === 'TRANSFER') ? 'off'
+          : (r.rd_presence === 'leave' || ['L', 'DL', 'UPL'].includes(hr)) ? 'leave'
+          : (r.rd_presence === 'sick' || hr === 'SL') ? 'sick'
+          : (r.rd_presence === 'absent' || hr === 'A') ? 'absent'
+          : (r.rd_presence === 'holiday' || hr === 'H') ? 'holiday'
+          : 'present';
+        cellWfh = r.rd_presence === 'wfh' || hr === 'WFH';
+        shift = deriveShiftLabel(r.rd_start_min != null ? minToHHMM(r.rd_start_min) : null, null, cellMarker, cellWfh);
+        // show the EXACT roster code (E / M / B / C / MD / C7 …) — keep deriveShiftLabel's colour/category
+        if (cellMarker === 'present' && r.rd_code) shift = { ...shift, code: r.rd_code };
+      } else {
+        shift = deriveShiftLabel(r.scheduled_start, r.scheduled_end, r.attendance_marker, r.is_wfh);
+      }
+      // the shift code stays clean (E/M/B/C/MD…) — WFH is shown by the 🏠 icon + dotted texture, not a "-WFH" suffix
+      if (shift && shift.code) shift = { ...shift, code: shift.code.replace(/-WFH$/, '') };
       // Parse audit edit count from notes JSON
       let editCount = 0;
       let lastEditBy: string | null = null;
@@ -253,17 +296,20 @@ export class ScheduleService {
         } catch {}
       }
       emp.days[r.date] = {
-        marker:      r.attendance_marker,
-        start:       r.scheduled_start,
-        end:         r.scheduled_end,
-        isWfh:       r.is_wfh,
+        marker:      cellMarker,
+        // when corrected: show the canonical roster_days shift time so the time MATCHES the code
+        // (attendance_records scheduled_start/end is stale and disagreed — caused MD shown as "7am–4pm")
+        start:       hasRoster ? (r.rd_start_min != null ? minToHHMM(r.rd_start_min) : null) : r.scheduled_start,
+        end:         hasRoster ? (r.rd_end_min   != null ? minToHHMM(r.rd_end_min)   : null) : r.scheduled_end,
+        isWfh:       cellWfh,
         punchIn:     r.punch_in,
         punchOut:    r.punch_out,
-        lateMinutes: r.punch_late_minutes ?? r.system_late_minutes ?? 0,
-        otMinutes:   r.ot_minutes ?? 0,
+        lateMinutes: hasRoster ? (r.rd_late ?? 0) : (r.punch_late_minutes ?? r.system_late_minutes ?? 0),
+        otMinutes:   hasRoster ? (r.rd_ot ?? 0) : (r.ot_minutes ?? 0),
         editCount,
         lastEditBy,
         notes:       r.notes ?? null,
+        source:      hasRoster ? 'roster' : 'schedule',
         ...shift,
       };
     }

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { StatTile } from '@/components/dazzle';
 
 const dur = (m: number) => { if (!m) return '0'; const h=Math.floor(m/60), mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const adhC = (v: number) => v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
@@ -37,6 +38,7 @@ export default function RosterDashboardPage() {
     { ic: LogOut, l: ar?'خروج مبكر':'Early out', v: s.early_days, sub: dur(s.early_min), c:'#f59e0b' },
     { ic: TimerReset, l: ar?'OT قبل الشفت':'OT before', v: dur(s.ot_before), c:'#10b981' },
     { ic: Timer, l: ar?'OT بعد الشفت':'OT after', v: dur(s.ot_after), c:'#10b981' },
+    { ic: Timer, l: ar?'إجمالي OT':'Total OT', v: dur(s.ot_total), sub: ar?'شامل OFF/عطلة':'incl off/holiday', c:'#22d3ee' },
     { ic: Coffee, l: ar?'سيك':'Sick', v: s.sick, c:'#f59e0b' },
     { ic: UserX, l: ar?'غياب':'Absent', v: s.absent, c:'#f43f5e' },
     { ic: ListChecks, l: ar?'استئذانات':'Permissions', v: s.permissions, c:'#8b5cf6' },
@@ -109,14 +111,10 @@ export default function RosterDashboardPage() {
       {!loading && !d && <p className="text-sm text-rose-400 py-8 text-center">{ar?'تعذّر التحميل':'Failed to load'}</p>}
 
       {!loading && d && (<>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
           {kpis.map((x,i)=>(
-            <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:`${x.c}22`, color:x.c }}><x.ic size={16}/></div>
-              <div className="min-w-0"><p className="text-[9px] text-slate-500 uppercase font-semibold tracking-wide truncate">{x.l}</p>
-                <p className="text-lg font-bold text-white leading-tight">{typeof x.v==='number'?x.v.toLocaleString():x.v}</p>
-                {x.sub && <p className="text-[9px] text-slate-500">{x.sub}</p>}</div>
-            </div>
+            <StatTile key={i} icon={x.ic} label={x.l} color={x.c} sub={x.sub} delay={i*45}
+              {...(typeof x.v==='number' ? { num: x.v } : { value: String(x.v) })} />
           ))}
         </div>
 

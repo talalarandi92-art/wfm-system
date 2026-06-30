@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { StatTile, BarRow, Gauge } from '@/components/dazzle';
 
 const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
@@ -34,16 +35,17 @@ export default function WfmOverviewPage() {
   const s = dash?.summary; const h = integ?.headline;
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
   const flaggedTLs = (integ?.teamLeaders||[]).filter((t:any)=>!t.verified);
+  const maxLate = Math.max(1, ...((dash?.rankings?.mostLate||[]).map((a:any)=>a.v||0)));
 
-  const kpis = s ? [
-    { ic:Users, l:ar?'موظفون نشطون':'Active agents', v:s.agents, c:'#6366f1' },
-    { ic:ShieldCheck, l:ar?'كونفورمانس':'Conformance', v:s.conformance!=null?s.conformance+'%':'—', c:adhC(s.conformance) },
-    { ic:Clock, l:ar?'أيام تأخير':'Late days', v:s.late_days, sub:dur(s.late_min), c:'#f59e0b' },
-    { ic:Timer, l:ar?'OT بعد':'OT after', v:dur(s.ot_after), c:'#10b981' },
-    { ic:Coffee, l:ar?'سيك':'Sick', v:s.sick, c:'#f59e0b' },
-    { ic:UserX, l:ar?'غياب':'Absent', v:s.absent, c:'#f43f5e' },
-    { ic:ListChecks, l:ar?'استئذانات':'Permissions', v:s.permissions, c:'#8b5cf6' },
-    { ic:Building2, l:'WFH', v:s.wfh, c:'#06b6d4' },
+  const kpis: { ic:any; l:string; num?:number|null; value?:string; suffix?:string; sub?:string; c:string }[] = s ? [
+    { ic:Users, l:ar?'موظفون نشطون':'Active agents', num:s.agents, c:'#6366f1' },
+    { ic:ShieldCheck, l:ar?'كونفورمانس':'Conformance', num:s.conformance!=null?Number(s.conformance):null, suffix:'%', c:adhC(s.conformance) },
+    { ic:Clock, l:ar?'أيام تأخير':'Late days', num:s.late_days, sub:dur(s.late_min), c:'#f59e0b' },
+    { ic:Timer, l:ar?'OT بعد':'OT after', value:dur(s.ot_after), c:'#10b981' },
+    { ic:Coffee, l:ar?'سيك':'Sick', num:s.sick, c:'#f59e0b' },
+    { ic:UserX, l:ar?'غياب':'Absent', num:s.absent, c:'#f43f5e' },
+    { ic:ListChecks, l:ar?'استئذانات':'Permissions', num:s.permissions, c:'#8b5cf6' },
+    { ic:Building2, l:'WFH', num:s.wfh, c:'#06b6d4' },
   ] : [];
 
   const TILES: { ic:any; ar:string; en:string; to:string; c:string }[] = [
@@ -112,13 +114,10 @@ export default function WfmOverviewPage() {
       {!loading && s && (<>
         {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {kpis.map((x,i)=>(
-            <div key={i} className="flex items-center gap-2.5 p-3 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:`${x.c}22`, color:x.c }}><x.ic size={18}/></div>
-              <div className="min-w-0"><p className="text-[9px] text-slate-500 uppercase font-semibold truncate">{x.l}</p>
-                <p className="text-xl font-bold text-white leading-tight">{typeof x.v==='number'?x.v.toLocaleString():x.v}</p>{x.sub&&<p className="text-[9px] text-slate-500">{x.sub}</p>}</div>
-            </div>
-          ))}
+          {kpis.map((x,i)=> x.num!=null
+            ? <StatTile key={i} icon={x.ic} label={x.l} num={x.num} suffix={x.suffix||''} sub={x.sub} color={x.c} delay={i*55} />
+            : <StatTile key={i} icon={x.ic} label={x.l} value={x.value ?? '—'} sub={x.sub} color={x.c} delay={i*55} />
+          )}
         </div>
 
         {/* tiles + top rankings */}
@@ -131,18 +130,25 @@ export default function WfmOverviewPage() {
               </button>
             ))}
           </div>
-          {/* top late + lowest conformance mini-boards */}
+          {/* conformance health dial + top late / lowest conformance mini-boards */}
           <div className="space-y-3">
-            {([['mostLate',ar?'الأكثر تأخيراً':'Most late','#f59e0b',(v:any)=>dur(v)],['lowestConformance',ar?'الأقل كونفورمانس':'Lowest conformance','#f43f5e',(v:any)=>`${v}%`]] as [string,string,string,(v:any)=>string][]).map(([key,title,col,fmt])=>(
+            {s.conformance != null && (
+              <div className="rounded-2xl p-3 flex flex-col items-center" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+                <div className="self-start text-[11px] font-bold text-white mb-1">{ar?'صحّة الالتزام':'Conformance health'}</div>
+                <Gauge value={Number(s.conformance)} label={ar?'متوسط الكونفورمانس':'avg conformance'} color={adhC(s.conformance)} size={140} />
+              </div>
+            )}
+            {([
+              ['mostLate', ar?'الأكثر تأخيراً':'Most late', '#f59e0b', maxLate, ar?'د':'m'],
+              ['lowestConformance', ar?'الأقل كونفورمانس':'Lowest conformance', '#f43f5e', 100, '%'],
+            ] as [string,string,string,number,string][]).map(([key,title,col,mx,sfx])=>(
               <div key={key} className="rounded-2xl p-3" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-                <div className="flex items-center gap-1.5 mb-2"><Award size={12} style={{ color:col }}/><h3 className="text-[11px] font-bold text-white">{title}</h3></div>
-                {(dash.rankings?.[key]||[]).slice(0,5).map((a:any,i:number)=>(
-                  <div key={i} className="flex items-center gap-2 mb-1">
-                    <span className="text-[10px] text-slate-600 w-3">{i+1}</span>
-                    <span className="flex-1 text-[11px] text-slate-200 truncate">{a.name}</span>
-                    <span className="text-[11px] font-bold" style={{ color:col }}>{fmt(a.v)}</span>
-                  </div>
-                ))}
+                <div className="flex items-center gap-1.5 mb-2.5"><Award size={12} style={{ color:col }}/><h3 className="text-[11px] font-bold text-white">{title}</h3></div>
+                <div className="space-y-2">
+                  {(dash.rankings?.[key]||[]).slice(0,5).map((a:any,i:number)=>(
+                    <BarRow key={i} label={a.name} value={a.v} max={mx} color={col} suffix={sfx} delay={i*40} />
+                  ))}
+                </div>
                 {(!dash.rankings?.[key]||!dash.rankings[key].length)&&<p className="text-[11px] text-slate-600">—</p>}
               </div>
             ))}

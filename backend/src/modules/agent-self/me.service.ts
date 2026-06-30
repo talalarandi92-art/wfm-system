@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { SprinklrService } from '@modules/integrations/sprinklr/sprinklr.service';
 
 /**
  * Self-service data for the logged-in employee only — never team-wide.
@@ -8,7 +9,25 @@ import { DataSource } from 'typeorm';
  */
 @Injectable()
 export class MeService {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly sprinklr: SprinklrService,
+  ) {}
+
+  /** The agent's OWN live Sprinklr performance: status + duration + today's
+   *  contacts/AHT/idle/hold/break + per-status timeline (their data only). */
+  async getLivePerformance(tenantId: string, employeeId: string | null) {
+    if (!employeeId) return { linked: false, reason: 'no_employee' };
+    const [m] = await this.ds.query(
+      `SELECT sprinklr_agent_id FROM sprinklr_agent_map
+        WHERE tenant_id = $1 AND employee_id = $2 AND sprinklr_agent_id IS NOT NULL
+        ORDER BY last_seen DESC NULLS LAST LIMIT 1`,
+      [tenantId, employeeId],
+    ).catch(() => []);
+    if (!m?.sprinklr_agent_id) return { linked: false, reason: 'not_mapped' };
+    const a360 = await this.sprinklr.getAgent360(tenantId, m.sprinklr_agent_id);
+    return { linked: true, ...a360 };
+  }
 
   async getOverview(tenantId: string, employeeId: string | null) {
     if (!employeeId) {

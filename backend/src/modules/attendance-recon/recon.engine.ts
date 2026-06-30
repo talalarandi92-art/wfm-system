@@ -9,7 +9,9 @@
  *   • approved = late/early minutes covered by an approved Permission/Comp
  *
  * Rules:
- *   1. Presence:  system+punch=office · system&!punch=WFH · punch&!system=anomaly · neither=absent
+ *   1. Presence:  WFH is determined ONLY by a WFH shift code or a WFH location —
+ *      NEVER inferred from "system login but no punch". system+punch=office ·
+ *      system&!punch=office+missing_punch (see line ~76) · punch&!system=anomaly · neither=absent
  *   2. An approved permission/comp exempts that many late / early-out minutes.
  *   3. Late ALWAYS owes compensation (make-up on BOTH system & punch), even 1 min.
  *      A financial DEDUCTION only starts when effective late > 20 min.
@@ -70,7 +72,10 @@ export function reconcileDay(inp: ReconInput): ReconResult {
 
   let presence: Presence;
   if (hasSystem && hasPunch) presence = 'office';
-  else if (hasSystem && !hasPunch) { presence = 'wfh'; flags.push('wfh'); }
+  // System session but NO fingerprint punch = a MISSING PUNCH on an office shift — NOT WFH.
+  // WFH is only ever asserted from a WFH shift code / WFH location (carried by the rich roster_days
+  // builder), never inferred here. (Corrected 2026-06-24 to match WFM_RULES_AND_DECISIONS §4.)
+  else if (hasSystem && !hasPunch) { presence = 'office'; flags.push('missing_punch'); }
   else if (!hasSystem && hasPunch) { presence = 'anomaly'; flags.push('punch_no_system'); }
   else { presence = 'absent'; }
 

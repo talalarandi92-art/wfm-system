@@ -637,6 +637,23 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light [class*="bg-white/"]     { background-color: rgba(15, 23, 42, 0.035) !important; }
 .theme-light [class*="border-white/"] { border-color: rgba(15, 23, 42, 0.12) !important; }
 
+/* dark-first SOLID near-black inline backgrounds (table heads, panels) →
+   a light header grey. These hexes (#11162a, #0f1527, #0f172a, #0b0f1c, #0b1120,
+   #080f1a, rgba(7,9,15,…)) serialize to rgb()/rgba() in the style attribute; in
+   light mode they'd stay black, so remap. Only NEAR-BLACK tones — colored
+   buttons/badges are untouched. Glass is dark-based, so it keeps them as-is. */
+.theme-light [style*="background: rgb(17, 22, 42)"],
+.theme-light [style*="background:rgb(17, 22, 42)"],
+.theme-light [style*="background: rgb(15, 21, 39)"],
+.theme-light [style*="background:rgb(15, 21, 39)"],
+.theme-light [style*="background: rgb(15, 23, 42)"],
+.theme-light [style*="background:rgb(15, 23, 42)"],
+.theme-light [style*="background: rgb(11, 15, 28)"],
+.theme-light [style*="background: rgb(11, 17, 32)"],
+.theme-light [style*="background: rgb(8, 15, 26)"],
+.theme-light [style*="background: rgba(7, 9, 15"],
+.theme-light [style*="background:rgba(7,9,15"] { background: #e9edf4 !important; }
+
 /* dark-first INLINE light-slate text colors (style={{color:'#e2e8f0'}} etc.) →
    readable dark tones. These hexes are body/muted text by convention. */
 .theme-light [style*="color: rgb(241, 245, 249)"] { color: #0f172a !important; }  /* #f1f5f9 */

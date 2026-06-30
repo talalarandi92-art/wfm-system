@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { LlmService } from '@modules/llm/llm.service';
 
 interface ArticleInput {
   categoryId?: string | null;
@@ -12,7 +13,135 @@ interface ArticleInput {
 
 @Injectable()
 export class KbService {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly llm: LlmService,
+  ) {}
+
+  /* ── What's New (continuous-learning change feed) ───────────────────────── */
+  async whatsNew(tenantId: string, days = 30, limit = 60) {
+    const items = await this.ds.query(
+      `SELECT ch.article_id, ch.slug, ch.title, ch.category, ch.change_type, ch.changed_at,
+              c.icon AS category_icon
+         FROM kb_changes ch
+         LEFT JOIN kb_articles a ON a.id = ch.article_id
+         LEFT JOIN kb_categories c ON c.id = a.category_id
+        WHERE ch.tenant_id = $1 AND ch.changed_at >= NOW() - ($2 || ' days')::interval
+        ORDER BY ch.changed_at DESC
+        LIMIT $3`, [tenantId, String(days), limit]);
+    const counts = await this.ds.query(
+      `SELECT change_type, COUNT(*)::int n FROM kb_changes
+        WHERE tenant_id = $1 AND changed_at >= NOW() - ($2 || ' days')::interval
+        GROUP BY change_type`, [tenantId, String(days)]);
+    const lastImport = await this.ds.query(
+      `SELECT created_at, articles, words FROM kb_import_log
+        WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1`, [tenantId]);
+    const c: any = { new: 0, updated: 0 };
+    counts.forEach((r: any) => { c[r.change_type] = r.n; });
+    return { days, counts: c, items, lastImport: lastImport[0] || null };
+  }
+
+  /* ── Reply Helper: paste customer message → best-matching reply scripts ──── */
+  async suggestReply(tenantId: string, text: string, limit = 6) {
+    const q = (text || '').toLowerCase();
+    if (q.trim().length < 2) return { matches: [] };
+    // intent keywords → category (customer message maps to the reply bucket)
+    const INTENT: Record<string, string[]> = {
+      'Delivery': ['وين طلب', 'متى يوصل', 'متى بيوصل', 'تأخر', 'تاخر', 'توصيل', 'يوصل', 'ما وصل', 'لساته', 'تتبع', 'شحن', 'delivery', 'late', 'track', 'where is my order', 'arrive', 'shipping', 'shipment'],
+      'Order Info': ['طلبي', 'رقم الطلب', 'order number', 'my order', 'order info'],
+      'Returns': ['ارجاع', 'إرجاع', 'استرجاع', 'ارجع', 'أرجع', 'رجع', 'return', 'refund', 'استرداد', 'مبلغ', 'فلوس', 'المبلغ', 'مرتجع', 'استرد'],
+      'Exchange': ['استبدال', 'تبديل', 'exchange', 'مقاس', 'size', 'بدل', 'أبدل'],
+      'Cancellation': ['الغاء', 'إلغاء', 'الغي', 'ألغي', 'إلغي', 'تلغي', 'cancel', 'ابطال', 'بطل', 'ما بدي الطلب', 'ما بدي', 'لا تجهز', "don't want"],
+      'Payment': ['دفع', 'payment', 'بطاقة', 'knet', 'كنت', 'فيزا', 'card', 'pay', 'خصم مبلغ', 'انخصم'],
+      'Tabby Info': ['تابي', 'tabby'],
+      'Tamara': ['تمارا', 'tamara'],
+      'Complaint': ['شكوى', 'مشكلة', 'complaint', 'سيء', 'زعلان', 'problem', 'مو راضي', 'غاضب', 'سيئة'],
+      'App': ['تطبيق', 'app', 'application', 'الموقع', 'website', 'ما يفتح', 'معلق'],
+      'Security Questions': ['تحقق', 'هوية', 'security', 'verify', 'أسئلة الأمان', 'identity'],
+      'Empathy': ['اعتذار', 'آسف', 'sorry', 'متضايق'],
+      'Product': ['منتج', 'product', 'item', 'بضاعة', 'الغرض'],
+      'PNA': ['غير متوفر', 'نفذ', 'out of stock', 'unavailable', 'pna', 'مو موجود'],
+      'Promotions': ['خصم', 'عرض', 'كوبون', 'discount', 'promo', 'offer', 'coupon', 'كود'],
+      'Reset Password': ['كلمة المرور', 'باسورد', 'password', 'reset', 'نسيت'],
+      'Gift Card': ['هدية', 'gift card', 'بطاقة هدايا', 'gift'],
+      'Address Info': ['عنوان', 'address', 'منطقة', 'تغيير العنوان'],
+    };
+    const catScore: Record<string, number> = {};
+    for (const cat in INTENT) for (const kw of INTENT[cat]) if (q.includes(kw)) catScore[cat] = (catScore[cat] || 0) + 1;
+    // Greetings → Protocols (the greeting / "how may I help" scripts)
+    const greet = /\b(hi+|hello+|hey+|good\s*(morning|evening|afternoon))\b/i.test(q)
+      || /(مرحب|السلام|سلام|هلا|اهلا|أهلا|هاي|صباح|مساء|اهلين)/.test(q);
+    if (greet) catScore['Protocols'] = (catScore['Protocols'] || 0) + 3;
+
+    const tokens = (q.match(/[\p{L}\p{N}]{3,}/gu) || []).filter(w => !['the', 'and', 'you', 'for', 'هذا', 'هذه', 'من', 'على', 'الى', 'في'].includes(w)).slice(0, 25);
+    const scripts = await this.ds.query(
+      `SELECT category, en, ar, source, code, keywords FROM kb_scripts WHERE tenant_id=$1`, [tenantId]);
+    let scored = scripts.map((s: any) => {
+      let score = (catScore[s.category] || 0) * 4;
+      for (const t of tokens) if ((s.keywords || '').includes(t)) score += 1;
+      return { ...s, score };
+    }).filter((s: any) => s.score > 0).sort((a: any, b: any) => b.score - a.score);
+    // Always respond: if nothing matched, fall back to greeting + ask-for-order scripts.
+    if (scored.length === 0) {
+      scored = scripts
+        .filter((s: any) => ['Protocols', 'Order Info'].includes(s.category))
+        .map((s: any) => ({ ...s, score: 0 }))
+        .slice(0, 6);
+    }
+    const matches = scored.slice(0, limit).map((s: any) => ({ category: s.category, en: s.en, ar: s.ar, source: s.source, score: s.score }));
+
+    // Also surface matching KB articles (the policy/guide + its explanation).
+    let articles: any[] = [];
+    if (tokens.length) {
+      const aParams: any[] = [tenantId]; const aConds: string[] = []; const aScore: string[] = [];
+      for (const t of tokens) {
+        aParams.push(`%${t}%`); const i = aParams.length;
+        aConds.push(`(a.title ILIKE $${i} OR a.body ILIKE $${i})`);
+        aScore.push(`(CASE WHEN a.title ILIKE $${i} THEN 2 WHEN a.body ILIKE $${i} THEN 1 ELSE 0 END)`);
+      }
+      const rawArticles = await this.ds.query(
+        `SELECT a.id, a.title, c.name AS category, (${aScore.join(' + ')}) AS score,
+                LEFT(regexp_replace(COALESCE(NULLIF(a.body,''),''), '[#*\`>_]', '', 'g'), 380)  AS excerpt,
+                LEFT(regexp_replace(COALESCE(NULLIF(a.body,''),''), '[#\`>_]', '', 'g'), 9000)   AS body
+           FROM kb_articles a LEFT JOIN kb_categories c ON c.id = a.category_id
+          WHERE a.tenant_id = $1 AND a.status = 'published' AND (${aConds.join(' OR ')})
+          ORDER BY score DESC, length(a.body) ASC LIMIT 8`, aParams)
+        .then((r: any) => r.filter((x: any) => Number(x.score) > 0)).catch(() => []);
+      const seenTitle = new Set<string>();
+      for (const a of rawArticles) {
+        const key = (a.title || '').trim().toLowerCase();
+        if (seenTitle.has(key)) continue;
+        seenTitle.add(key); articles.push(a);
+        if (articles.length >= 3) break;
+      }
+    }
+
+    const topScore = scored[0]?.score || 0;
+    const llmConfigured = this.llm.isConfigured();
+
+    // HYBRID: confident local script match AND no policy question → return locally
+    // (free, private). Otherwise, if the LLM is enabled, compose a natural reply +
+    // a short policy explanation grounded in the scripts + KB articles.
+    if ((topScore >= 4 && articles.length === 0) || !llmConfigured) {
+      return { mode: topScore >= 4 ? 'local' : 'local-weak', llmConfigured, generated: null, matches, articles };
+    }
+    const isAr = /[؀-ۿ]/.test(text);
+    const scriptCtx = scored.slice(0, 10).map((s: any, i: number) =>
+      `${i + 1}. [${s.category}] AR: ${s.ar || '-'} | EN: ${s.en || '-'}`).join('\n');
+    const policyCtx = articles.map((a: any, i: number) => `${i + 1}. ${a.title}: ${a.excerpt}`).join('\n') || '(none)';
+    const system = `You are a Boutiqaat Contact Center assistant helping an AGENT. Using ONLY the provided scripts + KB policy excerpts, answer in the SAME language as the input (${isAr ? 'Arabic' : 'English'}). Produce two short parts, clearly labelled:
+1) "${isAr ? 'الرد المقترح' : 'Suggested reply'}": the message to send the customer (adapt a script; ask for order number if needed).
+2) "${isAr ? 'الشرح' : 'Explanation'}": 1–3 lines explaining the relevant policy to the agent.
+Be concise, professional, on-brand. Do not invent policy not in the context.
+
+Scripts:
+${scriptCtx}
+
+KB policy excerpts:
+${policyCtx}`;
+    const generated = await this.llm.chat(system, [{ role: 'user', content: text }], 650).catch(() => null);
+    return { mode: generated ? 'llm' : 'local-weak', llmConfigured, model: generated ? this.llm.modelName : null, generated, matches, articles };
+  }
 
   /* ── Categories ─────────────────────────────────────────────────────────── */
   listCategories(tenantId: string) {

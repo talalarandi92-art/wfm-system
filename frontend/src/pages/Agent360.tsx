@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { StatTile, Gauge } from '@/components/dazzle';
 
 const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
@@ -114,13 +115,17 @@ export default function Agent360Page() {
   const bandsMax = Math.max(...(d?.tardinessBands||[]).map((x:any)=>x.n), 1);
   const srMax = Math.max(...Object.values(d?.shiftRate||{}).map(Number).filter(v=>v), 1);
   const monMax = Math.max(...(d?.byMonth||[]).map((x:any)=>x.worked), 1);
+  // chronological monthly series → mini trend sparklines inside the tiles
+  const _mon = [...(d?.byMonth||[])].sort((a:any,b:any)=>String(a.month).localeCompare(String(b.month)));
+  const trWorked = _mon.map((m:any)=>Number(m.worked)); const trConf = _mon.map((m:any)=>Number(m.conformance)); const trOt = _mon.map((m:any)=>Number(m.otMin));
 
   const kpis = s ? [
-    { ic:Briefcase, l:ar?'أيام عمل':'Worked', v:s.workedDays, sub:`${s.officeDays} ${ar?'مكتب':'office'} · ${s.wfhDays} WFH`, c:'#6366f1' },
-    { ic:ShieldCheck, l:ar?'كونفورمانس':'Conformance', v:s.conformance!=null?s.conformance+'%':'—', c:adhC(s.conformance) },
+    { ic:Briefcase, l:ar?'أيام عمل':'Worked', v:s.workedDays, sub:`${s.officeDays} ${ar?'مكتب':'office'} · ${s.wfhDays} WFH`, c:'#6366f1', tr:trWorked },
+    { ic:ShieldCheck, l:ar?'كونفورمانس':'Conformance', v:s.conformance!=null?s.conformance+'%':'—', c:adhC(s.conformance), tr:trConf },
     { ic:Clock, l:ar?'تأخير':'Late', v:s.lateDays, sub:dur(s.totalLateMin), c:'#f59e0b' },
     { ic:TimerReset, l:ar?'OT قبل':'OT before', v:dur(s.otBefore), c:'#10b981' },
     { ic:Timer, l:ar?'OT بعد':'OT after', v:dur(s.otAfter), c:'#10b981' },
+    { ic:Timer, l:ar?'إجمالي OT':'Total OT', v:dur(s.otTotal), sub:`${ar?'منها':'incl'} ${dur(s.offdayOt)} ${ar?'OFF':'off'} · ${dur(s.holidayOt)} ${ar?'عطلة':'hol'}`, c:'#22d3ee', tr:trOt },
     { ic:Coffee, l:ar?'سيك':'Sick', v:s.sickDays, c:'#f59e0b' },
     { ic:UserX, l:ar?'غياب':'Absent', v:s.absenceDays, c:'#f43f5e' },
     { ic:CalendarDays, l:ar?'إجازة':'Leave', v:s.leaveDays, c:'#a78bfa' },
@@ -335,15 +340,25 @@ export default function Agent360Page() {
         )}
 
         {/* KPI grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 stagger-grid">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
           {kpis.map((x,i)=>(
-            <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl lift sheen" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:`${x.c}22`, color:x.c }}><x.ic size={16}/></div>
-              <div className="min-w-0"><p className="text-[9px] text-slate-500 uppercase font-semibold truncate">{x.l}</p>
-                <p className="text-lg font-bold text-white leading-tight num-pop">{typeof x.v==='number'?x.v.toLocaleString():x.v}</p>{x.sub&&<p className="text-[9px] text-slate-500 truncate">{x.sub}</p>}</div>
-            </div>
+            <StatTile key={i} icon={x.ic} label={x.l} color={x.c} sub={x.sub} delay={i*45} trend={(x as any).tr}
+              {...(typeof x.v==='number' ? { num: x.v } : { value: String(x.v) })} />
           ))}
         </div>
+
+        {/* personal adherence dial */}
+        {s && s.conformance != null && (
+          <div className="rounded-2xl p-4 flex flex-col sm:flex-row items-center sm:gap-5" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)' }}>
+            <Gauge value={Number(s.conformance)} label={ar?'كونفورمانس الموظف':'agent conformance'} color={adhC(s.conformance)} size={150} />
+            <div className="flex-1 text-xs leading-relaxed mt-2 sm:mt-0" style={{ color:'var(--text-3)' }}>
+              <div className="font-bold mb-1" style={{ color:'var(--text-1)' }}>{ar?'صحّة التزام الموظف':'Adherence health'}</div>
+              {ar
+                ? `عمل ${s.workedDays} يوم · تأخّر ${s.lateDays} · غياب ${s.absenceDays} · سيك ${s.sickDays}. الكونفورمانس = متوسط التزامه عبر الفترة، والمنحنيات داخل الكروت توري الاتجاه شهرياً.`
+                : `${s.workedDays} worked · ${s.lateDays} late · ${s.absenceDays} absent · ${s.sickDays} sick. Conformance is the agent's adherence across the period; the in-tile sparklines show the monthly direction.`}
+            </div>
+          </div>
+        )}
 
         {/* Performance & Productivity — official scorecard Net Points + Ameyo AHT/occupancy */}
         {perf && (perf.scorecardMonths>0 || perf.productivity?.hasData) && (

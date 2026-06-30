@@ -1284,15 +1284,14 @@ export class RequestsService {
 
     // Get employee_id from requests table (getOne() doesn't expose it)
     const empRow = await this.ds.query(
-      `SELECT r.employee_id, e.function_id, f.name AS func_name
+      `SELECT r.employee_id, e.employee_no, e.function_id, f.name AS func_name
        FROM requests r
        JOIN employees e ON e.id = r.employee_id
-       JOIN functions f ON f.id = e.function_id
+       LEFT JOIN functions f ON f.id = e.function_id
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [req.id, tenantId],
     );
-    const empId   = empRow[0]?.employee_id;
-    const funcId   = empRow[0]?.function_id;
+    const reqNo    = empRow[0]?.employee_no != null ? String(empRow[0].employee_no) : null;
     const funcName = empRow[0]?.func_name ?? req.function_name ?? 'â€”';
 
     // For each date, count working HC in the function.
@@ -1301,17 +1300,12 @@ export class RequestsService {
     const dateRows = await Promise.all(
       dates.map(async (d) => {
         const hcRow = await this.ds.query(
-          `SELECT COUNT(*) FILTER (WHERE ar.attendance_marker = 'present') AS total,
-                  COUNT(*) FILTER (WHERE ar.attendance_marker = 'present'
-                                     AND ar.employee_id != $3)              AS after_approval,
-                  COUNT(*) FILTER (WHERE ar.attendance_marker = 'present'
-                                     AND ar.employee_id  = $3)              AS requester_working
-           FROM attendance_records ar
-           JOIN employees e ON e.id = ar.employee_id
-           WHERE ar.tenant_id = $1
-             AND e.function_id = $2
-             AND ar.attendance_date::date = $4::date`,
-          [tenantId, funcId, empId, d],
+          `SELECT COUNT(*) FILTER (WHERE presence IN ('office','wfh'))                    AS total,
+                  COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no <> $3) AS after_approval,
+                  COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no  = $3) AS requester_working
+           FROM roster_days
+           WHERE tenant_id = $1 AND is_active AND role_function = $2 AND work_date = $4::date`,
+          [tenantId, funcName, reqNo, d],
         );
         const total   = parseInt(hcRow[0]?.total ?? '0');
         const after   = parseInt(hcRow[0]?.after_approval ?? '0');
@@ -1422,60 +1416,53 @@ export class RequestsService {
     }
 
     const funcInfo = await this.ds.query(
-      `SELECT r.employee_id, e.function_id, f.name AS func_name
+      `SELECT e.employee_no, COALESCE(f.name, '—') AS func_name
        FROM requests r
        JOIN employees e ON e.id = r.employee_id
-       JOIN functions f ON f.id = e.function_id
+       LEFT JOIN functions f ON f.id = e.function_id
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [req.id, tenantId],
     );
-    const empId    = funcInfo[0]?.employee_id;
-    const funcId   = funcInfo[0]?.function_id;
+    const reqNo    = funcInfo[0]?.employee_no != null ? String(funcInfo[0].employee_no) : null;
     const funcName = funcInfo[0]?.func_name ?? '—';
 
-    // Pull all working shifts that can cover any hour of the permission date:
-    // shifts ON the date itself + cross-midnight shifts from the PREVIOUS day
-    // that spill into the early hours of the date.
     const permDate = typeof req.permission_date === 'string'
       ? req.permission_date.substring(0, 10)
       : RequestsService.ymdLocal(new Date(req.permission_date));
+
+    // CANONICAL schedule from roster_days — NOT the stale attendance_records grid (which can disagree,
+    // e.g. it showed 09:00-18:00 for a person whose real roster shift was N 13:00-22:00, so an evening
+    // permission falsely read "outside shift" and never reduced the headcount). Pull all of the
+    // function's WORKING shifts on the date + cross-midnight shifts from the previous day that spill in.
     const shifts = await this.ds.query(
-      `SELECT ar.employee_id, ar.scheduled_start, ar.scheduled_end,
-              ar.attendance_date::date::text AS att_date
-       FROM attendance_records ar
-       JOIN employees e ON e.id = ar.employee_id
-       WHERE ar.tenant_id = $1 AND e.function_id = $2
-         AND ar.attendance_marker = 'present'
-         AND ar.scheduled_start IS NOT NULL
-         AND ar.attendance_date::date IN ($3::date, $3::date - 1)`,
-      [tenantId, funcId, permDate],
+      `SELECT person_no, shift_start_min AS ss, shift_end_min AS se, work_date::text AS wd
+       FROM roster_days
+       WHERE tenant_id = $1 AND is_active AND role_function = $2
+         AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL
+         AND work_date IN ($3::date, $3::date - 1)`,
+      [tenantId, funcName, permDate],
     );
 
     const toMin = (t: string) => {
       const [h, m] = t.split(':').map(Number);
       return h * 60 + (m || 0);
     };
+    const fmtMin = (m: number) => `${String(Math.floor((((m % 1440) + 1440) % 1440) / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
-    /** Does this shift cover minute-of-day `mod` on the permission date? */
+    /** Does this roster_days shift (minute-of-day ss; se may exceed 1440 when crossing midnight)
+     *  cover minute-of-day `mod` ON the permission date? */
     const covers = (s: any, mod: number): boolean => {
-      const start = toMin(s.scheduled_start);
-      const end   = toMin(s.scheduled_end);
-      const crossesMidnight = end <= start;
-      const isPrevDay = s.att_date < permDate;
-      if (isPrevDay) {
-        // Previous-day shift only matters if it crosses midnight into this date
-        return crossesMidnight && mod < end;
-      }
-      if (crossesMidnight) return mod >= start;          // covers start→24:00 on this date
-      return mod >= start && mod < end;                  // normal same-day shift
+      const ss = Number(s.ss), se = Number(s.se);
+      if (s.wd < permDate) return se > 1440 && mod < (se - 1440);   // prev-day shift spilling into early hours
+      return mod >= ss && mod < Math.min(se, 1440);                  // same-day portion [ss, min(se,1440))
     };
 
     const permStart = toMin(req.start_time);
     const permEnd   = toMin(req.end_time);
     const durationMins = req.duration_minutes ?? Math.max(permEnd - permStart, 0);
 
-    // Requester's own shift today (for scheduled check + display)
-    const reqShift = shifts.find((s: any) => s.employee_id === empId && s.att_date === permDate);
+    // Requester's own canonical shift today (for scheduled check + display)
+    const reqShift = shifts.find((s: any) => String(s.person_no) === reqNo && s.wd === permDate);
     const requesterScheduled = !!reqShift;
 
     // Hour-by-hour breakdown across the permission window
@@ -1512,9 +1499,7 @@ export class RequestsService {
       permissionTime: `${req.start_time?.substring(0,5)} - ${req.end_time?.substring(0,5)}`,
       durationMinutes: durationMins,
       requesterScheduled,
-      requesterShift: reqShift
-        ? `${reqShift.scheduled_start.substring(0,5)} - ${reqShift.scheduled_end.substring(0,5)}`
-        : null,
+      requesterShift: reqShift ? `${fmtMin(reqShift.ss)} - ${fmtMin(reqShift.se)}` : null,
       hourly,
       // Day-level summary kept for backwards compatibility
       scheduledHcOnDate: maxScheduled,

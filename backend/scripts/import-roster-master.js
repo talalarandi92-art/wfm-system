@@ -21,6 +21,12 @@ for (const p of [path.join(__dirname, '..', '.env'), path.join(__dirname, '..', 
   }
 
 const DIR = 'C:/Users/t.bassam/Desktop/ROSTER';
+// Optional overrides (defaults preserve original behaviour):
+//  SCHED_PATH       — read the schedule workbook (matrix+Timing+Shifts) from elsewhere (e.g. the
+//                     newer update drop) while keeping the VALIDATED ROSTER attendance sources.
+//  ROSTER_OUT_TABLE — write to a scratch table for a non-destructive dry-run before promoting.
+const SCHED_PATH = process.env.SCHED_PATH || path.join(DIR, 'CC Schedule 26.xlsx');
+const OUT_TABLE  = (process.env.ROSTER_OUT_TABLE || 'roster_days').replace(/[^a-z0-9_]/gi, '');
 const FROM = process.argv[2] || '2026-06-01';
 const TO   = process.argv[3] || '2026-06-07';
 const MONTH_TAB = { '2026-01':'Jan 26','2026-02':'Feb 26','2026-03':'Mar 26','2026-04':'April 26','2026-05':'May 26','2026-06':'June 26','2026-07':'July 26' };
@@ -91,6 +97,11 @@ function weekNum(iso) {
   return Math.floor((ws-fws)/(7*86400000))+1;
 }
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+// The Odoo "Status" column names every official public holiday — the AUTHORITY for holidays (the
+// schedule's H code only covers people rostered OFF, missing whoever actually works the holiday).
+// Seen in the real data: New Year, Eid ul-Fitr, Eid ul-Adha, Arafat Day, Hijri New Year,
+// Israa Wal Miraj, National Day, Liberation Day (all "- 2026").
+const HOLIDAY_RE = /new year|eid|arafat|national day|liberation|isra|mi'?raj|hijri|public holiday|ascension/i;
 function lateCat(m, noShow) { if (noShow) return 'No show'; if (m<=0) return 'On time'; if (m<=5) return 'Late 1-5'; if (m<=15) return 'Late 6-15'; if (m<=20) return 'Late 16-20'; if (m<=29) return 'Late 21-29'; if (m<=59) return 'Late 30-59'; return 'Late 60+'; }
 function attStatus(presence, pcStatus, code) {
   const U = String(code).toUpperCase();
@@ -99,6 +110,7 @@ function attStatus(presence, pcStatus, code) {
   if (pcStatus==='holiday') return 'Holiday'; if (pcStatus==='leave') return 'Annual Leave';
   if (pcStatus==='comp' || String(code).toUpperCase()==='COMP') return 'COMP'; if (pcStatus==='off') return 'OFF';
   if (pcStatus==='left') return 'Left';
+  if (presence==='holiday') return 'Holiday';
   if (presence==='office') return 'Present (Office)'; if (presence==='wfh') return 'WFH';
   if (presence==='absent') return 'Absence'; return 'Present';
 }
@@ -109,6 +121,8 @@ function attStatus(presence, pcStatus, code) {
   const tid = (await c.query(`SELECT id FROM tenants LIMIT 1`)).rows[0].id;
   for (const mig of ['053_roster_days.sql','054_roster_days_adherence.sql','055_roster_team_notes.sql','056_roster_master_fields.sql','057_roster_master_full.sql'])
     await c.query(fs.readFileSync(path.join(__dirname, '..', '..', 'database', 'migrations', mig), 'utf8'));
+  if (OUT_TABLE !== 'roster_days') await c.query(`CREATE TABLE IF NOT EXISTS ${OUT_TABLE} (LIKE roster_days INCLUDING DEFAULTS)`);
+  console.log(`SCHEDULE=${SCHED_PATH===path.join(DIR,'CC Schedule 26.xlsx')?'(default ROSTER)':SCHED_PATH} | ATTENDANCE=${DIR} | OUT=${OUT_TABLE}`);
   const empGender = new Map((await c.query(`SELECT employee_no, gender FROM employees`)).rows.map(r=>[String(r.employee_no), r.gender]));
   const sm = (await c.query(`SELECT m.sprinklr_agent_id, lower(m.agent_email) email, e.employee_no FROM sprinklr_agent_map m JOIN employees e ON e.id=m.employee_id WHERE m.employee_id IS NOT NULL`)).rows;
   const sprkIdToNo = new Map(), emailToNo = new Map();
@@ -117,7 +131,7 @@ function attStatus(presence, pcStatus, code) {
   // ── Timing dict + monthly matrix + Shifts static (single streaming pass) ──
   const TIMING = {}; const matrix = []; const staticMap = new Map();   // id → {mgr,gender}
   const tabsNeeded = new Set([MONTH_TAB[FROM.slice(0,7)], 'Timing', 'Shifts']);
-  const reader = new ExcelJS.stream.xlsx.WorkbookReader(path.join(DIR, 'CC Schedule 26.xlsx'), {});
+  const reader = new ExcelJS.stream.xlsx.WorkbookReader(SCHED_PATH, {});
   for await (const ws of reader) {
     if (!tabsNeeded.has(ws.name)) continue;
     if (ws.name === 'Timing') {
@@ -130,12 +144,19 @@ function attStatus(presence, pcStatus, code) {
       for await (const row of ws) { const v = row.values; const no = String(val(v[5])).replace(/\D/g,''); if (!no) continue;
         if (!staticMap.has(no)) staticMap.set(no, { mgr: str(v[9])||null, gender: str(v[10])||null }); }
     } else { // monthly matrix
-      let r = 0, dateCols = [];
+      // Column layout VARIES by month: Jan–Mar have no "Team" column (Name,ID,Username,Location,Function
+      // → dates from col 6); Apr–Jun add "Team" (→ dates from col 7). Detect team/location/func by HEADER
+      // and scan ALL columns for dates — hardcoding col 7 silently dropped the 1st of Jan/Feb/Mar.
+      let r = 0, dateCols = [], col = { team: null, location: null, func: null };
       for await (const row of ws) { r++; const v = row.values;
-        if (r === 2) { for (let cc = 7; cc < v.length; cc++) { const d = isoOf(v[cc]); if (d) dateCols.push([cc, d]); } continue; }
+        if (r === 1) { for (let cc = 1; cc < v.length; cc++) { const h = str(v[cc]).toLowerCase();
+            if (h === 'team') col.team = cc; else if (/location/.test(h)) col.location = cc; else if (/function/.test(h)) col.func = cc; } continue; }
+        if (r === 2) { for (let cc = 1; cc < v.length; cc++) { const d = isoOf(v[cc]); if (d) dateCols.push([cc, d]); } continue; }
         if (r < 4) continue;
         const no = String(val(v[2])).replace(/\D/g,''); if (!no) continue;
-        const rec = { no, name: str(v[1]), login: str(v[3]).toLowerCase(), team: str(v[4])||null, location: str(v[5])||null, func: str(v[6])||null, days: {} };
+        const rec = { no, name: str(v[1]), login: str(v[3]).toLowerCase(),
+          team: col.team ? str(v[col.team])||null : null, location: col.location ? str(v[col.location])||null : null,
+          func: col.func ? str(v[col.func])||null : null, days: {} };
         for (const [cc, d] of dateCols) if (d >= FROM && d <= TO) { const code = str(v[cc]); if (code) rec.days[d] = code; }
         if (Object.keys(rec.days).length) matrix.push(rec);
       }
@@ -150,6 +171,12 @@ function attStatus(presence, pcStatus, code) {
   for (let r=2;r<=ws.rowCount;r++){ const row=ws.getRow(r); const iso=isoOf(row.getCell(2)); if(!iso||iso<FROM||iso>TO)continue;
     const no=String(val(row.getCell(1).value)).replace(/\D/g,''); if(!no)continue;
     punch.set(`${no}|${iso}`, { in:timeMin(row.getCell(4).value), out:timeMin(row.getCell(5).value), ot:timeMin(row.getCell(9).value)||0, status:str(row.getCell(10).value) }); }
+  // DATE-LEVEL public holidays: a public holiday applies to EVERYONE who worked that date — so collect
+  // every date whose Odoo status names an official occasion for ANY employee, and treat the whole date
+  // as a holiday (else one agent's row says "New Year" and earns holiday-OT while another's says "WFH"
+  // and only gets 3 min regular OT — inconsistent).
+  const holidayDates = new Set();
+  for (const [k, v] of punch) if (HOLIDAY_RE.test(String(v.status || ''))) holidayDates.add(k.split('|')[1]);
   const sysByLogin=new Map(), sysByNo=new Map();
   const addSys=(map,key,iso,li,lo)=>{ if(li==null)return; const k=`${key}|${iso}`; let s=map.get(k); if(!s){map.set(k,{li,lo});return;} if(li<s.li)s.li=li; if(lo!=null&&(s.lo==null||lo>s.lo))s.lo=lo; };
   wb=new ExcelJS.Workbook(); await wb.xlsx.readFile(path.join(DIR,'Login and logout Ameyo.xlsx')); ws=wb.worksheets[0];
@@ -183,12 +210,37 @@ function attStatus(presence, pcStatus, code) {
       let ss = shift?.ss ?? null, se = shift?.se ?? null;
       const p = punch.get(`${rec.no}|${iso}`);
       const sA = sysByLogin.get(`${rec.login}|${iso}`), sS = sysByNo.get(`${rec.no}|${iso}`);
-      let li=null, lo=null, src=[]; for (const s of [sA,sS]) if (s){ if(li==null||s.li<li)li=s.li; if(s.lo!=null&&(lo==null||s.lo>lo))lo=s.lo; }
-      if (sA) src.push('Ameyo'); if (sS) src.push('Sprinklr');
+      const hasPunch = (p?.in!=null);
+      // SOURCE/SESSION SELECTION (user rule: punch → Ameyo → Sprinklr; take the best session that MATCHES
+      // the scheduled shift, else treat as no-work). Keep only system sessions OVERLAPPING the shift
+      // window (cross-midnight aware). A SHORT session entirely outside it (e.g. a 6:35–7:21 ping for a
+      // 9–6 shift) is a STRAY, not the shift's work → dropped + flagged. A long off-window session is kept
+      // (real work at another time; existing OT-before / shift-alert logic handles it).
+      let li=null, lo=null, src=[], straySession=false;
+      { const shiftOv = s => { if (ss==null||se==null||!s||s.li==null) return null;
+          let a=s.li, b=(s.lo!=null&&s.lo<a)?s.lo+1440:(s.lo??a), we=(se<=ss)?se+1440:se;
+          if (we>1440 && a<ss-180){ a+=1440; b+=1440; }
+          return Math.min(b,we)-Math.max(a,ss); };
+        const cand=[['Ameyo',sA],['Sprinklr',sS]].filter(x=>x[1]&&x[1].li!=null);
+        const ovd=cand.filter(c=>{ const o=shiftOv(c[1]); return o==null||o>0; });
+        let use=ovd;
+        if (ovd.length===0 && cand.length>0) {
+          const longOnes=cand.filter(c=>{ const s=c[1]; const span=(s.lo!=null)?((s.lo<s.li?s.lo+1440:s.lo)-s.li):0; return span>=120; });
+          if (longOnes.length || hasPunch) use=cand; else { use=[]; straySession=true; }   // only-short off-shift pings ⇒ stray
+        }
+        for (const [nm,s] of use){ src.push(nm); if(li==null||s.li<li)li=s.li; if(s.lo!=null&&(lo==null||s.lo>lo))lo=s.lo; }
+      }
       const odPerm=perms.get(`${rec.no}|${iso}`), odComp=comps.get(`${rec.no}|${iso}`), odSick=sicks.get(`${rec.no}|${iso}`);
       const pin=p?.in??null, pout=p?.out??null;
+      // Odoo-confirmed public holiday (authoritative occasion note, e.g. "Eid ul-Adha- 2026"). Overrides
+      // a false "absence" and credits holiday OT when worked — the schedule's H code only covers OFF staff.
+      const officialHoliday = holidayDates.has(iso) || HOLIDAY_RE.test(String(p?.status||''));
 
-      // presence from planned status + actuals (WFH rule: system + no punch + scheduled shift ⇒ wfh)
+      // presence from planned status + actuals.
+      // WFH RULE (user-confirmed 2026-06-24): WFH comes ONLY from a WFH shift code (handled above) or an
+      // explicit WFH location. It is NEVER inferred from "system login + no fingerprint punch" — an office
+      // shift with a system session but no punch is a MISSING PUNCH (presence='office'), not WFH. The old
+      // code stamped WFH whenever there was a system login, even when location literally said 'Office'.
       let presence;
       if (pc.status==='sick') presence='sick';
       else if (pc.status==='absent') presence='absent';
@@ -197,9 +249,12 @@ function attStatus(presence, pcStatus, code) {
       else if (pc.status==='holiday') presence='holiday';
       else if (pc.status==='left') presence='left';
       else if (pc.status==='wfh') presence='wfh';
-      else if (pc.status==='present') { const wfhLoc = /wfh/i.test(rec.location||''); presence = pin!=null ? 'office' : ((li!=null || wfhLoc) ? 'wfh' : 'office'); }   // P = trusted present
-      else if (pc.status==='work') { const wfhLoc = /wfh/i.test(rec.location||''); presence = pin!=null ? 'office' : ((li!=null || wfhLoc) ? 'wfh' : 'absent'); }
+      else if (pc.status==='present') { const wfhLoc = /wfh/i.test(rec.location||''); presence = wfhLoc ? 'wfh' : 'office'; }   // P = trusted present (office unless location says WFH)
+      else if (pc.status==='work') { const wfhLoc = /wfh/i.test(rec.location||''); presence = wfhLoc ? 'wfh' : ((pin!=null || li!=null) ? 'office' : 'absent'); }   // worked (office; missing-punch if no punch) unless location says WFH
       else presence='off';
+      // a public holiday is never "absence"; if the person didn't work, it's a holiday for them
+      if (officialHoliday && presence==='absent') presence='holiday';
+      const holidayWorked = officialHoliday && (presence==='office'||presence==='wfh');
       if (pc.status==='work' && pc.base && !shift?.ss) unknownCodes.set(pc.base, (unknownCodes.get(pc.base)||0)+1);   // a working code that didn't resolve to a shift
       const worked = presence==='office'||presence==='wfh';
       const hasActual = (pin!=null) || (li!=null);   // do we have any login/punch trace?
@@ -225,15 +280,39 @@ function attStatus(presence, pcStatus, code) {
       // don't blow up into 20h. Caps remove residual persistent-session (never-logged-out) noise.
       let inAdj=inMin, outAdj=outMin;
       if (ss!=null && se!=null && (se>1440||se<ss) && inAdj!=null && inAdj<ss-180) { inAdj+=1440; if(outAdj!=null&&outAdj<inAdj)outAdj+=1440; }
+      // PERSISTENT-SESSION guard: a system session left open long past the scheduled end (agent forgot
+      // to log out of Ameyo/Sprinklr) inflates worked & holiday hours — e.g. an MD night shift reading
+      // 19h. With NO biometric punch-out to anchor the real end, count the scheduled shift (cap logout
+      // at the shift end) and flag it, rather than crediting phantom open hours.
+      let persistentSession = false;
+      if (pout==null && inAdj!=null && outAdj!=null) {
+        const sl = (ss!=null && se!=null) ? (se-ss) : null;       // scheduled shift gross (cross-midnight aware)
+        const maxSpan = (sl!=null) ? sl + 300 : 840;              // tolerate up to +5h OT; 14h if the shift didn't resolve
+        if (outAdj - inAdj > maxSpan) { persistentSession = true; outAdj = inAdj + (sl!=null ? sl : 540); }  // phantom span (persistent login or two merged night shifts) ⇒ credit the shift only
+      }
       const sysLate=(worked&&ss!=null&&inAdj!=null)?Math.max(0,inAdj-ss):0;
       const sysEarly=(worked&&se!=null&&outAdj!=null)?Math.max(0,se-outAdj):0;
       const punchLate=(worked&&ss!=null&&pin!=null)?Math.max(0,pin-ss):0;
       let poutAdj=pout; if(pin!=null&&pout!=null&&pout<pin)poutAdj=pout+1440;
       const punchEarly=(worked&&se!=null&&pout!=null)?Math.max(0,se-poutAdj):0;
-      const otBefore=(worked&&ss!=null&&inAdj!=null)?Math.min(360,Math.max(0,ss-inAdj)):0;   // cap 6h
-      const otAfter=(worked&&se!=null&&outAdj!=null)?Math.min(480,Math.max(0,outAdj-se)):0;    // cap 8h
-      const workedMin=(pin!=null&&pout!=null)?(poutAdj-pin):(inAdj!=null&&outAdj!=null?outAdj-inAdj:null);
-      const effLate=authLate?0:sysLate, effEarly=authEarly?0:sysEarly;
+      const otBefore=holidayWorked?0:((worked&&ss!=null&&inAdj!=null)?Math.min(360,Math.max(0,ss-inAdj)):0);   // cap 6h; on a worked holiday the whole day is holiday OT, not before/after
+      const otAfter=holidayWorked?0:((worked&&se!=null&&outAdj!=null)?Math.min(480,Math.max(0,outAdj-se)):0);    // cap 8h
+      const punchSpan=(pin!=null&&pout!=null)?(poutAdj-pin):null;
+      const sysSpan=(inAdj!=null&&outAdj!=null)?(outAdj-inAdj):null;
+      let workedMin=punchSpan;
+      // DEGENERATE-PUNCH fallback: a 1-min punch window (punch-out logged ~immediately after punch-in)
+      // would zero a genuinely-worked day — fall back to the real system session when it's larger.
+      if (workedMin==null || (workedMin<30 && sysSpan!=null && sysSpan>workedMin)) workedMin=sysSpan;
+      // final guard (covers punch-based spans too): a worked span beyond shift+5h is a merge/persistent
+      // artifact (e.g. a 00:12 in + 23:43 out from two adjacent shifts) — credit the shift, flag it.
+      { const sl=(ss!=null&&se!=null)?(se-ss):null; const maxW=(sl!=null)?sl+300:840;
+        if (workedMin!=null && workedMin>maxW) { persistentSession=true; workedMin = (sl!=null?sl:540); } }
+      // STORED conformance must use CREDIBLE tardiness only: a cross-midnight bleed (>4h, e.g. a post-
+      // midnight login on a non-cross-midnight shift) is a measurement artifact, not real lateness, and
+      // must NOT tank a real worker's adherence_pct/conforming. (Raw sys_late/early are kept for the
+      // report layer's excludedDq detection; only the conformance math is fenced here.)
+      const credLate=(sysLate>=1&&sysLate<=240)?sysLate:0, credEarly=(sysEarly>=1&&sysEarly<=240)?sysEarly:0;
+      const effLate=authLate?0:credLate, effEarly=authEarly?0:credEarly;
       const shiftLen=(ss!=null&&se!=null)?(se-ss):null;
       const adherence=(worked&&shiftLen>0&&hasActual)?Math.max(0,Math.round(100*(shiftLen-Math.min(shiftLen,effLate+effEarly))/shiftLen*10)/10):null;
       const conforming=(worked&&hasActual)?(effLate===0&&effEarly===0):null;
@@ -245,17 +324,27 @@ function attStatus(presence, pcStatus, code) {
       else if (pc.status==='absent') { attCode = code.length>1?code:(letter?`${letter}A`:'A'); hrCode='A'; }
       else if (pc.status==='off') hrCode = String(code).toUpperCase()==='TRANSFER' ? 'Transfer' : 'OFF';
       else if (pc.status==='leave') hrCode = ['DL','UPL'].includes(String(code).toUpperCase()) ? String(code).toUpperCase() : 'L';
-      else if (pc.status==='holiday') hrCode='H';
+      else if (pc.status==='holiday' || (officialHoliday && presence==='holiday')) hrCode='H';
       else if (pc.status==='wfh') hrCode='WFH';
       else if (presence==='absent') { attCode = letter?`${letter}A`:'A'; hrCode='A'; }
       else hrCode = code;   // working shift present → shift code
 
       // ── full-WFM fields ──
       const crossMidnight = se!=null && se>1440;
-      // OT on non-working days (worked despite OFF/Holiday/COMP)
+      // OT on non-working days (worked despite OFF/Holiday/COMP). Full-day premium = the worked shift
+      // NET of its 1h unpaid break (a 9h shift = 8h paid), so a full holiday/off-day shift credits 8h
+      // not 9h. Deduct the break only when a real shift was worked (>=5h); shorter stints take no break.
+      // Round worked to the NEAREST whole hour (minutes >30 round up, <30 round down, exactly :30 is
+      // kept as the half), THEN deduct the 1h break for a real shift (>=5h). So 8h59m/9h20m/8h45m → 9h →
+      // 8h; 8h20m → 8h → 7h; 8h30m → 8h30m → 7h30m. Keeps OT close to the true number, no stray fractions.
+      const netWork = m => { m = m||0; const h = Math.floor(m/60), mn = m%60;
+        const r = mn===30 ? m : (mn>30 ? (h+1)*60 : h*60);
+        return r >= 300 ? Math.max(0, r-60) : r; };
       const nonWorkWorkedMin = (presence==='off'||presence==='holiday'||pc.status==='comp') && (pin!=null||li!=null) ? (workedMin||0) : 0;
-      const offdayOt = (pc.status==='off') ? nonWorkWorkedMin : 0;
-      const holidayOt = (pc.status==='holiday') ? nonWorkWorkedMin : 0;
+      const offdayOt = (pc.status==='off' && !officialHoliday) ? netWork(nonWorkWorkedMin) : 0;
+      // holiday OT = time worked on a public holiday (net of break) — scheduled-H who punched in, OR
+      // anyone the Odoo note flags as an official holiday and who worked (the 24/7 floor runs on holidays).
+      const holidayOt = ((pc.status==='holiday' || officialHoliday) && (pin!=null||li!=null)) ? netWork(workedMin||0) : 0;
       const compWorked = (pc.status==='comp' || String(code).toUpperCase()==='COMP') ? nonWorkWorkedMin : 0;
       // late category (no-show = scheduled working but zero login/punch)
       const noShow = (pc.status==='work'||pc.status==='present') && !/wfh/i.test(rec.location||'') && pin==null && li==null;
@@ -274,7 +363,10 @@ function attStatus(presence, pcStatus, code) {
       let mismatch=null;
       if (pc.status==='work' && !pc.base?.match(/wfh/i)) { if (pin!=null&&li!=null&&Math.abs(pin-li)>30) mismatch='punch<>system'; }
       let dq=null;
-      if (shiftAlert) dq='roster-shift!=actual->'+shiftAlert;     // written shift doesn't match when they actually logged in
+      if (straySession) dq='stray-session-no-shift-match';          // system session(s) don't match the scheduled shift → verify (treated as no-work)
+      else if (persistentSession) dq='persistent-session-capped';        // system left open past shift end → worked capped to shift
+      else if (worked && (sysLate>240 || sysEarly>240)) dq='tardiness-bleed';   // cross-midnight session bleed → excluded from credible tardiness & conformance
+      else if (shiftAlert) dq='roster-shift!=actual->'+shiftAlert;     // written shift doesn't match when they actually logged in
       else if (inferredShift) dq='shift-inferred->'+inferredShift; // code had no shift; inferred from login time
       else if (String(code).toUpperCase()==='TRANSFER') dq='transfer-marker';
       else if (pc.status==='work' && pc.base && !ss) dq='unknown-shift-code';
@@ -295,20 +387,21 @@ function attStatus(presence, pcStatus, code) {
   }
 
   await c.query('BEGIN');
-  await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [tid, FROM, TO]);
+  await c.query(`DELETE FROM ${OUT_TABLE} WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [tid, FROM, TO]);
   const CINS=['tenant_id','employee_no','name','function_name','work_date','day_name','status','presence','punch_in_min','punch_out_min','sys_login_min','sys_logout_min','login_src','late_min','early_min','ot_min','permission','comp_off','sick','conforming','team_manager','team_group','gender','worked_min','shift_code','shift_start_min','shift_end_min','sys_late_min','sys_early_min','adherence_pct','mismatch','location','shift_category','shift_start2_min','shift_end2_min','ot_before_min','ot_after_min','is_7h','is_20','attendance_code','hr_code','permission_type','permission_duration','permission_status','campaign','week_number','month_name','attendance_status','original_shift_code','original_shift_start_min','original_shift_end_min','offday_ot_min','holiday_ot_min','comp_worked_min','crosses_midnight','late_category','missing_punch','missing_system','worked_min_system','data_quality'];
   const N=CINS.length;
-  for(let i=0;i<rows.length;i+=300){ const ch=rows.slice(i,i+300); const ph=ch.map((_,j)=>`(${Array.from({length:N},(_,k)=>`$${j*N+k+1}`).join(',')})`).join(','); await c.query(`INSERT INTO roster_days (${CINS.join(',')}) VALUES ${ph}`, ch.flat()); }
+  for(let i=0;i<rows.length;i+=300){ const ch=rows.slice(i,i+300); const ph=ch.map((_,j)=>`(${Array.from({length:N},(_,k)=>`$${j*N+k+1}`).join(',')})`).join(','); await c.query(`INSERT INTO ${OUT_TABLE} (${CINS.join(',')}) VALUES ${ph}`, ch.flat()); }
   await c.query('COMMIT');
 
-  console.log(`written ${rows.length} (${FROM}..${TO})`);
-  console.table((await c.query(`SELECT presence, COUNT(*) n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 GROUP BY presence ORDER BY n DESC`,[tid,FROM,TO])).rows);
-  const a=(await c.query(`SELECT ROUND(AVG(adherence_pct),1) adh, COUNT(*) FILTER(WHERE punch_in_min IS NOT NULL) pun, COUNT(*) FILTER(WHERE sys_login_min IS NOT NULL) sys, COUNT(*) FILTER(WHERE sys_late_min>0) lt, COUNT(*) FILTER(WHERE sys_early_min>0) er, COUNT(*) FILTER(WHERE ot_before_min>0) otb, COUNT(*) FILTER(WHERE ot_after_min>0) ota, COUNT(*) FILTER(WHERE shift_start_min IS NOT NULL) sh FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`,[tid,FROM,TO])).rows[0];
+  console.log(`written ${rows.length} (${FROM}..${TO}) → ${OUT_TABLE}`);
+  console.table((await c.query(`SELECT presence, COUNT(*) n FROM ${OUT_TABLE} WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 GROUP BY presence ORDER BY n DESC`,[tid,FROM,TO])).rows);
+  const a=(await c.query(`SELECT ROUND(AVG(adherence_pct),1) adh, COUNT(*) FILTER(WHERE punch_in_min IS NOT NULL) pun, COUNT(*) FILTER(WHERE sys_login_min IS NOT NULL) sys, COUNT(*) FILTER(WHERE sys_late_min>0) lt, COUNT(*) FILTER(WHERE sys_early_min>0) er, COUNT(*) FILTER(WHERE ot_before_min>0) otb, COUNT(*) FILTER(WHERE ot_after_min>0) ota, COUNT(*) FILTER(WHERE shift_start_min IS NOT NULL) sh FROM ${OUT_TABLE} WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`,[tid,FROM,TO])).rows[0];
   console.log(`adherence ${a.adh}% | shift-resolved ${a.sh} | punched ${a.pun} | system ${a.sys} | sys-late ${a.lt} | early ${a.er} | OT-before ${a.otb} | OT-after ${a.ota}`);
   if (unknownCodes.size) console.log('⚠ UNKNOWN/unresolved working codes:', [...unknownCodes.entries()].map(([k,n])=>`${k}:${n}`).join(' '));
   else console.log('✓ all working codes resolved to a shift');
 
-  // ── per-7-day-block validation log (Saturday-anchored weeks within the range) ──
+  // ── per-7-day-block validation log (only when writing the LIVE table) ──
+  if (OUT_TABLE !== 'roster_days') { console.log('(dry-run → scratch; validation log skipped)'); await c.end(); return; }
   const wks = await c.query(`
     WITH wk AS (
       SELECT *, (work_date - ((EXTRACT(DOW FROM work_date)::int + 1) % 7))::date AS ws FROM roster_days

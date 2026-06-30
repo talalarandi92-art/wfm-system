@@ -62,7 +62,10 @@ export class AnalystService {
   // ── Main assessment ─────────────────────────────────────────────────────────
   async assess(tid: string, dateQ?: string, lang: Lang = 'ar') {
     const [ld] = await this.ds.query(
-      `SELECT MAX(attendance_date)::text d FROM attendance_records WHERE tenant_id = $1`, [tid],
+      // attendance_records runs ahead of real attendance (it carries the forward
+      // SCHEDULE); default the assessment day to the latest day up to today, not
+      // the furthest scheduled date, so the Chief's briefing date stays sensible.
+      `SELECT MAX(attendance_date)::text d FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE`, [tid],
     ).catch(() => [{ d: null }]);
     const date = dateQ ?? ld?.d ?? new Date().toISOString().slice(0, 10);
     const surplusSafe = await this.getThreshold(tid, 'surplus_safe', 2);

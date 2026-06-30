@@ -136,11 +136,18 @@ function roleOf(fn) {
     `UPDATE roster_days r SET
         person_no = i.person_no,
         clean_name = i.clean_name,
-        role_function = i.function_name,
+        -- role_function = the PER-MONTH function from the uploaded schedule (r.function_name); the
+        -- static identity function is only a fallback. An agent's function changes month to month
+        -- (e.g. Line Khaled: CH-WA in Jan → Social Media & Email Feb→Jun) so the report must reflect
+        -- the schedule, not a single frozen value.
+        role_function = COALESCE(NULLIF(r.function_name,''), i.function_name),
         role_category = i.role_category,
         expected_hours = CASE WHEN r.is_7h THEN 7 ELSE i.expected_hours END,
         include_tardiness = i.include_tardiness,
-        is_active = i.is_active,
+        -- is_active here is the CANONICAL-dedup flag (collapse old↔new intern IDs to ONE person),
+        -- NOT an employment flag. Someone who left keeps their historical rows visible so reports
+        -- don't break; forward-scheduling eligibility lives in employees.status instead.
+        is_active = i.is_canonical,
         dup_alias = NOT i.is_canonical
      FROM employee_identity i
      WHERE i.tenant_id = r.tenant_id AND i.employee_no = r.employee_no AND r.tenant_id = $1`, [TENANT]);
