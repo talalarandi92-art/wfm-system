@@ -357,6 +357,7 @@ export default function RosterPage() {
                     <td className="px-2 py-2.5 text-center">
                       <span className="px-2 py-0.5 rounded-md text-[11px] font-bold" style={{ background:`${pc}1f`, color:pc }}>{ar?PRES[r.presence]?.ar:PRES[r.presence]?.en||r.presence}</span>
                       {r.mismatch && <span className="ms-1" title={r.mismatch}><AlertTriangle size={11} className="inline text-rose-400" /></span>}
+                      {!r.mismatch && r.data_quality && <span className="ms-1" title={r.data_quality}><AlertTriangle size={11} className="inline text-amber-400" /></span>}
                       {r.note && <span className="ms-1" title={r.note}><StickyNote size={11} className="inline text-amber-400" /></span>}
                     </td>
                     <td className="px-2 py-2.5 text-center text-slate-400 whitespace-nowrap">{r.shift_code?<span><span className="text-slate-200 font-semibold">{r.shift_code}</span> <span className="text-[10px]">{r.shift_start_min!=null?`${hhmm(r.shift_start_min)}-${hhmm(r.shift_end_min)}`:''}</span></span>:'—'}</td>
@@ -415,7 +416,7 @@ export default function RosterPage() {
                           'stray-session-no-shift-match': ar?'⚠ جلسة السيستم لا تطابق الشفت المجدول — تُعامل كأنه ما داوم، يرجى التحقق من الجدول':'System session does not match the scheduled shift — treated as no-work, verify the schedule',
                           'persistent-session-capped': ar?'الجلسة بقيت مفتوحة بعد نهاية الشفت — احتُسبت ساعات الشفت لا الجلسة المفتوحة':'System session left open past shift end — counted the shift, not the open session',
                           'tardiness-bleed': ar?'قراءة تأخير/خروج عبر منتصف الليل (>4س) استُبعدت كبليد':'Cross-midnight tardiness reading (>4h) excluded as bleed' };
-                          const msg = r.data_quality ? M[r.data_quality] : null;
+                          const msg = r.data_quality ? (M[r.data_quality] || r.data_quality) : null;
                           return msg ? (<div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(245,158,11,0.12)', color:'#fbbf24' }}><AlertTriangle size={13} />{msg}</div>) : null; })()}
                         {r.permission && (r.sys_late_min>0 || r.sys_early_min>0) && (
                           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(168,85,247,0.12)', color:'#c084fc' }}>
