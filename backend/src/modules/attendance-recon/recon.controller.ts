@@ -284,7 +284,7 @@ export class ReconController {
       sysLogin:{col:'sys_login_min',label:'Sys Login',time:true}, sysLogout:{col:'sys_logout_min',label:'Sys Logout',time:true},
       systemSource:{col:'login_src',label:'Sys Source'}, workedMin:{col:'worked_min',label:'Worked (min)'},
       lateMin:{col:'sys_late_min',label:'Late (min)'}, lateCategory:{col:'late_category',label:'Late Category'}, earlyMin:{col:'sys_early_min',label:'Early Out (min)'},
-      otBefore:{col:'ot_before_min',label:'OT Before'}, otAfter:{col:'ot_after_min',label:'OT After'}, otTotal:{col:'ot_min',label:'OT Total'},
+      otBefore:{col:'ot_before_min',label:'OT Before'}, otAfter:{col:'ot_after_min',label:'OT After'}, otTotal:{col:'(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))',label:'OT Total'},
       offdayOt:{col:'offday_ot_min',label:'OFF-day OT'}, holidayOt:{col:'holiday_ot_min',label:'Holiday OT'},
       conformance:{col:'adherence_pct',label:'Conformance %'}, permission:{col:'permission_type',label:'Permission'},
       permissionDuration:{col:'permission_duration',label:'Permission Dur'}, dataQuality:{col:'data_quality',label:'Data Quality'}, crossesMidnight:{col:'crosses_midnight',label:'X-Midnight'},
@@ -1877,7 +1877,6 @@ export class ReconController {
    *  Note: roster_days stores minutes → HH:MM:SS shows :00 seconds; raw-file run
    *  can preserve seconds. Permission/COMP read from the DB — validate vs the
    *  authoritative Odoo files before final HR submission. ══════════════════════ */
-  private readonly WFH_HOLIDAYS = new Set(['2026-06-16']);
   private readonly WFH_EXCLUDE_RE = /team ?lead|leader|senior|\brta\b|customer\s*care|resolution|specialist|support/i;
   private readonly WFH_MOTHERS = ['haya', 'shaima', 'shaimaa'];
   private wfhHms(min: number | null): string {
@@ -1904,6 +1903,9 @@ export class ReconController {
         ORDER BY work_date, clean_name`, [t, from, to]);
 
     const alignTo = (v: number, ref: number) => { let x = v; while (x < ref - 720) x += 1440; while (x > ref + 720) x -= 1440; return x; };
+    // official holidays come from the editable `holidays` table (synced from recon-config.json) — NOT a single
+    // hardcoded date, so WFH work on Arafat/Eid/National-Day etc. is correctly treated as holiday work, never HR.
+    const holSet = new Set((await this.ds.query(`SELECT holiday_date::text d FROM holidays WHERE tenant_id=$1`, [t])).rows.map((x: any) => x.d));
     const out: any[] = [];
     for (const r of rows) {
       const start = Number(r.shift_start_min), end = Number(r.shift_end_min);
@@ -1917,7 +1919,7 @@ export class ReconController {
       const breakMin = 60;
       const requiredNet = Math.max(0, gross - breakMin);
       const excludedRole = !r.include_tardiness || this.WFH_EXCLUDE_RE.test(`${r.role_category || ''} ${r.role_function || ''}`);
-      const holiday = this.WFH_HOLIDAYS.has(r.date);
+      const holiday = holSet.has(r.date);
       // any presence other than a clean 'wfh' (sick/absent/leave/off/holiday/office…) +
       // no fingerprint is an internal contradiction → route to Data Quality, never HR.
       const onLeave = r.presence != null && r.presence !== 'wfh';
@@ -2865,12 +2867,15 @@ export class ReconController {
       error = String(e?.message || e).slice(0, 600);
       log = String((e?.stdout || '') + '\n' + (e?.stderr || '')).split('\n').slice(-24).join('\n');
     }
-    // 3) Clear caches + report the fresh June roster_days summary so the page reflects it immediately.
+    // 3) Clear caches + report the freshly-ingested roster_days summary (the ACTUAL range that was written,
+    //    parsed from the engine log "ingest range: X .. Y" — NOT a hardcoded month, so any month reports correctly).
     this.svc.clearCache();
+    const m = /ingest range:\s*(\d{4}-\d{2}-\d{2})\s*\.\.\s*(\d{4}-\d{2}-\d{2})/.exec(log);
+    const rFrom = m ? m[1] : '2000-01-01', rTo = m ? m[2] : '2999-12-31';
     const [roster] = await this.ds.query(
       `SELECT COUNT(*)::int rows, COUNT(DISTINCT person_no)::int people, MIN(work_date)::text "from", MAX(work_date)::text "to",
               ROUND(SUM(${TRUE_OT})/60.0)::int ot_hours
-         FROM roster_days WHERE tenant_id=$1 AND work_date >= date '2026-06-01' AND work_date < date '2026-07-01'`, [req.user.tenantId]);
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [req.user.tenantId, rFrom, rTo]);
     return { ok, error, saved, unmatched, sourceDir: RECON_NEW_DIR, log, roster };
   }
 

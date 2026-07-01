@@ -282,6 +282,7 @@ module.exports = function build() {
           : ((!c.mapped && c.kind === 'unknown') ? c.note : (dqFlag || null)),
         teamMgr: idn.manager || null, teamGroup: idn.team || e.teamCol || null, gender: idn.gender || null,
         roleCat: dayExcluded ? (c.management ? 'Management' : 'Excluded') : 'Agent', expectedH: c.net != null ? +(c.net / 60).toFixed(2) : null,
+        includeTardiness: !dayExcluded,   // Agents count for tardiness rankings; Excluded/Management = record-only
         active: true,
       };
 

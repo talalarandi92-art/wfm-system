@@ -63,7 +63,7 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
 - **Source trust:** Schedule = truth for OFF/work/leave · Ameyo ready-end reliable (raw logout bleeds → discard
   >16h, cluster gap>4h) · Sprinklr raw login/logout bleeds → use **AGENT_OCCUPANCY** report instead · Odoo =
   holidays + punch trusted, individual leave NOT (goes stale). Punch = office only (WFH have none).
-- **Tardiness/Early — credible only (`CRED_LATE`/`CRED_EARLY` = 1..240 min)**; cross-midnight bleed capped at
+- **Tardiness/Early — credible only (`CRED_LATE`/`CRED_EARLY` = 7..240 min; >6 tolerated, see §19)**; cross-midnight bleed capped at
   240 (night logout reads 25–29h otherwise). Normalize post-midnight login with +1440 before measuring late.
 - **Approved permission NEVER lowers conformance** (its minutes are added back to the covered overlap); only
   **Approved** exempts (not Refused/Pending). Tardiness = unauthorized late/early/system-close.

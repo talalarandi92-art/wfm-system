@@ -57,7 +57,6 @@ import ResearcherPage            from '@/pages/Researcher';
 import KnowledgeLedgerPage       from '@/pages/KnowledgeLedger';
 import TeamLearningPage          from '@/pages/TeamLearning';
 import DiagnosticsPage           from '@/pages/Diagnostics';
-import Placeholder from '@/pages/Placeholder';
 import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
