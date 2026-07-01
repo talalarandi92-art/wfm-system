@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, CalendarRange, CalendarDays, Users, Coffee, Home, AlertTriangle, Clock, TrendingDown, Lock } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { DateRangeBar } from '@/components/DateRangeBar';
 
 const CAT_COLOR: Record<string,string> = { Morning:'#38bdf8', Night:'#a78bfa', Evening:'#fb923c', Midnight:'#818cf8', Other:'#94a3b8' };
 
@@ -45,9 +46,7 @@ export default function ScheduleAnalysisPage() {
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#6366f1,#06b6d4)' }}><CalendarRange size={20} className="text-white"/></div>
         <div className="flex-1 min-w-[200px]"><h1 className="text-lg font-bold text-white">{ar?'تحليل الجدول':'Schedule Analysis'}</h1>
           <p className="text-xs text-slate-500">{ar?'كل تحليلات الجدول المعتمد بمكان واحد — شرينكيج، شيفت-ريت، OFF/إجازات، ويك-إند OFF، هيدكاونت بالساعات، استئذانات':'all approved-schedule analytics in one place — shrinkage, shift-rate, OFF/leave, weekend-OFF, hourly headcount, permissions'}</p></div>
-        <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
-          <input type="date" value={f.from} onChange={e=>set('from',e.target.value)} className={inputCls}/><span className="text-xs">→</span>
-          <input type="date" value={f.to} onChange={e=>set('to',e.target.value)} className={inputCls}/></div>
+        <DateRangeBar from={f.from} to={f.to} onChange={(a,b)=>setF(x=>({...x,from:a,to:b}))} />
         <select value={f.function} onChange={e=>set('function',e.target.value)} className={inputCls}><option value="">{ar?'كل الفنكشن':'All functions'}</option>{(d?.filterOptions?.functions||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
         <select value={f.teamLeader} onChange={e=>set('teamLeader',e.target.value)} className={inputCls}><option value="">{ar?'كل التيم ليدرز':'All TLs'}</option>{(d?.filterOptions?.teamLeaders||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
       </div>

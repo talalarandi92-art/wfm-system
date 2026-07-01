@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Home, CalendarDays, Download, Play, ShieldAlert, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { DateRangeBar } from '@/components/DateRangeBar';
 
 /** WFH HR Action Report — who worked from home late / short, conservatively.
  *  Backend: roster-v2/wfh-hr-report (+ /export). Accuracy-critical: weak evidence
@@ -61,9 +62,7 @@ export default function WfhHrReportPage() {
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#0ea5e9,#6366f1)' }}><Home size={20} className="text-white"/></div>
         <div className="flex-1 min-w-[200px]"><h1 className="text-lg font-bold text-white">{ar?'تقرير HR للعمل من المنزل':'WFH — HR Action Report'}</h1>
           <p className="text-xs text-slate-500">{ar?'مين داوم من البيت وتأخّر/سكّر بدري بدون استئذان — متحفّظ: الأدلة الضعيفة تروح جودة البيانات مش HR':'who worked from home late/short with no permission — conservative: weak evidence → Data Quality, never HR'}</p></div>
-        <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
-          <input type="date" value={from} onChange={e=>setFrom(e.target.value)} className={inputCls}/><span className="text-xs">→</span>
-          <input type="date" value={to} onChange={e=>setTo(e.target.value)} className={inputCls}/></div>
+        <DateRangeBar from={from} to={to} onChange={(a,b)=>{setFrom(a);setTo(b);}} />
         <label className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none"><input type="checkbox" checked={inc} onChange={e=>setInc(e.target.checked)} className="accent-indigo-500"/>{ar?'تضمين الأدوار المستثناة':'Include excluded roles'}</label>
         <button onClick={load} className="btn-secondary text-xs"><Play size={13}/>{ar?'تشغيل':'Run'}</button>
         <button onClick={exportXlsx} disabled={busy||!d} className="btn-primary text-xs">{busy?'…':<><Download size={13}/>Excel</>}</button>

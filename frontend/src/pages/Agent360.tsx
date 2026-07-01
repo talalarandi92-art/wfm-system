@@ -7,6 +7,7 @@ import {
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile, Gauge } from '@/components/dazzle';
+import { DateRangeBar } from '@/components/DateRangeBar';
 
 const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
@@ -142,9 +143,7 @@ export default function Agent360Page() {
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#8b5cf6,#6366f1)' }}><UserSearch size={20} className="text-white"/></div>
         <div className="flex-1 min-w-[180px]"><h1 className="text-lg font-bold text-white">{ar?'ملف الموظف 360':'Agent 360 Profile'}</h1>
           <p className="text-xs text-slate-500">{ar?'صورة كاملة لأداء وحضور الموظف من الماستر النظيف':'A complete attendance & performance picture from the clean master'}</p></div>
-        <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
-          <input type="date" value={from} onChange={e=>setFrom(e.target.value)} className={inputCls}/><span className="text-xs">→</span>
-          <input type="date" value={to} onChange={e=>setTo(e.target.value)} className={inputCls}/></div>
+        <DateRangeBar from={from} to={to} onChange={(a,b)=>{setFrom(a);setTo(b);}} />
         <div className="relative" onBlur={()=>setTimeout(()=>setOpen(false),150)}>
           <div className="flex items-center gap-1.5"><Search size={14} className="text-slate-400"/>
             <input

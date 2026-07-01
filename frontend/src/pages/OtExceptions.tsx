@@ -4,6 +4,7 @@ import { ArrowLeft, Clock, CalendarDays, Download, Sparkles, AlertTriangle, Coff
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile, Donut, BarRow, useCountUp } from '@/components/dazzle';
+import { DateRangeBar } from '@/components/DateRangeBar';
 
 /** tiny inline count-up number */
 function CountVal({ n }: { n: number }) { return <>{useCountUp(n, 900, true).toLocaleString()}</>; }
@@ -93,9 +94,7 @@ export default function OtExceptionsPage() {
           <h1 className="text-lg font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'الأوفر تايم والاستثناءات' : 'OT & Exceptions'}</h1>
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>{ar ? 'أوفر تايم (عادي/يوم OFF/عطلة رسمية + النسبة)، تأخير وخروج مبكر بدون استئذان، الاستئذانات، الغيابات — بالاسم/الفنكشن/الساعات' : 'overtime (regular / off-day / public-holiday + %), late & early-out without permission, permissions, absences — by name / function / hours'}</p>
         </div>
-        <div className="flex items-center gap-1.5" style={{ color: 'var(--text-2)' }}><CalendarDays size={14} />
-          <input type="date" value={f.from} onChange={e => set('from', e.target.value)} className={inputCls} style={inputStyle} /><span className="text-xs">→</span>
-          <input type="date" value={f.to} onChange={e => set('to', e.target.value)} className={inputCls} style={inputStyle} /></div>
+        <DateRangeBar from={f.from} to={f.to} onChange={(a, b) => setF(x => ({ ...x, from: a, to: b }))} />
         <select value={f.function} onChange={e => set('function', e.target.value)} className={inputCls} style={inputStyle}><option value="">{ar ? 'كل الفنكشن' : 'All functions'}</option>{(d?.filterOptions?.functions || []).map((x: string) => <option key={x} value={x}>{x}</option>)}</select>
         <select value={f.teamLeader} onChange={e => set('teamLeader', e.target.value)} className={inputCls} style={inputStyle}><option value="">{ar ? 'كل التيم ليدرز' : 'All TLs'}</option>{(d?.filterOptions?.teamLeaders || []).map((x: string) => <option key={x} value={x}>{x}</option>)}</select>
         <button onClick={exportXlsx} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', boxShadow: '0 4px 14px rgba(16,185,129,0.35)' }}><Download size={13} />{ar ? 'إكسل' : 'Excel'}</button>
