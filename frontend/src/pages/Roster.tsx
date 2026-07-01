@@ -291,6 +291,19 @@ export default function RosterPage() {
   const presColor = (p: string) => PRES[p]?.c || '#64748b';
   const btn = (extra: string) => `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${extra}`;
 
+  // quick date presets — pick a whole range in ONE click (relative to today), no more two-input juggling
+  const fmtD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const datePresets: { k: string; l: string; r: () => [string, string] }[] = [
+    { k: 'today', l: ar ? 'اليوم' : 'Today', r: () => { const s = fmtD(new Date()); return [s, s]; } },
+    { k: 'yesterday', l: ar ? 'أمس' : 'Yesterday', r: () => { const d = new Date(); d.setDate(d.getDate() - 1); const s = fmtD(d); return [s, s]; } },
+    { k: 'last7', l: ar ? 'آخر ٧ أيام' : 'Last 7 days', r: () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 6); return [fmtD(s), fmtD(e)]; } },
+    { k: 'last30', l: ar ? 'آخر ٣٠ يوم' : 'Last 30 days', r: () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); return [fmtD(s), fmtD(e)]; } },
+    { k: 'thisMonth', l: ar ? 'هذا الشهر' : 'This month', r: () => { const n = new Date(); return [fmtD(new Date(n.getFullYear(), n.getMonth(), 1)), fmtD(new Date(n.getFullYear(), n.getMonth() + 1, 0))]; } },
+    { k: 'lastMonth', l: ar ? 'الشهر الماضي' : 'Last month', r: () => { const n = new Date(); return [fmtD(new Date(n.getFullYear(), n.getMonth() - 1, 1)), fmtD(new Date(n.getFullYear(), n.getMonth(), 0))]; } },
+  ];
+  const activePreset = datePresets.find(p => { const [f, t] = p.r(); return f === from && t === to; })?.k;
+  const applyPreset = (p: { r: () => [string, string] }) => { const [f, t] = p.r(); setFrom(f); setTo(t); };
+
   return (
     <div className="space-y-4 page-enter">
       {/* header + actions — gradient hero band, theme-safe */}
@@ -330,7 +343,15 @@ export default function RosterPage() {
       </div>
 
       {/* filters */}
-      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+      <div className="p-3 rounded-2xl space-y-2.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+        {/* quick date presets — ONE click sets the whole range (no more picking two inputs) */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide me-1" style={{ color:'var(--text-3)' }}>{ar?'اختصار سريع':'Quick range'}</span>
+          {datePresets.map(p => { const on = activePreset===p.k; return (
+            <button key={p.k} onClick={()=>applyPreset(p)} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: on?'#6366f1':'var(--surface-2)', color: on?'#fff':'var(--text-2)', border:`1px solid ${on?'#6366f1':'var(--border)'}`, boxShadow: on?'0 4px 12px rgba(99,102,241,0.35)':'none', transition:'all .15s' }}>{p.l}</button>
+          ); })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14} />
           <input type="date" value={from} onChange={e=>setFrom(e.target.value)} className={inputCls} style={inputStyle} />
           <span className="text-xs">→</span>
@@ -358,6 +379,7 @@ export default function RosterPage() {
           <option value="mismatch">{ar?'عدم التطابق أولاً':'Mismatches first'}</option>
           <option value="ot">{ar?'الأكثر OT':'Most OT'}</option>
         </select>
+        </div>
       </div>
 
       {/* summary band — animated count-up KPI tiles */}
