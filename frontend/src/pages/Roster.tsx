@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
-import { StatTile, Donut, Gauge, BarRow, Sparkline } from '@/components/dazzle';
+import { StatTile, Donut, Gauge, BarRow, Sparkline, useReducedMotion } from '@/components/dazzle';
 
 interface Row {
   employee_no: string; name: string; function_name: string; date: string; day_name: string;
@@ -67,6 +67,103 @@ const PRES: Record<string,{ar:string;en:string;c:string}> = {
 };
 const PER = 40;
 
+/* ── Month heatmap — a calendar grid coloured by daily conformance, sized by present count ── */
+function HeatCell({ d, color, maxPres, ar, reduced, delay, onPick }: {
+  d: { date: string; conformance: number | null; present: number };
+  color: string; maxPres: number; ar: boolean; reduced: boolean; delay: number; onPick: (from: string, to: string) => void;
+}) {
+  const [hov, setHov] = useState(false);
+  const [rdy, setRdy] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setRdy(true), reduced ? 0 : delay); return () => clearTimeout(t); }, [delay, reduced]);
+  const day = Number(d.date.slice(8, 10));
+  const presPct = Math.round(100 * (d.present || 0) / maxPres);
+  const conf = d.conformance;
+  return (
+    <div onClick={() => onPick(d.date, d.date)} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      title={`${d.date} · ${ar ? 'كونفورمانس' : 'conformance'} ${conf ?? '—'}% · ${ar ? 'حاضر' : 'present'} ${d.present}`}
+      style={{
+        position: 'relative', aspectRatio: '1 / 1', borderRadius: 10, cursor: 'pointer', minHeight: 42,
+        background: `${color}${hov ? '3a' : '1f'}`, border: `1px solid ${color}${hov ? '99' : '44'}`,
+        opacity: rdy ? 1 : 0, transform: hov ? 'translateY(-3px) scale(1.05)' : (rdy ? 'none' : 'scale(.85)'),
+        boxShadow: hov ? `0 10px 22px ${color}44` : 'none',
+        transition: 'opacity .35s ease, transform .22s cubic-bezier(.34,1.56,.64,1), box-shadow .2s, background .2s, border-color .2s',
+        display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '4px 5px', overflow: 'hidden',
+      }}>
+      <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--text-1)', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{day}</span>
+      <div>
+        <div style={{ fontSize: 9, fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{conf != null ? conf + '%' : '—'}</div>
+        <div style={{ height: 3, borderRadius: 2, marginTop: 2, background: 'var(--surface-2)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: rdy ? `${presPct}%` : '0%', background: color, borderRadius: 2, transition: reduced ? 'none' : 'width .8s cubic-bezier(.4,0,.2,1)' }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+function MonthHeatmap({ trend, ar, onPick }: {
+  trend: { date: string; conformance: number | null; present: number }[]; ar: boolean; onPick: (from: string, to: string) => void;
+}) {
+  const reduced = useReducedMotion();
+  const days = (trend || []).filter(d => d.date).slice().sort((a, b) => a.date.localeCompare(b.date));
+  if (days.length < 3) return null;
+  const colOf = (iso: string) => (new Date(iso + 'T00:00:00Z').getUTCDay() + 1) % 7; // Sat=0 … Fri=6 (WFM week starts Sat)
+  const maxPres = Math.max(1, ...days.map(d => d.present || 0));
+  const heat = (v: number | null) => v == null ? '#64748b' : v >= 95 ? '#22c55e' : v >= 85 ? '#06b6d4' : v >= 70 ? '#f59e0b' : '#f43f5e';
+  const cells: (typeof days[0] | null)[] = [];
+  for (let i = 0; i < colOf(days[0].date); i++) cells.push(null);
+  for (const d of days) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (typeof days[0] | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  const HEAD = ar ? ['سبت', 'أحد', 'إثن', 'ثلا', 'أرب', 'خمي', 'جمع'] : ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const withConf = days.filter(d => d.conformance != null);
+  const avg = withConf.length ? Math.round(withConf.reduce((a, d) => a + (d.conformance || 0), 0) / withConf.length) : 0;
+  const best = withConf.slice().sort((a, b) => (b.conformance || 0) - (a.conformance || 0))[0];
+  const worst = withConf.slice().sort((a, b) => (a.conformance || 0) - (b.conformance || 0))[0];
+  return (
+    <div className="rounded-2xl p-4 relative overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="absolute -top-12 -inline-end-10 w-44 h-44 rounded-full" style={{ background: '#6366f1', opacity: 0.08, filter: 'blur(46px)', pointerEvents: 'none' }} />
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3 relative">
+        <div className="flex items-center gap-2">
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}><CalendarDays size={17} className="text-white" /></div>
+          <div>
+            <h3 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'خريطة الشهر — الكونفورمانس اليومي' : 'Month heatmap — daily conformance'}</h3>
+            <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>{ar ? 'كل خانة يوم · اللون = الكونفورمانس · الشريط = الحضور · اضغط لفلترة اليوم' : 'each cell = a day · colour = conformance · bar = present · click a day to filter'}</p>
+          </div>
+        </div>
+        <div className="text-end">
+          <div className="text-2xl font-extrabold leading-none" style={{ color: heat(avg), fontVariantNumeric: 'tabular-nums' }}>{avg}%</div>
+          <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>{ar ? 'متوسط الفترة' : 'period avg'}</div>
+        </div>
+      </div>
+      <div className="grid gap-1.5 mb-1.5" style={{ gridTemplateColumns: 'repeat(7,1fr)' }}>
+        {HEAD.map((h, i) => <div key={i} className="text-center" style={{ fontSize: 9, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-3)' }}>{h}</div>)}
+      </div>
+      <div className="space-y-1.5">
+        {weeks.map((w, wi) => (
+          <div key={wi} className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(7,1fr)' }}>
+            {w.map((d, di) => d == null
+              ? <div key={di} style={{ aspectRatio: '1 / 1', minHeight: 42 }} />
+              : <HeatCell key={di} d={d} color={heat(d.conformance)} maxPres={maxPres} ar={ar} reduced={reduced} delay={(wi * 7 + di) * 16} onPick={onPick} />)}
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          {([['≥95', '#22c55e'], ['85–94', '#06b6d4'], ['70–84', '#f59e0b'], ['<70', '#f43f5e']] as [string, string][]).map(([lab, c], i) => (
+            <span key={i} className="flex items-center gap-1" style={{ fontSize: 10, color: 'var(--text-3)' }}><span style={{ width: 10, height: 10, borderRadius: 3, background: c }} />{lab}%</span>
+          ))}
+        </div>
+        {best && worst && (
+          <div className="flex items-center gap-3" style={{ fontSize: 10.5 }}>
+            <span style={{ color: 'var(--text-3)' }}>{ar ? 'أفضل' : 'best'} <b style={{ color: '#22c55e' }}>{best.date.slice(5)} · {best.conformance}%</b></span>
+            <span style={{ color: 'var(--text-3)' }}>{ar ? 'أضعف' : 'worst'} <b style={{ color: '#f43f5e' }}>{worst.date.slice(5)} · {worst.conformance}%</b></span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function RosterPage() {
   const { lang } = useUiStore();
   const ar = lang === 'ar';
@@ -77,7 +174,7 @@ export default function RosterPage() {
   const [presence, setPresence] = useState('');
   const [shift, setShift] = useState('');
   const [from, setFrom] = useState('2026-06-01');
-  const [to, setTo] = useState('2026-06-20');
+  const [to, setTo] = useState('2026-06-30');
   const [sort, setSort] = useState('date_desc');
   const [page, setPage] = useState(0);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -351,6 +448,11 @@ export default function RosterPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── month heatmap — see the whole period at a glance; click a day to filter ── */}
+      {data?.dailyTrend && data.dailyTrend.length >= 3 && (
+        <MonthHeatmap trend={data.dailyTrend} ar={ar} onPick={(f, t) => { setFrom(f); setTo(t); }} />
       )}
 
       {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}

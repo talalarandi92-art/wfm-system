@@ -306,11 +306,11 @@ export class ReconController {
       coveragePct:{agg:`ROUND(100.0*COUNT(*) FILTER (WHERE presence IN ('office','wfh'))/NULLIF(COUNT(*) FILTER (WHERE shift_start_min IS NOT NULL),0),1)`,label:'Coverage %'},
       shrinkagePct:{agg:`ROUND(100.0*COUNT(*) FILTER (WHERE presence IN ('absent','sick','leave'))/NULLIF(COUNT(*) FILTER (WHERE shift_start_min IS NOT NULL),0),1)`,label:'Shrinkage %'},
       permissionCount:{agg:`COUNT(*) FILTER (WHERE permission_type IS NOT NULL)`,label:'Permissions'}, compDays:{agg:`COUNT(*) FILTER (WHERE comp_off IS NOT NULL OR comp_worked_min>0)`,label:'COMP Days'},
-      lateMin:{agg:'SUM(sys_late_min) FILTER (WHERE sys_late_min BETWEEN 1 AND 240)',label:'Late (min)'}, lateDays:{agg:'COUNT(*) FILTER (WHERE sys_late_min BETWEEN 1 AND 240)',label:'Late Days'},
-      earlyMin:{agg:`SUM(sys_early_min) FILTER (WHERE sys_early_min BETWEEN 1 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`,label:'Early Out (min)'}, otMin:{agg:'SUM(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))',label:'OT (min)'},
+      lateMin:{agg:'SUM(sys_late_min) FILTER (WHERE sys_late_min BETWEEN 7 AND 240)',label:'Late (min)'}, lateDays:{agg:'COUNT(*) FILTER (WHERE sys_late_min BETWEEN 7 AND 240)',label:'Late Days'},
+      earlyMin:{agg:`SUM(sys_early_min) FILTER (WHERE sys_early_min BETWEEN 7 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`,label:'Early Out (min)'}, otMin:{agg:'SUM(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))',label:'OT (min)'},
       otBefore:{agg:'SUM(ot_before_min)',label:'OT Before (min)'}, otAfter:{agg:'SUM(ot_after_min)',label:'OT After (min)'},
       offdayOt:{agg:'SUM(offday_ot_min)',label:'OFF-day OT'}, holidayOt:{agg:'SUM(holiday_ot_min)',label:'Holiday OT'},
-      avgLate:{agg:'ROUND(AVG(sys_late_min) FILTER (WHERE sys_late_min BETWEEN 1 AND 240))',label:'Avg Late'}, avgWorked:{agg:'ROUND(AVG(worked_min) FILTER (WHERE worked_min>0))',label:'Avg Worked (min)'},
+      avgLate:{agg:'ROUND(AVG(sys_late_min) FILTER (WHERE sys_late_min BETWEEN 7 AND 240))',label:'Avg Late'}, avgWorked:{agg:'ROUND(AVG(worked_min) FILTER (WHERE worked_min>0))',label:'Avg Worked (min)'},
       conformance:{agg:'ROUND(AVG(adherence_pct),1)',label:'Conformance %'}, missingPunch:{agg:'COUNT(*) FILTER (WHERE missing_punch)',label:'Missing Punch'},
       missingSystem:{agg:'COUNT(*) FILTER (WHERE missing_system)',label:'Missing System'}, mismatch:{agg:'COUNT(*) FILTER (WHERE mismatch IS NOT NULL)',label:'Mismatch'},
       agents:{agg:'COUNT(DISTINCT COALESCE(person_no,employee_no))',label:'Agents'},
@@ -651,8 +651,8 @@ export class ReconController {
     };
     const SHIFT = cov('r.ss', 'r.se-r.ss');
     const pres = `r.presence IN ('office','wfh')`;
-    const credL = `r.sys_late_min BETWEEN 1 AND 240`;
-    const credE = `r.sys_early_min BETWEEN 1 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
+    const credL = `r.sys_late_min BETWEEN 7 AND 240`;
+    const credE = `r.sys_early_min BETWEEN 7 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
     const grid = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
       r AS (SELECT COALESCE(role_function,function_name) fn, person_no, employee_no, shift_start_min ss, shift_end_min se,

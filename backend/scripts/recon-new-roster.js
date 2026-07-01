@@ -258,7 +258,9 @@ let horizon = '0000';
 {
   const empByDate = {}; // count distinct employees per date from odoo punches (most reliable presence signal)
   for (const k in odoo) { const [id, d] = k.split('|'); if (odoo[k].punchIn != null) (empByDate[d] = empByDate[d] || new Set()).add(id); }
-  for (const d in empByDate) if (d <= '2026-06-30' && empByDate[d].size >= 10 && d > horizon) horizon = d;
+  // upper bound = RECON_TO, else the uploaded schedule's last date — NOT a hardcoded June, so ANY month works
+  const HZ_CAP = process.env.RECON_TO || (F.meta && F.meta.dateRange && F.meta.dateRange[1]) || '2999-12-31';
+  for (const d in empByDate) if (d <= HZ_CAP && empByDate[d].size >= 10 && d > horizon) horizon = d;
 }
 console.log('data horizon (>=10 employees with punches): ' + horizon);
 
