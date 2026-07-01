@@ -103,6 +103,8 @@ function MonthHeatmap({ trend, ar, onPick }: {
   trend: { date: string; conformance: number | null; present: number }[]; ar: boolean; onPick: (from: string, to: string) => void;
 }) {
   const reduced = useReducedMotion();
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('roster_heatmap_open') !== '0'; } catch { return true; } });
+  const toggle = () => setOpen(o => { const n = !o; try { localStorage.setItem('roster_heatmap_open', n ? '1' : '0'); } catch { /* */ } return n; });
   const days = (trend || []).filter(d => d.date).slice().sort((a, b) => a.date.localeCompare(b.date));
   if (days.length < 3) return null;
   const colOf = (iso: string) => (new Date(iso + 'T00:00:00Z').getUTCDay() + 1) % 7; // Sat=0 … Fri=6 (WFM week starts Sat)
@@ -122,19 +124,27 @@ function MonthHeatmap({ trend, ar, onPick }: {
   return (
     <div className="rounded-2xl p-4 relative overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
       <div className="absolute -top-12 -inline-end-10 w-44 h-44 rounded-full" style={{ background: '#6366f1', opacity: 0.08, filter: 'blur(46px)', pointerEvents: 'none' }} />
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-3 relative">
+      <div onClick={toggle} title={ar ? 'اضغط للطي أو الفتح' : 'click to collapse / expand'}
+        className="flex items-center justify-between flex-wrap gap-2 relative" style={{ cursor: 'pointer', marginBottom: open ? 12 : 0, transition: 'margin .3s ease' }}>
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}><CalendarDays size={17} className="text-white" /></div>
           <div>
             <h3 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'خريطة الشهر — الكونفورمانس اليومي' : 'Month heatmap — daily conformance'}</h3>
-            <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>{ar ? 'كل خانة يوم · اللون = الكونفورمانس · الشريط = الحضور · اضغط لفلترة اليوم' : 'each cell = a day · colour = conformance · bar = present · click a day to filter'}</p>
+            <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>{open ? (ar ? 'كل خانة يوم · اللون = الكونفورمانس · الشريط = الحضور · اضغط لفلترة اليوم' : 'each cell = a day · colour = conformance · bar = present · click a day to filter') : (ar ? 'مطويّة — اضغط للفتح' : 'collapsed — click to expand')}</p>
           </div>
         </div>
-        <div className="text-end">
-          <div className="text-2xl font-extrabold leading-none" style={{ color: heat(avg), fontVariantNumeric: 'tabular-nums' }}>{avg}%</div>
-          <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>{ar ? 'متوسط الفترة' : 'period avg'}</div>
+        <div className="flex items-center gap-3">
+          <div className="text-end">
+            <div className="text-2xl font-extrabold leading-none" style={{ color: heat(avg), fontVariantNumeric: 'tabular-nums' }}>{avg}%</div>
+            <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>{ar ? 'متوسط الفترة' : 'period avg'}</div>
+          </div>
+          <div style={{ width: 28, height: 28, borderRadius: 8, display: 'grid', placeItems: 'center', background: 'var(--surface-2)', color: 'var(--text-2)', flexShrink: 0, transition: 'transform .3s ease', transform: open ? 'rotate(0deg)' : (ar ? 'rotate(90deg)' : 'rotate(-90deg)') }}>
+            <ChevronDown size={16} />
+          </div>
         </div>
       </div>
+      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: reduced ? 'none' : 'grid-template-rows .35s ease, opacity .3s ease', opacity: open ? 1 : 0, overflow: 'hidden' }}>
+       <div style={{ minHeight: 0, overflow: 'hidden' }}>
       <div className="grid gap-1.5 mb-1.5" style={{ gridTemplateColumns: 'repeat(7,1fr)' }}>
         {HEAD.map((h, i) => <div key={i} className="text-center" style={{ fontSize: 9, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-3)' }}>{h}</div>)}
       </div>
@@ -159,6 +169,8 @@ function MonthHeatmap({ trend, ar, onPick }: {
             <span style={{ color: 'var(--text-3)' }}>{ar ? 'أضعف' : 'worst'} <b style={{ color: '#f43f5e' }}>{worst.date.slice(5)} · {worst.conformance}%</b></span>
           </div>
         )}
+      </div>
+       </div>
       </div>
     </div>
   );
