@@ -256,3 +256,19 @@ corrections came out of it (both now LIVE):
 - **REMAINING (Jan–May Rule B):** the cross-midnight double-count is fixed in the recon engine (June + future). Jan–May
   was built by the OTHER pipeline (import-roster-master) and its 480 non-working-with-worked rows can't be cleanly
   de-bled via SQL (no session-login sign) — needs a per-month recon rebuild when those months' sources are loaded.
+
+## 20. 2026-07-01 — Partial-upload data-loss INCIDENT + the ingest-safety rule
+A test upload of only **Jun 28–30** wiped **Jun 1–27**. Root cause: `recon-ingest.js` hardcoded `DELETE FROM
+roster_days WHERE work_date BETWEEN 2026-06-01 AND 2026-06-30` then inserted only the 339 uploaded rows.
+- **FIX (commit b7b833d):** the ingest now DELETEs **only the actual date range present in `ingest.json`** (min..max
+  `date`); `RECON_FROM`/`RECON_TO` still override; it refuses to delete when there are no dated records; and
+  `roster_days_recon_bak` is refreshed **each run** (a true undo-last-ingest — restore uses the backup's own range).
+  **A partial upload can now only ever replace its own days — never the rest of the month.**
+- **Recovery state:** Jan–May untouched (safe, keep their fixes). June restored from `roster_days_recon_bak` to the
+  PRE-today version (**2733 rows / 103 people**) — so today's June refinements (cross-midnight, leave-on-holiday,
+  username, totals, +13 people) are NOT on June's rows until a rebuild. Full snapshot of ALL months kept in
+  `roster_days_predisaster` (15794 rows). **The RULES were never lost — only June's data snapshot rolled back.**
+- **GOTCHA:** the raw `Desktop/ROSTER/` exports are NOT the prepared engine sources (raw Ameyo matched 0 rows because
+  `byUser` needs the small prepared "Ameyo login and logout.xlsx" User-ID format) — rebuilding today's corrected June
+  needs the user's PREPARED source files re-shared. A partial June re-apply is possible via SQL (username + leave-on-
+  holiday) but the cross-midnight de-bleed and the 13 missing people need the rebuild.
