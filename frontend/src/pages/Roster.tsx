@@ -23,7 +23,7 @@ interface Row {
   team_manager: string|null; team_group: string|null; gender: string|null; worked_min: number|null; note: string|null;
 }
 interface OtFn { fn: string; ot_h: number; offday_h: number; ot_days: number; }
-interface Resp { from: string; to: string; total: number; limit: number; offset: number; summary: any; otByFunction?: OtFn[]; dailyTrend?: { date: string; conformance: number|null; present: number }[]; shiftCodes?: string[]; rows: Row[]; }
+interface Resp { from: string; to: string; total: number; limit: number; offset: number; summary: any; range?: { a: string|null; b: string|null }; otByFunction?: OtFn[]; dailyTrend?: { date: string; conformance: number|null; present: number }[]; shiftCodes?: string[]; rows: Row[]; }
 
 const hhmm = (m: number | null | undefined) => { if (m == null) return '—'; const t=((m%1440)+1440)%1440; let h=Math.floor(t/60); const mm=t%60; const ap=h<12?'AM':'PM'; h=h%12||12; return `${h}:${String(mm).padStart(2,'0')} ${ap}`; };
 const dur = (m: number | null) => { if (!m || m<=0) return '—'; const h=Math.floor(m/60), mm=m%60; return h?`${h}h ${mm}m`:`${mm}m`; };
@@ -293,13 +293,18 @@ export default function RosterPage() {
 
   // quick date presets — pick a whole range in ONE click (relative to today), no more two-input juggling
   const fmtD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // WFM week starts SATURDAY → the Saturday on/before a given date
+  const satOf = (d: Date) => { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 1) % 7)); return x; };
   const datePresets: { k: string; l: string; r: () => [string, string] }[] = [
     { k: 'today', l: ar ? 'اليوم' : 'Today', r: () => { const s = fmtD(new Date()); return [s, s]; } },
     { k: 'yesterday', l: ar ? 'أمس' : 'Yesterday', r: () => { const d = new Date(); d.setDate(d.getDate() - 1); const s = fmtD(d); return [s, s]; } },
+    { k: 'thisWeek', l: ar ? 'هذا الأسبوع' : 'This week', r: () => { const s = satOf(new Date()); const e = new Date(s); e.setDate(e.getDate() + 6); return [fmtD(s), fmtD(e)]; } },
+    { k: 'lastWeek', l: ar ? 'الأسبوع الماضي' : 'Last week', r: () => { const s = satOf(new Date()); s.setDate(s.getDate() - 7); const e = new Date(s); e.setDate(e.getDate() + 6); return [fmtD(s), fmtD(e)]; } },
     { k: 'last7', l: ar ? 'آخر ٧ أيام' : 'Last 7 days', r: () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 6); return [fmtD(s), fmtD(e)]; } },
     { k: 'last30', l: ar ? 'آخر ٣٠ يوم' : 'Last 30 days', r: () => { const e = new Date(); const s = new Date(); s.setDate(s.getDate() - 29); return [fmtD(s), fmtD(e)]; } },
     { k: 'thisMonth', l: ar ? 'هذا الشهر' : 'This month', r: () => { const n = new Date(); return [fmtD(new Date(n.getFullYear(), n.getMonth(), 1)), fmtD(new Date(n.getFullYear(), n.getMonth() + 1, 0))]; } },
     { k: 'lastMonth', l: ar ? 'الشهر الماضي' : 'Last month', r: () => { const n = new Date(); return [fmtD(new Date(n.getFullYear(), n.getMonth() - 1, 1)), fmtD(new Date(n.getFullYear(), n.getMonth(), 0))]; } },
+    { k: 'all', l: ar ? 'الكل' : 'All', r: () => [data?.range?.a || from, data?.range?.b || to] },
   ];
   const activePreset = datePresets.find(p => { const [f, t] = p.r(); return f === from && t === to; })?.k;
   const applyPreset = (p: { r: () => [string, string] }) => { const [f, t] = p.r(); setFrom(f); setTo(t); };
@@ -529,7 +534,12 @@ export default function RosterPage() {
                     <td className="px-2 py-2.5 text-center text-slate-400 whitespace-nowrap">{r.shift_code?<span><span className="text-slate-200 font-semibold">{r.shift_code}</span> <span className="text-[10px]">{r.shift_start_min!=null?`${hhmm(r.shift_start_min)}-${hhmm(r.shift_end_min)}`:''}</span></span>:'—'}</td>
                     <td className="px-2 py-2.5 text-center whitespace-nowrap text-slate-300">{r.punch_in_min!=null?<span className="inline-flex items-center gap-1">{hhmm(r.punch_in_min)}<ArrowRight size={10} className="text-slate-500"/>{hhmm(r.punch_out_min)}</span>:'—'}</td>
                     <td className="px-2 py-2.5 text-center whitespace-nowrap" style={{ color: r.sys_late_min>0||r.sys_early_min>0?'#f59e0b':'#cbd5e1' }}>{r.sys_login_min!=null?<span className="inline-flex items-center gap-1">{hhmm(r.sys_login_min)}<ArrowRight size={10} className="text-slate-500"/>{hhmm(r.sys_logout_min)}</span>:<span className="text-slate-600">—</span>}</td>
-                    <td className="px-2 py-2.5 text-center">{r.adherence_pct!=null?<span className="px-1.5 py-0.5 rounded font-bold text-[11px]" style={{ background:`${adhColor(r.adherence_pct)}1f`, color:adhColor(r.adherence_pct) }}>{r.adherence_pct}%</span>:<span className="text-slate-600">—</span>}</td>
+                    <td className="px-2 py-2.5 text-center">{r.adherence_pct!=null?(
+                      <div className="inline-flex flex-col items-stretch gap-1" style={{ minWidth:48 }}>
+                        <span className="px-1.5 py-0.5 rounded font-bold text-[11px] text-center" style={{ background:`${adhColor(r.adherence_pct)}1f`, color:adhColor(r.adherence_pct) }}>{r.adherence_pct}%</span>
+                        <div style={{ height:3, borderRadius:2, background:'var(--surface-2)', overflow:'hidden' }}><div style={{ height:'100%', width:`${Math.max(0,Math.min(100,r.adherence_pct))}%`, background:adhColor(r.adherence_pct), borderRadius:2 }} /></div>
+                      </div>
+                    ):<span className="text-slate-600">—</span>}</td>
                   </tr>
                   {openKey===key && (
                     <tr><td colSpan={7} className={`px-4 pb-3.5 ${lightRow?'zdet-on-light':'zdet-on-dark'}`} style={{ boxShadow:'inset 0 2px 0 rgba(99,102,241,0.5)' }}>
