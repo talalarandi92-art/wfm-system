@@ -315,12 +315,15 @@ export class ReconController {
       conformance:{agg:'ROUND(AVG(adherence_pct),1)',label:'Conformance %'}, missingPunch:{agg:'COUNT(*) FILTER (WHERE missing_punch)',label:'Missing Punch'},
       missingSystem:{agg:'COUNT(*) FILTER (WHERE missing_system)',label:'Missing System'}, mismatch:{agg:'COUNT(*) FILTER (WHERE mismatch IS NOT NULL)',label:'Mismatch'},
       agents:{agg:'COUNT(DISTINCT COALESCE(person_no,employee_no))',label:'Agents'},
-      // official scorecard (joined per-person via the sc CTE) — Net Points + KPI scores
-      netPoints:{agg:'ROUND(AVG(sc.net),1)',label:'Net Points'}, scQuality:{agg:'ROUND(AVG(sc.quality),1)',label:'Quality (pts)'},
-      scAht:{agg:'ROUND(AVG(sc.aht),1)',label:'AHT (pts)'}, scFcr:{agg:'ROUND(AVG(sc.fcr),1)',label:'FCR (pts)'},
-      scProductivity:{agg:'ROUND(AVG(sc.prod),1)',label:'Productivity (pts)'}, scCtr:{agg:'ROUND(AVG(sc.ctr),1)',label:'CTR (pts)'}, scQuiz:{agg:'ROUND(AVG(sc.quiz),1)',label:'Quiz (pts)'},
-      scPrr:{agg:'ROUND(AVG(sc.prr),1)',label:'PRR (pts)'}, scRes:{agg:'ROUND(AVG(sc.res),1)',label:'RES %'}, scResponseTime:{agg:'ROUND(AVG(sc.rt),1)',label:'Response Time (pts)'},
-      scMistakes:{agg:'ROUND(AVG(sc.mist),1)',label:'Mistakes (pts)'}, scIncidents:{agg:'ROUND(AVG(sc.inc),1)',label:'Incidents (pts)'}, scAttendance:{agg:'ROUND(AVG(sc.att),1)',label:'Attendance (pts)'},
+      // official scorecard (joined per-person via the sc CTE) — Net Points + KPI scores.
+      // PERSON-weighted, not day-weighted: sc values are constant per person, so averaging over
+      // every roster day made a 22-day agent count 22×. The grouped query adds sc_rn = ROW_NUMBER()
+      // per (person, group); FILTER (sc_rn=1) counts each person exactly ONCE per group.
+      netPoints:{agg:'ROUND(AVG(sc.net) FILTER (WHERE sc_rn=1),1)',label:'Net Points'}, scQuality:{agg:'ROUND(AVG(sc.quality) FILTER (WHERE sc_rn=1),1)',label:'Quality (pts)'},
+      scAht:{agg:'ROUND(AVG(sc.aht) FILTER (WHERE sc_rn=1),1)',label:'AHT (pts)'}, scFcr:{agg:'ROUND(AVG(sc.fcr) FILTER (WHERE sc_rn=1),1)',label:'FCR (pts)'},
+      scProductivity:{agg:'ROUND(AVG(sc.prod) FILTER (WHERE sc_rn=1),1)',label:'Productivity (pts)'}, scCtr:{agg:'ROUND(AVG(sc.ctr) FILTER (WHERE sc_rn=1),1)',label:'CTR (pts)'}, scQuiz:{agg:'ROUND(AVG(sc.quiz) FILTER (WHERE sc_rn=1),1)',label:'Quiz (pts)'},
+      scPrr:{agg:'ROUND(AVG(sc.prr) FILTER (WHERE sc_rn=1),1)',label:'PRR (pts)'}, scRes:{agg:'ROUND(AVG(sc.res) FILTER (WHERE sc_rn=1),1)',label:'RES %'}, scResponseTime:{agg:'ROUND(AVG(sc.rt) FILTER (WHERE sc_rn=1),1)',label:'Response Time (pts)'},
+      scMistakes:{agg:'ROUND(AVG(sc.mist) FILTER (WHERE sc_rn=1),1)',label:'Mistakes (pts)'}, scIncidents:{agg:'ROUND(AVG(sc.inc) FILTER (WHERE sc_rn=1),1)',label:'Incidents (pts)'}, scAttendance:{agg:'ROUND(AVG(sc.att) FILTER (WHERE sc_rn=1),1)',label:'Attendance (pts)'},
     };
     const G: Record<string, { col: string; label: string }> = {
       day:{col:'day_name',label:'Day'}, week:{col:'week_number',label:'Week'}, month:{col:'month_name',label:'Month'}, date:{col:'work_date::text',label:'Date'},
@@ -362,7 +365,10 @@ export class ReconController {
       const kpis = String(q.kpis||'scheduledDays,workedDays,lateMin,otMin,conformance').split(',').filter(k=>K[k]);
       columns = [{ key:'group', label:g.label }, ...kpis.map(k=>({ key:k, label:K[k].label }))];
       const sel = [`${g.col} AS "group"`, ...kpis.map(k=>`${K[k].agg} AS "${k}"`)].join(', ');
-      rows = await this.ds.query(`${SC} SELECT ${sel} FROM ${FROM} WHERE ${w} GROUP BY ${g.col} ORDER BY 2 DESC NULLS LAST LIMIT 500`, p);
+      // sc_rn = one row per (person, group) so the sc-CTE scorecard KPIs are PERSON-weighted; the
+      // filters move inside the subquery (they reference roster_days columns only), everything else identical.
+      const FROM_G = `(SELECT rd.*, ROW_NUMBER() OVER (PARTITION BY rd.person_no, ${g.col.replace(/\broster_days\./g, 'rd.')}) AS sc_rn FROM roster_days rd WHERE ${w}) roster_days LEFT JOIN sc ON sc.sc_person = roster_days.person_no`;
+      rows = await this.ds.query(`${SC} SELECT ${sel} FROM ${FROM_G} GROUP BY ${g.col} ORDER BY 2 DESC NULLS LAST LIMIT 500`, p);
     } else {
       const fields = String(q.fields||'date,agent,function,shiftCode,attendanceStatus,lateMin,otBefore,otAfter,conformance').split(',').filter(k=>F[k]);
       columns = fields.map(k=>({ key:k, label:F[k].label }));
