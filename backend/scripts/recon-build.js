@@ -30,6 +30,19 @@ module.exports = function build() {
   const MAX_HR_DEV = 120;      // late/early-out > 2h => likely swap/incomplete capture => Manual Review (fairness)
   const MIN_PRESENCE = 120;    // captured WFH presence < 2h with no punch => incomplete evidence => Manual Review
   const fmtT = (min) => (min == null ? '' : (min >= 1440 ? hhmm(min - 1440) + ' (+1)' : (min < 0 ? hhmm(min + 1440) + ' (-1)' : hhmm(min))));
+  // ── report-column helpers, EXACT copies of the proven import-roster-master ones (so the
+  //    corrected ingest stops NULLing the columns the reports read: ot_before/after, week/month,
+  //    attendance_status, late_category, missing flags, crosses_midnight, original code). ──
+  const weekNum = (iso) => { const d = new Date(iso + 'T00:00:00Z'); const sinceSat = (d.getUTCDay() + 1) % 7; const ws = new Date(d); ws.setUTCDate(d.getUTCDate() - sinceSat); const jan1 = new Date(Date.UTC(d.getUTCFullYear(), 0, 1)); const fws = new Date(jan1); fws.setUTCDate(jan1.getUTCDate() - ((jan1.getUTCDay() + 1) % 7)); return Math.floor((ws - fws) / (7 * 86400000)) + 1; };
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const lateCat = (m) => { if (m == null || m <= 0) return 'On time'; if (m <= 5) return 'Late 1-5'; if (m <= 15) return 'Late 6-15'; if (m <= 20) return 'Late 16-20'; if (m <= 29) return 'Late 21-29'; if (m <= 59) return 'Late 30-59'; return 'Late 60+'; };
+  const attStatus = (kind, presence, raw) => { const U = String(raw || '').toUpperCase();
+    if (U === 'DL') return 'Death Leave'; if (U === 'UPL') return 'Unpaid Leave'; if (/transfer/i.test(U)) return 'Transfer';
+    if (kind === 'sick') return 'Sick Leave'; if (kind === 'absence') return 'Absence';
+    if (presence === 'holiday' || kind === 'holiday') return 'Holiday'; if (kind === 'leave') return 'Annual Leave';
+    if (kind === 'comp' || U === 'COMP') return 'COMP'; if (kind === 'off') return 'OFF'; if (kind === 'sep') return 'Left';
+    if (presence === 'office') return 'Present (Office)'; if (presence === 'wfh') return 'WFH';
+    if (presence === 'absent') return 'Absence'; return 'Present'; };
   // 12-hour clock display (user preference 2026-06-28): clock times show h:mm AM/PM; DURATIONS stay HH:MM:SS.
   const clock12 = (min) => { if (min == null) return ''; const t = ((min % 1440) + 1440) % 1440; let h = Math.floor(t / 60); const m = t % 60; const ap = h < 12 ? 'AM' : 'PM'; h = h % 12; if (h === 0) h = 12; return h + ':' + String(m).padStart(2, '0') + ' ' + ap; };
   const fmtT12 = (min) => (min == null ? '' : (min >= 1440 ? clock12(min - 1440) + ' (+1)' : (min < 0 ? clock12(min + 1440) + ' (-1)' : clock12(min))));
@@ -259,6 +272,15 @@ module.exports = function build() {
         emp: String(e.id), person: String(e.id), name: idn.name || e.name, fn, username: idn.userId || e.username || null,
         totalSysMin: (prevDayBleed || govDur == null) ? null : Math.max(0, govDur),
         dailyNote: leaveOnHoliday ? 'Annual leave on an official holiday — counted as holiday, not deducted from leave balance' : null,
+        // report columns (same semantics as import-roster-master, so reports never read NULL/0 after a refresh):
+        // OT before/after = informational split around the shift window; a worked HOLIDAY day is all holiday-OT, not before/after.
+        otBefore: (isWorkingKind && !isHolidayDate && schedStart != null && govLogin != null) ? Math.min(360, Math.max(0, schedStart - govLogin)) : 0,
+        otAfter: (isWorkingKind && !isHolidayDate && schedEnd != null && govLogout != null) ? Math.min(480, Math.max(0, govLogout - schedEnd)) : 0,
+        weekNumber: weekNum(date), monthName: MONTHS[+date.slice(5, 7) - 1],
+        attendanceStatus: attStatus(c.kind, presenceLive, raw),
+        lateCategory: isWorkingKind ? ((!hasSystem && !hasPunch) ? 'No show' : lateCat(effLate)) : null,
+        missingPunch: !!(isWorkingKind && !hasPunch), missingSystem: !!(isWorkingKind && !hasSystem),
+        crossesMidnight: !!c.crossMidnight, originalShiftCode: c.origin || null,
         date, day: dayName(date), status: holidayLabel ? (holidayLabel + (isWorkingKind ? ' (worked)' : '')) : raw, presence: presenceLive, location: isWFH ? 'WFH' : 'Office',
         shiftCode: c.norm, shiftCat: c.norm, schedStart, schedEnd: (schedEnd != null && schedEnd > 1440 ? schedEnd - 1440 : schedEnd),
         punchIn: hasPunch ? od.punchIn : null, punchOut: (od && od.punchOut != null) ? od.punchOut : null,

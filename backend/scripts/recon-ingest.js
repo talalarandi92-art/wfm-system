@@ -23,6 +23,9 @@ const MAP = {
   adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_type: 'permType', permission_duration: 'permDur',
   comp_off: 'comp', sick: 'sick', hr_code: 'hrCode', attendance_code: 'attCode', mismatch: 'mismatch', data_quality: 'dq',
   username: 'username', total_work_sys_min: 'totalSysMin', daily_note: 'dailyNote', include_tardiness: 'includeTardiness',
+  ot_before_min: 'otBefore', ot_after_min: 'otAfter', week_number: 'weekNumber', month_name: 'monthName',
+  attendance_status: 'attendanceStatus', late_category: 'lateCategory', missing_punch: 'missingPunch',
+  missing_system: 'missingSystem', crosses_midnight: 'crossesMidnight', original_shift_code: 'originalShiftCode',
   team_manager: 'teamMgr', team_group: 'teamGroup', gender: 'gender', role_category: 'roleCat',
   expected_hours: 'expectedH', is_active: 'active',
 };
