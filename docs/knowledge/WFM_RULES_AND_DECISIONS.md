@@ -161,8 +161,12 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
 - ✅ **RESOLVED:** `import-roster-days.js` DEPRECATED (header) — it had the cross-midnight late gap; `master.js`
   is the sole live builder.
 - ⚠ **OPEN (number-changing — do carefully, with full re-validation, AFTER the demo):**
-  - **Shift-category 6-way conflict** (2026-07-01 audit verified 6 sites) — one canonical mapping (§3) imported by all 6; changes shift-rate %/fairness.
-  - **Net-Points day-weighted join** (Custom Report Builder grouped scorecard) — aggregate at person grain; changes grouped averages.
+  - **Shift-category conflict — ✅ ANALYTIC SITES UNIFIED 2026-07-02** (`common/shift-category.ts` = THE §3 mapping;
+    wired into fairness catExpr [C was mis-bucketed as evening], generate-week 3-way, and /me shift-rate hour buckets —
+    verified live). REMAINING BY DESIGN: the Schedule grid's visual 'between' colour taxonomy (display language, not
+    analytics) and the generator's hour→code derivation (changes generation behaviour — needs the Director's eyes).
+  - **Net-Points day-weighted join — ✅ FIXED 2026-07-02**: grouped report-builder scorecard KPIs are PERSON-weighted
+    via `sc_rn = ROW_NUMBER() OVER (PARTITION BY person, group)` + `FILTER (WHERE sc_rn=1)`; verified live.
   - **Dead code** — remove `Nx*`+`sevColor` (`ds.tsx`) and `common/wfm-calc.ts` (orphan); safe cleanup, no behavior change.
   - **Legacy roster_daily re-ingest** — to surface the engine WFH fix on `/dashboard`,`/metric`,`/overtime` (heavy parse).
 - 🧹 **DEAD CODE:** the entire `Nx*` library + `sevColor` in `ds.tsx` (0 usages) and `common/wfm-calc.ts` (the
