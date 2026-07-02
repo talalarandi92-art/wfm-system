@@ -11,6 +11,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
+import { shiftCategoryFromCode, shiftCategoryCaseSql } from '@common/shift-category';
 import { ReconService } from './recon.service';
 import { RosterIngestionService } from './roster-ingestion.service';
 
@@ -424,10 +425,9 @@ export class ReconController {
     if (functionName) w += ` AND ${add('r.role_function=$$', functionName)}`;
     if (teamLeader)   w += ` AND ${add('r.team_manager=$$', teamLeader)}`;
 
-    // shift CODE (held in shift_category) → category. midnight = MD*/MN*, night = N*,
-    // evening = E*/C*/EE*, morning = M*/B*/AM*.
-    const catExpr = `CASE WHEN U ~ '^(MD|MN)' THEN 'midnight' WHEN U ~ '^N' THEN 'night' WHEN U ~ '^(E|C|EE)' THEN 'evening' WHEN U ~ '^(M|B|AM)' THEN 'morning' ELSE 'other' END`
-      .replace(/U/g, `upper(coalesce(shift_category,shift_code,''))`);
+    // THE ONE canonical shift-category mapping (rules §3, common/shift-category.ts) —
+    // was a local CASE that mis-bucketed C into evening (canonical: morning/day).
+    const catExpr = shiftCategoryCaseSql('shift_category,shift_code');
     const work = `r.presence IN ('office','wfh')`;
     const rows: any[] = await this.ds.query(`
       WITH r AS (SELECT *, ${catExpr} cat FROM roster_days)
@@ -822,7 +822,8 @@ export class ReconController {
     const t = req.user.tenantId;
     const mixData: any = await this.generateMix(req, functionName, from, to);
     const fn = mixData.function, dFrom = mixData.from, dTo = mixData.to;
-    const cat = (code: string) => /^(MD|MN)/.test(code) ? 'midnight' : /^N/.test(code) ? 'night' : 'day';
+    // canonical classifier (common/shift-category.ts) collapsed to the 3 buckets this planner needs
+    const cat = (code: string) => { const c = shiftCategoryFromCode(code); return c === 'midnight' ? 'midnight' : c === 'night' ? 'night' : 'day'; };
 
     // active people in the function with gender + historical night/mid load + weekend-off share
     const emps = (await this.ds.query(`

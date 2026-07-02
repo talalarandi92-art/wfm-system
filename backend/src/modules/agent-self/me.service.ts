@@ -44,14 +44,16 @@ export class MeService {
     return { linked: true, shiftRate, adherence, score, schedule };
   }
 
-  /** YTD shift distribution by start-time category — the agent's own rotation balance. */
+  /** YTD shift distribution — the agent's own rotation balance. Hour buckets = THE ONE canonical
+   *  mapping's start-hour fallback (rules §3, common/shift-category.ts): M/B/C/AM start 5–12 →
+   *  morning · N 13–14 → night · E/EE 15–20 → evening · MD/MN ≥21|<5 → midnight. */
   private async shiftRate(tenantId: string, employeeId: string) {
     const [r] = await this.ds.query(
       `SELECT
-         COUNT(*) FILTER (WHERE attendance_marker='present' AND EXTRACT(HOUR FROM scheduled_start) BETWEEN 5 AND 11)  AS morning,
-         COUNT(*) FILTER (WHERE attendance_marker='present' AND EXTRACT(HOUR FROM scheduled_start) BETWEEN 12 AND 16) AS evening,
-         COUNT(*) FILTER (WHERE attendance_marker='present' AND EXTRACT(HOUR FROM scheduled_start) BETWEEN 17 AND 21) AS night,
-         COUNT(*) FILTER (WHERE attendance_marker='present' AND (EXTRACT(HOUR FROM scheduled_start) >= 22 OR EXTRACT(HOUR FROM scheduled_start) < 5)) AS midnight,
+         COUNT(*) FILTER (WHERE attendance_marker='present' AND EXTRACT(HOUR FROM scheduled_start) BETWEEN 5 AND 12)  AS morning,
+         COUNT(*) FILTER (WHERE attendance_marker='present' AND EXTRACT(HOUR FROM scheduled_start) BETWEEN 15 AND 20) AS evening,
+         COUNT(*) FILTER (WHERE attendance_marker='present' AND EXTRACT(HOUR FROM scheduled_start) BETWEEN 13 AND 14) AS night,
+         COUNT(*) FILTER (WHERE attendance_marker='present' AND (EXTRACT(HOUR FROM scheduled_start) >= 21 OR EXTRACT(HOUR FROM scheduled_start) < 5)) AS midnight,
          COUNT(*) FILTER (WHERE attendance_marker='present' AND scheduled_start IS NULL) AS unclassified,
          COUNT(*) FILTER (WHERE attendance_marker='off')                                 AS off_days,
          COUNT(*) FILTER (WHERE attendance_marker IN ('leave','sick','holiday'))          AS leave_days
