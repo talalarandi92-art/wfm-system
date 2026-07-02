@@ -10,39 +10,23 @@ import ImportPage          from '@/pages/Import';
 import AttendanceHub        from '@/pages/AttendanceHub';
 import SchedulingHub          from '@/pages/SchedulingHub';
 import RequestsPage            from '@/pages/Requests';
-import CapacityPage            from '@/pages/Capacity';
 import EmployeesHub           from '@/pages/EmployeesHub';
 import UserManagementPage      from '@/pages/UserManagement';
 import LiveOpsHub             from '@/pages/LiveOpsHub';
-import ScorecardPage           from '@/pages/Scorecard';
 import AnalyticsHub            from '@/pages/AnalyticsHub';
-import ProductivityPage        from '@/pages/Productivity';
-import RosterPage              from '@/pages/Roster';
-import RosterDashboardPage     from '@/pages/RosterDashboard';
-import ReportBuilderPage       from '@/pages/ReportBuilder';
-import WfhHrReportPage          from '@/pages/WfhHrReport';
-import ScheduleAnalysisPage     from '@/pages/ScheduleAnalysis';
-import OtExceptionsPage          from '@/pages/OtExceptions';
-import DataQualityPage         from '@/pages/DataQuality';
-import DashboardBuilderPage    from '@/pages/DashboardBuilder';
-import ScheduleChangeLogPage   from '@/pages/ScheduleChangeLog';
-import IntervalHeadcountPage    from '@/pages/IntervalHeadcount';
-import Agent360Page             from '@/pages/Agent360';
+// Consolidated hubs (2026-07-02): the roster-reports / scorecard / capacity page
+// families are now ?tab= tabs inside three hubs; their old routes redirect below.
+import RosterHub               from '@/pages/RosterHub';
+import ScorecardHub            from '@/pages/ScorecardHub';
+import CapacityHub             from '@/pages/CapacityHub';
 import WfmOverviewPage          from '@/pages/WfmOverview';
-import SystemAuditPage          from '@/pages/SystemAudit';
-import Team360Page              from '@/pages/Team360';
-import AgentScoresPage          from '@/pages/AgentScores';
-import TrendsPage               from '@/pages/Trends';
-import ScorecardBoardPage       from '@/pages/ScorecardBoard';
 import SettingsPage            from '@/pages/Settings';
 import CalendarPage            from '@/pages/Calendar';
 import SkillsPage              from '@/pages/Skills';
 import WorkspaceHub           from '@/pages/WorkspaceHub';
 import AgentHome               from '@/pages/AgentHome';
 import OdooIntegrationPage     from '@/pages/OdooIntegration';
-import CoachingPage              from '@/pages/Coaching';
 import ControlDashboardsPage     from '@/pages/ControlDashboards';
-import HourlyCoveragePage        from '@/pages/HourlyCoverage';
 import SystemHealthPage          from '@/pages/SystemHealth';
 import AnalystPage               from '@/pages/Analyst';
 import ReportsBotPage            from '@/pages/ReportsBot';
@@ -106,11 +90,20 @@ export default function App() {
           <Route path="attendance" element={<AttendanceHub />} />
           <Route path="requests"   element={<RequestsPage />} />
           <Route path="breaks"     element={<Navigate to="/attendance?tab=breaks" replace />} />
-          <Route path="capacity"   element={<CapacityPage />} />
+          <Route path="capacity"   element={<CapacityHub />} />
+          <Route path="hourly-coverage"    element={<Navigate to="/capacity?tab=coverage" replace />} />
+          <Route path="interval-headcount" element={<Navigate to="/capacity?tab=intervals" replace />} />
           <Route path="rta"              element={<LiveOpsHub />} />
           <Route path="outages"         element={<Navigate to="/rta?tab=outages" replace />} />
           <Route path="technical-issues" element={<Navigate to="/rta?tab=technical" replace />} />
-          <Route path="scorecard"  element={<ScorecardPage />} />
+          <Route path="scorecard"  element={<ScorecardHub />} />
+          <Route path="scorecard-board" element={<Navigate to="/scorecard?tab=board" replace />} />
+          <Route path="agent-scores"    element={<Navigate to="/scorecard?tab=leaderboard" replace />} />
+          <Route path="trends"          element={<Navigate to="/scorecard?tab=trends" replace />} />
+          <Route path="agent-360"       element={<Navigate to="/scorecard?tab=agent360" replace />} />
+          <Route path="team-360"        element={<Navigate to="/scorecard?tab=team360" replace />} />
+          <Route path="coaching"        element={<Navigate to="/scorecard?tab=coaching" replace />} />
+          <Route path="productivity"    element={<Navigate to="/scorecard?tab=productivity" replace />} />
           <Route path="employees"  element={<EmployeesHub />} />
           <Route path="employee-merge" element={<Navigate to="/employees?tab=merge" replace />} />
           <Route path="users"      element={<UserManagementPage />} />
@@ -124,30 +117,21 @@ export default function App() {
           <Route path="knowledge-base" element={<Navigate to="/chat?tab=kb" replace />} />
           <Route path="integrations/odoo" element={<OdooIntegrationPage />} />
           <Route path="analytics" element={<AnalyticsHub />} />
-          <Route path="productivity" element={<ProductivityPage />} />
-          <Route path="roster" element={<RosterPage />} />
-          <Route path="roster-dashboard" element={<RosterDashboardPage />} />
-          <Route path="report-builder" element={<ReportBuilderPage />} />
-          <Route path="data-quality" element={<DataQualityPage />} />
-          <Route path="wfh-hr-report" element={<WfhHrReportPage />} />
-          <Route path="schedule-analysis" element={<ScheduleAnalysisPage />} />
-          <Route path="ot-exceptions" element={<OtExceptionsPage />} />
-          <Route path="dashboard-builder" element={<DashboardBuilderPage />} />
-          <Route path="schedule-change-log" element={<ScheduleChangeLogPage />} />
-          <Route path="interval-headcount" element={<IntervalHeadcountPage />} />
-          <Route path="agent-360" element={<Agent360Page />} />
+          <Route path="roster" element={<RosterHub />} />
+          <Route path="roster-dashboard"    element={<Navigate to="/roster?tab=dashboard" replace />} />
+          <Route path="ot-exceptions"       element={<Navigate to="/roster?tab=ot" replace />} />
+          <Route path="schedule-analysis"   element={<Navigate to="/roster?tab=analysis" replace />} />
+          <Route path="wfh-hr-report"       element={<Navigate to="/roster?tab=wfh" replace />} />
+          <Route path="data-quality"        element={<Navigate to="/roster?tab=quality" replace />} />
+          <Route path="system-audit"        element={<Navigate to="/roster?tab=audit" replace />} />
+          <Route path="schedule-change-log" element={<Navigate to="/roster?tab=changes" replace />} />
+          <Route path="report-builder"      element={<Navigate to="/roster?tab=report-builder" replace />} />
+          <Route path="dashboard-builder"   element={<Navigate to="/roster?tab=dashboard-builder" replace />} />
           <Route path="wfm-overview" element={<WfmOverviewPage />} />
-          <Route path="system-audit" element={<SystemAuditPage />} />
-          <Route path="team-360" element={<Team360Page />} />
-          <Route path="agent-scores" element={<AgentScoresPage />} />
-          <Route path="trends" element={<TrendsPage />} />
-          <Route path="scorecard-board" element={<ScorecardBoardPage />} />
           <Route path="campaigns" element={<Navigate to="/schedule?tab=campaigns" replace />} />
           <Route path="attendance-corrections" element={<Navigate to="/attendance?tab=corrections" replace />} />
           <Route path="schedule-changes" element={<Navigate to="/schedule?tab=changes" replace />} />
-          <Route path="coaching" element={<CoachingPage />} />
           <Route path="control-dashboards" element={<ControlDashboardsPage />} />
-          <Route path="hourly-coverage" element={<HourlyCoveragePage />} />
           <Route path="system-health" element={<SystemHealthPage />} />
           <Route path="analyst" element={<AnalystPage />} />
           <Route path="reports-bot" element={<ReportsBotPage />} />

@@ -18,10 +18,10 @@ const NAV_SECTIONS = [
       { key: 'myWorkspace', icon: UserCircle,      path: '/my',        permission: null },
       // Ops overview — management + RTA only; agents use My Workspace instead.
       { key: 'dashboard',   icon: LayoutDashboard, path: '/dashboard', permission: null, agentHidden: true },
-      { key: 'controlDashboards', icon: LayoutDashboard, path: '/control-dashboards', permission: 'reports.view', agentHidden: true },
+      { key: 'controlDashboards', icon: Gauge, path: '/control-dashboards', permission: 'reports.view', agentHidden: true },
       // The Chief is the single visible face — the rest of the team runs behind it
       // (reachable from the Chief / Bots Hub, not shown individually in the nav).
-      { key: 'chief', icon: Crown, path: '/chief', permission: 'hc.view', agentHidden: true },
+      { key: 'chief', icon: Bot, path: '/chief', permission: 'hc.view', agentHidden: true },
     ],
   },
   {
@@ -47,31 +47,17 @@ const NAV_SECTIONS = [
   {
     label: { ar: 'التخطيط', en: 'Planning' },
     items: [
-      // Executive command center — gateway to Agent 360, Scorecard Board, Roster Dashboard, Team 360, etc.
+      // Executive command center — gateway to the hub tabs (Agent 360, Board, Roster Dashboard…).
       { key: 'wfmOverview', icon: Sparkles, path: '/wfm-overview', permission: 'attendance.view_team', agentHidden: true },
+      // Capacity & Coverage hub (Erlang planning + hourly coverage + interval headcount).
       { key: 'capacity',  icon: BarChart3, path: '/capacity',  permission: 'hc.view' },
-      { key: 'hourlyCoverage', icon: Activity, path: '/hourly-coverage', permission: 'hc.view', agentHidden: true },
-      // Team scorecard / rankings — agent sees own score in My Workspace.
+      // Scorecard hub (overview + board + leaderboard + trends + agent/team 360 + coaching + productivity).
       { key: 'scorecard', icon: Award,     path: '/scorecard', permission: 'scorecard.view_own', agentHidden: true },
-      { key: 'coaching',  icon: GraduationCap, path: '/coaching', permission: 'scorecard.view', agentHidden: true },
       { key: 'analyticsHub', icon: Activity, path: '/analytics', permission: 'reports.view' },
-      { key: 'productivity', icon: Gauge, path: '/productivity', permission: 'reports.view', agentHidden: true },
     ],
   },
-  {
-    // Roster-analytics pages that were previously reachable only via WFM Overview tiles — surfaced
-    // directly so management can find them in the demo.
-    label: { ar: 'التقارير والتحليلات', en: 'Reports & Analytics' },
-    items: [
-      { key: 'scorecardBoard',  icon: ClipboardCheck,  path: '/scorecard-board',  permission: 'reports.view',         agentHidden: true },
-      { key: 'agent360',        icon: UserCircle,       path: '/agent-360',        permission: 'attendance.view_team', agentHidden: true },
-      { key: 'team360',         icon: Users,            path: '/team-360',         permission: 'attendance.view_team', agentHidden: true },
-      { key: 'leaderboard',     icon: Award,            path: '/agent-scores',     permission: 'reports.view',         agentHidden: true },
-      { key: 'trends',          icon: Activity,         path: '/trends',           permission: 'reports.view',         agentHidden: true },
-      { key: 'rosterDashboard', icon: LayoutDashboard,  path: '/roster-dashboard', permission: 'attendance.view_team', agentHidden: true },
-      { key: 'otExceptions',    icon: ClockIcon,        path: '/ot-exceptions',    permission: 'attendance.view_team', agentHidden: true },
-    ],
-  },
+  // (2026-07-02) The former "Reports & Analytics" section is gone: its 7 pages are now
+  // tabs inside the Roster hub (/roster) and the Scorecard hub (/scorecard).
   {
     label: { ar: 'الإدارة', en: 'Management' },
     items: [
