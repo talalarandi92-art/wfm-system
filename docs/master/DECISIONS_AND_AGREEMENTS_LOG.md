@@ -399,15 +399,15 @@
 - **Items:** (1) `ot_before_min`/`ot_after_min` still NULL after a corrected ingest (+ ~7 other MAP-omitted report columns) — emit in `_ingest` without changing TRUE_OT semantics. (2) sc-CTE 1:N fan-out — grouped scorecard KPIs are day-weighted; fix = aggregate at person grain (changes grouped averages). (3) **Shift-category computed 6 conflicting ways** — the ONE canonical mapping (doc §3: Morning=M/B/C/AM+20s+WFH-M/B · Evening=E/EE20 · Night=N/N20+WFH-N · Midnight=MD/MN/MDR/MNR) is the Confirmed rule; unifying the 6 code sites CHANGES shift-rate/fairness numbers → do with full re-validation. (4) Dead code: `Nx*`+`sevColor`, orphan `common/wfm-calc.ts` — adopt or delete. (5) Quick wins: shared `adhColor`/`ShiftRateBars`/`ROSTER_KPI_DEFS`, `keep-dark` on the ShiftRotation modal, i18n header titles, sidebar icon de-dup.
 - **Source:** WFM_RULES_AND_DECISIONS.md §3, §9, §16; memory `audit_2026_07_01_and_consolidation`.
 
-### D-068 — ★ Page-consolidation plan (hubs): NEEDS APPROVAL
-- **Status:** Needs Approval — awaiting the Director's go before restructuring navigation
-- **Proposal (from the 2026-07-01 audit, 37 findings):** extend the proven 6-hub `HubTabs + ?tab=` shape so ~80 pages / 66 routes / ~35 sidebar entries become **~10–12 top-level entries**:
-  - **Roster Reports hub** `/roster`: roster grid, roster-dashboard, schedule-analysis, ot-exceptions, interval-headcount, hourly-analytics, data-quality, system-audit, schedule-change-log, report-builder, dashboard-builder (delete the "Reports & Analytics" sidebar section + WfmOverview tile grid).
-  - **Scorecard hub** `/scorecard`: scorecard, scorecard-board, agent-scores, trends, agent-360, team-360, coaching, productivity.
-  - **Capacity & Coverage hub** `/capacity`: capacity (Erlang), hourly-coverage, interval-headcount, hourly-analytics, demand-schedule.
-  - **Chief branch** `/chief`: nest the 13 guard routes under one shell (already sidebar-hidden).
-  - **Executive home**: keep `/command-center` only; fold ControlDashboards' role switcher in; demote Dashboard; WfmOverview becomes the hub shell.
-- **Source:** memory `audit_2026_07_01_and_consolidation`; audit output `tasks/wqw23hg78.output`.
+### D-068 — ★ Page-consolidation plan (hubs): CONFIRMED & EXECUTED (core), 2026-07-02
+- **Status:** Confirmed — Director gave the go 2026-07-02 ("بلش يا وحش ابدع"); core executed in commits `5f68365` + `e9f5bb6`.
+- **Executed (verified live):** 3 new hubs extend the proven `HubTabs + ?tab=` shape to 9 hubs total:
+  - **Roster Reports hub** `/roster` (10 tabs): grid, dashboard, ot, analysis, wfh, quality, audit, changes, report-builder, dashboard-builder. "Reports & Analytics" sidebar section (7 items) deleted.
+  - **Scorecard hub** `/scorecard` (8 tabs): overview, board, leaderboard, trends, agent360, team360, coaching, productivity.
+  - **Capacity & Coverage hub** `/capacity` (3 tabs): planning (Erlang), coverage, intervals.
+  - Every old route redirects to its hub tab (deep links + existing buttons keep working). Polish: ShiftRotation modal `keep-dark`, PAGE_TITLES 15→33, Roster header farm 14→6 buttons.
+- **Remaining sub-items (still Needs Approval):** Chief branch nesting (13 guard routes under one shell); executive-home merge (CommandCenter + ControlDashboards + Dashboard + WfmOverview → one landing); hourly-analytics/demand-schedule stay in AnalyticsHub for now (cross-linked, not duplicated).
+- **Source:** memory `audit_2026_07_01_and_consolidation`; audit output `tasks/wqw23hg78.output`; execution commits `5f68365`, `e9f5bb6`.
 
 ---
 
@@ -456,7 +456,7 @@
 
 | # | Item | Status | Blocking on |
 |---|---|---|---|
-| O-1 | Page-consolidation plan (D-068) | Needs Approval | Director's go |
+| O-1 | Page-consolidation plan (D-068) | Core EXECUTED 2026-07-02 (3 hubs live); Chief-branch nesting + executive-home merge still Needs Approval | Director's go on the 2 sub-items |
 | O-2 | June full rebuild (cross-midnight de-bleed + 116-person foundation, D-065) | Pending | Director re-shares the PREPARED source files |
 | O-3 | Full-year re-run from January (D-063 step 2) | Pending | O-2 test pass |
 | O-4 | Shift-category 6-site unification (D-067.3) | Needs Approval (number-changing) | Joint re-validation |
