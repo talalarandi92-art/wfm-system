@@ -1,5 +1,17 @@
 # WFM PROJECT INSTRUCTIONS — FULL MASTER VERSION
 
+> **★ ENTERPRISE KNOWLEDGE SUITE (rebuilt 2026-07-02 — the organized presentation layer over everything below):**
+> `docs/master/` holds the 10-file suite: `MASTER_PROJECT_MEMORY.md` (the brain — read FIRST),
+> `WFM_BUSINESS_RULES_LIBRARY.md` (every rule with BR-IDs + status + enforcement path),
+> `DECISIONS_AND_AGREEMENTS_LOG.md` (every dated decision D-###), `MODULE_SPECIFICATIONS.md`,
+> `DATA_DICTIONARY.md`, `DASHBOARDS_AND_REPORTS.md`, `IMPLEMENTATION_ROADMAP.md`,
+> `SYSTEM_LEARNINGS_AND_IMPROVEMENTS.md`, `AI_AND_AUTOMATION_OPPORTUNITIES.md`,
+> `REBUILD_PROMPT_AND_OPERATING_INSTRUCTIONS.md` (how to restart the project without re-explaining).
+> The **`enterprise-wfm-platform`** skill (`.claude/skills/enterprise-wfm-platform/SKILL.md`) routes all
+> WFM work through this suite and carries the MEMORY UPDATE PROTOCOL (where each new rule/decision goes).
+> `docs/knowledge/WFM_RULES_AND_DECISIONS.md` remains the raw single source of truth for rules — the
+> suite cross-references it; on any conflict the rules doc wins.
+
 > **Durable knowledge base (read these before UI / roster / reports work — they ship with the repo):**
 > - ⭐ `docs/knowledge/WFM_RULES_AND_DECISIONS.md` — **THE single source of truth for every business rule &
 >   decision** (identity, week/cut-off, the ONE shift-category mapping, the CORRECTED WFH rule, reconciliation,
