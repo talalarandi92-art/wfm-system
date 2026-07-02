@@ -184,7 +184,7 @@ function GroupModal({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-md rounded-2xl p-6"
+        className="keep-dark relative w-full max-w-md rounded-2xl p-6"
         style={{
           background: 'linear-gradient(135deg,#0f1527,#151d35)',
           border: '1px solid rgba(255,255,255,0.08)',

@@ -398,18 +398,12 @@ export default function RosterPage() {
             ) : null; })()}
           </div>
         </div>
+        {/* (2026-07-02) trimmed: the sibling report pages are now TABS of the Roster hub —
+            only cross-hub jumps + actions stay here. */}
         <div className="flex items-center gap-2 relative">
           <button onClick={() => nav('/wfm-overview')} className={btn('text-white')} style={{ background:'linear-gradient(135deg,rgba(99,102,241,0.3),rgba(6,182,212,0.3))', color:'#c7d2fe' }}><LayoutDashboard size={13} />{ar?'النظرة التنفيذية':'Overview'}</button>
-          <button onClick={() => nav('/roster-dashboard')} className={btn('text-white')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><BarChart3 size={13} />{ar?'لوحة':'Dashboard'}</button>
-          <button onClick={() => nav('/dashboard-builder')} className={btn('')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><LayoutDashboard size={13} />{ar?'باني الداشبورد':'Dashboard Builder'}</button>
-          <button onClick={() => nav('/report-builder')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><Wrench size={13} />{ar?'منشئ التقارير':'Report Builder'}</button>
-          <button onClick={() => nav('/data-quality')} className={btn('')} style={{ background:'rgba(245,158,11,0.15)', color:'#fbbf24' }}><ShieldCheck size={13} />{ar?'جودة البيانات':'Data Quality'}</button>
-          <button onClick={() => nav('/wfh-hr-report')} className={btn('')} style={{ background:'rgba(14,165,233,0.16)', color:'#38bdf8' }}><Home size={13} />{ar?'تقرير WFH لـ HR':'WFH HR Report'}</button>
-          <button onClick={() => nav('/schedule-analysis')} className={btn('')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><CalendarDays size={13} />{ar?'تحليل الجدول':'Schedule Analysis'}</button>
-          <button onClick={() => nav('/ot-exceptions')} className={btn('')} style={{ background:'rgba(245,158,11,0.16)', color:'#fbbf24' }}><Clock size={13} />{ar?'OT والاستثناءات':'OT & Exceptions'}</button>
-          <button onClick={() => nav('/schedule-change-log')} className={btn('')} style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><GitCompareArrows size={13} />{ar?'تغييرات الجدول':'Change Log'}</button>
-          <button onClick={() => nav('/interval-headcount')} className={btn('')} style={{ background:'rgba(6,182,212,0.16)', color:'#67e8f9' }}><BarChart4 size={13} />{ar?'هيدكاونت بالفترات':'Intervals'}</button>
-          <button onClick={() => nav('/agent-360')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><UserSearch size={13} />{ar?'ملف 360':'Agent 360'}</button>
+          <button onClick={() => nav('/capacity?tab=intervals')} className={btn('')} style={{ background:'rgba(6,182,212,0.16)', color:'#67e8f9' }}><BarChart4 size={13} />{ar?'هيدكاونت بالفترات':'Intervals'}</button>
+          <button onClick={() => nav('/scorecard?tab=agent360')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><UserSearch size={13} />{ar?'ملف 360':'Agent 360'}</button>
           <button onClick={hrMatrix} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><FileSpreadsheet size={13} />HR Matrix</button>
           <button onClick={() => fileRef.current?.click()} title={ar?'ارفع ملفات الشهر (CC Schedule / أودو / استئذانات / Ameyo / Sprinklr) → يشتغل المحرّك المصحّح ويعيد بناء الروستر بكل القواعد المتفق عليها':'Upload the month sources (CC Schedule / Odoo / Permissions / Ameyo / Sprinklr) → runs the corrected engine and rebuilds the roster with every agreed rule'} className={btn('')} style={{ background:'rgba(16,185,129,0.16)', color:'#34d399' }}><Upload size={13} />{uploading?(ar?'جارٍ البناء…':'Rebuilding…'):(ar?'رفع وإعادة بناء':'Upload & Rebuild')}</button>
           <input ref={fileRef} type="file" multiple hidden onChange={onUpload} accept=".xlsx,.xls,.xlsm,.csv" />
