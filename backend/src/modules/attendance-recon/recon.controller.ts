@@ -28,7 +28,8 @@ const RECON_NEW_DIR = process.env.RECON_NEW_DIR || 'C:/Users/t.bassam/Desktop/ne
  *    offday_ot_min (OT worked on the employee's OFF day) + holiday_ot_min (OT on a
  *    public holiday). Each roster_days row sits in exactly one bucket, so the real
  *    total is their SUM. Summing ot_min alone undercounts (~28% on the live data).
- *  CRED_LATE/CRED_EARLY: a credible late-in/early-out is 1..240 min. Cross-midnight
+ *  CRED_LATE/CRED_EARLY: a credible late-in/early-out is 7..240 min (>6 min tolerated,
+ *    rule 2026-06-30). Cross-midnight
  *    night shifts (MD/MN/MNR, shift_end>1440) make the post-midnight session tail
  *    read as a multi-hour false late/early — an artifact, not the agent leaving early
  *    — so values >4h are excluded from credible-tardiness counts (HR-safe).

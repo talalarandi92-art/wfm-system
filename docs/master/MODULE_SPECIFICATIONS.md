@@ -10,8 +10,11 @@
 >   (the single source of truth — cited as **RULES §n**) or a memory note. It is executable policy.
 > - **Recommended** = an improvement proposal. Per the Director's standing order, **no new or changed rule is
 >   executed before explicit agreement** — nothing marked Recommended may be treated as agreed.
-> - Rule IDs: `BR-<MOD>-###`. Risks: `R-<MOD>-###`. Where a rule already lives in a canonical doc, this file
->   summarizes and cross-references; the canonical doc wins on any divergence.
+> - Rule IDs: where the rule exists in `docs/master/WFM_BUSINESS_RULES_LIBRARY.md`, this file cites the
+>   library's canonical `BR-<domain>-###` ID. Module-only rules use `BR-<MOD>-###` prefixes that do NOT
+>   collide with the library's domains (FC, CP, SCH, REQ, APR, REC, HC, SHR, LV, AUD). Risks: `R-<MOD>-###`.
+>   Where a rule already lives in a canonical doc, this file summarizes and cross-references; the canonical
+>   doc wins on any divergence.
 > - Companion docs: `docs/knowledge/REPORTS_AND_ROSTER_ENGINE.md` (engine + SQL patterns),
 >   `docs/RECON_PIPELINE.md` (rebuild runbook), `docs/knowledge/DESIGN_SYSTEM.md` (UI standards),
 >   `CLAUDE.md` (full program scope), `.claude/skills/wfm-system/reference/*`.
@@ -195,7 +198,8 @@ team and fair distribution. Users: WFM, TLs.
   authoritative).
 
 **Business rules.** BR-ROT-001 fairness formula as above (Confirmed). BR-ROT-002 night team is optional and
-Director-controlled (Confirmed). BR-ROT-003 proposals never auto-write the schedule (Confirmed).
+Director-controlled (Confirmed). BR-ROT-004 proposals never auto-write the schedule (Confirmed). (Also
+BR-ROT-003: fairness basis = PRE-SWAP — see the library / D-075.)
 
 **Target / Recommended.** "Apply proposal" button writing through the publish pipeline; retire/rewire legacy
 schedule-rotation onto roster_days; rotation history view. Also fix the Light-mode rotation modal (audit
@@ -341,8 +345,8 @@ ingest; partial upload touches only its own dates; manual-vs-engine comparison w
 - Cross-midnight: post-midnight login normalized +1440 before measuring late; tardiness capped 240 min with
   the excess surfaced as `excludedDq`, never held against the agent (RULES §5, REPORTS doc).
 
-**Business rules.** BR-ADH-001 tolerance >6 min (RULES §19). BR-ADH-002 240-min credibility cap + excludedDq
-(Confirmed). BR-ADH-003 maternity 7h excluded from EARLY-OUT only (RULES §7).
+**Business rules.** BR-TRD-001 tolerance >6 min (RULES §19). BR-TRD-003 240-min credibility cap + excludedDq
+(Confirmed). BR-MAT-001 maternity 7h excluded from EARLY-OUT only (RULES §7).
 
 **Acceptance.** Injecting one approved late_in permission converts exactly one tardy→permitted; night agents
 never appear in top-early-out via bleed.
@@ -409,9 +413,9 @@ definition note (audit finding); planned-vs-unplanned split per CLAUDE.md §18.
   report (EXCEEDED / APPROACHING); 5h+ OT bonus report.
 - Holiday-worked OT rule lives in the engine (§7 above).
 
-**Business rules.** BR-OT-001 disjoint buckets (Confirmed). BR-OT-002 evidence-backed off-day/holiday OT
-(Confirmed). BR-OT-003 OT accounting buckets by the population's **cut-off cycle**, not calendar month
-(Confirmed, RULES §2). BR-OT-004 cross-midnight OT belongs to the start day (RULES §19 ★).
+**Business rules.** BR-OT-001 disjoint buckets (Confirmed). BR-OT-004 evidence-backed off-day/holiday OT
+(Confirmed). BR-TIM-002 OT accounting buckets by the population's **cut-off cycle**, not calendar month
+(Confirmed, RULES §2). BR-TIM-003 cross-midnight OT belongs to the start day (RULES §19 ★).
 
 **Risk.** R-OT-001 = R-REC-001: recon ingest wipes ot_before/ot_after split (open). R-OT-002: off-day OT is
 the least-certain field (no schedule anchor) — verify before trusting (RECON_PIPELINE notes).
@@ -470,8 +474,8 @@ only where entitlement configured.
 - Outputs: HR_Action / Audit_All / Excluded_Valid / Data_Quality + agent/TL/function/date summaries, each row
   with a reason. Verified 1 May–20 Jun: 2262 WFH days → 17 HR-action / 1682 excluded / 563 data-quality.
 
-**Business rules.** BR-WFH-001 the corrected WFH definition (Confirmed). BR-WFH-002 conservative gate +
-Data-Quality routing (Confirmed). BR-WFH-003 validate permission/COMP against the Director's authoritative
+**Business rules.** BR-WFH-001 the corrected WFH definition (Confirmed). BR-WFH-004 conservative gate +
+Data-Quality routing (Confirmed). BR-WFH-006 validate permission/COMP against the Director's authoritative
 files before any final HR submission (Confirmed pending step).
 
 **Acceptance.** No HR_Action row without every gate condition; every excluded row carries its reason; night
@@ -489,8 +493,9 @@ agents absent from HR_Action.
 - `roster-v2/schedule-change/swap/changes/revert` provide the change log + revert on the roster side;
   `/schedule-change-log` UI shows before/after rate bars.
 
-**Business rules.** BR-SWP-001 peer acceptance precedes managerial approval (Confirmed). BR-SWP-002 swap of a
-cross-midnight shift is keyed to the start day (RULES §19 ★).
+**Business rules.** BR-SWP-001 peer acceptance precedes managerial approval (Confirmed). BR-SWP-003 swap of a
+cross-midnight shift is keyed to the start day (RULES §19 ★). (BR-SWP-002: fairness ignores approved swaps —
+PRE-SWAP basis, see the library.)
 
 **Acceptance.** A swap approved without peer acceptance is impossible; applied swap visible in change log and
 revertible.
@@ -546,7 +551,7 @@ compliance.
   CTR .95 (Sprinklr override 1.0).
 - **Confirmed formulas** (memory `metric_formulas`): productivity% = (WD×9 − namedBreaks) ÷ (WD×9) — named
   breaks only (Short/Tea/Lunch/Long/Bio; NOT Unavailable/ACW/Meeting/Training); CTR = contacts ÷ tickets;
-  FCR = tickets ÷ closed; **sick-day penalty: 1 sick −2%, 2+ −5%**; quiz-commitment −5 on unsolved weeks;
+  FCR = **closed ÷ total tickets**; **sick-day penalty: 1 sick −2%, 2+ −5%**; quiz-commitment −5 on unsolved weeks;
   maternity ×7 productivity window.
 - **Data shape (critical)**: `scorecard_entries` = ONE month only (weekly W1..W4 + Final, no year/month cols);
   `scorecard_monthly` = many months but **Net Points only**; `survey_fcr_monthly.employee_id` is a **uuid** —
@@ -606,7 +611,7 @@ flag appears within one scan of the 3rd occurrence.
   two reports disagree; heavy exports run as async jobs.
 - Command Center (`/command-center`): verified-data-only flagship (a fake "counterfactual" score was declined).
 
-**Consolidation plan (Recommended — audit 2026-07-01, awaiting the Director's go).** 80 pages / 66 routes /
+**Consolidation plan (Needs Approval — audit 2026-07-01, awaiting the Director's go; D-068).** 80 pages / 66 routes /
 ~35 sidebar items → extend the proven hub pattern: Roster hub (9 sibling roster pages as tabs), Scorecard hub,
 Capacity & Coverage hub, Chief hub for the 13 guard routes; one executive landing; shared DateRangeBar,
 default-range helper, one adhColor scale, shared ShiftRateBars/OT-split components.
@@ -639,16 +644,18 @@ audited with old+new (Confirmed).
 ## 21. The Guard Team + The Chief
 
 **AS-BUILT (Confirmed — RULES §13; modules doc).**
-- **Sidebar shows ONLY the Chief** (`/chief`); 8 guards run behind it:
+- **Sidebar shows ONLY the Chief** (`/chief`); the 8 guards (canonical lineup, RULES §13) run behind it:
   1. **Health Guard** (`/health-guard`,`/system-health`) — front/back/data + 11 schedule-rule checks.
   2. **Analyst** (`/analyst`, migration 029) — assess coverage/schedule/queues/compliance, recommend, **learns
      from accept/reject**.
   3. **Reporter** (`/reports-bot`, migration 030) — auto daily reports + Excel.
-  4. **Advisor LLM** (`/advisor`) — narrates/proposes; Anthropic API + graceful fallback (`ANTHROPIC_API_KEY`).
-  5. **Expert** (`/expert`) — WFM knowledge corpus (14 topics) + KB search.
-  6. **Security Guard** (`/security-guard`) — 10 account/access/audit checks.
-  7. **Scorecard Guard** — builds/reviews scorecard entries → coaching flags.
-  8. **Researcher** — curated WFM gap feed (live gap detection).
+  4. **Security Guard** (`/security-guard`) — 10 account/access/audit checks.
+  5. **Scorecard Guard** — builds/reviews scorecard entries → coaching flags.
+  6. **Researcher** — curated WFM gap feed (live gap detection).
+  7. **Expert** (`/expert`) — WFM knowledge corpus (14 topics) + KB search.
+  8. **Reply-Helper** (`/reply-helper`) — canned-response suggestions from the 120 full-text `kb_scripts`.
+- **Advisor LLM** (`/advisor`) — the key-gated narration layer over the guards; narrates/proposes;
+  Anthropic API + graceful fallback (`ANTHROPIC_API_KEY`).
 - **Auto Mode** (migration 031): auto-approves only safe-surplus requests by coverage; guarded, reversible,
   transparent holds. **Self-modifying code was explicitly DECLINED** (Confirmed boundary).
 - `/bots` hub, `/knowledge-ledger` (every knowledge item: what/benefit/source/date), `/team-learning`

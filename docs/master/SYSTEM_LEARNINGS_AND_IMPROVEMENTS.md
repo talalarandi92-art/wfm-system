@@ -10,6 +10,8 @@
 >   or the project memory. Executable now.
 > - **Recommended** — an improvement identified by audit/review that **needs the Director's approval before
 >   execution**. Standing order: no new or changed rule is executed before agreement.
+> - **Needs Approval** — a fully documented plan explicitly parked awaiting the Director's go
+>   (e.g. the page-consolidation plan, D-068). **Deferred** — agreed to postpone; revisit condition stated.
 >
 > **Canonical sources this file summarizes (one master per fact — do not fork):**
 > - `docs/knowledge/WFM_RULES_AND_DECISIONS.md` (rules §1–20 — THE source of truth)
@@ -32,7 +34,7 @@ Numbered as **L-###** (learnings). Each entry: the ambiguity → the resolution 
 | L-002 | **`hr_code` semantics** — the HR Matrix cell is `COALESCE(hr_code, attendance_code, shift_code, 'OFF')`, but for months nobody knew *which pipeline set hr_code*. The corrected recon ingest never wrote it → every June re-ingest left it 100% NULL → sick showed raw `NS/ES` instead of `SL`, absence `CA/BA` instead of `A` — the recurring "HR Matrix خربت / it worked then broke" mystery. | hr_code + attendance_code are now computed **IN the engine** (`recon-build.js`, same logic as `import-roster-master.js`): sick→`SL`, absence→`A`, off→`OFF`, leave→`L` (DL/UPL kept), holiday→`H`, comp→`COMP`, separation→`RES`/`TER`, WFH-working→`WFH` (shift kept in attendance_code), office-working incl. forgot-to-punch→the SHIFT CODE (never OFF/absent). Added to the recon-ingest MAP. **Root principle learned: a rule that is not in the engine gets overwritten on the next rebuild.** | WFM_RULES_AND_DECISIONS.md §18; memory `new_roster_recon_engine` |
 | L-003 | **Sprinklr timestamps** — assumed UTC, causing +3h drift; a later export format stored 1899-epoch serials with an LMT +3:11 offset; raw login/logout also "bleeds" (never-closed sessions read 25–29h). | Sprinklr login/logout is **LOCAL time, not UTC** (no +3 shift). Read raw serials (`cellDates:false`) + `serialToISO`; times from `frac*1440`. Use the **AGENT_OCCUPANCY** report instead of raw sessions where possible; bleed sessions are dropped by a safe 3-condition rule and residuals capped at schedEnd+2h. | WFM_RULES_AND_DECISIONS.md §12; memory `roster_reconcile_tz`, `new_roster_recon_engine` |
 | L-004 | **WFH detection** — originally *inferred* from "system login + no punch," silently converting forgot-to-punch office days into WFH. | **CORRECTED (2026-06-24):** WFH = WFH shift code OR explicit WFH `location` ONLY — never inferred. Office shift + system session + no fingerprint = **missing punch, presence=`office`**. 1,730 live rows corrected wfh→office; both the rich builder and the legacy `recon.engine.ts` fixed. | WFM_RULES_AND_DECISIONS.md §4 |
-| L-005 | **Which roster table is real** — two tables with near-identical names: rich `roster_days` (58 cols, person_no, OT buckets — read by every roster-v2 report) vs thin `roster_daily` (14 cols, written by `/upload`+`/ingest`, read only by the legacy `/dashboard` path). Refreshes aimed at the wrong one "did nothing" or nearly corrupted the right one. | Documented as a hard rule: **never cross-wire**. `/dashboard` auto-fires a destructive ingest of roster_daily when count==0 (landmine). Refresh of roster_days goes ONLY through the standalone recon/import scripts. | WFM_RULES_AND_DECISIONS.md §11; memory `roster_days_vs_roster_daily` |
+| L-005 | **Which roster table is real** — two tables with near-identical names: rich `roster_days` (74 cols today — person_no, OT buckets — read by every roster-v2 report) vs thin `roster_daily` (18 cols incl. `payload jsonb`, written by `/upload`+`/ingest`, read only by the legacy `/dashboard` path). Refreshes aimed at the wrong one "did nothing" or nearly corrupted the right one. | Documented as a hard rule: **never cross-wire**. `/dashboard` auto-fires a destructive ingest of roster_daily when count==0 (landmine). Refresh of roster_days goes ONLY through the standalone recon/import scripts. | WFM_RULES_AND_DECISIONS.md §11; memory `roster_days_vs_roster_daily` |
 | L-006 | **Whose numbers to trust** — the Director manually reconciled May 30–Jun 27 and we diffed engine vs manual: login 93% / late 96% / early 95% match, and of 166 diffs **0 were cases the engine was clearly wrong** (most were the manual grabbing a wrong cross-midnight session or missing a Sprinklr session). | Director's verdict: **"the engine is the more accurate, trusted source."** Two rule corrections came out of the review (tolerance >6 min; full-shift 9h span) — see §4. | WFM_RULES_AND_DECISIONS.md §19 |
 | L-007 | **Cross-midnight ownership** — which day owns a shift that starts on D and ends on D+1 (attendance? OT? a 2 AM permission?). Ambiguity caused double-counted holiday OT on 2026-06-16. | **Confirmed: a cross-midnight shift belongs ENTIRELY to its START day, for everything** — attendance, worked hours, OT, permission, sick, leave, swaps, every request type. General rule, not holiday-specific. | WFM_RULES_AND_DECISIONS.md §19 (★ cross-midnight) |
 | L-008 | **Identity** — same person under intern ID (6xxxx) and full-time ID (1xxxx); duplicate names via double-spaces; function changing per month. | `person_no` is canonical (Employee_ID_Map merges); `is_active` = canonical-dedup NOT employment; function is per-month from that month's schedule row; match by ID, never name. `backfill-identity.js` MUST run after every `import-roster-master.js` rebuild. | WFM_RULES_AND_DECISIONS.md §1 |
@@ -116,7 +118,7 @@ only ever replace its own days.** Full pre-incident snapshot kept in `roster_day
   IntervalHeadcount still use bare native date inputs; every page boots with a different hardcoded 2026
   default range.
 
-### 3.2 Pending (Recommended — **awaiting the Director's go before restructuring nav**)
+### 3.2 Pending (**Needs Approval** — awaiting the Director's go before restructuring nav, D-068)
 From the 2026-07-01 audit (37 findings; ~80 page files / 66 routes / ~35 sidebar entries — the hub pattern
 was proven 6 times then abandoned). Target ≈ 10–12 sidebar entries:
 - **Roster Reports hub** `/roster` — roster grid, roster-dashboard, schedule-analysis, ot-exceptions,
@@ -157,7 +159,9 @@ Numbered **C-###**. All Confirmed and live unless noted.
 
 ## 5. Future Risks Discovered (open — ranked)
 
-Numbered **R-###**. "Number-changing" fixes are **Recommended** and need the Director's eyes-on approval + full re-validation.
+Numbered **R-###** — this file's own register (the BR library's drift register uses **DRIFT-###** and the
+roadmap's risk register uses **RSK-##**; always name the file when citing an ID across documents).
+"Number-changing" fixes are **Recommended** and need the Director's eyes-on approval + full re-validation.
 
 | ID | Risk | Detail | Mitigation / plan |
 |----|------|--------|-------------------|

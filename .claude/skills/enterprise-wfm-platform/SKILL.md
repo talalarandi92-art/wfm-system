@@ -47,7 +47,7 @@ source doc, memory note, code path, table, endpoint, or a confirmed decision (se
 | Status | **REAL and RUNNING** on live data — NOT a prototype. ~80 frontend pages / 66 routes, ~60 backend modules, a standalone reconciliation engine, an autonomous guard team (8 guards + Chief). |
 | Backend | NestJS + TypeScript + TypeORM (`synchronize:false`, SQL migrations ~067), JWT + rotating refresh, RBAC, audit log. Runs compiled `dist` (`npm run build` → `node dist/main.js`; restart to apply changes). |
 | Frontend | React + TS + Vite; Arabic/English inline `ar?'..':'..'`; RTL/LTR; 3 themes (Dark / Light / Aurora-Glass); dazzle kit `components/dazzle.tsx`. NO animated background. |
-| Database | Live local PostgreSQL **`wfm_db`** — real data (~162 employees, 126 tables, tens of thousands of roster/attendance rows). Access via `backend/scripts` + `.env` `POSTGRES_*`. |
+| Database | Live local PostgreSQL **`wfm_db`** — real data (~162 employees, 125 tables, tens of thousands of roster/attendance rows). Access via `backend/scripts` + `.env` `POSTGRES_*`. |
 | Data spine | **`roster_days`** (74 cols) — the RICH canonical per-person-per-day table built by the recon engine (`backend/scripts/recon-build.js` et al.) from the Director's real month files (`Desktop/new roster/`). Every `roster-v2/*` report reads it. **`roster_daily`** is a THIN legacy table — never cross-wire (BR-ING-002). |
 | Refresh | `node scripts/recon-refresh.js` or the Roster **Upload & Rebuild** button (`POST /attendance-recon/recon-refresh`). Every agreed rule is re-applied on each rebuild — rules live IN the engine, never patched into data. Runbook: `docs/RECON_PIPELINE.md`. |
 | Integrations | Ameyo (telephony) + Sprinklr (omnichannel) Chrome-extension bridges; Odoo (holidays, biometric punch, permissions/comp/sick). Sprinklr times are LOCAL Kuwait, not UTC. |
@@ -143,8 +143,8 @@ Workspace, Employees, Analytics · AgentHome (`/me`).
 (recon-extract-foundation-v2 → recon-build → recon-ingest, orchestrated by recon-refresh) +
 `import-roster-master.js` + `backfill-identity.js`.
 
-**Recommended (awaiting the Director's go — do NOT execute):** the 2026-07-01 nav consolidation plan
-(~10–12 sidebar hubs: Roster Reports, Scorecard, Capacity & Coverage, Chief branch, Command Center
+**Needs Approval (D-068 — awaiting the Director's go; do NOT execute):** the 2026-07-01 nav consolidation
+plan (~10–12 sidebar hubs: Roster Reports, Scorecard, Capacity & Coverage, Chief branch, Command Center
 as sole exec home).
 
 ---
@@ -211,7 +211,7 @@ Never fake completion; never present mock data as done; heavy jobs async; audit-
 (Full catalogue + per-dashboard specs: `docs/master/DASHBOARDS_AND_REPORTS.md` §1–2.)
 
 - **P-1 Verified data only** — every number from a real endpoint over real data; modeled/estimated
-  values labelled on-page; fake/counterfactual metrics are DECLINED (D-008 / D-AI-004).
+  values labelled on-page; fake/counterfactual metrics are DECLINED (D-070 / D-AI-004).
 - **P-2 One canonical table** — roster-family reads `roster_days`; badge or retarget anything still
   on `attendance_records`/legacy paths (source-basis badges: 🔵 live / 🟢 corrected / 🟣 12-month).
 - **P-3 One metric definition per concept** — the shared consts; no two dashboards may disagree.
@@ -239,18 +239,20 @@ Never fake completion; never present mock data as done; heavy jobs async; audit-
 
 ## 10. Risk review standards
 
-(Registers: BUSINESS_RULES_LIBRARY §22, SYSTEM_LEARNINGS R-###, IMPLEMENTATION_ROADMAP risk table.)
+(Registers: BUSINESS_RULES_LIBRARY §22 = **DRIFT-###**, SYSTEM_LEARNINGS = **R-###**,
+IMPLEMENTATION_ROADMAP risk table = **RSK-##**, DASHBOARDS_AND_REPORTS §8 = **DEF-##** — each register is
+file-local; always name the file when citing an ID.)
 
-- Every open risk gets an **R-###** ID, a status (Open / Data limit / Deferred), and a canonical home.
-- **Number-changing fixes require the Director's eyes on** — e.g. R-001 shift-category unification
-  (6 conflicting classifiers), R-002 `sc` CTE person-grain fix, R-003 Jan–May cross-midnight rebuild,
-  R-004 `ot_before/after` emission. Dry-run + diff + explicit approval before promoting.
+- Every open risk gets an ID in its home register, a status (Open / Data limit / Deferred), and a canonical home.
+- **Number-changing fixes require the Director's eyes on** — e.g. DRIFT-001 shift-category unification
+  (6 conflicting classifiers), DRIFT-002 `sc` CTE person-grain fix, DRIFT-003 Jan–May cross-midnight rebuild,
+  DRIFT-004 `ot_before/after` emission. Dry-run + diff + explicit approval before promoting.
 - Distinguish **rule risk** (code drifts from a Confirmed rule → fix code now) from **proposal risk**
   (a Recommended change → park until approved).
 - Post-incident discipline (learned 2026-07-01): never hardcode destructive ranges; refuse to delete
   without dated records; keep a true undo + full snapshot; write the post-mortem into RULES + the
   learnings file so it survives every rebuild.
-- Payroll-sensitive caveats stay visible (e.g. R-005 off-day OT is system-only — verify before use).
+- Payroll-sensitive caveats stay visible (e.g. DRIFT-005 off-day OT is system-only — verify before use).
 
 ---
 

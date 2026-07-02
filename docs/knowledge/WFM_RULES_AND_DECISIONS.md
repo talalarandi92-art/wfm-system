@@ -31,7 +31,7 @@ Newer overrides older. Real data overrides theory. A feature on mock/demo data i
 - **Permission balance renews per cycle: 6 hours + 3 permissions.** Only **Approved** permissions consume/exempt.
 
 ## 3. Shift Dictionary & THE ONE Canonical Shift-Category Mapping
-**⚠ DRIFT TO FIX (audit): shift-category is currently defined 5+ conflicting ways** (by start-hour in
+**⚠ DRIFT TO FIX (audit): shift-category is currently defined 6 conflicting ways** (by start-hour in
 `wfm-calc.ts`/`me.service`, by code-prefix in `recon.controller:380`, a 3-way in `recon.controller:776`,
 collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shift is "evening" in one and
 "night" in another. **Canonical mapping (use everywhere, by CODE with start-hour fallback):**
@@ -161,7 +161,7 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
 - ✅ **RESOLVED:** `import-roster-days.js` DEPRECATED (header) — it had the cross-midnight late gap; `master.js`
   is the sole live builder.
 - ⚠ **OPEN (number-changing — do carefully, with full re-validation, AFTER the demo):**
-  - **Shift-category 5-way conflict** — one canonical mapping (§3) imported by all 5 sites; changes shift-rate %/fairness.
+  - **Shift-category 6-way conflict** (2026-07-01 audit verified 6 sites) — one canonical mapping (§3) imported by all 6; changes shift-rate %/fairness.
   - **Net-Points day-weighted join** (Custom Report Builder grouped scorecard) — aggregate at person grain; changes grouped averages.
   - **Dead code** — remove `Nx*`+`sevColor` (`ds.tsx`) and `common/wfm-calc.ts` (orphan); safe cleanup, no behavior change.
   - **Legacy roster_daily re-ingest** — to surface the engine WFH fix on `/dashboard`,`/metric`,`/overtime` (heavy parse).

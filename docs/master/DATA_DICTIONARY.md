@@ -2,7 +2,7 @@
 
 > **Last rebuilt: 2026-07-02 — full knowledge reconstruction.**
 > AS-BUILT reference for the live PostgreSQL database `wfm_db` (local, real Boutiqaat contact-center data,
-> 126 tables, migrations `001_initial_schema.sql` … `067_agent_status_events.sql` in `schema_migrations`).
+> 125 base tables, migrations `001_initial_schema.sql` … `067_agent_status_events.sql` in `schema_migrations`).
 > Every column below was verified against the live `information_schema` on 2026-07-02.
 >
 > Business rules are NOT restated here — for the rule behind a field, follow the cross-reference to
@@ -99,7 +99,7 @@ present in the upload** (min..max of `ingest.json`; `RECON_FROM/TO` env override
 | `status` | text | — | E | Human status line for the day (e.g. `Official Holiday — Hijri New Year (worked)` on worked holidays). | see left |
 | `presence` | text | — | E | **The classification that drives everything.** Values: `office · wfh · absent · leave · off · holiday · sick · left · unconfirmed` (RULES §4). **WFH = WFH shift code OR explicit WFH location ONLY — never inferred from system-login-without-punch** (that is `office` + missing punch). Holiday is never absence; sick only from Odoo status. `unconfirmed` = low-capture roles (<70% observed) so they aren't wrongly marked absent. | `office` |
 | `shift_code` | text | — | I | Scheduled code from the monthly matrix — the Timing sheet is the shift dictionary of record. Canonical codes kept exactly: `M B C N E AM MD MN EE20 M20 B20 C20 N20 WFH-M WFH-B WFH-N M7-3 B7 MR BR NR ER MDR MNR CR OFF H L SL A DL COMP UPL RES TER` + `S`/`A` suffixes. On leave-on-holiday days the **original `L` is kept here for audit** while `hr_code` becomes `H` (RULES §19 ★). | `MD` |
-| `shift_category` | text | — | E | Morning/Day · Evening · Night · Midnight per **THE ONE canonical mapping** (RULES §3). ⚠ Known drift: 5 conflicting classifier copies still exist in code — the §3 mapping is the truth. | `Midnight` |
+| `shift_category` | text | — | E | Morning/Day · Evening · Night · Midnight per **THE ONE canonical mapping** (RULES §3). ⚠ Known drift: 6 conflicting classifier copies still exist in code (2026-07-01 audit) — the §3 mapping is the truth. | `Midnight` |
 | `shift_start_min` / `shift_end_min` | int | — | E | **Canonical** scheduled window in minutes-from-midnight, resolved from the Timing dict (not stale `attendance_records.scheduled_*`). `shift_end_min > 1440` ⇒ crosses midnight. | `1320` / `1860` |
 | `shift_start2_min` / `shift_end2_min` | int | — | E | Second window for **split shifts** (Ramadan `CR` etc.). NULL when not split. | `1020` / `1260` |
 | `original_shift_code`, `original_shift_start_min`, `original_shift_end_min` | text/int | — | E | Pre-override/pre-remap values kept for audit when the day was changed (swap/manual edit). | `C` |
@@ -377,7 +377,7 @@ Demand→schedule chain writes: `schedule_drafts` (066) → publish into `attend
 | REC-001 | Retire `roster_daily` + repoint legacy `/dashboard`,`/metric`,`/overtime` at `roster_days` | Ends the dual-truth landmine (§1); legacy engine already corrected but the thin table only updates on re-ingest | Heavy re-parse; numbers on legacy pages change |
 | REC-002 | Person-grain aggregation for `sc.*` KPIs in grouped Report-Builder views | Day-weighted averages misrank agents (RULES §9) | Grouped averages change — full re-validation |
 | REC-003 | Decide `headcount_intervals`: wire a writer or drop it | It is the one never-INSERTed snapshot table | None if documented; confusion if left silent |
-| REC-004 | Collapse the 5 shift-category classifier copies onto the RULES §3 mapping (single import) | A 14:00 shift is "evening" in one copy, "night" in another | Shift-rate % / fairness numbers shift |
+| REC-004 | Collapse the 6 shift-category classifier copies onto the RULES §3 mapping (single import) | A 14:00 shift is "evening" in one copy, "night" in another | Shift-rate % / fairness numbers shift |
 | REC-005 | Rebuild Jan–May through the recon engine when their prepared sources are re-shared | Applies Rule B (cross-midnight de-bleed, ~480 rows), no-punch flags + full-span rule to the whole year | A prior refresh REGRESSED — always dry-run + diff vs backup first (RULES §11/§20) |
 | REC-006 | Formal FK/index audit on `roster_days` (`person_no`, `(tenant_id, work_date)`) and typed enums for `presence`/`hr_code` | Text columns rely on engine discipline | Migration must not break the ingest's dynamic column mapping (`recon-ingest.js` MAP) |
 

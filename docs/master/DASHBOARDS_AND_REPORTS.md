@@ -22,7 +22,8 @@
 - **P-1 — Verified data only.** Every dashboard number traces to a real endpoint over real data. No mock
   KPIs; anything estimated or modeled is labelled as such on the page (e.g. the Hourly Analytics
   per-hour attribution note). The Command Center was explicitly built "verified-endpoints only", and a
-  fake "counterfactual schedulability score" was **declined** rather than shipped (D-CC-1, 2026-06-24).
+  fake "counterfactual schedulability score" was **declined** rather than shipped (D-070 in the
+  DECISIONS log, 2026-06-24).
 - **P-2 — One canonical data table.** All roster/reconciliation reports read the RICH **`roster_days`**
   table (canonical `person_no` identity). The THIN `roster_daily` table serves only the legacy
   `/dashboard`,`/metric`,`/overtime` path. **Never cross-wire** (Rules doc §11).
@@ -198,8 +199,9 @@ monthly HR attendance submission.
 - **Modes:** Detail (raw rows) and Summary (grouped aggregates). Scorecard KPIs (Quality / AHT / FCR /
   Productivity / CTR / Quiz / PRR / Response-Time / Mistakes / Net Points) join via the `sc` CTE and
   auto-appear in Summary.
-- **Presets:** **36 one-click ready reports** (code comment "The 36 spec reports"; each sets
-  mode + fields/KPIs + groupBy + filters), grouped by theme, plus user-saved presets (localStorage).
+- **Presets:** **33 one-click ready reports** (the code comment says "The 36 spec reports" but the
+  `PRESETS` array holds 33; each sets mode + fields/KPIs + groupBy + filters), grouped by theme, plus
+  user-saved presets (localStorage).
 - **Filters:** date range, search, function, team leader, group, shift, status, late category,
   `shiftStartHour` group-by, `onlyTardiness` mode. **Export:** Excel.
 - **Open defects affecting it:** sc-CTE day-weighting in grouped views; columns NULL after a corrected
@@ -286,7 +288,7 @@ Unless a dashboard section above says otherwise:
 | RPT-01 | OT & Exceptions Excel (agent/function/permission/absence slices) | `ot-exceptions/export` | Built |
 | RPT-02 | WFH HR 8-sheet workbook (HR_Action / Audit_All / Excluded_Valid / Data_Quality + 4 summaries) | `wfh-hr-report/export` | Built |
 | RPT-03 | HR Matrix (master-code month grid + appended totals) | `hr-matrix` | Built |
-| RPT-04 | Report Builder — 36 presets + saved views + Excel | `report-builder` | Built |
+| RPT-04 | Report Builder — 33 presets + saved views + Excel | `report-builder` | Built |
 | RPT-05 | Workflow/SLA workbook (requests, coaching, outages, tech issues) | `/reports/*` | Built |
 | RPT-06 | Reporter-guard automated daily report + Excel | `/reports-bot` | Built |
 | RPT-07 | RTA 24-column live agent Excel report | LiveOps Queue 360 | Built |
@@ -352,15 +354,18 @@ sidebar icons; `keep-dark`/theme-var fix for the Shift Rotation modal.
 
 ## 8. Known defects & drift affecting dashboards (Confirmed — tracked, not hidden)
 
+> IDs here are **DEF-##** (file-local). The BR library's drift register uses DRIFT-###, the learnings
+> file R-###, the roadmap RSK-## — name the file when citing across documents.
+
 | ID | Issue | Affects | Status |
 |---|---|---|---|
-| R-01 | Corrected ingest wipes `ot_before_min`/`ot_after_min` (NULL after every Upload & Rebuild) | OT-before/after tiles (Roster Dashboard, Agent 360, Hourly cascade, report-builder KPIs) read 0 while TRUE_OT is correct | **Open — deferred** (do with the Director's eyes on it; emit in `_ingest` + MAP without touching TRUE_OT semantics) |
-| R-02 | Report-builder references MAP-omitted columns (attendance_status, late_category, week/month, missing_punch/system, comp_worked_min, original_shift_code, crosses_midnight) → blank after a corrected refresh | Report Builder detail fields/filters | Open — deferred (emit from build or hide fields) |
-| R-03 | `sc` CTE 1:N fan-out → grouped scorecard KPIs are **day-weighted, not person-weighted** | Report Builder Summary mode (all 13 sc KPIs); detail view unaffected | Open — number-changing; aggregate at person grain (Rules doc §9) |
-| R-04 | Shift-category computed 6 conflicting ways vs the canonical §3 mapping | Shift-rate %, fairness, rotation buckets differ per endpoint | Open — number-changing; one shared code-keyed classifier (Rules doc §16) |
-| R-05 | Legacy `/dashboard`,`/metric`,`/overtime` still read thin `roster_daily` (old WFH inference until re-ingest) | Legacy dashboard path only (badged) | Open — retarget or re-ingest |
-| R-06 | Command Center mixes corrected roster + legacy `/dashboard/summary` | DASH-01 | Open — badge or retarget |
-| R-07 | Jan–May "Rule B" cross-midnight de-bleed needs a per-month recon rebuild (June + future already engine-enforced) | Historical OT/worked on non-working days | Open — waits on month sources |
+| DEF-01 | Corrected ingest wipes `ot_before_min`/`ot_after_min` (NULL after every Upload & Rebuild) | OT-before/after tiles (Roster Dashboard, Agent 360, Hourly cascade, report-builder KPIs) read 0 while TRUE_OT is correct | **Open — deferred** (do with the Director's eyes on it; emit in `_ingest` + MAP without touching TRUE_OT semantics) |
+| DEF-02 | Report-builder references MAP-omitted columns (attendance_status, late_category, week/month, missing_punch/system, comp_worked_min, original_shift_code, crosses_midnight) → blank after a corrected refresh | Report Builder detail fields/filters | Open — deferred (emit from build or hide fields) |
+| DEF-03 | `sc` CTE 1:N fan-out → grouped scorecard KPIs are **day-weighted, not person-weighted** | Report Builder Summary mode (all 13 sc KPIs); detail view unaffected | Open — number-changing; aggregate at person grain (Rules doc §9) |
+| DEF-04 | Shift-category computed 6 conflicting ways vs the canonical §3 mapping | Shift-rate %, fairness, rotation buckets differ per endpoint | Open — number-changing; one shared code-keyed classifier (Rules doc §16) |
+| DEF-05 | Legacy `/dashboard`,`/metric`,`/overtime` still read thin `roster_daily` (old WFH inference until re-ingest) | Legacy dashboard path only (badged) | Open — retarget or re-ingest |
+| DEF-06 | Command Center mixes corrected roster + legacy `/dashboard/summary` | DASH-01 | Open — badge or retarget |
+| DEF-07 | Jan–May "Rule B" cross-midnight de-bleed needs a per-month recon rebuild (June + future already engine-enforced) | Historical OT/worked on non-working days | Open — waits on month sources |
 | ✅ | include_tardiness NULL after refresh → tardiness rankings empty · report-builder OT-Total = bare `ot_min` · WFH-holidays hardcoded → `holidays` table · June-pinned refresh summary | — | **Fixed** 2026-07-01, commit b6bfcf4 |
 
 ---
@@ -380,7 +385,7 @@ Director's agreement (standing order). Where a partial as-built exists it is cro
 | T-06 | **Outage Dashboard** | Open/resolved, severity, impacted intervals, SLA, root cause | Workflow report exists (DASH-21) + LiveOps outages tab; **Recommended:** impact-before/during/after quantification + email automation hook |
 | T-07 | **Technical Issue / CX-flag report** | 48h SLA, repeated-reason ≥20 customers → CX issue flag, SKU defect board | Tech-issues SLA report exists (DASH-21); **Recommended:** repeated-count/CX-flag analytics + SKU defect dashboard |
 | T-08 | **Shrinkage planned-vs-unplanned trend** | Split planned (leave/training/meeting) vs unplanned (sick/absence/late) over time | Shrinkage % exists (DASH-05, workforce analytics); **Recommended:** planned/unplanned split + trend |
-| T-09 | **Counterfactual Roster Replay** | Grade the optimizer against actual demand | **Explicitly deferred (Confirmed decision D-CC-1):** needs an independent per-hour volume signal first — a schedule-derived score is circular/fake |
+| T-09 | **Counterfactual Roster Replay** | Grade the optimizer against actual demand | **Explicitly declined/deferred (Confirmed decision D-070):** needs an independent per-hour volume signal first — a schedule-derived score is circular/fake |
 | T-10 | **Skill-expiry & cross-skill coverage board** | Expiring skills + coverage-move recommendations | Skill-expiry alerts built; **Recommended:** consolidated board |
 | T-11 | **Attendance-compliance score & team trends** | Composite compliance score by team/function w/ weekly trend | Components all exist (rankings, conformance); **Recommended:** the composite + trend view |
 | T-12 | **PDF export layer** | PDF variants of the key HR/exec reports | Excel/CSV exist everywhere; PDF **Recommended** (future per CLAUDE.md §28) |
@@ -391,9 +396,9 @@ Director's agreement (standing order). Where a partial as-built exists it is cro
 
 1. **Consolidation go/no-go (§7):** approve the 5-hub merge (C-1..C-5) as a whole, or phase it
    (suggested order: C-1 Roster hub → C-2 Scorecard hub → C-5 executive home → C-3/C-4)?
-2. **R-01/R-02 timing:** the OT-before/after + report-builder-column ingest fix changes what a refresh
+2. **DEF-01/DEF-02 timing:** the OT-before/after + report-builder-column ingest fix changes what a refresh
    writes — schedule it with a dry-run + diff on a backup, per the update-files refresh lesson?
-3. **Number-changing passes (R-03, R-04):** when to run the person-grain scorecard fix and the single
+3. **Number-changing passes (DEF-03, DEF-04):** when to run the person-grain scorecard fix and the single
    shift-category classifier (both will move published numbers — need a validation window)?
 4. **T-01 OT cost:** provide hourly cost rates (or a per-band table) to turn OT hours into cost?
 5. **T-02/T-09:** priority of wiring a true per-hour volume signal (ops_contacts / Erlang inputs) —

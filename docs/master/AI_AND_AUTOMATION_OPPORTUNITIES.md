@@ -29,9 +29,11 @@
 
 ## 2. The AI/Automation Stack As-Built (Confirmed, live today)
 
-The platform already runs a **team of 8 guards + the Chief**, all deterministic background workers on the
-real PostgreSQL data (NestJS `OnModuleInit` timer pattern — no `@nestjs/schedule` dependency), plus an LLM
-layer that activates with one env var.
+The platform already runs a **team of 8 guards + the Chief** — the canonical 8-guard lineup (RULES §13) is
+**Health · Analyst · Reporter · Security · Scorecard · Researcher · Expert · Reply-Helper**; the **Advisor
+LLM** (listed in the table below for completeness) is the key-gated narration layer on top of them. All are
+deterministic background workers on the real PostgreSQL data (NestJS `OnModuleInit` timer pattern — no
+`@nestjs/schedule` dependency), plus the LLM layer that activates with one env var.
 
 ### 2.1 The guard team (all **Built**)
 
@@ -277,7 +279,8 @@ Effort: S (≤1 day) / M (2–5 days) / L (1–3 weeks). Value: ★–★★★ 
   risk BarRows, presence donut; **Chief briefing** (posture, ranked priorities, learning stats, self-test);
   Control Dashboards role switcher. LLM executive narration activates with the key (D-AI-006).
 - **Note:** the 2026-07-01 audit recommends consolidating the 4 overlapping landings (Dashboard /
-  CommandCenter / ControlDashboards / WfmOverview) into one — part of the approved-pending page-merge plan.
+  CommandCenter / ControlDashboards / WfmOverview) into one — part of the page-merge plan
+  (**Needs Approval**, D-068 — awaiting the Director's go).
 
 ---
 

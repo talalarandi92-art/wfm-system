@@ -41,6 +41,7 @@ READ FIRST, IN THIS ORDER (do not code before finishing #1–#4):
    C:/Users/t.bassam/.claude/projects/C--Users-t-bassam-Desktop-WFM-System/memory/MEMORY.md
    — open the topic notes relevant to your task; they are history the Director insists is honored.
 8. The portable skills (version-controlled, self-describing):
+   .claude/skills/enterprise-wfm-platform/  (master operating skill — routing + protocols)
    .claude/skills/wfm-system/  (full knowledge base)
    .claude/skills/mini-me/     (assistant clone incl. confirmed rules + scorecard method)
    .claude/skills/scorecard-builder/  (monthly scorecard generator)
@@ -79,7 +80,7 @@ in-system Roster "Upload & Rebuild" button. Match employees by ID (person_no), n
 |---|---|
 | Product | Enterprise Contact-Center WFM platform for Boutiqaat (Kuwait, 24/7 omnichannel) — purpose-comparable to NICE / Verint / Calabrio / Genesys WFM. Single source of truth for WFM, Ops, HR, RTA, TLs, agents, management. |
 | Owner | The **WFM Director** at Boutiqaat — deep domain expert, approves every rule before it executes, works in Arabic (Levantine). |
-| Status | **REAL and RUNNING on live data** — not a prototype. ~80 frontend pages / 66 routes / 6 tabbed hubs, ~60 backend modules, 126 DB tables (migrations `001`…`067`), a standalone recon engine, and an 8-guard autonomous team fronted by "the Chief". |
+| Status | **REAL and RUNNING on live data** — not a prototype. ~80 frontend pages / 66 routes / 6 tabbed hubs, ~60 backend modules, 125 DB tables (migrations `001`…`067`), a standalone recon engine, and an 8-guard autonomous team fronted by "the Chief". |
 | Backend | NestJS + TypeScript + TypeORM (`synchronize:false`; SQL migrations are the schema truth), JWT + rotating refresh tokens, RBAC (`RequirePermissions`), append-only audit log, Swagger. Runs **compiled `dist`**. |
 | Frontend | React + TypeScript + Vite. Arabic/English inline (`ar?'..':'..'`), RTL/LTR, 3 themes (Dark / Light / Aurora-Glass), dazzle kit (`frontend/src/components/dazzle.tsx`), DateRangeBar (Saturday weeks). |
 | Database | Live local PostgreSQL **`wfm_db`** (~162 employees, tens of thousands of roster/attendance rows). Access via `backend/scripts` + root `.env` `POSTGRES_*`. Full column reference: `docs/master/DATA_DICTIONARY.md`. |
@@ -90,7 +91,7 @@ in-system Roster "Upload & Rebuild" button. Match employees by ID (person_no), n
 | Guards | Health · Analyst · Reporter · Security · Scorecard · Researcher · Expert · Reply-Helper behind **the Chief** (only the Chief shows in the sidebar). Auto Mode approves only safe-surplus requests (RULES §13). |
 | Integrations | Ameyo + Sprinklr Chrome-extension bridges (Sprinklr times are LOCAL, not UTC); Odoo = holidays + biometric punch + permissions/comp/sick (individual leave goes stale — don't trust it). |
 | Data state | **Jan–May 2026 consistent** (verified by dry-run diff — do NOT bulk-rebuild). **June** = pre-incident backup (2733 rows / 103 people) + SQL re-applies; a full June rebuild needs the Director's PREPARED source files (RULES §20). `roster_days_predisaster` (15,794 rows) is the 2026-07-01 full snapshot. |
-| Latest audit | 2026-07-01 A-to-Z audit: 37 findings; batch-1 data bugs FIXED (commit `b6bfcf4`); the page-consolidation (hub-merge) plan is **Recommended — awaiting the Director's go**. |
+| Latest audit | 2026-07-01 A-to-Z audit: 37 findings; batch-1 data bugs FIXED (commit `b6bfcf4`); the page-consolidation (hub-merge) plan is **Needs Approval — awaiting the Director's go (D-068)**. |
 
 ---
 
@@ -155,7 +156,7 @@ WFM System/
 │   │                              DESIGN_SYSTEM.md
 │   ├── RECON_PIPELINE.md          roster refresh runbook
 │   └── master/                    THIS suite (see 5.2)
-├── .claude/skills/                wfm-system · mini-me · scorecard-builder (portable, versioned)
+├── .claude/skills/                enterprise-wfm-platform · wfm-system · mini-me · scorecard-builder (portable, versioned)
 └── My work/                       the Director's real operational files (OPS, Score Card 2026, …)
 Outside the repo: Desktop/ROSTER + Desktop/new roster/ (month source files) ·
 C:/Users/t.bassam/.claude/projects/C--Users-t-bassam-Desktop-WFM-System/memory/ (~95 notes + MEMORY.md index)
@@ -169,8 +170,11 @@ C:/Users/t.bassam/.claude/projects/C--Users-t-bassam-Desktop-WFM-System/memory/ 
 | `WFM_BUSINESS_RULES_LIBRARY.md` | Every rule as BR-XXX-### with status + enforcing code path (indexes RULES, never forks it) |
 | `MODULE_SPECIFICATIONS.md` | Per-module as-built spec + target spec |
 | `DATA_DICTIONARY.md` | Every live table/column, provenance codes, verified against `information_schema` |
-| `DECISIONS_AND_AGREEMENTS_LOG.md` | Chronological D-### register (Confirmed / Recommended / Declined / Deferred) |
+| `DASHBOARDS_AND_REPORTS.md` | Every dashboard/report: purpose, KPIs, endpoint, roles, defects (DEF-##), consolidation plan |
+| `DECISIONS_AND_AGREEMENTS_LOG.md` | Chronological D-### register — **the canonical decision numbering** (Confirmed / Recommended / Needs Approval / Declined / Deferred) |
 | `SYSTEM_LEARNINGS_AND_IMPROVEMENTS.md` | L-### learnings, R-### open risks, operating non-negotiables |
+| `IMPLEMENTATION_ROADMAP.md` | Phase 0 (live) → hardening → target phases, dependency map, RSK-## risk register, UAT plan, go-live checklist |
+| `AI_AND_AUTOMATION_OPPORTUNITIES.md` | Guard team as-built + automation catalogue + AI governing principles & boundaries |
 | `REBUILD_PROMPT_AND_OPERATING_INSTRUCTIONS.md` | **This file** — restart prompt + behavior covenant + memory protocol |
 
 ### 5.3 Which file is CANONICAL for what (one master per fact)
@@ -184,7 +188,10 @@ C:/Users/t.bassam/.claude/projects/C--Users-t-bassam-Desktop-WFM-System/memory/ 
 | DB schema (tables/columns) | `docs/master/DATA_DICTIONARY.md` (+ `database/migrations/`) | link |
 | UI/theming standards | `docs/knowledge/DESIGN_SYSTEM.md` | link |
 | Module behavior & scope | `docs/master/MODULE_SPECIFICATIONS.md` + `CLAUDE.md` §6–33 | link |
-| Decision history | `docs/master/DECISIONS_AND_AGREEMENTS_LOG.md` | cite D-### |
+| Dashboard / report catalogue | `docs/master/DASHBOARDS_AND_REPORTS.md` | cite DASH-## / RPT-## |
+| Phasing, risks, UAT, go-live | `docs/master/IMPLEMENTATION_ROADMAP.md` | cite H-## / P2-## / P3-## / RSK-## |
+| AI/automation boundaries & guard catalogue | `docs/master/AI_AND_AUTOMATION_OPPORTUNITIES.md` | cite D-AI-### / AI-## / B-AI-## |
+| Decision history | `docs/master/DECISIONS_AND_AGREEMENTS_LOG.md` | cite D-### (the ONLY D-### numbering) |
 | Session-to-session working memory | `memory/MEMORY.md` + topic notes | keep the index line per note |
 | Portable teach-another-agent knowledge | `.claude/skills/{wfm-system,mini-me,scorecard-builder}` | keep in sync with the docs above |
 
@@ -227,9 +234,9 @@ Director, most after a real incident.
    refresh only via the recon pipeline.
 5. **Schedule publish safety** — a published schedule is never overwritten by Generate; publish stays
    atomic + reversible; manual edits keep versioning/audit/before-after impact.
-6. **Number-changing open drifts** (RULES §16) — the shift-category 5-way unification, sc-CTE
-   person-grain fix, legacy `roster_daily` re-ingest: fix ONLY with the Director's eyes on it, with
-   full re-validation, because grouped report numbers will move.
+6. **Number-changing open drifts** (RULES §16) — the shift-category unification (6 conflicting code
+   sites per the 2026-07-01 audit), sc-CTE person-grain fix, legacy `roster_daily` re-ingest: fix ONLY
+   with the Director's eyes on it, with full re-validation, because grouped report numbers will move.
 7. **Design vetoes** — no animated background; the 3-theme system stays.
 
 ---
@@ -258,7 +265,7 @@ on an area whose module spec and rules sections you have not read.
    already-running process is the right one); frontend `npm run build` / dev server; login; run the
    smoke-test guard / `/diagnostics`. Fix build/runtime breakage before features (CLAUDE.md §4).
 2. **Read the latest audit + open items.** As of 2026-07-02 the queue is:
-   - **Awaiting the Director's go (Recommended):** the 2026-07-01 consolidation plan — merge ~40
+   - **Needs Approval (D-068 — awaiting the Director's go):** the 2026-07-01 consolidation plan — merge ~40
      standalone pages into the proven hub pattern (`HubTabs` + `?tab=`), sidebar ~35 → ~10-12 entries
      (memory `audit_2026_07_01_and_consolidation`; batch-1 data bugs already fixed, commit `b6bfcf4`).
    - **Number-changing drifts (careful, post-approval):** shift-category unification to the ONE

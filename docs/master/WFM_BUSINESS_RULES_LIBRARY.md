@@ -13,7 +13,7 @@
 | Field | Meaning |
 |---|---|
 | **ID** | `BR-<domain>-###`. Domains: TIM time/calendar · SHF shifts · GEN gender · RST rest · OFF off-days · ROT rotation/fairness · OT overtime · LVE leave · ATT attendance/reconciliation · WFH work-from-home · PRM permissions · SWP swaps · TRD tardiness · MAT maternity · ROL role exclusions · ADH adherence · HDC headcount/shrinkage · OUT outages/tech issues · SCC scorecard · APP approvals/schedule lifecycle · HOL holidays · ING ingest safety |
-| **Status** | **Confirmed** = dictated/agreed by the WFM Director and recorded (RULES, memory, or an explicit dated decision). **Recommended** = an improvement proposal — per the Director's standing order it is NEVER executed before explicit agreement. |
+| **Status** | **Confirmed** = dictated/agreed by the WFM Director and recorded (RULES, memory, or an explicit dated decision). **Recommended** = an improvement proposal — per the Director's standing order it is NEVER executed before explicit agreement. **Deferred** = the Director agreed to postpone (revisit condition stated, e.g. the Sprinklr login-only recovery, D-057). |
 | **Enforced in** | The live code path(s). "Engine" = `backend/scripts/recon-build.js` (+ `recon-new-roster.js`, `recon-ingest.js`, `recon-refresh.js`) — rules in the engine are re-applied on every Upload & Rebuild, so they can never silently regress (RULES §18). |
 
 **Source-of-truth priority when rules conflict (RULES §0):** 1. latest direct Director clarification → 2. the real uploaded workbook (`Desktop/ROSTER/CC Schedule`, tab "Shifts") → 3. `WFM_RULES_AND_DECISIONS.md` → 4. earlier assumptions → 5. generic WFM practice.
@@ -26,7 +26,7 @@
 |---|---|---|---|---|
 | BR-TIM-001 | **The workforce week starts SATURDAY** (Sat→Fri). Use `fmtLocal` + `snapToSaturday`; never `toISOString()` for local dates (UTC off-by-one once caused a 3-OFF/week bug). | Confirmed | RULES §2; CLAUDE.md §6.1 | Frontend date helpers; generator week logic; weekend-OFF = DOW 5,6 (Fri/Sat) in `recon.controller.ts` fairness |
 | BR-TIM-002 | **Cut-off cycles:** full-time **15th → 14th**; interns **1st → end of month**; Bahrain **25th → 24th**. All OT / attendance / permission-balance accounting buckets by the population's cut-off window, not the plain calendar month. | Confirmed (2026-06-16) | RULES §2; memory `cutoff_cycles` | Period bucketing in reports; permission-balance accounting (BR-PRM-003) |
-| BR-TIM-003 | **★ Cross-midnight shift = owned by its START day, for EVERYTHING** — attendance, login/logout, worked hours, OT, permission, sick, leave, swaps, and every request type. The discriminator is the shift's start calendar day, never the end day. A 2 AM permission on D+1 for a shift that started on D is filed under D. General — not holiday-specific. | Confirmed (2026-06-30) | RULES §19 (★ cross-midnight) | Engine: `prevDayBleed = !isWorkingKind && govLogin < 0` in recon-build (a non-working day never credits a previous night's session). Applied June + all future uploads; Jan–May Rule-B backfill pending per-month rebuild (R-003) |
+| BR-TIM-003 | **★ Cross-midnight shift = owned by its START day, for EVERYTHING** — attendance, login/logout, worked hours, OT, permission, sick, leave, swaps, and every request type. The discriminator is the shift's start calendar day, never the end day. A 2 AM permission on D+1 for a shift that started on D is filed under D. General — not holiday-specific. | Confirmed (2026-06-30) | RULES §19 (★ cross-midnight) | Engine: `prevDayBleed = !isWorkingKind && govLogin < 0` in recon-build (a non-working day never credits a previous night's session). Applied June + all future uploads; Jan–May Rule-B backfill pending per-month rebuild (DRIFT-003) |
 | BR-TIM-004 | Cross-midnight and split shifts must be supported everywhere (parsing, rest calc, adherence, intervals). Post-midnight logins are normalized with **+1440 min** before measuring lateness. | Confirmed | RULES §3, §5; CLAUDE.md §6.2 | Engine session windows; `import-roster-master.js` day-wrap; interval-headcount folds overnight tails into 00:00–07:30 |
 
 ## 2. Shift Rules (BR-SHF)
@@ -38,7 +38,7 @@
 | BR-SHF-003 | **Ramadan shifts = 7h** (MR/BR/NR/ER/MDR/MNR + CR split). Some Ramadan shifts are split shifts. | Confirmed | RULES §3 | Timing-dictionary parsing; engine expected-hours |
 | BR-SHF-004 | **The real workbook Timing sheet is the ONLY shift-code dictionary.** Never hardcode a subset. Suffixes: S=sick, A=absence; OFF/H/L/SL/DL/COMP/RES/TER/UPL/COV are non-working codes. Timing-sheet gotcha: a second CORRUPT block (~row 121+) swaps C/MN times — keep the FIRST occurrence only. | Confirmed | CLAUDE.md §6.3; memory `roster_conventions`, `workbook_import_gotchas` | `import-roster-master.js` Timing parse; engine `classifyCode` |
 | BR-SHF-005 | **Canonical shift times** (do NOT invent): M 07–16 · B 09–18 · C 11–20 · N 13–22 · E 16–01(+1) · EE 18–02(+1) · MD 22–07(+1) · MN 23–08(+1). Director-confirmed extras: CCNO = fixed 09–17 (management, record-only) · M7-3 = 07–15 · B20 = 10–18 · C20 = 11–20 · N20 = 14–22 · M20 = 08–16. **No real shift ends at 21:00.** | Confirmed (2026-06 + 2026-06-28) | memory `business_rules`, `new_roster_recon_engine` | `generator.types.ts` SHIFTS; engine code-time map; `roster_days.shift_start_min/end_min` are canonical for the Schedule grid overlay |
-| BR-SHF-006 | **THE ONE canonical shift-category mapping** (by CODE, start-hour fallback): Morning/Day = M, B, C, AM (+M20/B20/C20, WFH-M/WFH-B, M7-3, B7); Evening = E, EE20; Night = N, N20 (+WFH-N); Midnight = MD, MN, MDR, MNR. Exclude OFF/H/L/S/A/COMP from the working shift-rate (track separately). | Confirmed | RULES §3 | Target: ONE shared classifier. ⚠ Currently computed **6 conflicting ways** (recon.controller:422/818, schedule.service:876, me.service:51, generator.service:320/375, Schedule.tsx:804) — see R-001 |
+| BR-SHF-006 | **THE ONE canonical shift-category mapping** (by CODE, start-hour fallback): Morning/Day = M, B, C, AM (+M20/B20/C20, WFH-M/WFH-B, M7-3, B7); Evening = E, EE20; Night = N, N20 (+WFH-N); Midnight = MD, MN, MDR, MNR. Exclude OFF/H/L/S/A/COMP from the working shift-rate (track separately). | Confirmed | RULES §3 | Target: ONE shared classifier. ⚠ Currently computed **6 conflicting ways** (recon.controller:422/818, schedule.service:876, me.service:51, generator.service:320/375, Schedule.tsx:804) — see DRIFT-001 |
 | BR-SHF-007 | **Shift Rate % = shift-distribution, NOT pay.** Per employee: Morning/Night/Evening/Midnight counts + % YTD/MTD/period, with before/after impact on every edit or swap (both employees for a swap). | Confirmed | RULES §8; CLAUDE.md §7 | `schedule_change_log` (migration 059) computes before/after; `GET /schedule-generator/shift-rate`; fairness endpoint shift-mix |
 | BR-SHF-008 | **Per-function shift policy (operating hours):** Outbound (OMT) → B, N only; Refund → M, B, C, N, E, EE (no MD/MN); unlisted functions = 24/7. Female rule and function policy both apply (intersection). | Confirmed (2026-06) | memory `business_rules` | `FUNCTION_SHIFT_POLICY` in generator.types.ts, applied in `getWorkingShifts` (generator.engine.ts) |
 | BR-SHF-009 | Schedule cell shows the **shift code DIRECT** (E/M/B/C/MD/C7…) — no `-WFH` suffix; WFH is conveyed only by the 🏠 icon + dotted texture. Corrected (roster) cells solid, planned cells dashed/faded, holiday cells gold-ribboned. | Confirmed (2026-06-30) | RULES §18 | `schedule.service.ts` getGrid (strips `-WFH$`); `Schedule.tsx` ShiftCell |
@@ -109,7 +109,7 @@
 | BR-ATT-006 | **worked_min clamp:** a non-working day credits only the validated OT session (never raw never-logged-out bleed — killed a 31h false rest-day); working days capped ≤16h. | Confirmed | RULES §18 | Engine |
 | BR-ATT-007 | Presence values: `office · wfh · absent · leave · off · holiday · sick · left · unconfirmed`. Office shift + punch → office; + system-only → office (missing punch); + neither → absent, or `unconfirmed` for low-capture roles observed <70% of days (excluded from absence — don't punish RTA/supervisors during a capture gap). | Confirmed | RULES §4 | Engine + import-roster-master presence classification |
 | BR-ATT-008 | Employees are matched by **ID, never name-only**. `person_no` is the canonical person key (intern 6xxxx + full-time 1xxxx collapse to one). `is_active` = canonical-dedup, NOT employment. Function is per-month from the schedule row. Name whitespace collapsed on read. | Confirmed | RULES §1 | `employee_identity` (migration 058) + `backfill-identity.js`; the `sc` CTE join |
-| BR-ATT-009 | Never-closed Sprinklr sessions: login-only recovery **NOT enabled** — the Director decided leave-as-is until the recovery method is verified (Fatma/Hassan/Noura may be over-strictly flagged until then). | Confirmed (2026-06-30) | RULES §19 | Engine (deliberate non-change) |
+| BR-ATT-009 | Never-closed Sprinklr sessions: login-only recovery **NOT enabled** — the Director decided leave-as-is until the recovery method is verified (Fatma/Hassan/Noura may be over-strictly flagged until then). | Confirmed leave-as-is; recovery **Deferred** (2026-06-30, D-057) | RULES §19 | Engine (deliberate non-change) |
 | BR-ATT-010 | Always surface the RAW late/early amount even when excused by permission (Raw columns + Covered flag) — transparency over hiding. | Confirmed (2026-06-28) | memory `new_roster_recon_engine` | Engine record columns; Employee_Tardiness_Summary sheet |
 
 ## 9. WFH Rules (BR-WFH)
@@ -118,9 +118,10 @@
 |---|---|---|---|---|
 | BR-WFH-001 | **WFH = a WFH shift code OR an explicit WFH `location` OR Odoo Status=WFH — NEVER inferred from "system login + no punch."** An office-located shift + system session + no fingerprint = MISSING PUNCH (presence='office'), not WFH. The old inference rule was wrong; fixed in both pipelines + 1730 live rows corrected. | Confirmed (CORRECTED 2026-06-24; Option A signed 2026-06-28) | RULES §4, §16; memory `wfh_hr_report`, `roster_conventions` #1 | `import-roster-master.js` (~L248) + engine classify; legacy `recon.engine.ts` also fixed (RULES §16 RESOLVED) |
 | BR-WFH-002 | A WFH-code row whose location reads 'Office' → **Data Quality**, never an auto-WFH assertion. | Confirmed | RULES §4 | Engine DQ routing |
-| BR-WFH-003 | **WFH work requires system-login proof.** Odoo-absence rescue (Director-approved): Odoo='Absence' but Ameyo+Sprinklr prove a full shift (≥6h), no punch ⇒ reclassified WFH-worked (system-verified) — rescued 288 false absences. | Confirmed (2026-06-28) | memory `new_roster_recon_engine` | Engine rescue branch |
+| BR-WFH-003 | **WFH work requires system-login proof.** Odoo-absence rescue (Director-approved): Odoo='Absence' but Ameyo+Sprinklr prove a full shift (≥6h), no punch ⇒ reclassified WFH-worked (system-verified) — rescued **324 falsely-absent days / 69 employees** (288 of them → WFH-valid). | Confirmed (2026-06-28) | memory `new_roster_recon_engine` | Engine rescue branch |
 | BR-WFH-004 | **WFH HR report is conservative — "ما بدي اظلم حد" (never wrong anyone).** Weak/ambiguous evidence → Data Quality, NEVER HR. HR gate = WFH AND (late-in OR early-out) AND no permission AND no COMP AND no OT AND NOT completed AND shortage ≥5min AND not excluded role. Cross-midnight single rows, >3h late, <1h sessions → Data Quality. Official holidays (from the editable `holidays` table) → holiday work, never an HR flag. | Confirmed | memory `wfh_hr_report`; audit fix b6bfcf4 | `buildWfhReport` in recon.controller.ts (`roster-v2/wfh-hr-report` + 8-sheet export) |
 | BR-WFH-005 | "Completed" for WFH = consolidated system span (earliest login→latest logout, cross-midnight aligned) ≥ scheduled **GROSS** shift (9h/7h) — LOCKED decision (see BR-TRD-002 for the general rule). | Confirmed | memory `wfh_hr_report`; RULES §19 | buildWfhReport; engine `completedReq` |
+| BR-WFH-006 | Before any FINAL HR submission of the WFH report, validate permission/COMP coverage against the Director's authoritative files (the system's Odoo feed may lag). | Confirmed (pending step in each cycle) | memory `wfh_hr_report` | WFH HR report review step (manual gate before submission) |
 
 ## 10. Permission Rules (BR-PRM)
 
@@ -172,7 +173,7 @@
 | BR-ADH-001 | Adherence engine compares scheduled shift vs actual punch + system login + breaks + permissions; outputs adherence %, conformance %, late/early minutes, missing punch/login, unplanned absence, approved vs non-approved exceptions — at agent/TL/function/RTA/WFM grain, daily/weekly/monthly. | Confirmed (spec) | CLAUDE.md §17 | roster_days-based reports; `adherence_daily` (Sprinklr online-time) |
 | BR-HDC-001 | Coverage matrices per interval/function: Required / Scheduled / On-Permission / Sick-Absent / Available / Gap / Risk. Interval headcount is cross-midnight aware (overnight tails fold into 00:00–07:30). Per-day report default dates skip marker-only tail days (default = latest day with ≥20 working rows). | Confirmed | CLAUDE.md §13, §15; RULES §11 | `roster-v2/interval-headcount`, `coverage-impact`, hourly-coverage |
 | BR-HDC-002 | Shrinkage covers planned (leave, holiday, training, meeting, coaching) + unplanned (sick, absence, permission) → shrinkage %, productive/lost hours, by function/interval, trend. Capacity: voice = Erlang-C (audited 100% vs textbook); chat/WhatsApp concurrency = 4; email = backlog/throughput; intern productivity ≈70% (configurable). | Confirmed | CLAUDE.md §14, §18; memory `capacity_audit` | Capacity module; schedule-analysis; workforce-analytics |
-| BR-HDC-003 | `headcount_intervals` is the ONE snapshot exception in an otherwise-live-computed system (currently never INSERTed — see R-006). All other KPIs are computed live from source tables so they cannot drift. | Confirmed (as-built) | memory `data_interconnection_map` | — |
+| BR-HDC-003 | `headcount_intervals` is the ONE snapshot exception in an otherwise-live-computed system (currently never INSERTed — see DRIFT-006). All other KPIs are computed live from source tables so they cannot drift. | Confirmed (as-built) | memory `data_interconnection_map` | — |
 
 ## 16. Outages & Technical Issues (BR-OUT)
 
@@ -194,7 +195,7 @@
 | BR-SCC-006 | Productivity: `X = WD×9h (7h for maternity/7-codes)` → `Y = X − Short Break` → `Z = Y/X` → sick penalty. Named breaks only (Short/Tea/Lunch/Long/Bio); NOT Unavailable/ACW/Meeting/Training. | Confirmed | mini-me `rules-confirmed`; memory `metric_formulas` | `/productivity` module + scorecard-gen.js |
 | BR-SCC-007 | Metric definitions: RES = feedback response rate · PRR = positive response rate (Yes÷responses) · CTR = contacts÷tickets · FCR = closed÷total tickets. CTR/FCR peak overrides: Sprinklr functions (CH-WA, Social/Email) CTR=bar, FCR normal; Inbound/Outbound/Refund CTR=bar AND FCR=bar. | Confirmed (2026-06-16/17) | mini-me `rules-confirmed` | scorecard-gen.js |
 | BR-SCC-008 | Function consolidation: **CH-WA = Live Chat + WhatsApp = one function; Social Media & Email = one function** (Sprinklr ONLY for SM&Email — never Ameyo). | Confirmed (2026-06-17) | mini-me `rules-confirmed` | scorecard-gen.js source map |
-| BR-SCC-009 | Scorecard grain: `scorecard_entries` = weekly per-KPI detail (one month per load); `scorecard_monthly` = Net Points only; `fcr.employee_id` is a uuid. Grouped scorecard averages must aggregate at PERSON grain before AVG (the current 1:N day-weighted `sc` CTE join is drift R-002). | Confirmed | RULES §9 | recon.controller report-builder `sc` CTE |
+| BR-SCC-009 | Scorecard grain: `scorecard_entries` = weekly per-KPI detail (one month per load); `scorecard_monthly` = Net Points only; `fcr.employee_id` is a uuid. Grouped scorecard averages must aggregate at PERSON grain before AVG (the current 1:N day-weighted `sc` CTE join is drift DRIFT-002). | Confirmed | RULES §9 | recon.controller report-builder `sc` CTE |
 | BR-SCC-010 | Delivery format: the Director KEEPS their template ("قالبي أحسن") — the system computes KPI VALUES per agent×week+Final and outputs a SCORED workbook + a FILLED template. The FILLED template is the permanent monthly form. | Confirmed (2026-06-17) | memory `scorecard_build_plan`; mini-me `rules-confirmed` | scorecard-gen.js dual output; scorecard-builder skill |
 
 ## 18. Approvals & Schedule Lifecycle (BR-APP)
@@ -231,33 +232,38 @@
 
 ## 21. Decisions Register (selected, dated)
 
+> IDs cite the **canonical register** `docs/master/DECISIONS_AND_AGREEMENTS_LOG.md` — never a local numbering.
+
 | ID | Decision | Date | Source |
 |---|---|---|---|
-| D-001 | Engine is the trusted source over manual reconciliation ("مبدئيا انت ادق مني") — after diffing the Director's hand-reconciled May30–Jun27 vs the engine: 0 cases the engine was clearly wrong. | 2026-06-30 | RULES §19 |
-| D-002 | Leaders stay record-only for deductions; only the system-open flag applies to them (chose "system-open only", not full scrutiny). | 2026-06-30 | RULES §19 |
-| D-003 | Sprinklr never-closed-session login-only recovery NOT enabled — leave as-is until the method is verified. | 2026-06-30 | RULES §19 |
-| D-004 | Jan–May left AS-IS (dry-run proved 0 diffs on rules; only a ~3% WFH-detection refinement available) — no risky rebuild. | 2026-06-30 | RULES §18 |
-| D-005 | Night-team model: support BOTH a fixed night team AND fair distribution — the Director's per-period choice (migration 065). | 2026-06-23 | RULES §8 |
-| D-006 | Fairness basis = PRE-SWAP (swaps must never game rotation). | June 2026 | memory `business_rules` |
-| D-007 | Scorecard delivery: keep the Director's template as the permanent form; system fills values (SCORED + FILLED outputs). | 2026-06-17 | mini-me `rules-confirmed` |
-| D-008 | No fake/"counterfactual" numbers ever — verified-data-only surfaces (Command Center); declined a fabricated score. Live-vs-corrected sources must be badged. | June 2026 | memory `command_center`, `new_roster_recon_engine` |
-| D-009 | Canonical foundation = the Director's latest manual workbook (`Final` sheet, 116 employees); in-system Upload writes to it. | 2026-06-30 | RULES §19 |
-| D-010 | Future single-system direction = Sprinklr-only sessions (`RECON_SYS_MODE` flag ready) — flip ONLY when the Director says go; June stays ameyo-first. | 2026-06-28 | memory `new_roster_recon_engine` |
+| D-052 | Engine is the trusted source over manual reconciliation ("مبدئيا انت ادق مني") — after diffing the Director's hand-reconciled May30–Jun27 vs the engine: 0 cases the engine was clearly wrong. | 2026-06-30 | RULES §19 |
+| D-056 | Leaders stay record-only for deductions; only the system-open flag applies to them (chose "system-open only", not full scrutiny). | 2026-06-30 | RULES §19 |
+| D-057 | Sprinklr never-closed-session login-only recovery **Deferred** — NOT enabled, leave as-is until the method is verified. | 2026-06-30 | RULES §19 |
+| D-062 | Jan–May left AS-IS (dry-run proved 0 diffs on rules; only a ~3% WFH-detection refinement available) — no risky rebuild. | 2026-06-30 | RULES §18 |
+| D-039 | Night-team model: support BOTH a fixed night team AND fair distribution — the Director's per-period choice (migration 065). | 2026-06-23 | RULES §8 |
+| D-075 | Fairness basis = PRE-SWAP (swaps must never game rotation). | June 2026 | memory `business_rules` |
+| D-021 | Scorecard delivery: keep the Director's template as the permanent form; system fills values (SCORED + FILLED outputs). | 2026-06-17 | mini-me `rules-confirmed` |
+| D-070 | No fake/"counterfactual" numbers ever — verified-data-only surfaces (Command Center); declined a fabricated score. Live-vs-corrected sources must be badged. | June 2026 | memory `command_center`, `new_roster_recon_engine` |
+| D-060 | Canonical foundation = the Director's latest manual workbook (`Final` sheet, 116 employees); in-system Upload writes to it. | 2026-06-30 | RULES §19 |
+| D-044 | Future single-system direction = Sprinklr-only sessions (`RECON_SYS_MODE` flag ready) — flip ONLY when the Director says go; June stays ameyo-first. | 2026-06-28 | memory `new_roster_recon_engine` |
 
 ## 22. Known Drifts & Risks (open — do not treat as rules)
 
+> This register uses **DRIFT-###** IDs (file-local). The learnings file has its own `R-###` register and
+> the roadmap its own `RSK-##` risk register — always name the file when citing across documents.
+
 | ID | Item | Status |
 |---|---|---|
-| R-001 | Shift-category computed 6 conflicting ways (BR-SHF-006 is the canonical mapping) — consolidating CHANGES NUMBERS (shift-rate %, fairness); do with full re-validation, Director's eyes on. | Open (RULES §16; audit 2026-07-01) |
-| R-002 | Report-builder `sc` CTE 1:N fan-out → grouped scorecard KPIs are day-weighted, not person-weighted. Fix = aggregate at person grain before AVG. | Open (RULES §9, §16) |
-| R-003 | Jan–May cross-midnight de-bleed (Rule B, BR-TIM-003) needs a per-month recon rebuild (built by the other pipeline; ~480 rows can't be SQL-corrected). June's full corrected rebuild also pending the Director's PREPARED source files (post-incident rollback state, RULES §20). | Open |
-| R-004 | `ot_before_min`/`ot_after_min` NULL after engine ingest (BR-OT-002 detail split) — emit in `_ingest` without changing TRUE_OT semantics; several other MAP-omitted columns too. | Open (audit 2026-07-01) |
-| R-005 | Off-day OT from the recon engine (594h vs old pipeline 173h) is the one uncertain field — system-only, no schedule anchor; verify before payroll use. | Open caveat |
-| R-006 | `headcount_intervals` never INSERTed (the one snapshot exception) — live Hour×Function before/after impact runs on computed queries instead. | Open (as-built) |
-| R-007 | `roster_days` lacks permission start/end minutes → precise intra-day permission-HC impact impossible (day granularity only; `permission_duration` is a text window). | Data limit |
-| R-008 | Schedule editCell / demand-publish still WRITE `attendance_records` (reads overlay roster_days) — retarget or badge next. | Open follow-up |
+| DRIFT-001 | Shift-category computed 6 conflicting ways (BR-SHF-006 is the canonical mapping) — consolidating CHANGES NUMBERS (shift-rate %, fairness); do with full re-validation, Director's eyes on. | Open (RULES §16; audit 2026-07-01) |
+| DRIFT-002 | Report-builder `sc` CTE 1:N fan-out → grouped scorecard KPIs are day-weighted, not person-weighted. Fix = aggregate at person grain before AVG. | Open (RULES §9, §16) |
+| DRIFT-003 | Jan–May cross-midnight de-bleed (Rule B, BR-TIM-003) needs a per-month recon rebuild (built by the other pipeline; ~480 rows can't be SQL-corrected). June's full corrected rebuild also pending the Director's PREPARED source files (post-incident rollback state, RULES §20). | Open |
+| DRIFT-004 | `ot_before_min`/`ot_after_min` NULL after engine ingest (BR-OT-002 detail split) — emit in `_ingest` without changing TRUE_OT semantics; several other MAP-omitted columns too. | Open (audit 2026-07-01) |
+| DRIFT-005 | Off-day OT from the recon engine (594h vs old pipeline 173h) is the one uncertain field — system-only, no schedule anchor; verify before payroll use. | Open caveat |
+| DRIFT-006 | `headcount_intervals` never INSERTed (the one snapshot exception) — live Hour×Function before/after impact runs on computed queries instead. | Open (as-built) |
+| DRIFT-007 | `roster_days` lacks permission start/end minutes → precise intra-day permission-HC impact impossible (day granularity only; `permission_duration` is a text window). | Data limit |
+| DRIFT-008 | Schedule editCell / demand-publish still WRITE `attendance_records` (reads overlay roster_days) — retarget or badge next. | Open follow-up |
 
-**Recommended (needs Director approval before any execution):** adopt the single shared shift-category classifier (R-001); person-grain scorecard aggregation (R-002); per-month Jan–May rebuild when sources are loaded (R-003); emit OT before/after split in `_ingest` (R-004) — all listed in the 2026-07-01 audit batch-2 plan (memory `audit_2026_07_01_and_consolidation`).
+**Recommended (needs Director approval before any execution):** adopt the single shared shift-category classifier (DRIFT-001); person-grain scorecard aggregation (DRIFT-002); per-month Jan–May rebuild when sources are loaded (DRIFT-003); emit OT before/after split in `_ingest` (DRIFT-004) — all listed in the 2026-07-01 audit batch-2 plan (memory `audit_2026_07_01_and_consolidation`).
 
 ---
 

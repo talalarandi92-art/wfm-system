@@ -27,6 +27,7 @@
 | 2026-06-30 | D-052 – D-064 | Manual-vs-engine verdict, tardiness >6 min, full-shift span, cross-midnight, leave-on-holiday |
 | 2026-07-01 | D-065 – D-068 | Partial-upload incident + ingest-safety rule, audit batch-1 fixes, consolidation plan |
 | Cross-cutting declines/deferrals | D-069 – D-073 | Self-modifying code, fake metrics, animated background, security |
+| Addenda (2026-07-02 audit) | D-074 – D-075 | RBAC final access model, fairness PRE-SWAP basis (registered late) |
 
 ---
 
@@ -114,7 +115,7 @@
 
 ### D-015 — Metric formulas (Director-dictated 2026-06-16)
 - **Status:** Confirmed
-- **Rule:** RES = feedback response; PRR = positive response rate; CTR = contacts ÷ tickets created; FCR = total tickets ÷ closed. Final criteria live in the 2026 score files (April/May 26).
+- **Rule:** RES = feedback response; PRR = positive response rate; CTR = contacts ÷ tickets created; FCR = **closed ÷ total tickets** (resolution rate — as implemented and verified against the 2026 score files, which hold the final criteria; the dictated shorthand "توتال التكيتات على كم كلوز" is the same ratio). Final criteria live in the 2026 score files (April/May 26).
 - **Source:** memory `metric_formulas`.
 
 ### D-016 — Productivity formula + sick-day penalty
@@ -434,6 +435,20 @@
 - **Status:** Confirmed (working agreement with the Director)
 - **Rule:** When the Director asks to review or verify, that means a DEEP correctness and data-integrity audit against the rules doc and real data — never a surface render check. Mock/demo data is never called complete.
 - **Source:** memory `feedback_review_means_correctness`, `feedback_rules`; CLAUDE.md §3, §34.3.
+
+---
+
+## Addenda — decisions registered late (2026-07-02 consistency audit)
+
+### D-074 — Final RBAC access model
+- **Status:** Confirmed (2026-06-20, migration 040)
+- **Rule:** Admin = everything, including settings (162/162 GETs verified); **RTA + Team Leader = "like admin but cannot change settings"** — every permission EXCEPT `settings.edit`, `admin.*` (roles/functions/shift_codes), `users.*`; **Agent = own data only** (self-scoped by employee_id via `/me/overview`, `/me/attendance`, own requests/schedule/coaching/scorecard). Verified per role with `scripts/smoke-get.js`; 0×5xx all roles; sensitive actions audited.
+- **Source:** memory `final_access_model`; MASTER_PROJECT_MEMORY.md §5.
+
+### D-075 — Fairness basis = PRE-SWAP
+- **Status:** Confirmed (June 2026)
+- **Rule:** Rotation/shift-rate fairness is ALWAYS computed on the schedule BEFORE approved shift swaps (approved swaps are reversed before counting). Swapping away your midnight still counts as yours — swaps must never game rotation.
+- **Source:** memory `business_rules`; BR-ROT-003 / BR-SWP-002 in `WFM_BUSINESS_RULES_LIBRARY.md`; `loadYtdDistribution(preSwap=true)` (generator.service.ts:97/224, requests.service.ts:753).
 
 ---
 

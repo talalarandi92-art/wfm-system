@@ -7,8 +7,10 @@
 > (single source of truth for rules — if code conflicts with it, the rule wins) →
 > `docs/RECON_PIPELINE.md` (the roster refresh runbook) → the sibling master docs in `docs/master/`.
 > Everything here is **Confirmed** (agreed with the WFM Director / recorded in the canonical docs or
-> project memory) unless explicitly labelled **Recommended**. The Director's standing order: **no new
-> or changed rule is executed before agreement** — never dress a recommendation as an agreed rule.
+> project memory) unless explicitly labelled **Recommended** (needs approval before execution),
+> **Needs Approval** (a documented plan explicitly parked awaiting the Director's go), or **Deferred**
+> (agreed to postpone). The Director's standing order: **no new or changed rule is executed before
+> agreement** — never dress a recommendation as an agreed rule.
 
 ---
 
@@ -19,7 +21,7 @@
 | Product | Boutiqaat Contact Center Workforce Management (WFM) platform — enterprise-grade, comparable in purpose/depth to NICE / Verint / Calabrio / Genesys WFM |
 | Owner / Product authority | The **WFM Director** at Boutiqaat Contact Center (Kuwait). Deep domain expertise (24/7 omnichannel ops, scheduling, Erlang, RTA, scorecards). Approves every rule before it executes. |
 | Status | **REAL and RUNNING** on live Boutiqaat contact-center data — not a prototype. ~80 frontend pages / 66 routes, ~60 backend modules, a standalone reconciliation engine, and an autonomous "guard team". |
-| Backend | NestJS + TypeScript + TypeORM (`synchronize:false`, SQL migrations ~065+), JWT + rotating refresh tokens, RBAC, audit logging, Swagger. Runs **compiled `dist`** (`npm run build` → `node dist/main.js`; restart to apply changes). |
+| Backend | NestJS + TypeScript + TypeORM (`synchronize:false`, SQL migrations 001…067), JWT + rotating refresh tokens, RBAC, audit logging, Swagger. Runs **compiled `dist`** (`npm run build` → `node dist/main.js`; restart to apply changes). |
 | Frontend | React + TypeScript + Vite. Arabic/English (inline `ar?'..':'..'`), RTL/LTR, 3 themes (Dark / Light / Aurora-Glass), dazzle kit (`components/dazzle.tsx`). |
 | Database | Live local PostgreSQL **`wfm_db`** with real data (≈162 employees, tens of thousands of attendance/roster rows). Access pattern: `backend/scripts` + `.env` `POSTGRES_*`. |
 | Data spine | **`roster_days`** — the rich canonical per-person-per-day table built by the reconciliation engine from the Director's real monthly workbooks (`Desktop/new roster/` sources). Every `roster-v2/*` report reads it. |
@@ -82,7 +84,7 @@ Key endpoint families: `attendance-recon/roster-v2/*` (agent-360, agent-performa
 
 > Full per-module specs, endpoints and data contracts: `docs/master/MODULE_SPECIFICATIONS.md` and `docs/knowledge/REPORTS_AND_ROSTER_ENGINE.md`.
 
-**Recommended (approved direction, awaiting execution go):** the 2026-07-01 consolidation plan — extend the proven 6-hub `?tab=` shape to ~10–12 sidebar entries (Roster Reports hub, Scorecard hub, Capacity & Coverage hub, Chief branch, Command Center as sole executive home). Do NOT restructure nav before the Director's go.
+**Needs Approval (D-068 — awaiting the Director's go):** the 2026-07-01 page-consolidation plan — extend the proven 6-hub `?tab=` shape to ~10–12 sidebar entries (Roster Reports hub, Scorecard hub, Capacity & Coverage hub, Chief branch, Command Center as sole executive home). Do NOT restructure nav before the Director's go.
 
 ---
 
@@ -123,29 +125,29 @@ Request envelope + extension tables. Submit (with attachments where applicable) 
 
 ## 7. Final Decisions — Top 20
 
-> Full dated log with IDs: sibling `docs/master/DECISIONS log` (D-### numbering) and
-> `WFM_RULES_AND_DECISIONS.md` §16–20. The load-bearing twenty:
+> Full dated log with IDs: sibling `docs/master/DECISIONS_AND_AGREEMENTS_LOG.md` — the **canonical
+> D-### register; the IDs below cite it** — and `WFM_RULES_AND_DECISIONS.md` §16–20. The load-bearing twenty:
 
-1. **D-001** `roster_days` is the canonical reporting spine; rules live IN the recon engine so every refresh re-applies them (2026-06-29/30).
-2. **D-002** WFH rule corrected: code/location only, never inferred from system-no-punch (2026-06-24; 1730 live rows fixed).
-3. **D-003** TRUE_OT = 3 disjoint buckets summed (verified no double-count, 2026-06-24).
-4. **D-004** Tardiness tolerance **> 6 min** (`HR_MIN=7`; CRED 7..240) (2026-06-30).
-5. **D-005** Full-shift span = gross hours incl. break (9h, not net 8h) (2026-06-30).
-6. **D-006** Cross-midnight shift owned entirely by its START day, for everything (2026-06-30).
-7. **D-007** Annual leave on an official holiday counts as the holiday and returns to the balance (2026-06-30).
-8. **D-008** No-punch-AND-no-system working day → flagged, `worked_min=0`, role-blind (2026-06-30).
-9. **D-009** All roles must open the system; leaders stay record-only for deductions (system-open flag only) (2026-06-30).
-10. **D-010** Session selection = **Ameyo-first**, Sprinklr fills gaps (not min/max union); official late/early basis = SYSTEM times (2026-06-28). Future: Director plans Sprinklr-only (`RECON_SYS_MODE`) — flip only when he says go.
-11. **D-011** Engine trusted over manual after the May30–Jun27 diff ("مبدئيا انت ادق مني") (2026-06-30).
-12. **D-012** Ingest deletes only its own uploaded date range; backup refreshed every run (post-incident, commit b7b833d) (2026-07-01).
-13. **D-013** Jan–May left AS-IS (already consistent; a prior refresh regressed — dry-run-first discipline) (2026-06-30).
-14. **D-014** RBAC final model: admin=all; RTA+TL=admin-minus-settings; agent=own + /me (2026-06-20).
-15. **D-015** Publish is additive-only into the first empty future week; never overwrites (verified live).
-16. **D-016** Maternity 7h set = 12375/12434, excluded from early-out only; extend only as HR confirms.
-17. **D-017** Sidebar shows only the **Chief**; guards run behind it; Auto Mode = safe-surplus only. Declined: self-modifying code, fake "counterfactual" scores — verified-data-only.
-18. **D-018** Design: 3 themes, dazzle kit for KPIs, light-mode near-black net, **NO animated background** (removed — do not re-add).
-19. **D-019** Schedule cell shows the shift code DIRECT (no `-WFH` suffix; WFH = 🏠 icon + texture); friendly bilingual status labels classified by `hr_code` first.
-20. **D-020** Never-closed Sprinklr sessions: leave as-is, login-only recovery NOT enabled (revisit when the method is verified) (2026-06-30).
+1. **D-038 / D-050** `roster_days` is the canonical reporting spine; rules live IN the recon engine so every refresh re-applies them (2026-06-29/30).
+2. **D-032** WFH rule corrected: code/location only, never inferred from system-no-punch (2026-06-24; 1730 live rows fixed).
+3. **D-036** TRUE_OT = 3 disjoint buckets summed (verified no double-count, 2026-06-24).
+4. **D-053** Tardiness tolerance **> 6 min** (`HR_MIN=7`; CRED 7..240) (2026-06-30).
+5. **D-054** Full-shift span = gross hours incl. break (9h, not net 8h) (2026-06-30).
+6. **D-058** Cross-midnight shift owned entirely by its START day, for everything (2026-06-30).
+7. **D-059** Annual leave on an official holiday counts as the holiday and returns to the balance (2026-06-30).
+8. **D-055** No-punch-AND-no-system working day → flagged, `worked_min=0`, role-blind (2026-06-30).
+9. **D-056** All roles must open the system; leaders stay record-only for deductions (system-open flag only) (2026-06-30).
+10. **D-044** Session selection = **Ameyo-first**, Sprinklr fills gaps (not min/max union); official late/early basis = SYSTEM times (2026-06-28). Future: Director plans Sprinklr-only (`RECON_SYS_MODE`) — flip only when he says go.
+11. **D-052** Engine trusted over manual after the May30–Jun27 diff ("مبدئيا انت ادق مني") (2026-06-30).
+12. **D-065** Ingest deletes only its own uploaded date range; backup refreshed every run (post-incident, commit b7b833d) (2026-07-01).
+13. **D-062** Jan–May left AS-IS (already consistent; a prior refresh regressed — dry-run-first discipline) (2026-06-30).
+14. **D-074** RBAC final model: admin=all; RTA+TL=admin-minus-settings; agent=own + /me (2026-06-20).
+15. **D-040** Publish is additive-only into the first empty future week; never overwrites (verified live).
+16. **D-030** Maternity 7h set = 12375/12434, excluded from early-out only; extend only as HR confirms.
+17. **D-025** Sidebar shows only the **Chief**; guards run behind it; Auto Mode = safe-surplus only (D-026). Declined: self-modifying code (D-069), fake "counterfactual" scores (D-070) — verified-data-only.
+18. **D-027** Design: 3 themes, dazzle kit for KPIs, light-mode near-black net, **NO animated background** (removed — do not re-add, D-071).
+19. **D-051 / D-061** Schedule cell shows the shift code DIRECT (no `-WFH` suffix; WFH = 🏠 icon + texture); friendly bilingual status labels classified by `hr_code` first.
+20. **D-057** Never-closed Sprinklr sessions: **Deferred** — leave as-is, login-only recovery NOT enabled (revisit when the method is verified) (2026-06-30).
 
 ---
 
@@ -164,7 +166,7 @@ Request envelope + extension tables. Submit (with attachments where applicable) 
 - Cloud/production deployment (Docker+nginx plan exists in memory `production_deployment`), MFA/SSO, email/Teams/push notification channels, CRM/HR-system/telephony API integrations beyond the extension bridges, PDF export — all **future**.
 - Internal chat is an operational layer, not a Teams replacement.
 - Jan–May cross-midnight de-bleed (Rule B): needs a per-month recon rebuild when those months' prepared sources are loaded — deliberately deferred.
-- Number-changing refactors deferred for supervised execution: shift-category 5-way unification, `sc` CTE person-grain fix, legacy `roster_daily` re-ingest, `ot_before/after` emission (see §11).
+- Number-changing refactors deferred for supervised execution: shift-category unification (6 conflicting code sites per the 2026-07-01 audit), `sc` CTE person-grain fix, legacy `roster_daily` re-ingest, `ot_before/after` emission (see §11).
 - Nav consolidation plan awaits the Director's go (§4).
 - Declined outright: self-modifying code for guards; fabricated/counterfactual KPIs; any KPI granularity beyond what the data holds (single-month `scorecard_entries`).
 
@@ -204,7 +206,7 @@ Request envelope + extension tables. Submit (with attachments where applicable) 
 If this platform (or an agent's knowledge of it) must be reconstructed from zero:
 
 1. **Follow `docs/master/REBUILD_PROMPT_AND_OPERATING_INSTRUCTIONS.md`** — the operating prompt, session bootstrap, and step-by-step rebuild order. That file is the executable version of this memory.
-2. Load, in order: `CLAUDE.md` (master instructions + module spec) → `docs/knowledge/WFM_RULES_AND_DECISIONS.md` (every rule; doc wins over code) → `docs/RECON_PIPELINE.md` → `docs/knowledge/REPORTS_AND_ROSTER_ENGINE.md` → `docs/knowledge/DESIGN_SYSTEM.md` → the sibling `docs/master/*` files (BUSINESS_RULES_LIBRARY, MODULE_SPECIFICATIONS, DATA_DICTIONARY, DECISIONS log).
-3. The portable skills rebuild everything without further input: **`wfm-system`** (full knowledge base), **`mini-me`** (assistant clone incl. confirmed rules), **`scorecard-builder`** (monthly scorecard). They live in `.claude/skills/` (version-controlled).
+2. Load, in order: `CLAUDE.md` (master instructions + module spec) → `docs/knowledge/WFM_RULES_AND_DECISIONS.md` (every rule; doc wins over code) → `docs/RECON_PIPELINE.md` → `docs/knowledge/REPORTS_AND_ROSTER_ENGINE.md` → `docs/knowledge/DESIGN_SYSTEM.md` → the sibling `docs/master/*` files (WFM_BUSINESS_RULES_LIBRARY, MODULE_SPECIFICATIONS, DATA_DICTIONARY, DASHBOARDS_AND_REPORTS, DECISIONS_AND_AGREEMENTS_LOG, SYSTEM_LEARNINGS_AND_IMPROVEMENTS, IMPLEMENTATION_ROADMAP, AI_AND_AUTOMATION_OPPORTUNITIES).
+3. The portable skills rebuild everything without further input: **`enterprise-wfm-platform`** (the master operating skill — routing, standards, memory protocol), **`wfm-system`** (full knowledge base), **`mini-me`** (assistant clone incl. confirmed rules), **`scorecard-builder`** (monthly scorecard). They live in `.claude/skills/` (version-controlled).
 4. Data comes back via the recon pipeline: place the Director's month files in `Desktop/new roster/`, run `node backend/scripts/recon-refresh.js` per month — every rule re-applies automatically. Never bulk-rebuild months that are already consistent without a dry-run diff.
 5. Operating covenant with the Director: audit before coding; plan and get approval before executing; distinguish Confirmed vs Recommended; never fake completion or hide mock data; never execute a new/changed rule before agreement; do not restart the project — continue from the latest approved state.
