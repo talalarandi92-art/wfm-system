@@ -15,13 +15,11 @@ const NAV_SECTIONS = [
   {
     label: null,
     items: [
+      // Executive home hub (2026-07-02): Command Center + Role Dashboards + Ops
+      // Dashboard + WFM Overview are ONE landing now (?tab=).
       { key: 'commandCenter', icon: Crown,         path: '/command-center', permission: 'reports.view', agentHidden: true },
       { key: 'myWorkspace', icon: UserCircle,      path: '/my',        permission: null },
-      // Ops overview — management + RTA only; agents use My Workspace instead.
-      { key: 'dashboard',   icon: LayoutDashboard, path: '/dashboard', permission: null, agentHidden: true },
-      { key: 'controlDashboards', icon: Gauge, path: '/control-dashboards', permission: 'reports.view', agentHidden: true },
-      // The Chief is the single visible face — the rest of the team runs behind it
-      // (reachable from the Chief / Bots Hub, not shown individually in the nav).
+      // The Chief hub — the whole guard team (13 pages) lives behind it as tabs.
       { key: 'chief', icon: Bot, path: '/chief', permission: 'hc.view', agentHidden: true },
     ],
   },
@@ -48,8 +46,6 @@ const NAV_SECTIONS = [
   {
     label: { ar: 'التخطيط', en: 'Planning' },
     items: [
-      // Executive command center — gateway to the hub tabs (Agent 360, Board, Roster Dashboard…).
-      { key: 'wfmOverview', icon: Sparkles, path: '/wfm-overview', permission: 'attendance.view_team', agentHidden: true },
       // Capacity & Coverage hub (Erlang planning + hourly coverage + interval headcount).
       { key: 'capacity',  icon: BarChart3, path: '/capacity',  permission: 'hc.view' },
       // Scorecard hub (overview + board + leaderboard + trends + agent/team 360 + coaching + productivity).

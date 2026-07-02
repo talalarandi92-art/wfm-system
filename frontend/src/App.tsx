@@ -4,8 +4,10 @@ import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
 import { authApi } from '@/api/client';
 import Login from '@/pages/Login';
-import Dashboard from '@/pages/Dashboard';
-import CommandCenter from '@/pages/CommandCenter';
+// Executive home + Chief team hubs (2026-07-02): the four landing pages and the 13
+// guard pages are ?tab= tabs now; their old routes redirect below.
+import CommandCenterHub from '@/pages/CommandCenterHub';
+import ChiefHub from '@/pages/ChiefHub';
 import ImportPage          from '@/pages/Import';
 import AttendanceHub        from '@/pages/AttendanceHub';
 import SchedulingHub          from '@/pages/SchedulingHub';
@@ -19,28 +21,12 @@ import AnalyticsHub            from '@/pages/AnalyticsHub';
 import RosterHub               from '@/pages/RosterHub';
 import ScorecardHub            from '@/pages/ScorecardHub';
 import CapacityHub             from '@/pages/CapacityHub';
-import WfmOverviewPage          from '@/pages/WfmOverview';
 import SettingsPage            from '@/pages/Settings';
 import CalendarPage            from '@/pages/Calendar';
 import SkillsPage              from '@/pages/Skills';
 import WorkspaceHub           from '@/pages/WorkspaceHub';
 import AgentHome               from '@/pages/AgentHome';
 import OdooIntegrationPage     from '@/pages/OdooIntegration';
-import ControlDashboardsPage     from '@/pages/ControlDashboards';
-import SystemHealthPage          from '@/pages/SystemHealth';
-import AnalystPage               from '@/pages/Analyst';
-import ReportsBotPage            from '@/pages/ReportsBot';
-import BotsHubPage               from '@/pages/BotsHub';
-import AdvisorPage               from '@/pages/Advisor';
-import SecurityGuardPage         from '@/pages/SecurityGuard';
-import ExpertPage                from '@/pages/Expert';
-import ChiefPage                 from '@/pages/Chief';
-import ReplyHelperPage           from '@/pages/ReplyHelper';
-import ScorecardGuardPage        from '@/pages/ScorecardGuard';
-import ResearcherPage            from '@/pages/Researcher';
-import KnowledgeLedgerPage       from '@/pages/KnowledgeLedger';
-import TeamLearningPage          from '@/pages/TeamLearning';
-import DiagnosticsPage           from '@/pages/Diagnostics';
 import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
@@ -82,8 +68,10 @@ export default function App() {
         >
           <Route index element={<LandingRedirect />} />
           <Route path="my"         element={<AgentHome />} />
-          <Route path="dashboard"  element={<Dashboard />} />
-          <Route path="command-center" element={<CommandCenter />} />
+          <Route path="command-center" element={<CommandCenterHub />} />
+          <Route path="dashboard"           element={<Navigate to="/command-center?tab=ops" replace />} />
+          <Route path="control-dashboards"  element={<Navigate to="/command-center?tab=roles" replace />} />
+          <Route path="wfm-overview"        element={<Navigate to="/command-center?tab=overview" replace />} />
           <Route path="schedule"     element={<SchedulingHub />} />
           <Route path="generator"   element={<Navigate to="/schedule?tab=generator" replace />} />
           <Route path="rotation"    element={<Navigate to="/schedule?tab=rotation" replace />} />
@@ -127,28 +115,26 @@ export default function App() {
           <Route path="schedule-change-log" element={<Navigate to="/roster?tab=changes" replace />} />
           <Route path="report-builder"      element={<Navigate to="/roster?tab=report-builder" replace />} />
           <Route path="dashboard-builder"   element={<Navigate to="/roster?tab=dashboard-builder" replace />} />
-          <Route path="wfm-overview" element={<WfmOverviewPage />} />
           <Route path="campaigns" element={<Navigate to="/schedule?tab=campaigns" replace />} />
           <Route path="attendance-corrections" element={<Navigate to="/attendance?tab=corrections" replace />} />
           <Route path="schedule-changes" element={<Navigate to="/schedule?tab=changes" replace />} />
-          <Route path="control-dashboards" element={<ControlDashboardsPage />} />
-          <Route path="system-health" element={<SystemHealthPage />} />
-          <Route path="analyst" element={<AnalystPage />} />
-          <Route path="reports-bot" element={<ReportsBotPage />} />
-          <Route path="bots" element={<BotsHubPage />} />
-          <Route path="advisor" element={<AdvisorPage />} />
-          <Route path="security-guard" element={<SecurityGuardPage />} />
-          <Route path="expert" element={<ExpertPage />} />
-          <Route path="reply-helper" element={<ReplyHelperPage />} />
-          <Route path="chief" element={<ChiefPage />} />
-          <Route path="scorecard-guard" element={<ScorecardGuardPage />} />
-          <Route path="researcher" element={<ResearcherPage />} />
-          <Route path="knowledge-ledger" element={<KnowledgeLedgerPage />} />
-          <Route path="team-learning" element={<TeamLearningPage />} />
-          <Route path="diagnostics" element={<DiagnosticsPage />} />
+          <Route path="chief" element={<ChiefHub />} />
+          <Route path="bots"             element={<Navigate to="/chief?tab=bots" replace />} />
+          <Route path="system-health"    element={<Navigate to="/chief?tab=health" replace />} />
+          <Route path="analyst"          element={<Navigate to="/chief?tab=analyst" replace />} />
+          <Route path="reports-bot"      element={<Navigate to="/chief?tab=reports" replace />} />
+          <Route path="security-guard"   element={<Navigate to="/chief?tab=security" replace />} />
+          <Route path="scorecard-guard"  element={<Navigate to="/chief?tab=scorecard" replace />} />
+          <Route path="researcher"       element={<Navigate to="/chief?tab=researcher" replace />} />
+          <Route path="expert"           element={<Navigate to="/chief?tab=expert" replace />} />
+          <Route path="reply-helper"     element={<Navigate to="/chief?tab=reply" replace />} />
+          <Route path="advisor"          element={<Navigate to="/chief?tab=advisor" replace />} />
+          <Route path="knowledge-ledger" element={<Navigate to="/chief?tab=ledger" replace />} />
+          <Route path="team-learning"    element={<Navigate to="/chief?tab=learning" replace />} />
+          <Route path="diagnostics"      element={<Navigate to="/chief?tab=diagnostics" replace />} />
         </Route>
 
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
@@ -173,5 +159,5 @@ function LandingRedirect() {
   const isManager = hasPermission('attendance.view_team')
     || hasPermission('attendance.view_all')
     || hasPermission('users.view');
-  return <Navigate to={isManager ? '/dashboard' : '/my'} replace />;
+  return <Navigate to={isManager ? '/command-center' : '/my'} replace />;
 }
