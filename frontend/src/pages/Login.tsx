@@ -1,9 +1,10 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Globe, Moon, Sun, ArrowRight, Zap } from 'lucide-react';
+import { Eye, EyeOff, Globe, Moon, Sun, ArrowRight } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
 import { t } from '@/i18n';
+import BrandLogo from '@/components/BrandLogo';
 
 /* ─────────────────────────────────────────────────────────────────────────── */
 
@@ -130,15 +131,9 @@ export default function Login() {
               className="absolute w-20 h-20 rounded-2xl anim-ring opacity-60"
               style={{ background: 'transparent' }}
             />
-            {/* Logo box */}
-            <div
-              className="relative w-16 h-16 rounded-2xl flex items-center justify-center shadow-2xl"
-              style={{
-                background: 'linear-gradient(135deg,#4f46e5,#7c3aed)',
-                boxShadow: '0 8px 32px rgba(99,102,241,.45), 0 0 0 1px rgba(255,255,255,.08)',
-              }}
-            >
-              <Zap size={28} className="text-white" fill="white" />
+            {/* Logo — the fused seal (T + orchestrator + north star + crown) */}
+            <div className="relative w-20 h-20 flex items-center justify-center">
+              <BrandLogo size={76} glow />
             </div>
           </div>
 

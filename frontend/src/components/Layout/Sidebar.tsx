@@ -8,6 +8,7 @@ import {
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
 import { t } from '@/i18n';
+import BrandLogo from '@/components/BrandLogo';
 
 /* ── Nav structure with section groupings ─────────────────────────────────── */
 const NAV_SECTIONS = [
@@ -104,15 +105,9 @@ export default function Sidebar() {
         className="flex items-center h-[60px] px-4 flex-shrink-0"
         style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
       >
-        {/* Logo mark */}
-        <div
-          className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{
-            background: 'linear-gradient(135deg,#4f46e5,#7c3aed)',
-            boxShadow: '0 4px 12px rgba(99,102,241,.4), 0 0 0 1px rgba(255,255,255,.1)',
-          }}
-        >
-          <Zap size={18} className="text-white" fill="white" />
+        {/* Logo mark — the Director's fused seal (T + orchestrator + north star + crown) */}
+        <div className="flex-shrink-0 w-9 h-9 flex items-center justify-center">
+          <BrandLogo size={36} />
         </div>
 
         {/* Brand name — only when expanded */}
