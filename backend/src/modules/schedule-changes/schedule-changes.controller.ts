@@ -1,5 +1,6 @@
 import {
   Controller, Get, Post, Param, Body, Query, UseGuards, BadRequestException, NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
@@ -20,6 +21,42 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 @Controller({ path: 'schedule-changes', version: '1' })
 export class ScheduleChangesController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
+
+  /** Saturday that starts the week containing `dateStr` (workforce week = Sat→Fri). */
+  private weekStartFor(dateStr: string): string {
+    const d = new Date(dateStr);
+    const diffToSat = (d.getDay() - 6 + 7) % 7;
+    const sat = new Date(d);
+    sat.setDate(d.getDate() - diffToSat);
+    return `${sat.getFullYear()}-${String(sat.getMonth() + 1).padStart(2, '0')}-${String(sat.getDate()).padStart(2, '0')}`;
+  }
+
+  /** Locked-week + approved-range soft-lock guard (mirrors recon.controller.assertScheduleEditable). */
+  private async assertScheduleEditable(user: any, date: string) {
+    // Hard lock: the week's publish/lock lifecycle status
+    const ws = this.weekStartFor(date);
+    const [wk] = await this.ds.query(
+      `SELECT status FROM schedule_week_status WHERE tenant_id = $1 AND week_start = $2::date`,
+      [user.tenantId, ws],
+    ).catch(() => [null]);
+    if (wk?.status === 'locked') {
+      throw new ForbiddenException(`Schedule week ${ws} is locked — unlock it before applying schedule changes`);
+    }
+    // Soft lock: the approved roster range (tenant_settings 'schedule_lock', set on upload)
+    const [r] = await this.ds.query(
+      `SELECT setting_value FROM tenant_settings WHERE tenant_id = $1 AND setting_key = 'schedule_lock'`,
+      [user.tenantId],
+    ).catch(() => [null]);
+    const v = r?.setting_value;
+    const lock = v ? (typeof v === 'string' ? JSON.parse(v) : v) : null;
+    const locked = !!lock && date >= lock.from && date <= lock.to;
+    const perms = user.permissionCodes ?? user.permissions ?? [];
+    if (locked && !perms.includes('schedule.publish')) {
+      throw new ForbiddenException(
+        `Schedule ${date} is inside the approved/locked range (${lock.from} → ${lock.to}). Manual edits are not allowed — re-upload the schedule to change it (a supervisor with schedule.publish may override, with audit).`,
+      );
+    }
+  }
 
   /* ── Create ───────────────────────────────────────────────────────────── */
   @Post()
@@ -147,6 +184,9 @@ export class ScheduleChangesController {
     const end   = sc?.end_time ?? null;
     const marker = start ? 'present' : 'off';
     const date = String(row.change_date).slice(0, 10);
+
+    // Lock enforcement: locked week + approved-range soft lock (same rule as manual cell edits)
+    await this.assertScheduleEditable(user, date);
 
     // Upsert the scheduled shift for that employee/date.
     const updated = await this.ds.query(

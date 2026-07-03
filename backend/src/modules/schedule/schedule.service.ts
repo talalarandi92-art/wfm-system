@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { shiftCategoryFromCode } from '../../common/shift-category';
+import { functionAllowsFemaleLate } from '../schedule-generator/generator.types';
 
 // ── Shift code → marker + times lookup ──────────────────────────────────────
 // Used by editCell to resolve a typed shift code to DB values
-const SHIFT_CODE_MAP: Record<string, { marker: string; start: string | null; end: string | null }> = {
+const SHIFT_CODE_MAP: Record<string, { marker: string; start: string | null; end: string | null; wfh?: boolean }> = {
   // Morning family
   M:    { marker: 'present', start: '07:00:00', end: '16:00:00' },
   AM:   { marker: 'present', start: '07:00:00', end: '15:00:00' },
@@ -38,9 +40,17 @@ const SHIFT_CODE_MAP: Record<string, { marker: string; start: string | null; end
   MN:   { marker: 'present', start: '23:00:00', end: '08:00:00' },
   MN20: { marker: 'present', start: '00:00:00', end: '08:00:00' },
   MN7:  { marker: 'present', start: '23:00:00', end: '06:00:00' },
+  // WFH variants — same times/category as the base code, flagged is_wfh
+  'WFH-M': { marker: 'present', start: '07:00:00', end: '16:00:00', wfh: true },
+  'WFH-B': { marker: 'present', start: '09:00:00', end: '18:00:00', wfh: true },
+  'WFH-C': { marker: 'present', start: '11:00:00', end: '20:00:00', wfh: true },
+  'WFH-N': { marker: 'present', start: '13:00:00', end: '22:00:00', wfh: true },
+  'WFH-E': { marker: 'present', start: '16:00:00', end: '01:00:00', wfh: true },
   // Non-working
   OFF:  { marker: 'off',     start: null, end: null },
   L:    { marker: 'leave',   start: null, end: null },
+  DL:   { marker: 'leave',   start: null, end: null }, // death leave
+  UPL:  { marker: 'leave',   start: null, end: null }, // unpaid leave
   SL:   { marker: 'sick',    start: null, end: null },
   ABS:  { marker: 'absent',  start: null, end: null },
   H:    { marker: 'holiday', start: null, end: null },
@@ -128,6 +138,12 @@ function minToHHMM(m: number): string {
   return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 }
 
+// "HH:MM" / "HH:MM:SS" → minutes-of-day (used by rest math + roster_days dual-write).
+function timeStrToMin(t: string): number {
+  const [h, m] = t.split(':');
+  return parseInt(h, 10) * 60 + parseInt(m ?? '0', 10);
+}
+
 @Injectable()
 export class ScheduleService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
@@ -176,14 +192,15 @@ export class ScheduleService {
       cur.setDate(cur.getDate() + 1);
     }
 
+    const params: any[] = [tenantId, from, to];
     const whereClauses: string[] = [
-      `ar.tenant_id = '${tenantId}'`,
-      `ar.attendance_date BETWEEN '${from}' AND '${to}'`,
+      `ar.tenant_id = $1`,
+      `ar.attendance_date BETWEEN $2 AND $3`,
       // exclude resigned / terminated / inactive humans — a current schedule shows only active staff
       `e.status = 'active'`,
     ];
-    if (functionId) whereClauses.push(`e.function_id = '${functionId}'`);
-    if (teamId)     whereClauses.push(`e.team_id = '${teamId}'`);
+    if (functionId) { params.push(functionId); whereClauses.push(`e.function_id = $${params.length}`); }
+    if (teamId)     { params.push(teamId);     whereClauses.push(`e.team_id = $${params.length}`); }
 
     const rows = await this.ds.query(`
       SELECT
@@ -222,13 +239,13 @@ export class ScheduleService {
       LEFT JOIN functions f ON e.function_id = f.id
       LEFT JOIN teams t ON e.team_id = t.id
       LEFT JOIN roster_days rd
-        ON rd.tenant_id = '${tenantId}'
+        ON rd.tenant_id = $1
         AND rd.person_no = e.employee_no
         AND rd.work_date = ar.attendance_date
         AND rd.is_active
       WHERE ${whereClauses.join(' AND ')}
       ORDER BY f.name, e.first_name_en, ar.attendance_date
-    `);
+    `, params);
 
     // ── Group by employee ────────────────────────────────────────────────────
     const empMap = new Map<
@@ -448,48 +465,89 @@ export class ScheduleService {
   }
 
   // ── Validate a shift assignment for an employee ──────────────────────────────
+  // Female rule: any shift ENDING after 20:00 is flagged (catches N ending 22:00 and
+  // E ending 01:00 — not just late starts). Midnight (MD/MN family) is always blocked.
+  // The N family downgrades to a warning when the function policy allows female late
+  // (functionAllowsFemaleLate — the allowFemaleN exception from the generator).
+  // Rest rule: BOTH directions vs the previous day's end and the next day's start,
+  // cross-midnight aware (+1440 when a shift's end <= start ⇒ it ends the next day).
   private validateShiftAssignment(
     gender: string,
+    functionName: string | null,
+    code: string,
     newMarker: string,
     newStart: string | null,
-    prevEnd: string | null,
+    newEnd: string | null,
+    prevDay: { start: string | null; end: string | null } | null,
+    nextDay: { start: string | null } | null,
   ): { rule: string; severity: 'error' | 'warning'; messageAr: string; messageEn: string }[] {
     const violations: { rule: string; severity: 'error' | 'warning'; messageAr: string; messageEn: string }[] = [];
 
     if (!newStart || newMarker !== 'present') return violations;
 
-    const h = parseInt(newStart.split(':')[0], 10);
+    const startMin = timeStrToMin(newStart);
+    const h = Math.floor(startMin / 60);
+    // absolute end minutes on the edit day's axis (cross-midnight ⇒ ends next day)
+    const endAbs = newEnd != null
+      ? (timeStrToMin(newEnd) <= startMin ? timeStrToMin(newEnd) + 1440 : timeStrToMin(newEnd))
+      : null;
 
-    // Female midnight rule
+    // Female rule — canonical category from the ONE classifier
     if (gender === 'female') {
-      if (h >= 22 || h < 6) {
+      const cat = shiftCategoryFromCode(code);
+      if (cat === 'midnight' || h >= 22 || h < 6) {
         violations.push({
           rule: 'female_midnight_blocked',
           severity: 'error',
           messageAr: 'منع تعيين وردية منتصف الليل للموظفات',
           messageEn: 'Female employees cannot be assigned midnight shifts',
         });
-      } else if (h >= 18) {
+      } else if (endAbs != null && endAbs > 20 * 60) {
+        if (cat === 'night' && functionAllowsFemaleLate(functionName ?? undefined)) {
+          violations.push({
+            rule: 'female_late_warning',
+            severity: 'warning',
+            messageAr: 'تحذير: وردية تنتهي بعد 20:00 لموظفة — مسموحة استثناءً لهذه الوظيفة',
+            messageEn: 'Warning: female shift ends after 20:00 — allowed by this function\'s late exception',
+          });
+        } else {
+          violations.push({
+            rule: 'female_late_blocked',
+            severity: 'error',
+            messageAr: 'وردية تنتهي بعد 20:00 لموظفة — تحتاج تجاوز صريح (override)',
+            messageEn: 'Female shift ends after 20:00 — explicit override required',
+          });
+        }
+      }
+    }
+
+    // Minimum rest: previous day's shift end → this shift's start
+    if (prevDay?.end) {
+      const pEnd = timeStrToMin(prevDay.end);
+      const pStart = prevDay.start != null ? timeStrToMin(prevDay.start) : null;
+      const pEndAbs = pStart != null && pEnd <= pStart ? pEnd + 1440 : pEnd; // crosses midnight ⇒ ends on the edit day
+      const restPrev = 1440 + startMin - pEndAbs; // minutes on the previous day's axis
+      if (restPrev < 600) {
+        const hrs = Math.round((restPrev / 60) * 10) / 10;
         violations.push({
-          rule: 'female_late_warning',
-          severity: 'warning',
-          messageAr: 'تحذير: الوردية المتأخرة للموظفات تحتاج موافقة',
-          messageEn: 'Warning: late shift for female requires approval',
+          rule: 'insufficient_rest',
+          severity: 'error',
+          messageAr: `راحة أقل من 10 ساعات بعد وردية اليوم السابق (~${hrs}س). يحتاج موافقة`,
+          messageEn: `Less than 10 hours rest after previous day's shift (~${hrs}h). Approval required`,
         });
       }
     }
 
-    // Minimum rest check (if we have prev shift end)
-    if (prevEnd) {
-      const prevH = parseInt(prevEnd.split(':')[0], 10);
-      // Approximate rest hours (next day)
-      const restApprox = 24 - prevH + h;
-      if (restApprox < 10) {
+    // Minimum rest: this shift's end → next day's shift start
+    if (nextDay?.start && endAbs != null) {
+      const restNext = 1440 + timeStrToMin(nextDay.start) - endAbs; // minutes on the edit day's axis
+      if (restNext < 600) {
+        const hrs = Math.round((restNext / 60) * 10) / 10;
         violations.push({
-          rule: 'insufficient_rest',
+          rule: 'insufficient_rest_next',
           severity: 'error',
-          messageAr: `راحة أقل من 10 ساعات (~${restApprox}س). يحتاج موافقة`,
-          messageEn: `Less than 10 hours rest (~${restApprox}h). Approval required`,
+          messageAr: `راحة أقل من 10 ساعات قبل وردية اليوم التالي (~${hrs}س). يحتاج موافقة`,
+          messageEn: `Less than 10 hours rest before next day's shift (~${hrs}h). Approval required`,
         });
       }
     }
@@ -515,6 +573,55 @@ export class ScheduleService {
     return parseInt(rows[0]?.cnt ?? '0', 10);
   }
 
+  // ── Approved-schedule soft lock (mirrors recon.controller.assertScheduleEditable —
+  //    replicated locally on purpose, do NOT import the controller) ─────────────
+  private async getScheduleLock(
+    tenantId: string,
+  ): Promise<{ from: string; to: string; lockedAt?: string; lockedBy?: string } | null> {
+    const [r] = await this.ds.query(
+      `SELECT setting_value FROM tenant_settings WHERE tenant_id = $1 AND setting_key = 'schedule_lock'`,
+      [tenantId],
+    );
+    const v = r?.setting_value;
+    return v ? (typeof v === 'string' ? JSON.parse(v) : v) : null;
+  }
+
+  /** User's permission codes (user_roles → role_permissions → permissions). */
+  private async getUserPermissionCodes(userId: string): Promise<string[]> {
+    if (!userId) return [];
+    const rows = await this.ds.query(
+      `SELECT DISTINCT p.code
+       FROM user_roles ur
+       JOIN role_permissions rp ON rp.role_id = ur.role_id
+       JOIN permissions p ON p.id = rp.permission_id
+       WHERE ur.user_id = $1`,
+      [userId],
+    ).catch(() => []);
+    return rows.map((r: any) => r.code);
+  }
+
+  /** Reject edits on locked weeks + inside the approved (soft-locked) roster range. */
+  private async assertCellEditable(tenantId: string, userId: string, date: string) {
+    // Hard lock: published/locked week status
+    const weekStatus = await this.getWeekStatus(tenantId, ScheduleService.weekStartFor(date));
+    if (weekStatus.status === 'locked') {
+      throw new ForbiddenException(
+        `Schedule week ${weekStatus.weekStart} is locked — unlock it before editing cells`,
+      );
+    }
+    // Soft lock: the approved roster range (set on upload) — only schedule.publish may override
+    const lock = await this.getScheduleLock(tenantId);
+    const locked = !!lock && date >= lock.from && date <= lock.to;
+    if (locked) {
+      const canOverride = (await this.getUserPermissionCodes(userId)).includes('schedule.publish');
+      if (!canOverride) {
+        throw new ForbiddenException(
+          `Schedule ${date} is inside the approved/locked range (${lock!.from} → ${lock!.to}). Manual edits are not allowed — re-upload the schedule to change it (a supervisor with schedule.publish may override, with audit).`,
+        );
+      }
+    }
+  }
+
   // ── Edit Cell — stores audit trail in notes JSON ────────────────────────────
   async editCell(
     tenantId: string,
@@ -525,9 +632,13 @@ export class ScheduleService {
     newShiftCode: string,
     editType: string,
     reason: string,
+    override = false,
   ) {
     if (!reason || reason.trim().length < 3)
       throw new BadRequestException('Reason must be at least 3 characters');
+
+    // Lock enforcement: locked week + approved-range soft lock
+    await this.assertCellEditable(tenantId, userId, date);
 
     const code = newShiftCode.trim().toUpperCase();
     const mapping = SHIFT_CODE_MAP[code];
@@ -559,15 +670,42 @@ export class ScheduleService {
     // HC BEFORE (count working employees in same function, same date)
     const hcBefore = await this.countFunctionHc(tenantId, rec.function_id, date);
 
+    // Neighbouring days for the REAL rest check (prev day's end → new start, new end → next day's start)
+    const neighbourRows = await this.ds.query(
+      `SELECT attendance_date::date::text AS d,
+              scheduled_start::text AS s, scheduled_end::text AS e
+       FROM attendance_records
+       WHERE tenant_id = $1 AND employee_id = $2
+         AND attendance_date IN ($3::date - INTERVAL '1 day', $3::date + INTERVAL '1 day')
+         AND attendance_marker = 'present'
+         AND scheduled_start IS NOT NULL`,
+      [tenantId, employeeId, date],
+    );
+    const prevRow = neighbourRows.find((r: any) => r.d < date);
+    const nextRow = neighbourRows.find((r: any) => r.d > date);
+
     // Run validation BEFORE applying the change
     const validations = this.validateShiftAssignment(
       rec.gender,
+      rec.function_name ?? null,
+      code,
       mapping.marker,
       mapping.start,
-      rec.scheduled_end,
+      mapping.end,
+      prevRow ? { start: prevRow.s, end: prevRow.e } : null,
+      nextRow ? { start: nextRow.s } : null,
     );
     const hasBlockingViolation = validations.some(v => v.severity === 'error');
     const requiresApproval = validations.length > 0;
+
+    // Error-severity violations require an EXPLICIT override:true — never apply silently
+    if (hasBlockingViolation && !override) {
+      throw new BadRequestException({
+        message: 'Edit blocked: rule violation(s) with error severity. Resubmit with override:true to force (the override is audited).',
+        validations,
+        requiresOverride: true,
+      });
+    }
 
     // Parse or initialise audit structure
     let audit: { original?: any; edits: any[]; source?: string } = { edits: [] };
@@ -608,29 +746,55 @@ export class ScheduleService {
       reason:          reason.trim(),
       validations,
       requiresApproval,
+      // explicit override of error-severity violations is part of the audit trail
+      ...(override && hasBlockingViolation ? { override: true } : {}),
       hcBefore,
       employeeName,
       functionName:    rec.function_name,
     });
 
-    // Apply the change
-    await this.ds.query(
-      `UPDATE attendance_records
-       SET attendance_marker = $1::attendance_marker_enum,
-           scheduled_start   = CASE WHEN $2::text IS NULL THEN NULL ELSE $2::time END,
-           scheduled_end     = CASE WHEN $3::text IS NULL THEN NULL ELSE $3::time END,
-           notes             = $4
-       WHERE tenant_id = $5 AND employee_id = $6 AND attendance_date::date::text = $7`,
-      [
-        mapping.marker,
-        mapping.start,
-        mapping.end,
-        JSON.stringify(audit),
-        tenantId,
-        employeeId,
-        date,
-      ],
-    );
+    // Apply the change — attendance_records + the ACTIVE roster_days overlay row
+    // (same transaction, so the grid overlay never shows a ghost of the old shift)
+    const isWfh = mapping.wfh === true;
+    const startMinNum = mapping.start != null ? timeStrToMin(mapping.start) : null;
+    const endMinNum   = mapping.end   != null ? timeStrToMin(mapping.end)   : null;
+    const qr = this.ds.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    try {
+      await qr.query(
+        `UPDATE attendance_records
+         SET attendance_marker = $1::attendance_marker_enum,
+             scheduled_start   = CASE WHEN $2::text IS NULL THEN NULL ELSE $2::time END,
+             scheduled_end     = CASE WHEN $3::text IS NULL THEN NULL ELSE $3::time END,
+             is_wfh            = $4,
+             notes             = $5
+         WHERE tenant_id = $6 AND employee_id = $7 AND attendance_date::date::text = $8`,
+        [
+          mapping.marker,
+          mapping.start,
+          mapping.end,
+          isWfh,
+          JSON.stringify(audit),
+          tenantId,
+          employeeId,
+          date,
+        ],
+      );
+      // Dual-write: keep the canonical roster_days row (person_no keyed) in sync when one exists
+      await qr.query(
+        `UPDATE roster_days
+         SET shift_code = $4, shift_start_min = $5, shift_end_min = $6
+         WHERE tenant_id = $1 AND person_no = $2 AND work_date = $3::date AND is_active`,
+        [tenantId, rec.employee_no, date, code, startMinNum, endMinNum],
+      );
+      await qr.commitTransaction();
+    } catch (err) {
+      await qr.rollbackTransaction();
+      throw err;
+    } finally {
+      await qr.release();
+    }
 
     // HC AFTER
     const hcAfter = await this.countFunctionHc(tenantId, rec.function_id, date);
@@ -936,7 +1100,9 @@ export class ScheduleService {
     functionId?: string,
   ) {
     const { from, to } = this.getWeekRange(weekStart, weeks);
-    const fnFilter = functionId ? `AND e.function_id = '${functionId}'` : '';
+    const absParams: any[] = [tenantId, from, to];
+    let fnFilter = '';
+    if (functionId) { absParams.push(functionId); fnFilter = `AND e.function_id = $${absParams.length}`; }
 
     // Get sick/absent records
     const absRows = await this.ds.query(
@@ -957,7 +1123,7 @@ export class ScheduleService {
          AND ar.attendance_marker IN ('sick','absent')
          ${fnFilter}
        ORDER BY ar.attendance_date DESC`,
-      [tenantId, from, to],
+      absParams,
     );
 
     // Get total scheduled employees per day (for shrinkage %)
@@ -975,7 +1141,7 @@ export class ScheduleService {
          AND ar.attendance_date BETWEEN $2 AND $3
          ${fnFilter}
        GROUP BY ar.attendance_date, f.id`,
-      [tenantId, from, to],
+      absParams,
     );
 
     // Build a quick lookup: date + functionId → {total, present, absent}
@@ -1168,7 +1334,7 @@ export class ScheduleService {
           WHERE tenant_id = $1 AND week_start = $2::date`,
         [tenantId, weekStart, notes ?? null],
       );
-      return this.getWeekStatus(tenantId, weekStart);
+      return this.finishWeekStatusChange(tenantId, weekStart, userId, action, current.status, notes);
     }
 
     if (action === 'publish') {
@@ -1216,6 +1382,31 @@ export class ScheduleService {
       );
     }
 
-    return this.getWeekStatus(tenantId, weekStart);
+    return this.finishWeekStatusChange(tenantId, weekStart, userId, action, current.status, notes);
+  }
+
+  /** Write the lifecycle transition to audit_logs (actor, week, old→new) and return the fresh status. */
+  private async finishWeekStatusChange(
+    tenantId: string,
+    weekStart: string,
+    userId: string,
+    action: string,
+    oldStatus: string,
+    notes?: string,
+  ) {
+    const result = await this.getWeekStatus(tenantId, weekStart);
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, old_value, new_value, notes)
+       VALUES ($1,$2,$3,'schedule','schedule_week',NULL,$4,$5,$6)`,
+      [
+        tenantId,
+        userId ?? null,
+        `schedule.week.${action}`,
+        JSON.stringify({ weekStart, status: oldStatus }),
+        JSON.stringify({ weekStart, status: result.status }),
+        notes ?? null,
+      ],
+    ).catch(() => {}); // audit must never break the lifecycle action itself
+    return result;
   }
 }

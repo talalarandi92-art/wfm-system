@@ -195,6 +195,36 @@ export class BreakSchedulerService {
       });
     }
 
+    // ── FALLBACK: headcount_intervals has never been populated on this system —
+    // an empty map made checkCoverage() always pass (a no-op guard). When empty,
+    // rebuild coverage LIVE from the scheduled working agents (attendance_records,
+    // already loaded above): count per function per 15-min interval each shift covers
+    // (cross-midnight handled — shift_end was moved to the next day in SQL).
+    // required = scheduled, so the 70% rule caps simultaneous breaks at 30% of staff.
+    if (coverageMap.size === 0) {
+      this.logger.warn(
+        `headcount_intervals is EMPTY for ${scheduleDate}${functionId ? ` (function ${functionId})` : ''} — ` +
+        `break coverage falling back to LIVE scheduled-HC from attendance_records (required = scheduled). ` +
+        `Populate headcount_intervals to enforce real required-HC coverage.`,
+      );
+      const coverageKey = (t: Date, fnId: string) =>
+        `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}|${fnId}`;
+      for (const emp of shiftRows) {
+        const s = new Date(emp.shift_start);
+        const e = new Date(emp.shift_end);
+        for (let t = new Date(s); t < e; t = new Date(t.getTime() + 15 * 60000)) {
+          const key = coverageKey(t, emp.function_id);
+          const cell = coverageMap.get(key);
+          if (cell) {
+            cell.scheduled += 1;
+            cell.required += 1;
+          } else {
+            coverageMap.set(key, { required: 1, scheduled: 1, onBreak: 0 });
+          }
+        }
+      }
+    }
+
     const MIN_COVERAGE_RATIO = 0.7; // at least 70% of required HC must remain available
 
     // ── 5. Generate slots ─────────────────────────────────────────────────────
