@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Calendar, Zap, Shuffle, Megaphone, CalendarCog, Clock, Wand2, Waves } from 'lucide-react';
+import { Calendar, Zap, Shuffle, Megaphone, CalendarCog, Clock, Wand2, Waves, Layers } from 'lucide-react';
 import HubTabs from '@/components/HubTabs';
 import { useAuthStore } from '@/store/auth.store';
 import SchedulePage from '@/pages/Schedule';
@@ -10,12 +10,14 @@ import ScheduleChangesPage from '@/pages/ScheduleChanges';
 import HourlyAnalyticsPage from '@/pages/HourlyAnalytics';
 import ScheduleDemandPage from '@/pages/ScheduleDemand';
 import ForecastWeekPage from '@/pages/ForecastWeek';
+import LadderRotationPage from '@/pages/LadderRotation';
 
-type HubTab = 'schedule' | 'generator' | 'forecast' | 'hourly' | 'demand' | 'rotation' | 'campaigns' | 'changes';
+type HubTab = 'schedule' | 'generator' | 'ladder' | 'forecast' | 'hourly' | 'demand' | 'rotation' | 'campaigns' | 'changes';
 
 const TABS: { key: HubTab; icon: typeof Calendar; ar: string; en: string; permission: string }[] = [
   { key: 'schedule',  icon: Calendar,    ar: 'الجدول',        en: 'Schedule',   permission: 'schedule.view' },
   { key: 'generator', icon: Zap,         ar: 'توليد الجدول',  en: 'Generator',  permission: 'schedule.generate' },
+  { key: 'ladder',    icon: Layers,      ar: 'الدوران التدريجي', en: 'Laddered Rotation', permission: 'schedule.generate' },
   // (Director 2026-07-03) everything schedule-related lives HERE — the live week forecast +
   // hourly HC + demand/health moved in from AnalyticsHub so generate → forecast → schedule are ONE place.
   { key: 'forecast',  icon: Waves,       ar: 'توقّع الأسبوع', en: 'Week Forecast', permission: 'attendance.view_team' },
@@ -49,6 +51,7 @@ export default function SchedulingHub() {
 
       {tab === 'schedule'  && <SchedulePage />}
       {tab === 'generator' && <ScheduleGeneratorPage />}
+      {tab === 'ladder'    && <LadderRotationPage />}
       {tab === 'forecast'  && <ForecastWeekPage />}
       {tab === 'hourly'    && <HourlyAnalyticsPage />}
       {tab === 'demand'    && <ScheduleDemandPage />}
