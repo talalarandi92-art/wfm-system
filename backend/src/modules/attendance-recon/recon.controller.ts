@@ -680,7 +680,10 @@ export class ReconController {
       const s2 = `(CASE WHEN ${e}>1440 THEN GREATEST(0, LEAST(${e}-1440, ${h1}) - ${h0}) ELSE 0 END)`;
       return `(${s1} + ${s2})`;
     };
-    const SHIFT = cov('r.ss', 'r.se-r.ss');
+    // shift length must be WRAP-CORRECTED: cross-midnight shifts store shift_end_min < shift_start_min
+    // (MD 1320→420), so a naive r.se-r.ss is NEGATIVE and cov() then covers NOTHING → evening/night
+    // headcount was undercounted ~4-16% (bug found 2026-07-03). Normalize to the real duration.
+    const SHIFT = cov('r.ss', '(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END)');
     const pres = `r.presence IN ('office','wfh')`;
     const credL = `r.sys_late_min BETWEEN 7 AND 240`;
     const credE = `r.sys_early_min BETWEEN 7 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
@@ -960,7 +963,7 @@ export class ReconController {
               FROM roster_days
              WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3 AND shift_start_min IS NOT NULL${fnFilter})
       SELECT r.d, h.hh AS "hour",
-        COUNT(*) FILTER (WHERE ${pres} AND ${cov('r.ss', 'r.se-r.ss')})::int working,
+        COUNT(*) FILTER (WHERE ${pres} AND ${cov('r.ss', '(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END)')})::int working,
         COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0 AND ${cov('r.ss-r.ot_before_min', 'r.ot_before_min')})::int ot_before,
         COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_after_min,0)>0 AND ${cov('r.se', 'r.ot_after_min')})::int ot_after,
         COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NULL AND ${cov('r.ss', 'r.sys_late_min')})::int tardy,
@@ -1021,7 +1024,7 @@ export class ReconController {
              WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
                AND work_date >= ($2::date - interval '28 days') AND work_date < $2::date)
       SELECT h.hh AS "hour",
-        (COUNT(*) FILTER (WHERE ${cov('r.ss', 'r.se-r.ss')})::float / NULLIF((SELECT n FROM d),0)) baseline
+        (COUNT(*) FILTER (WHERE ${cov('r.ss', '(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END)')})::float / NULLIF((SELECT n FROM d),0)) baseline
       FROM r CROSS JOIN h GROUP BY h.hh`, bp).catch(() => []);
     const baseline = Array(24).fill(0);
     for (const b of baseRows) baseline[b.hour] = +(+b.baseline || 0).toFixed(1);
@@ -1123,7 +1126,7 @@ export class ReconController {
     // 1) DEMAND = avg daily scheduled headcount covering each hour (the need to replicate).
     const dem = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh), r AS (SELECT shift_start_min ss, shift_end_min se FROM roster_days WHERE ${w})
-      SELECT h.hh, COUNT(*) FILTER (WHERE ${cov('r.ss', 'r.se-r.ss')}) sched FROM r CROSS JOIN h GROUP BY h.hh ORDER BY h.hh`, p);
+      SELECT h.hh, COUNT(*) FILTER (WHERE ${cov('r.ss', '(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END)')}) sched FROM r CROSS JOIN h GROUP BY h.hh ORDER BY h.hh`, p);
     const demand = Array(24).fill(0); dem.forEach((r: any) => { demand[r.hh] = days ? Math.round(r.sched / days) : 0; });
     // 2) SHIFT DEFINITIONS = the function's real shift windows (mode start/end per code).
     const defs = await this.ds.query(`
