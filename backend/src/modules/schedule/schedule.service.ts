@@ -229,6 +229,7 @@ export class ScheduleService {
         t.name AS team_name,
         -- corrected reconciliation overlay (today's canonical roster_days) — wins over attendance_records when present
         rd.shift_code      AS rd_code,
+        rd.attendance_code AS rd_att,
         rd.hr_code         AS rd_hr,
         rd.presence        AS rd_presence,
         rd.shift_start_min AS rd_start_min,
@@ -299,6 +300,18 @@ export class ScheduleService {
         shift = deriveShiftLabel(r.rd_start_min != null ? minToHHMM(r.rd_start_min) : null, null, cellMarker, cellWfh);
         // show the EXACT roster code (E / M / B / C / MD / C7 …) — keep deriveShiftLabel's colour/category
         if (cellMarker === 'present' && r.rd_code) shift = { ...shift, code: r.rd_code };
+        // Suffix grammar on the grid (Director 2026-07-03): sick/absence ON a scheduled shift shows
+        // base+S / base+A (MS, NA, EE20A…); plain SL / A stays ONLY for pre-scheduled days with no
+        // base shift. The HR matrix keeps hr_code (SL/A) untouched — this is display-side only.
+        if (cellMarker === 'sick' || cellMarker === 'absent') {
+          const suffix = cellMarker === 'sick' ? 'S' : 'A';
+          const att  = String(r.rd_att  || '').toUpperCase().trim();
+          const base = String(r.rd_code || '').toUpperCase().trim();
+          const NON_BASE = ['SL', 'A', 'ABS', 'OFF', 'H', 'L', 'DL', 'UPL', 'COMP', 'RES', 'TER', ''];
+          if (/^[A-Z0-9-]+[SA]$/.test(att) && !NON_BASE.includes(att)) shift = { ...shift, code: att };
+          else if (!NON_BASE.includes(base)) shift = { ...shift, code: base + suffix };
+          // else: keep deriveShiftLabel's SL / A (pre-scheduled, no base shift)
+        }
       } else {
         shift = deriveShiftLabel(r.scheduled_start, r.scheduled_end, r.attendance_marker, r.is_wfh);
       }
