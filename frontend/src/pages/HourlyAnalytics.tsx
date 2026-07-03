@@ -9,7 +9,7 @@ import { StatTile } from '@/components/dazzle';
  *  and OT (before/after) per hour — with a TOTAL row. Theme-aware. */
 export default function HourlyAnalyticsPage() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
-  const [f, setF] = useState({ from: '', to: '', function: '' });
+  const [f, setF] = useState({ from: '', to: '', function: '', agent: '' });
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
@@ -24,12 +24,18 @@ export default function HourlyAnalyticsPage() {
   const inputStyle = { background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' } as React.CSSProperties;
   const panel = { background: 'var(--surface)', border: '1px solid var(--border)' } as React.CSSProperties;
 
-  // the dataset to show: a single function or All
+  // the dataset to show: a single function or All (agent mode groups per person — show the total)
   const view = useMemo(() => {
     if (!d) return null;
-    if (f.function) { const fn = d.byFunction.find((x: any) => x.fn === f.function); return fn || d.all; }
+    if (!f.agent && f.function) { const fn = d.byFunction.find((x: any) => x.fn === f.function); return fn || d.all; }
     return d.all;
-  }, [d, f.function]);
+  }, [d, f.function, f.agent]);
+  // sick / absence / leave split behind the shrinkage number (backend per-hour fields)
+  const shrinkSplit = useMemo(() => {
+    if (!view) return null;
+    const s = view.hours.reduce((a: any, h: any) => ({ sick: a.sick + (h.sick || 0), absent: a.absent + (h.absent || 0), leave: a.leave + (h.onLeave || 0) }), { sick: 0, absent: 0, leave: 0 });
+    return s;
+  }, [view]);
 
   const maxWork = useMemo(() => view ? Math.max(...view.hours.map((h: any) => h.effective), 1) : 1, [view]);
   // demand-driven coverage analysis (from the observed hourly pattern on roster_days):
@@ -61,7 +67,14 @@ export default function HourlyAnalyticsPage() {
           <input type="date" value={f.to} onChange={e => set('to', e.target.value)} className="px-2.5 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} /></div>
         <select value={f.function} onChange={e => set('function', e.target.value)} className="px-2.5 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
           <option value="">{ar ? 'كل الفنكشن' : 'All functions'}</option>{(d?.functions || []).map((x: string) => <option key={x} value={x}>{x}</option>)}</select>
+        <input value={f.agent} onChange={e => set('agent', e.target.value)} placeholder={ar ? 'موظف: رقم / اسم / يوزر' : 'Agent: ID / name / user'}
+          className="px-2.5 py-1.5 rounded-lg text-xs outline-none w-40" style={inputStyle} />
       </div>
+      {f.agent && d?.functions?.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap text-[10px]" style={{ color: 'var(--text-3)' }}>
+          {ar ? 'مطابقات:' : 'matches:'} {d.functions.slice(0, 8).map((g: string, i: number) => <span key={i} className="px-2 py-0.5 rounded-lg font-semibold" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)' }}>{g}</span>)}
+        </div>
+      )}
 
       {loading && <p className="text-sm py-8 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'جارٍ التحليل بالساعة…' : 'Computing hourly…'}</p>}
       {!loading && view && (<>
@@ -72,7 +85,7 @@ export default function HourlyAnalyticsPage() {
           <StatTile icon={ShieldCheck} label={ar ? 'كونفورمانس' : 'Conformance'} num={view.total.conformance ?? 0} suffix="%" sub={ar ? 'لكل انتيرفال' : 'per interval'} color={covColor(view.total.conformance ?? 0)} delay={120} trend={view.hours.map((h: any) => h.conformance)} />
           <StatTile icon={TrendingUp} label={ar ? 'OT قبل الدوام' : 'OT before'} num={view.total.otBeforeHours} suffix={ar ? 'س' : 'h'} sub={`${view.total.otBeforePct}% ${ar ? 'من OT' : 'of OT'}`} color="#a78bfa" delay={180} trend={view.hours.map((h: any) => h.otBeforeHc)} />
           <StatTile icon={Timer} label={ar ? 'OT بعد الدوام' : 'OT after'} num={view.total.otAfterHours} suffix={ar ? 'س' : 'h'} sub={`${view.total.otAfterPct}% ${ar ? 'من OT' : 'of OT'}`} color="#8b5cf6" delay={240} trend={view.hours.map((h: any) => h.otAfterHc)} />
-          <StatTile icon={TrendingDown} label={ar ? 'الشرينكج' : 'Shrinkage'} num={view.total.shrinkagePct} suffix="%" sub={`${view.total.shrinkage.toLocaleString()} ${ar ? 'حالة' : 'cases'}`} color="#f43f5e" delay={300} trend={view.hours.map((h: any) => h.shrinkagePct)} />
+          <StatTile icon={TrendingDown} label={ar ? 'الشرينكج' : 'Shrinkage'} num={view.total.shrinkagePct} suffix="%" sub={shrinkSplit ? (ar ? `مرض ${shrinkSplit.sick} · غياب ${shrinkSplit.absent} · إجازة ${shrinkSplit.leave}` : `sick ${shrinkSplit.sick} · absent ${shrinkSplit.absent} · leave ${shrinkSplit.leave}`) : `${view.total.shrinkage.toLocaleString()} ${ar ? 'حالة' : 'cases'}`} color="#f43f5e" delay={300} trend={view.hours.map((h: any) => h.shrinkagePct)} />
         </div>
 
         {/* hourly EFFECTIVE-headcount curve (working + OT − late/early) */}
