@@ -111,7 +111,7 @@ function getWorkingShifts(emp: EmployeeInfo, options: GeneratorOptions): ShiftDe
     !!options.femaleLateFunctionIds?.includes(emp.functionId) ||
     options.allowFemaleN;
   return Object.values(SHIFTS).filter((s) => {
-    if (s.code === 'OFF') return false;
+    if (s.code === 'OFF' || s.code === 'L') return false;  // non-working codes
     if (allowed && !allowed.has(s.code)) return false;   // function shift policy
     if (emp.gender === 'female') {
       if (s.femaleRule === 'blocked') return false;       // E/EE/MD/MN always off-limits
@@ -433,6 +433,7 @@ function buildCoverage(dates: string[], employeeSchedules: EmployeeSchedule[]): 
       if (!day) continue;
       cov.total++;
       if (day.shift.code === 'OFF') { cov.off++; continue; }
+      if (day.shift.code === 'L') continue;   // approved leave — neither working nor OFF
       cov.working++;
       if (day.shift.category === 'morning')   cov.morning++;
       if (day.shift.category === 'afternoon') cov.afternoon++;
@@ -537,8 +538,9 @@ function calcFairness(schedules: EmployeeSchedule[]): FairnessReport {
   const midnightVar = variance(details.map(d => d.midnightPct));
   const weekendVar  = variance(details.map(d => d.weekendOffPct));
 
-  // Shift fairness: 100 - weighted variance (lower variance = fairer)
-  const shiftFairnessScore = Math.max(0, Math.round(100 - (nightVar + morningVar) / 2));
+  // Shift fairness: 100 - sqrt of the mean night/midnight variance — the HARD
+  // shifts are what fairness is about; sqrt keeps the score in a usable range.
+  const shiftFairnessScore = Math.max(0, Math.round(100 - Math.sqrt((nightVar + midnightVar) / 2)));
   // Weekend fairness: 100 - sqrt(weekendVar)
   const weekendScore       = Math.max(0, Math.round(100 - Math.sqrt(weekendVar) * 5));
 
@@ -561,6 +563,7 @@ export function generateWeeklySchedule(
   weekStart: string,
   options: GeneratorOptions,
   priorConsecutiveDays?: Map<string, number>,  // consecutive working days before weekStart
+  onLeave?: Map<string, Set<string>>,          // empId → dates with APPROVED leave → 'L'
 ): GeneratorResult {
   const dates = buildWeekDates(weekStart);
   const weekEnd = dates[6];
@@ -648,6 +651,16 @@ export function generateWeeklySchedule(
       for (const date of dates) {
         const dayName = getDayNameAr(date);
 
+        // Approved leave short-circuit — the employee is simply not available.
+        // 'L' is NOT an OFF: it never consumes the weekly OFF allowance.
+        if (onLeave?.get(emp.id)?.has(date)) {
+          assignments.push({ date, dayName, shift: SHIFTS.L, violations: [], restHours: 999 });
+          prevShift = SHIFTS.OFF;   // full rest after a leave day
+          weekDist.leave++;
+          consecutiveDays = 0;
+          continue;
+        }
+
         // Force REST if consecutive days would exceed MAX
         const forceOff = consecutiveDays >= MAX_CONSECUTIVE && !offDates.has(date);
 
@@ -708,7 +721,8 @@ export function generateWeeklySchedule(
     ? Math.round(coverage.reduce((a, c) => a + c.coveragePct, 0) / coverage.length)
     : 0;
   const offAssigned   = allSchedules.reduce((a, es) => a + es.weekStats.offCount, 0);
-  const workingDays   = allSchedules.reduce((a, es) => a + (7 - es.weekStats.offCount), 0);
+  const workingDays   = allSchedules.reduce((a, es) =>
+    a + es.assignments.filter(x => x.shift.code !== 'OFF' && x.shift.code !== 'L').length, 0);
 
   return {
     weekStart,

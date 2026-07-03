@@ -17,7 +17,7 @@
  *   the blocking reason (per project rule: show gaps honestly).
  */
 
-import { ShiftDef, SHIFTS, EmployeeInfo, ShiftDistribution } from './generator.types';
+import { ShiftDef, SHIFTS, EmployeeInfo, ShiftDistribution, allowedShiftCodes } from './generator.types';
 import { calcRestHours } from './generator.engine';
 
 /* ── Interval helpers ─────────────────────────────────────────────────────── */
@@ -56,7 +56,11 @@ export interface ShiftMixDay {
   residualGaps: { interval: string; deficit: number }[]; // honest uncovered demand
 }
 
-const WORKING_CODES = ['M', 'B', 'C', 'E', 'N', 'MD']; // catalog working shifts
+const WORKING_CODES = ['M', 'B', 'C', 'E', 'EE', 'N', 'MD', 'MN']; // catalog working shifts
+
+// SHIFTS is keyed by catalog KEY (e.g. N2), not by shift CODE (EE) — resolve by code.
+const SHIFT_BY_CODE: Record<string, ShiftDef> =
+  Object.fromEntries(Object.values(SHIFTS).map(s => [s.code, s]));
 
 export function computeShiftMix(
   date: string,
@@ -74,7 +78,7 @@ export function computeShiftMix(
     let best: { code: string; reduction: number; coversPeak: boolean } | null = null;
     const peakIdx = deficit.indexOf(Math.max(...deficit));
     for (const code of WORKING_CODES) {
-      const slots = shiftSlots(SHIFTS[code]).today;
+      const slots = shiftSlots(SHIFT_BY_CODE[code]).today;
       const reduction = slots.reduce((s, i) => s + Math.max(0, Math.min(1, deficit[i])), 0);
       if (reduction <= 0) continue;
       const coversPeak = slots.includes(peakIdx);
@@ -86,7 +90,7 @@ export function computeShiftMix(
     }
     if (!best) break; // nothing reduces deficit anymore
     mix[best.code] = (mix[best.code] ?? 0) + 1;
-    for (const i of shiftSlots(SHIFTS[best.code]).today) {
+    for (const i of shiftSlots(SHIFT_BY_CODE[best.code]).today) {
       deficit[i] -= 1;
       staffed[i] += 1;
     }
@@ -109,7 +113,8 @@ export function computeShiftMix(
 export interface DemandAssignment {
   employeeId: string;
   date: string;
-  code: string;                 // shift code or OFF
+  code: string;                 // shift code, OFF, or L (approved leave)
+  overstaff?: boolean;          // working shift assigned beyond demand (OFF allowance exhausted)
 }
 
 export interface DemandRosterResult {
@@ -119,7 +124,7 @@ export interface DemandRosterResult {
 }
 
 const CATEGORY_OF: Record<string, keyof Pick<ShiftDistribution, 'morning' | 'afternoon' | 'evening' | 'night' | 'midnight'>> = {
-  M: 'morning', B: 'morning', C: 'afternoon', E: 'evening', N: 'night', MD: 'midnight',
+  M: 'morning', B: 'morning', C: 'afternoon', E: 'evening', EE: 'evening', N: 'night', MD: 'midnight', MN: 'midnight',
 };
 
 export function assignRoster(
@@ -160,31 +165,36 @@ export function assignRoster(
 
   for (const date of dates) offToday.set(date, new Set());
   for (const emp of employees) {
+    // 1) Place the weekly allowance on the LOWEST-demand days (35%/day cap staggers the pool).
     let need = opts.offDaysPerWeek;
-    // Forced OFF first: where would they exceed MAX_CONSEC?
-    let c = consec.get(emp.id) ?? 0;
-    for (const date of dates) {
-      if (need <= 0) break;
-      c++;
-      if (c > MAX_CONSEC) {
-        offToday.get(date)!.add(emp.id);
-        need--;
-        c = 0;
-      }
-    }
-    // Remaining OFFs on lowest-demand days (capped so a day never loses >35% of pool)
+    const mine = new Set<string>();
     for (const date of lowDemandOrder) {
       if (need <= 0) break;
       const set = offToday.get(date)!;
       if (set.has(emp.id)) continue;
       if (set.size >= Math.floor(employees.length * 0.35)) continue;
-      set.add(emp.id);
-      need--;
+      set.add(emp.id); mine.add(date); need--;
+    }
+    // 2) Streak repair WITH the planned OFFs credited (the old pre-pass counted every
+    //    date as working, so on a 7-day week EVERY employee got a forced OFF on day 7
+    //    and the whole pool went dark). If a streak would exceed MAX_CONSEC, MOVE one
+    //    of this employee's LATER planned OFFs to the breaking date (total stays =
+    //    allowance); only when none exists is an extra forced-rest OFF legal.
+    let c = consec.get(emp.id) ?? 0;
+    for (const date of dates) {
+      if (mine.has(date)) { c = 0; continue; }
+      c++;
+      if (c > MAX_CONSEC) {
+        const later = dates.filter(d => mine.has(d) && d > date).pop();
+        if (later) { offToday.get(later)!.delete(emp.id); mine.delete(later); }
+        offToday.get(date)!.add(emp.id); mine.add(date);
+        c = 0;
+      }
     }
   }
 
-  // ── Day-by-day assignment, hardest shifts first (MD → N → E → C → B → M)
-  const HARD_ORDER = ['MD', 'N', 'E', 'C', 'B', 'M'];
+  // ── Day-by-day assignment, hardest shifts first (midnights → cross-midnight evenings → …)
+  const HARD_ORDER = ['MD', 'MN', 'EE', 'E', 'N', 'C', 'B', 'M'];
 
   for (const date of dates) {
     const mix = { ...(mixByDate.get(date) ?? {}) };
@@ -200,9 +210,16 @@ export function assignRoster(
       }
     }
 
-    // Register OFF assignments
-    for (const id of offToday.get(date)!) {
+    // Register OFF assignments — but NEVER over the weekly allowance: if an employee
+    // already burned it (e.g. an early surplus OFF), release this planned slot so the
+    // day loop assigns them work instead. Forced-rest (at MAX_CONSEC) stays legal.
+    for (const id of [...offToday.get(date)!]) {
       if (opts.onLeave?.get(id)?.has(date)) continue; // leave already covers the day
+      if ((offUsed.get(id) ?? 0) >= opts.offDaysPerWeek && (consec.get(id) ?? 0) < MAX_CONSEC) {
+        offToday.get(date)!.delete(id);
+        assignedToday.delete(id);
+        continue;
+      }
       assignments.push({ employeeId: id, date, code: 'OFF' });
       consec.set(id, 0);
       prevShift.set(id, SHIFTS.OFF);
@@ -211,7 +228,7 @@ export function assignRoster(
 
     for (const code of HARD_ORDER) {
       let count = mix[code] ?? 0;
-      const shift = SHIFTS[code];
+      const shift = SHIFT_BY_CODE[code];
       const cat = CATEGORY_OF[code];
 
       while (count > 0) {
@@ -220,6 +237,9 @@ export function assignRoster(
           if (assignedToday.has(e.id)) return false;
           if ((consec.get(e.id) ?? 0) >= MAX_CONSEC) return false;
           if (e.gender === 'female' && shift.femaleRule === 'blocked') return false;
+          // Per-function operating hours (same policy the classic engine enforces)
+          const allowed = allowedShiftCodes(e.functionName);
+          if (allowed && !allowed.has(code)) return false;
           const rest = calcRestHours(prevShift.get(e.id) ?? null, shift);
           if (rest !== null && rest < opts.minRestHours) return false;
           return true;
@@ -261,13 +281,41 @@ export function assignRoster(
       }
     }
 
-    // Anyone not assigned and not OFF → extra OFF (pool exceeds demand)
+    // Anyone not assigned and not OFF → pool exceeds demand. An extra OFF is
+    // only allowed while under the weekly OFF allowance — beyond it the
+    // employee MUST work (labeled overstaffing), so OFF days never leak.
     for (const e of employees) {
-      if (!assignedToday.has(e.id)) {
-        assignments.push({ employeeId: e.id, date, code: 'OFF' });
-        consec.set(e.id, 0);
-        prevShift.set(e.id, SHIFTS.OFF);
+      if (assignedToday.has(e.id)) continue;
+      const mustRest = (consec.get(e.id) ?? 0) >= MAX_CONSEC;   // forced-rest OFF stays legal
+      if ((offUsed.get(e.id) ?? 0) >= opts.offDaysPerWeek && !mustRest) {
+        // Next-best working shift: eligible + fairest category share
+        const allowed = allowedShiftCodes(e.functionName);
+        const candidates = WORKING_CODES.filter(code => {
+          const s = SHIFT_BY_CODE[code];
+          if (allowed && !allowed.has(code)) return false;
+          // No demand necessity here → females never get 'warn' shifts in surplus
+          if (e.gender === 'female' && s.femaleRule !== 'allowed') return false;
+          return calcRestHours(prevShift.get(e.id) ?? null, s) >= opts.minRestHours;
+        });
+        if (candidates.length) {
+          candidates.sort((a, b) => {
+            const wa = weekCount.get(e.id)![CATEGORY_OF[a]] + share(ytdDist.get(e.id), CATEGORY_OF[a]);
+            const wb = weekCount.get(e.id)![CATEGORY_OF[b]] + share(ytdDist.get(e.id), CATEGORY_OF[b]);
+            return wa - wb;
+          });
+          const code = candidates[0];
+          assignments.push({ employeeId: e.id, date, code, overstaff: true });
+          weekCount.get(e.id)![CATEGORY_OF[code]] += 1;
+          consec.set(e.id, (consec.get(e.id) ?? 0) + 1);
+          prevShift.set(e.id, SHIFT_BY_CODE[code]);
+          warnings.push(`${date}: ${e.name} — فائض تغطية: أُسند ${code} لأن رصيد الـ OFF الأسبوعي مكتمل [overstaffing]`);
+          continue;
+        }
       }
+      assignments.push({ employeeId: e.id, date, code: 'OFF' });
+      consec.set(e.id, 0);
+      prevShift.set(e.id, SHIFTS.OFF);
+      offUsed.set(e.id, (offUsed.get(e.id) ?? 0) + 1);
     }
   }
 

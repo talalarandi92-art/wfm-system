@@ -12,10 +12,11 @@ import {
 import { generateWeeklySchedule, buildWeekDates } from './generator.engine';
 import { computeShiftMix, assignRoster } from './demand.engine';
 import { CapacityService } from '../capacity/capacity.service';
+import { shiftCategoryFromCode } from '@common/shift-category';
 
 const DEFAULT_OPTIONS: GeneratorOptions = {
   minRestHours: 10,
-  offDaysPerWeek: 1,
+  offDaysPerWeek: 2,   // business rule: 2 OFF days/week (one weekend + one mid-week)
   internProductivity: 0.70,
   // Females end by C (21:00) by default; late shifts (E/N) only when a supervisor
   // explicitly enables the exception. Midnight (N2/MD) always blocked.
@@ -313,17 +314,42 @@ export class GeneratorService {
     return this.fmtDate(d);
   }
 
-  // ── Derive shift from start/end times ────────────────────────────────────────
+  // ── Derive shift from start time — FALLBACK ONLY when the row has no shift
+  //    code. Bands aligned with the canonical shiftCategoryFromHour
+  //    (common/shift-category.ts): M 07 · B 09 · C 11 · N 13 · E 16 · EE 18 · MD 22.
   private deriveShiftFromStart(startTime: string | null, endTime?: string | null): ShiftDef {
     if (!startTime) return SHIFTS.OFF;
     const h = parseInt(startTime.split(':')[0], 10);
-    if (h >= 6  && h < 10) return SHIFTS.M;
-    if (h >= 10 && h < 12) return SHIFTS.B;
-    if (h >= 12 && h < 14) return SHIFTS.C;
-    if (h >= 14 && h < 17) return SHIFTS.E;
-    if (h >= 17 && h < 20) return SHIFTS.N;
-    if (h >= 20 && h < 23) return SHIFTS.N2;
-    return SHIFTS.MD;
+    if (h >= 5  && h <= 8)  return SHIFTS.M;
+    if (h >= 9  && h <= 10) return SHIFTS.B;
+    if (h >= 11 && h <= 12) return SHIFTS.C;
+    if (h >= 13 && h <= 15) return SHIFTS.N;
+    if (h >= 16 && h <= 17) return SHIFTS.E;
+    if (h >= 18 && h <= 20) return SHIFTS.N2;   // EE
+    if (h >= 21 && h <= 22) return SHIFTS.MD;
+    return SHIFTS.MN;
+  }
+
+  // ── CODE-FIRST classification (canonical rule — WFM_RULES §3): resolve a raw
+  //    scheduled shift code to its catalog ShiftDef via the ONE classifier.
+  //    Returns null when the code is unclassifiable → caller falls back to hours.
+  private shiftDefFromCode(codeRaw: string | null | undefined): ShiftDef | null {
+    if (!codeRaw) return null;
+    const cat = shiftCategoryFromCode(codeRaw);
+    if (cat === 'other') return null;
+    const code = String(codeRaw).toUpperCase()
+      .replace(/^WFH[-_]?/, '').replace(/[-_]?WFH$/, '').trim();
+    // Exact/prefix catalog match, longest code first (MD before M, EE before E)
+    const match = Object.values(SHIFTS)
+      .filter(s => s.code !== 'OFF' && s.code !== 'L')
+      .sort((a, b) => b.code.length - a.code.length)
+      .find(s => code === s.code || code.startsWith(s.code));
+    if (match) return match;
+    // No direct catalog entry (e.g. AM) → category representative
+    if (cat === 'midnight') return SHIFTS.MD;
+    if (cat === 'night')    return SHIFTS.N;
+    if (cat === 'evening')  return SHIFTS.E;
+    return SHIFTS.M;
   }
 
   // ── Load active employees ────────────────────────────────────────────────────
@@ -368,17 +394,10 @@ export class GeneratorService {
     return Array.from(fnMap.values()).filter((fn) => fn.employees.length > 0);
   }
 
-  // Helper: derive shift code label from start time (for byCodes tracking)
+  // Helper: derive shift code label from start time (fallback for byCodes when
+  // the row carries no code) — delegates to the ONE hour→ShiftDef fallback.
   private deriveShiftCode(start: string | null): string {
-    if (!start) return 'OFF';
-    const h = parseInt(start.split(':')[0], 10);
-    if (h >= 6  && h < 10) return 'M';
-    if (h >= 10 && h < 12) return 'B';
-    if (h >= 12 && h < 14) return 'C';
-    if (h >= 14 && h < 17) return 'E';   // covers N/E family 14-16
-    if (h >= 17 && h < 20) return 'N';
-    if (h >= 20 && h < 23) return 'EE';
-    return 'MD';
+    return this.deriveShiftFromStart(start).code;
   }
 
   // Helper: is a date a weekend day. Business rule — weekend = Thu/Fri/Sat.
@@ -414,8 +433,10 @@ export class GeneratorService {
          ar.attendance_marker,
          ar.scheduled_start,
          ar.scheduled_end,
+         sc.code AS shift_code,
          ar.attendance_date::date::text AS attendance_date
        FROM attendance_records ar
+       LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
        WHERE ar.tenant_id = $1
          AND ar.employee_id = ANY($2::uuid[])
          AND ar.attendance_date BETWEEN $3 AND $4`,
@@ -428,8 +449,8 @@ export class GeneratorService {
         `SELECT r.employee_id AS requester_id, rs.target_employee_id,
                 rs.requester_date::date::text AS requester_date,
                 rs.target_date::date::text    AS target_date,
-                sc1.start_time AS req_start, sc1.end_time AS req_end,
-                sc2.start_time AS tgt_start, sc2.end_time AS tgt_end
+                sc1.start_time AS req_start, sc1.end_time AS req_end, sc1.code AS req_code,
+                sc2.start_time AS tgt_start, sc2.end_time AS tgt_end, sc2.code AS tgt_code
          FROM request_shift_swaps rs
          JOIN requests r ON r.id = rs.request_id AND r.status = 'approved'
          LEFT JOIN shift_codes sc1 ON sc1.id = rs.requester_shift_code_id
@@ -440,18 +461,19 @@ export class GeneratorService {
       ).catch(() => []);
 
       if (swaps.length) {
-        // (employeeId|date) → original times
-        const original = new Map<string, { start: string | null; end: string | null }>();
+        // (employeeId|date) → original times + code
+        const original = new Map<string, { start: string | null; end: string | null; code: string | null }>();
         for (const s of swaps) {
-          original.set(`${s.requester_id}|${s.requester_date}`, { start: s.req_start, end: s.req_end });
+          original.set(`${s.requester_id}|${s.requester_date}`,
+            { start: s.req_start, end: s.req_end, code: s.req_code });
           if (s.target_employee_id) {
             original.set(`${s.target_employee_id}|${s.target_date ?? s.requester_date}`,
-              { start: s.tgt_start, end: s.tgt_end });
+              { start: s.tgt_start, end: s.tgt_end, code: s.tgt_code });
           }
         }
         for (const r of rows) {
           const o = original.get(`${r.employee_id}|${r.attendance_date}`);
-          if (o) { r.scheduled_start = o.start; r.scheduled_end = o.end; }
+          if (o) { r.scheduled_start = o.start; r.scheduled_end = o.end; r.shift_code = o.code; }
         }
       }
     }
@@ -497,15 +519,17 @@ export class GeneratorService {
       if (cons.current > cons.max) cons.max = cons.current;
       if (isWknd) d.weekendWork++;
 
-      const shift = this.deriveShiftFromStart(r.scheduled_start, r.scheduled_end);
-      if (shift.category === 'morning')        d.morning++;
-      else if (shift.category === 'afternoon') d.afternoon++;
-      else if (shift.category === 'evening')   d.evening++;
-      else if (shift.category === 'night')     d.night++;
-      else if (shift.category === 'midnight')  d.midnight++;
+      // CODE-FIRST (canonical rule): classify by the scheduled shift CODE via
+      // the ONE classifier; fall back to the hour-derived code ONLY when the
+      // row carries no code. The raw code feeds byCodes.
+      const code: string = r.shift_code ?? this.deriveShiftCode(r.scheduled_start);
+      const cat = shiftCategoryFromCode(code);
+      if (cat === 'morning')        d.morning++;
+      else if (cat === 'evening')   d.evening++;
+      else if (cat === 'night')     d.night++;
+      else if (cat === 'midnight')  d.midnight++;
 
       // Per-code count
-      const code = this.deriveShiftCode(r.scheduled_start);
       d.byCodes[code] = (d.byCodes[code] ?? 0) + 1;
     }
 
@@ -525,8 +549,10 @@ export class GeneratorService {
   ): Promise<Map<string, ShiftDef>> {
     const rows = await this.ds.query(
       `SELECT DISTINCT ON (ar.employee_id)
-         ar.employee_id, ar.scheduled_start, ar.scheduled_end, ar.attendance_marker
+         ar.employee_id, ar.scheduled_start, ar.scheduled_end, ar.attendance_marker,
+         sc.code AS shift_code
        FROM attendance_records ar
+       LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
        WHERE ar.tenant_id = $1
          AND ar.employee_id = ANY($2::uuid[])
          AND ar.attendance_date < $3
@@ -539,7 +565,10 @@ export class GeneratorService {
       if (r.attendance_marker === 'off') {
         map.set(r.employee_id, SHIFTS.OFF);
       } else {
-        map.set(r.employee_id, this.deriveShiftFromStart(r.scheduled_start, r.scheduled_end));
+        // Code-first; hour fallback ONLY when the row has no shift code
+        map.set(r.employee_id,
+          this.shiftDefFromCode(r.shift_code)
+            ?? this.deriveShiftFromStart(r.scheduled_start, r.scheduled_end));
       }
     }
     return map;
@@ -624,17 +653,42 @@ export class GeneratorService {
       };
     }
 
-    const [ytdDist, lastShifts, consecDays] = await Promise.all([
+    const weeksCount = Math.min(Math.max(options.weeks ?? 1, 1), 4);
+
+    // Full generation horizon (for the approved-leave lookup)
+    const allDates: string[] = [];
+    for (let w = 0; w < weeksCount; w++) allDates.push(...buildWeekDates(this.addWeeks(weekStart, w)));
+    const horizonFrom = allDates[0];
+    const horizonTo = allDates[allDates.length - 1];
+
+    const [ytdDist, lastShifts, consecDays, leaveRows] = await Promise.all([
       this.loadYtdDistribution(tenantId, allEmployeeIds, weekStart),
       this.loadLastShifts(tenantId, allEmployeeIds, weekStart),
       this.loadConsecutiveDays(tenantId, allEmployeeIds, weekStart),
+      // Approved leaves overlapping the horizon → those days become 'L'
+      this.ds.query(
+        `SELECT r.employee_id, rl.start_date::date::text AS start_date, rl.end_date::date::text AS end_date
+         FROM requests r
+         JOIN request_leaves rl ON rl.request_id = r.id
+         WHERE r.tenant_id = $1 AND r.status = 'approved'
+           AND rl.start_date <= $3::date AND rl.end_date >= $2::date`,
+        [tenantId, horizonFrom, horizonTo],
+      ).catch(() => []),
     ]);
 
-    const weeksCount = Math.min(Math.max(options.weeks ?? 1, 1), 4);
+    // empId → Set of dates covered by approved leave (same shape as the demand path)
+    const onLeave = new Map<string, Set<string>>();
+    for (const lv of leaveRows) {
+      for (const date of allDates) {
+        if (date >= lv.start_date && date <= lv.end_date) {
+          (onLeave.get(lv.employee_id) ?? onLeave.set(lv.employee_id, new Set()).get(lv.employee_id)!).add(date);
+        }
+      }
+    }
 
     // ── Single week (default path) ────────────────────────────────────────────
     if (weeksCount === 1) {
-      return generateWeeklySchedule(employeesByFunction, ytdDist, lastShifts, weekStart, options, consecDays);
+      return generateWeeklySchedule(employeesByFunction, ytdDist, lastShifts, weekStart, options, consecDays, onLeave);
     }
 
     // ── Multi-week: run engine week by week, feed each week into the next ─────
@@ -652,6 +706,7 @@ export class GeneratorService {
         currentWeekStart,
         options,
         currentConsecDays,
+        onLeave,
       );
 
       if (!combined) {
@@ -670,6 +725,7 @@ export class GeneratorService {
             if (!wEmp) continue;
             emp.assignments = [...emp.assignments, ...wEmp.assignments];
             emp.weekStats.morningCount   += wEmp.weekStats.morningCount;
+            emp.weekStats.afternoonCount = (emp.weekStats.afternoonCount ?? 0) + (wEmp.weekStats.afternoonCount ?? 0);
             emp.weekStats.eveningCount   = (emp.weekStats.eveningCount ?? 0) + (wEmp.weekStats.eveningCount ?? 0);
             emp.weekStats.nightCount     += wEmp.weekStats.nightCount;
             emp.weekStats.midnightCount  += wEmp.weekStats.midnightCount;
@@ -896,7 +952,39 @@ export class GeneratorService {
   }
 
   // ── Publish Version ───────────────────────────────────────────────────────────
-  async publishVersion(tenantId: string, versionId: string, userId: string) {
+  async publishVersion(tenantId: string, versionId: string, userId: string, force = false) {
+    const [version] = await this.ds.query(
+      `SELECT id, period_start::date::text AS period_start, period_end::date::text AS period_end
+       FROM schedule_versions WHERE id = $1 AND tenant_id = $2`,
+      [versionId, tenantId],
+    );
+    if (!version) throw new BadRequestException('Schedule version not found.');
+
+    // PUBLISH-OVERWRITE GUARD (business rule 6.7): a published/locked schedule
+    // must never be silently overwritten by publishing another version over the
+    // same period. An explicit force archives the old version(s) — audited below.
+    const conflicts = await this.ds.query(
+      `SELECT id, label, status
+       FROM schedule_versions
+       WHERE tenant_id = $1 AND id <> $2 AND status IN ('published','locked')
+         AND period_start <= $4::date AND period_end >= $3::date`,
+      [tenantId, versionId, version.period_start, version.period_end],
+    );
+    if (conflicts.length && !force) {
+      throw new BadRequestException(
+        `A published/locked schedule already covers ${version.period_start} → ${version.period_end}: ` +
+        conflicts.map((c: any) => `"${c.label ?? c.id}" (${c.status})`).join('; ') +
+        `. Re-publish with force=true to archive it and replace, or edit the published version instead.`,
+      );
+    }
+    if (conflicts.length && force) {
+      await this.ds.query(
+        `UPDATE schedule_versions SET status = 'archived', updated_at = NOW()
+         WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+        [tenantId, conflicts.map((c: any) => c.id)],
+      );
+    }
+
     await this.ds.query(
       `UPDATE schedule_versions
        SET status = 'published', published_at = NOW(), published_by = $3, updated_at = NOW()
@@ -907,20 +995,36 @@ export class GeneratorService {
     // Apply the published version to the live, agent-facing schedule. Each entry's
     // shift code is resolved to its scheduled times and upserted into
     // attendance_records (tenant, employee, date) — so once published, every agent
-    // sees their new shifts. Only the SCHEDULED fields are touched; any actual
-    // punch/login data on a row is preserved.
+    // sees their new shifts. Only the SCHEDULED fields are touched; rows that
+    // already carry ACTUAL punch/system data are skipped entirely (never rewrite
+    // a day that has really been worked) and reported in the response.
     const [applied] = await this.ds.query(
-      `WITH ins AS (
+      `WITH src AS (
+         SELECT se.tenant_id, se.employee_id, se.entry_date, se.attendance_marker,
+                sc.id AS shift_code_id, sc.start_time, sc.end_time, sc.start_time_2, sc.end_time_2
+           FROM schedule_entries se
+           LEFT JOIN shift_codes sc ON sc.tenant_id = se.tenant_id AND sc.code = se.shift_code_display
+          WHERE se.schedule_version_id = $1 AND se.tenant_id = $2
+       ),
+       skipped AS (
+         SELECT s.employee_id, s.entry_date
+           FROM src s
+           JOIN attendance_records ar
+             ON ar.tenant_id = $2 AND ar.employee_id = s.employee_id AND ar.attendance_date = s.entry_date
+          WHERE ar.punch_in IS NOT NULL OR ar.system_login IS NOT NULL
+       ),
+       ins AS (
          INSERT INTO attendance_records
            (id, tenant_id, employee_id, attendance_date, scheduled_shift_code_id,
             scheduled_start, scheduled_end, scheduled_start_2, scheduled_end_2,
             attendance_marker, created_at, updated_at)
-         SELECT gen_random_uuid(), se.tenant_id, se.employee_id, se.entry_date, sc.id,
-                sc.start_time, sc.end_time, sc.start_time_2, sc.end_time_2,
-                se.attendance_marker::attendance_marker_enum, NOW(), NOW()
-           FROM schedule_entries se
-           LEFT JOIN shift_codes sc ON sc.tenant_id = se.tenant_id AND sc.code = se.shift_code_display
-          WHERE se.schedule_version_id = $1 AND se.tenant_id = $2
+         SELECT gen_random_uuid(), s.tenant_id, s.employee_id, s.entry_date, s.shift_code_id,
+                s.start_time, s.end_time, s.start_time_2, s.end_time_2,
+                s.attendance_marker::attendance_marker_enum, NOW(), NOW()
+           FROM src s
+          WHERE NOT EXISTS (
+            SELECT 1 FROM skipped k
+            WHERE k.employee_id = s.employee_id AND k.entry_date = s.entry_date)
          ON CONFLICT (tenant_id, employee_id, attendance_date) DO UPDATE SET
             scheduled_shift_code_id = EXCLUDED.scheduled_shift_code_id,
             scheduled_start   = EXCLUDED.scheduled_start,
@@ -931,11 +1035,32 @@ export class GeneratorService {
             updated_at = NOW()
          RETURNING 1
        )
-       SELECT COUNT(*)::int AS n FROM ins`,
+       SELECT (SELECT COUNT(*)::int FROM ins)     AS n,
+              (SELECT COUNT(*)::int FROM skipped) AS skipped`,
       [versionId, tenantId],
     );
 
-    return { success: true, versionId, appliedToAgents: applied?.n ?? 0 };
+    // Audit the forced replacement — one row per archived version.
+    if (conflicts.length && force) {
+      for (const c of conflicts) {
+        await this.ds.query(
+          `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, notes)
+           VALUES ($1,$2,'schedule.published','schedule-generator','schedule_version',$3,$4)`,
+          [tenantId, userId, c.id,
+           `Force-published version ${versionId} over ${version.period_start} → ${version.period_end}; ` +
+           `archived ${c.status} version ${c.id} ("${c.label ?? ''}"); ` +
+           `applied ${applied?.n ?? 0} row(s) to attendance_records, skipped ${applied?.skipped ?? 0} with actual punch/system data`],
+        ).catch(() => {});
+      }
+    }
+
+    return {
+      success: true,
+      versionId,
+      appliedToAgents: applied?.n ?? 0,
+      skippedWithActuals: applied?.skipped ?? 0,
+      archivedVersionIds: force ? conflicts.map((c: any) => c.id) : [],
+    };
   }
 
   // ── Available Weeks ───────────────────────────────────────────────────────────

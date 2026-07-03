@@ -72,6 +72,14 @@ export const SHIFTS: Record<string, ShiftDef> = {
     category: 'off', crossMidnight: false,
     femaleRule: 'allowed', color: '#475569',
   },
+  // Approved leave — NOT a working shift and NOT an OFF: it never consumes the
+  // weekly OFF allowance and is excluded from coverage.working.
+  L: {
+    code: 'L', label: 'إجازة معتمدة', labelEn: 'Leave',
+    start: null, end: null, hours: 0,
+    category: 'off', crossMidnight: false,
+    femaleRule: 'allowed', color: '#10b981',
+  },
 };
 
 /**
