@@ -395,7 +395,7 @@ export class PermissionRequestService implements OnModuleInit {
 
   async approveRequest(tenantId: string, requestId: string, dto: ApproveRequestDto): Promise<void> {
     const rows = await this.ds.query(
-      `SELECT r.id, r.status, r.approver_l1_id, r.approved_l1_at FROM requests r WHERE r.id=$1 AND r.tenant_id=$2`,
+      `SELECT r.id, r.status, r.employee_id, r.approver_l1_id, r.approved_l1_at FROM requests r WHERE r.id=$1 AND r.tenant_id=$2`,
       [requestId, tenantId],
     );
     if (!rows.length) throw new NotFoundException('Request not found');
@@ -403,6 +403,8 @@ export class PermissionRequestService implements OnModuleInit {
     if (['approved','rejected','cancelled'].includes(req.status)) {
       throw new BadRequestException(`Request is already ${req.status}`);
     }
+
+    let fullyApproved = false;
 
     // If no L1 approval yet → set L1
     if (!req.approved_l1_at) {
@@ -420,19 +422,31 @@ export class PermissionRequestService implements OnModuleInit {
           `UPDATE requests SET status='approved'::request_status_enum, updated_at=NOW() WHERE id=$1`,
           [requestId],
         );
+        fullyApproved = true;
       }
     } else {
+      // L2 must be a DIFFERENT person than L1 — no single-person double approval.
+      if (dto.approverId && req.approver_l1_id && dto.approverId === req.approver_l1_id) {
+        throw new BadRequestException('لا يمكن لنفس المعتمد اعتماد المستويين الأول والثاني — يجب أن يكون معتمد المستوى الثاني شخصاً آخر');
+      }
       // L2 approval → mark fully approved
       await this.ds.query(
         `UPDATE requests SET approver_l2_id=$1, approved_l2_at=NOW(), status='approved'::request_status_enum, updated_at=NOW() WHERE id=$2`,
         [dto.approverId, requestId],
       );
+      fullyApproved = true;
+    }
+
+    if (fullyApproved) {
+      // Stamp the canonical roster row (tardiness/conformance read permission_type)
+      await this.stampRosterPermission(tenantId, requestId);
+      await this.notifyRequesterDecision(tenantId, req.employee_id, requestId, 'approved');
     }
   }
 
   async rejectRequest(tenantId: string, requestId: string, dto: RejectRequestDto): Promise<void> {
     const rows = await this.ds.query(
-      `SELECT id, status FROM requests WHERE id=$1 AND tenant_id=$2`, [requestId, tenantId],
+      `SELECT id, status, employee_id FROM requests WHERE id=$1 AND tenant_id=$2`, [requestId, tenantId],
     );
     if (!rows.length) throw new NotFoundException('Request not found');
     if (['approved','rejected'].includes(rows[0].status)) {
@@ -442,6 +456,49 @@ export class PermissionRequestService implements OnModuleInit {
       `UPDATE requests SET status='rejected'::request_status_enum, rejected_by=$1, rejected_at=NOW(), rejection_reason=$2, updated_at=NOW() WHERE id=$3`,
       [dto.rejectorId, dto.reason, requestId],
     );
+    await this.notifyRequesterDecision(tenantId, rows[0].employee_id, requestId, 'rejected', dto.reason ?? null);
+  }
+
+  /** Notify the requesting employee that their permission was approved/rejected. */
+  private async notifyRequesterDecision(
+    tenantId: string, employeeId: string, requestId: string,
+    decision: 'approved' | 'rejected', reason?: string | null,
+  ): Promise<void> {
+    const titleEn = decision === 'approved' ? 'Permission approved' : 'Permission rejected';
+    const titleAr = decision === 'approved' ? 'تمت الموافقة على استئذانك' : 'تم رفض استئذانك';
+    const bodyEn = `Your permission request was ${decision}${reason ? ' — ' + reason : ''}`;
+    const bodyAr = `${titleAr}${reason ? ' — ' + reason : ''}`;
+    await this.ds.query(
+      `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id, action_url)
+       SELECT $1, u.id, $3, $4, $5, $6, $7, 'request', $8, '/requests'
+       FROM users u WHERE u.tenant_id = $1 AND u.employee_id = $2 AND u.status = 'active'`,
+      [tenantId, employeeId, `request.${decision}`, titleEn, titleAr, bodyEn, bodyAr, requestId],
+    ).catch(() => {});
+  }
+
+  /** Stamp an APPROVED permission onto the canonical roster_days row for that
+   *  date (permission_type/permission_duration) so tardiness/conformance
+   *  reports fold it in. Idempotent — safe if the roster row is not there yet. */
+  private async stampRosterPermission(tenantId: string, requestId: string): Promise<void> {
+    const rows = await this.ds.query(
+      `SELECT rp.permission_date::text AS pdate, rp.start_time::text AS st, rp.end_time::text AS et,
+              rp.duration_minutes, rp.permission_type, e.employee_no
+       FROM request_permissions rp
+       JOIN requests r ON r.id = rp.request_id
+       JOIN employees e ON e.id = r.employee_id
+       WHERE rp.request_id = $1 AND r.tenant_id = $2`,
+      [requestId, tenantId],
+    ).catch(() => []);
+    if (!rows.length || rows[0].employee_no == null) return;
+    const p = rows[0];
+    const permDur = `${String(p.st ?? '').slice(0, 5)} → ${String(p.et ?? '').slice(0, 5)}`
+      + (p.duration_minutes ? ` (${p.duration_minutes}m)` : '');
+    await this.ds.query(
+      `UPDATE roster_days
+       SET permission_type = $1, permission_duration = $2
+       WHERE tenant_id = $3 AND person_no = $4 AND work_date = $5::date AND is_active`,
+      [p.permission_type ?? 'permission', permDur, tenantId, String(p.employee_no), p.pdate],
+    ).catch(() => {});
   }
 
   async cancelRequest(tenantId: string, requestId: string, employeeId: string): Promise<void> {

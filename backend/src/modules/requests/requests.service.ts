@@ -644,7 +644,7 @@ export class RequestsService {
 
   async approve(tenantId: string, requestId: string, dto: ApproveRejectDto) {
     const rows = await this.ds.query(
-      `SELECT r.id, r.status, rt.code AS type_code
+      `SELECT r.id, r.status, r.employee_id, rt.code AS type_code
        FROM requests r JOIN request_types rt ON rt.id = r.request_type_id
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [requestId, tenantId],
@@ -662,10 +662,14 @@ export class RequestsService {
 
     const approverId = await this.resolveUserIdOrNull(tenantId, dto.approverId);
 
-    // Write the swap to the live schedule FIRST. If it throws (e.g. a missing
+    // Write the approval to the live schedule FIRST. If it throws (e.g. a missing
     // schedule row), the request stays pending rather than approved-but-unapplied.
     if (isSwap) {
       await this.applySwap(tenantId, requestId, approverId);
+    } else if (['annual_leave', 'sick_leave', 'death_leave', 'comp_off', 'wfh', 'emergency_leave'].includes(req.type_code)) {
+      await this.applyLeaveToSchedule(tenantId, requestId, req.type_code, approverId);
+    } else if (req.type_code === 'permission') {
+      await this.applyPermissionToRoster(tenantId, requestId);
     }
 
     await this.ds.query(
@@ -682,12 +686,17 @@ export class RequestsService {
       [tenantId, approverId, requestId, `Approved ${req.type_code}`],
     ).catch(() => {});
 
+    await this.notifyRequesterDecision(tenantId, req.employee_id, requestId, 'approved', req.type_code);
+
     return { success: true, message: 'تمت الموافقة على الطلب' };
   }
 
   async reject(tenantId: string, requestId: string, dto: ApproveRejectDto) {
     const rows = await this.ds.query(
-      `SELECT id FROM requests WHERE id = $1 AND tenant_id = $2`, [requestId, tenantId],
+      `SELECT r.id, r.employee_id, rt.code AS type_code
+       FROM requests r JOIN request_types rt ON rt.id = r.request_type_id
+       WHERE r.id = $1 AND r.tenant_id = $2`,
+      [requestId, tenantId],
     );
     if (!rows.length) throw new NotFoundException('الطلب غير موجود');
 
@@ -706,6 +715,10 @@ export class RequestsService {
        VALUES ($1,$2,'request.rejected','requests','request',$3,$4)`,
       [tenantId, rejecterId, requestId, dto.reason ?? 'rejected'],
     ).catch(() => {});
+
+    await this.notifyRequesterDecision(
+      tenantId, rows[0].employee_id, requestId, 'rejected', rows[0].type_code, dto.reason ?? null);
+
     return { success: true, message: 'تم رفض الطلب' };
   }
 
@@ -740,6 +753,191 @@ export class RequestsService {
       `SELECT id FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [userId, tenantId],
     );
     return r.length ? userId : null;
+  }
+
+  /** Notify the requesting employee that their request was approved/rejected
+   *  (same SELECT-into-INSERT pattern as the swap-applied notification). */
+  private async notifyRequesterDecision(
+    tenantId: string, employeeId: string, requestId: string,
+    decision: 'approved' | 'rejected', typeCode: string, reason?: string | null,
+  ) {
+    const titleEn = decision === 'approved' ? 'Request approved' : 'Request rejected';
+    const titleAr = decision === 'approved' ? 'تمت الموافقة على طلبك' : 'تم رفض طلبك';
+    const bodyEn = `Your ${typeCode} request was ${decision}${reason ? ' — ' + reason : ''}`;
+    const bodyAr = `${titleAr} (${typeCode})${reason ? ' — ' + reason : ''}`;
+    await this.ds.query(
+      `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id, action_url)
+       SELECT $1, u.id, $3, $4, $5, $6, $7, 'request', $8, '/requests'
+       FROM users u WHERE u.tenant_id = $1 AND u.employee_id = $2 AND u.status = 'active'`,
+      [tenantId, employeeId, `request.${decision}`, titleEn, titleAr, bodyEn, bodyAr, requestId],
+    ).catch(() => {});
+  }
+
+  /**
+   * Reflect an APPROVED leave/sick/WFH request into the live schedule + roster.
+   * For each date in start_date..end_date:
+   *   - attendance_records: set the attendance_marker ('leave'/'sick'/'comp' per
+   *     type; wfh keeps its marker and sets is_wfh) + append a version-history
+   *     edit into the notes JSON timeline (same shape applySwap builds) + audit.
+   *   - roster_days: mirror presence + hr_code with the SAME codes the recon
+   *     engine writes (L / SL / DL / COMP / WFH) so reports stay consistent.
+   * Runs inside ONE transaction (TypeORM runner — never separate BEGIN/COMMIT).
+   * Half-day leaves are NOT reflected (no half-day marker exists — would
+   * overstate the absence); they keep the working shift.
+   */
+  private async applyLeaveToSchedule(
+    tenantId: string, requestId: string, typeCode: string, approverUserId: string | null,
+  ) {
+    // Marker + roster codes per type — engine-consistent (recon-build.js hr_code rule).
+    const MAP: Record<string, { marker: string | null; hrCode: string; presence: string; isWfh: boolean }> = {
+      annual_leave:    { marker: 'leave', hrCode: 'L',    presence: 'leave', isWfh: false },
+      emergency_leave: { marker: 'leave', hrCode: 'L',    presence: 'leave', isWfh: false },
+      death_leave:     { marker: 'leave', hrCode: 'DL',   presence: 'leave', isWfh: false },
+      sick_leave:      { marker: 'sick',  hrCode: 'SL',   presence: 'sick',  isWfh: false },
+      comp_off:        { marker: 'comp',  hrCode: 'COMP', presence: 'off',   isWfh: false },
+      wfh:             { marker: null,    hrCode: 'WFH',  presence: 'wfh',   isWfh: true  }, // keeps its shift marker
+    };
+    const m = MAP[typeCode];
+    if (!m) return;
+
+    const lvRows = await this.ds.query(
+      `SELECT rl.start_date::text AS start_date, rl.end_date::text AS end_date, rl.is_half_day,
+              r.employee_id, e.employee_no,
+              TRIM(COALESCE(e.first_name_en,'') || ' ' || COALESCE(e.last_name_en,'')) AS emp_name,
+              f.name AS function_name
+       FROM request_leaves rl
+       JOIN requests r ON r.id = rl.request_id
+       JOIN employees e ON e.id = r.employee_id
+       LEFT JOIN functions f ON f.id = e.function_id
+       WHERE rl.request_id = $1 AND r.tenant_id = $2`,
+      [requestId, tenantId],
+    );
+    if (!lvRows.length) return;             // no leave extension row — nothing to reflect
+    const lv = lvRows[0];
+    if (lv.is_half_day) return;             // half-day: keep the working shift (see doc above)
+
+    // Iterate local dates start..end (capped at 92 days as a sanity guard)
+    const start = new Date(lv.start_date);
+    const end   = new Date(lv.end_date);
+    const dates: string[] = [];
+    const cur    = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const endDay = new Date(end.getFullYear(),   end.getMonth(),   end.getDate());
+    while (cur <= endDay && dates.length < 92) {
+      dates.push(RequestsService.ymdLocal(cur));
+      cur.setDate(cur.getDate() + 1);
+    }
+    if (!dates.length) return;
+
+    // Approver attribution for the version-history entries (same as applySwap)
+    let approverEmail: string | null = null;
+    if (approverUserId) {
+      const ar = await this.ds
+        .query(`SELECT email FROM users WHERE id = $1 AND tenant_id = $2 LIMIT 1`, [approverUserId, tenantId])
+        .catch(() => []);
+      approverEmail = ar?.[0]?.email ?? null;
+    }
+
+    const personNo = lv.employee_no != null ? String(lv.employee_no) : null;
+
+    await this.ds.transaction(async (trx) => {
+      for (const d of dates) {
+        // ── Live schedule grid (attendance_records) ─────────────────────────
+        const rec = await trx.query(
+          `SELECT id, attendance_marker, scheduled_start, scheduled_end, is_wfh, notes
+           FROM attendance_records
+           WHERE tenant_id = $1 AND employee_id = $2 AND attendance_date::date = $3::date
+           FOR UPDATE`,
+          [tenantId, lv.employee_id, d],
+        );
+        if (rec.length) {
+          const r0 = rec[0];
+          const newMarker = m.marker ?? r0.attendance_marker;
+          const from = { marker: r0.attendance_marker, start: r0.scheduled_start, end: r0.scheduled_end };
+          const to   = { marker: newMarker, start: r0.scheduled_start, end: r0.scheduled_end, code: m.hrCode };
+
+          // Append a version-history edit into the notes JSON timeline the
+          // schedule UI reads (getCellTimeline) — same shape applySwap builds.
+          let audit: { original?: any; edits: any[] } = { edits: [] };
+          if (r0.notes) {
+            try {
+              const p = JSON.parse(r0.notes);
+              if (p && typeof p === 'object' && Array.isArray(p.edits)) audit = p;
+            } catch { /* legacy/plain notes — start a fresh audit */ }
+          }
+          if (!Array.isArray(audit.edits)) audit.edits = [];
+          if (audit.edits.length === 0) audit.original = from;
+          audit.edits.push({
+            seq: audit.edits.length + 1,
+            by: approverEmail ?? 'WFM',
+            byId: approverUserId,
+            at: new Date().toISOString(),
+            from,
+            to,
+            type: typeCode,
+            reason: `طلب ${typeCode} معتمد (request ${requestId})`,
+            sourceOfChange: 'request_approval',
+            validations: [],
+            requiresApproval: false,
+            employeeName: lv.emp_name,
+            functionName: lv.function_name,
+          });
+
+          await trx.query(
+            `UPDATE attendance_records
+             SET attendance_marker = $1::attendance_marker_enum,
+                 is_wfh = $2, notes = $3, updated_at = NOW()
+             WHERE id = $4`,
+            [newMarker, m.isWfh ? true : r0.is_wfh, JSON.stringify(audit), r0.id],
+          );
+
+          await trx.query(
+            `INSERT INTO audit_logs
+               (tenant_id, actor_id, action, module, entity_type, entity_id, old_value, new_value, notes)
+             VALUES ($1, $2, 'schedule.request_applied', 'requests', 'attendance_record', $3, $4::jsonb, $5::jsonb, $6)`,
+            [
+              tenantId, approverUserId, r0.id,
+              JSON.stringify({ marker: r0.attendance_marker, is_wfh: r0.is_wfh, date: d }),
+              JSON.stringify({ marker: newMarker, is_wfh: m.isWfh ? true : r0.is_wfh, hr_code: m.hrCode, date: d }),
+              `${typeCode} applied (request ${requestId})`,
+            ],
+          );
+        }
+
+        // ── Canonical roster (roster_days) — engine-consistent codes ────────
+        if (personNo) {
+          await trx.query(
+            `UPDATE roster_days
+             SET presence = $1, hr_code = $2
+             WHERE tenant_id = $3 AND person_no = $4 AND work_date = $5::date AND is_active`,
+            [m.presence, m.hrCode, tenantId, personNo, d],
+          );
+        }
+      }
+    });
+  }
+
+  /** Stamp an APPROVED permission onto the canonical roster row for that date so
+   *  tardiness/conformance reads (permission_type IS NOT NULL) fold it in. */
+  private async applyPermissionToRoster(tenantId: string, requestId: string) {
+    const rows = await this.ds.query(
+      `SELECT rp.permission_date::text AS pdate, rp.start_time::text AS st, rp.end_time::text AS et,
+              rp.duration_minutes, rp.permission_type, e.employee_no
+       FROM request_permissions rp
+       JOIN requests r ON r.id = rp.request_id
+       JOIN employees e ON e.id = r.employee_id
+       WHERE rp.request_id = $1 AND r.tenant_id = $2`,
+      [requestId, tenantId],
+    );
+    if (!rows.length || rows[0].employee_no == null) return;
+    const p = rows[0];
+    const permDur = `${String(p.st ?? '').slice(0, 5)} → ${String(p.et ?? '').slice(0, 5)}`
+      + (p.duration_minutes ? ` (${p.duration_minutes}m)` : '');
+    await this.ds.query(
+      `UPDATE roster_days
+       SET permission_type = $1, permission_duration = $2
+       WHERE tenant_id = $3 AND person_no = $4 AND work_date = $5::date AND is_active`,
+      [p.permission_type ?? 'permission', permDur, tenantId, String(p.employee_no), p.pdate],
+    ).catch(() => {});
   }
 
   /**
@@ -1007,6 +1205,7 @@ export class RequestsService {
     const arabicNames: Record<string, string> = {
       annual_leave: 'الإجازة السنوية', sick_leave: 'الإجازة المرضية',
       death_leave: 'إجازة الوفاة', comp_off: 'اليوم التعويضي', wfh: 'العمل من المنزل',
+      emergency_leave: 'الإجازة الطارئة', university_exam: 'موعد/امتحان جامعي',
     };
 
     return {
@@ -1203,9 +1402,9 @@ export class RequestsService {
    *  SINGLE REQUEST
    * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-  async getOne(tenantId: string, requestId: string) {
+  async getOne(tenantId: string, requestId: string, scopeEmployeeId?: string) {
     const rows = await this.ds.query(
-      `SELECT r.id, r.status, r.notes, r.submitted_at,
+      `SELECT r.id, r.employee_id, r.status, r.notes, r.submitted_at,
               r.approved_l1_at, r.rejected_at, r.rejection_reason, r.is_urgent,
               rt.code AS type_code, rt.name_ar,
               e.first_name_en || ' ' || e.last_name_en AS requester_name,
@@ -1233,6 +1432,11 @@ export class RequestsService {
       [requestId, tenantId],
     );
     if (!rows.length) throw new NotFoundException('الطلب غير موجود');
+    // Self-scope: an agent may only read their own request — 404 (not 403) so we
+    // don't leak that the id exists (mirrors attendance-corrections self-scoping).
+    if (scopeEmployeeId && rows[0].employee_id !== scopeEmployeeId) {
+      throw new NotFoundException('الطلب غير موجود');
+    }
     return rows[0];
   }
 
@@ -1240,12 +1444,12 @@ export class RequestsService {
    *  HC IMPACT â€” for any request type before/after approval
    * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-  async getHcImpact(tenantId: string, requestId: string) {
-    const req = await this.getOne(tenantId, requestId);
+  async getHcImpact(tenantId: string, requestId: string, scopeEmployeeId?: string) {
+    const req = await this.getOne(tenantId, requestId, scopeEmployeeId);
     const typeCode: string = req.type_code;
 
     // â”€â”€ Leaves / WFH / Comp Off â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (['annual_leave','sick_leave','death_leave','comp_off','wfh'].includes(typeCode)) {
+    if (['annual_leave','sick_leave','death_leave','comp_off','wfh','emergency_leave','university_exam'].includes(typeCode)) {
       return this.leaveHcImpact(tenantId, req);
     }
 

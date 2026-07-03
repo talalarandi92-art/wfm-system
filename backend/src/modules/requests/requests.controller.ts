@@ -47,6 +47,18 @@ export class RequestsController {
     return id;
   }
 
+  /** Permission codes from the JWT user (JwtStrategy returns the User entity). */
+  private perms(user: any): string[] {
+    return user?.permissionCodes ?? user?.permissions ?? [];
+  }
+
+  /** Employee id to scope reads to — undefined when the caller may see team/all. */
+  private scopeEmployeeId(user: any): string | undefined {
+    const perms = this.perms(user);
+    const canSeeAll = perms.includes('requests.view_team') || perms.includes('requests.view_all');
+    return canSeeAll ? undefined : (user?.employeeId ?? '00000000-0000-0000-0000-000000000000');
+  }
+
   /* ── Stats ─────────────────────────────────────────────────────────── */
   @Get('stats')
   @RequirePermissions('requests.view_team')
@@ -86,25 +98,28 @@ export class RequestsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    const lim = limit ? parseInt(limit, 10) : 50;
+    // Self-scope: callers without team/all view only ever see their own requests.
+    const scoped = this.scopeEmployeeId(user);
     return this.svc.listAll(this.tid(user), {
       status,
       type,
-      employeeId,
-      limit: limit ? parseInt(limit, 10) : 50,
-      page:  offset ? Math.floor(parseInt(offset, 10) / (limit ? parseInt(limit, 10) : 50)) : 1,
+      employeeId: scoped ?? employeeId,
+      limit: lim,
+      page:  offset ? Math.floor(parseInt(offset, 10) / lim) + 1 : 1,
     });
   }
 
   /* ── HC impact ──────────────────────────────────────────────────────── */
   @Get(':id/hc-impact')
   hcImpact(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.svc.getHcImpact(this.tid(user), id);
+    return this.svc.getHcImpact(this.tid(user), id, this.scopeEmployeeId(user));
   }
 
   /* ── Single request ─────────────────────────────────────────────────── */
   @Get(':id')
   getOne(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.svc.getOne(this.tid(user), id);
+    return this.svc.getOne(this.tid(user), id, this.scopeEmployeeId(user));
   }
 
   /* ── Shift swap ─────────────────────────────────────────────────────── */
@@ -155,7 +170,8 @@ export class RequestsController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('لم يتم إرفاق ملف');
-    return this.svc.addAttachment(this.tid(user), id, file, user?.sub ?? user?.userId);
+    // JwtStrategy returns the User entity — user.id is the users-FK for uploaded_by.
+    return this.svc.addAttachment(this.tid(user), id, file, user?.id);
   }
 
   /* ── Peer accept / reject swap ──────────────────────────────────────── */
@@ -166,7 +182,7 @@ export class RequestsController {
     @Param('id') id: string,
     @Body() dto: PeerRespondDto,
   ) {
-    return this.svc.peerAccept(this.tid(user), id, dto);
+    return this.svc.peerAccept(this.tid(user), id, this.asPeer(user, dto));
   }
 
   @Patch(':id/peer-reject')
@@ -176,7 +192,18 @@ export class RequestsController {
     @Param('id') id: string,
     @Body() dto: PeerRespondDto,
   ) {
-    return this.svc.peerReject(this.tid(user), id, dto);
+    return this.svc.peerReject(this.tid(user), id, this.asPeer(user, dto));
+  }
+
+  /** Anti-forgery: the peer is ALWAYS the authenticated employee. A body-supplied
+   *  targetEmployeeId is honoured ONLY for approvers (requests.approve_l1) acting
+   *  on an employee's behalf. */
+  private asPeer(user: any, dto: PeerRespondDto): PeerRespondDto {
+    const canOverride = this.perms(user).includes('requests.approve_l1');
+    const target = (canOverride && dto?.targetEmployeeId)
+      ? dto.targetEmployeeId
+      : (user?.employeeId ?? '00000000-0000-0000-0000-000000000000');
+    return { ...dto, targetEmployeeId: target };
   }
 
   /* ── Approve / reject ───────────────────────────────────────────────── */
@@ -204,6 +231,8 @@ export class RequestsController {
   @Patch(':id/cancel')
   @RequirePermissions('requests.cancel')
   cancel(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.svc.cancel(this.tid(user), id, user?.sub ?? user?.userId);
+    // svc.cancel compares against requests.employee_id — pass the caller's EMPLOYEE id
+    // (user.sub/userId never exist: JwtStrategy returns the User entity).
+    return this.svc.cancel(this.tid(user), id, user?.employeeId);
   }
 }
