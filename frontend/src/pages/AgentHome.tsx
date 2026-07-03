@@ -127,8 +127,10 @@ export default function AgentHome() {
 
   const loadOt = () => apiClient.get('/attendance-recon/roster-v2/my-ot-pending').then((r: any) => setOtPending(r.data?.requests || [])).catch(() => setOtPending([]));
   const decideOt = async (id: string, accept: boolean) => {
+    let reason: string | undefined;
+    if (!accept) { const r = window.prompt(ar ? 'سبب الاعتذار (اختياري):' : 'Reason for declining (optional):'); if (r === null) return; reason = r || undefined; }
     setOtBusy(id);
-    try { await apiClient.post('/attendance-recon/roster-v2/ot-ack', { requestId: id, accept }); await loadOt(); } finally { setOtBusy(null); }
+    try { await apiClient.post('/attendance-recon/roster-v2/ot-ack', { requestId: id, accept, reason }); await loadOt(); } finally { setOtBusy(null); }
   };
 
   useEffect(() => {

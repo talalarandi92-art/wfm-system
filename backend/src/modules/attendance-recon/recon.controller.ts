@@ -1264,16 +1264,20 @@ export class ReconController {
           WHERE ${w} ORDER BY se.employee_id, sv.created_at DESC`, p).catch(() => []);
     }
     let seated = rows.filter(r => covJs(Number(r.ss), Number(r.se)))
-      .map(r => ({ personNo: r.person_no, name: r.name, fn: r.fn, shiftCode: r.shift_code, start: hhmm(r.ss), end: hhmm(r.se), presence: r.presence, skilled: undefined as boolean | undefined }))
+      .map(r => ({ personNo: r.person_no, name: r.name, fn: r.fn, shiftCode: r.shift_code, start: hhmm(r.ss), end: hhmm(r.se), presence: r.presence, skilled: undefined as boolean | undefined, proficiency: undefined as string | undefined }))
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    // OPTIONAL skill badge: does each candidate hold the TARGET function's channel skill? (cross-skill)
+    // OPTIONAL skill badge: does each candidate hold the TARGET function's channel skill, and at what
+    // proficiency? Rank skilled-first, then by proficiency (expert > advanced > intermediate > beginner).
     if (skillFor && seated.length) {
       const code = this.funcToSkillCode(skillFor);
-      const skilledSet = new Set<string>((await this.ds.query(
-        `SELECT e.employee_no FROM employee_skills es JOIN skills s ON s.id=es.skill_id JOIN employees e ON e.id=es.employee_id
+      const profOf: Record<string, string> = {};
+      for (const r of (await this.ds.query(
+        `SELECT e.employee_no, es.proficiency FROM employee_skills es JOIN skills s ON s.id=es.skill_id JOIN employees e ON e.id=es.employee_id
           WHERE es.tenant_id=$1 AND es.status='active' AND s.code=$2 AND e.employee_no = ANY($3)`,
-        [t, code, seated.map(a => a.personNo)]).catch(() => [])).map((r: any) => r.employee_no));
-      seated = seated.map(a => ({ ...a, skilled: skilledSet.has(a.personNo) }));
+        [t, code, seated.map(a => a.personNo)]).catch(() => [])) as any[]) profOf[r.employee_no] = r.proficiency;
+      const rank: Record<string, number> = { expert: 4, advanced: 3, intermediate: 2, beginner: 1 };
+      seated = seated.map(a => ({ ...a, skilled: !!profOf[a.personNo], proficiency: profOf[a.personNo] }))
+        .sort((a, b) => (rank[b.proficiency || ''] || 0) - (rank[a.proficiency || ''] || 0) || (a.name || '').localeCompare(b.name || ''));
     }
     return { date, function: fn || null, hour: h, mode: isActual ? 'actual' : 'plan', skillFor: skillFor || null, count: seated.length, agents: seated };
   }
@@ -1371,17 +1375,28 @@ export class ReconController {
    *  the forecast (approved-OT overlay) also reflects it. Callable by the agent or a manager. */
   @Post('roster-v2/ot-ack')
   @RequirePermissions('requests.view_own')
-  async otAck(@Req() req: any, @Body() b: { requestId: string; accept: boolean }) {
+  async otAck(@Req() req: any, @Body() b: { requestId: string; accept: boolean; reason?: string }) {
     const t = req.user.tenantId;
     if (!b?.requestId) throw new BadRequestException('requestId required');
     const [row] = await this.ds.query(
-      `SELECT r.id, r.employee_id, r.requester_id, e.employee_no, ro.ot_date::text d,
+      `SELECT r.id, r.employee_id, r.requester_id, e.employee_no,
+              TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) agent, ro.ot_date::text d,
               EXTRACT(HOUR FROM ro.start_time)*60+EXTRACT(MINUTE FROM ro.start_time) os,
               EXTRACT(HOUR FROM ro.end_time)*60+EXTRACT(MINUTE FROM ro.end_time) oe, ro.duration_minutes dur
          FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id JOIN employees e ON e.id=r.employee_id
         WHERE r.tenant_id=$1 AND r.id=$2`, [t, b.requestId]);
     if (!row) throw new BadRequestException('OT request not found');
-    if (!b.accept) { await this.ds.query(`UPDATE requests SET status='rejected', rejected_at=NOW(), updated_at=NOW() WHERE id=$1`, [b.requestId]); return { ok: true, status: 'rejected' }; }
+    if (!b.accept) {
+      // agent declined — store the reason and tell the manager WHY, so they can pick another remedy.
+      await this.ds.query(`UPDATE requests SET status='rejected', rejected_at=NOW(), rejection_reason=$2, updated_at=NOW() WHERE id=$1`, [b.requestId, b.reason ?? null]);
+      const [m0] = await this.ds.query(`SELECT id FROM users WHERE tenant_id=$1 AND id=$2 LIMIT 1`, [t, row.requester_id]).catch(() => [null]);
+      if (m0?.id) await this.ds.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id, action_url)
+         VALUES ($1,$2,'overtime.declined',$3,$4,$5,$6,'request',$7,'/schedule?tab=forecast')`,
+        [t, m0.id, 'Overtime declined', 'اعتذر الموظف عن الأوفر تايم',
+         `${row.agent} declined the OT on ${row.d}${b.reason ? ' — ' + b.reason : ''}.`, `اعتذر ${row.agent} عن الأوفر تايم بتاريخ ${row.d}${b.reason ? ' — ' + b.reason : ''}.`, b.requestId]).catch(() => {});
+      return { ok: true, status: 'rejected', reason: b.reason ?? null };
+    }
     await this.ds.query(`UPDATE requests SET status='approved', approved_l1_at=NOW(), updated_at=NOW() WHERE id=$1`, [b.requestId]);
     // stamp the OT onto the roster row (if one exists for that agent/day) — before/after/off-day bucket.
     const [rd] = await this.ds.query(
@@ -1458,6 +1473,42 @@ export class ReconController {
         WHERE r.tenant_id=$1 AND r.employee_id=$2 AND r.status='pending'
         ORDER BY ro.ot_date`, [t, empId]).catch(() => []);
     return { requests: rows };
+  }
+
+  /** MANAGER OT LOG — the OT requests in a window with their lifecycle + REQUESTED vs ACTUALLY-WORKED
+   *  minutes. Once an approved OT's date has passed and the recon engine has recorded OT on the
+   *  agent's roster row (ot_before/after/off-day), it reads as 'worked' — closing the loop the
+   *  Director asked for (requested → acknowledged → worked → recorded). */
+  @Get('roster-v2/ot-requests')
+  @RequirePermissions('attendance.view_team')
+  async otRequestsLog(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('function') fn?: string) {
+    const t = req.user.tenantId;
+    const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
+    const p: any[] = [t, from || '2000-01-01', to || '2999-12-31'];
+    let w = `r.tenant_id=$1 AND ro.ot_date BETWEEN $2 AND $3`;
+    if (fn) { p.push(fn); w += ` AND f.name=$${p.length}`; }
+    const rows = await this.ds.query(
+      `SELECT r.id, r.status, ro.ot_date::text d, to_char(ro.start_time,'HH24:MI') start, to_char(ro.end_time,'HH24:MI') "end",
+              ro.duration_minutes requested, f.name function, e.employee_no,
+              TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) agent,
+              (SELECT COALESCE(rd.ot_before_min,0)+COALESCE(rd.ot_after_min,0)+COALESCE(rd.offday_ot_min,0)
+                 FROM roster_days rd WHERE rd.tenant_id=r.tenant_id AND rd.person_no=e.employee_no AND rd.work_date=ro.ot_date AND rd.is_active) worked_day
+         FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id
+         JOIN request_types rt ON rt.id=r.request_type_id AND rt.code='overtime'
+         JOIN employees e ON e.id=r.employee_id LEFT JOIN functions f ON f.id=ro.function_id
+        WHERE ${w} ORDER BY ro.ot_date DESC, r.submitted_at DESC LIMIT 200`, p).catch(() => []);
+    const items = rows.map((r: any) => {
+      const worked = Number(r.worked_day || 0);
+      const past = frontier && r.d <= frontier;
+      // lifecycle: pending → approved (acknowledged) → completed (approved + past + roster shows OT)
+      const phase = r.status === 'pending' ? 'awaiting_ack'
+        : r.status === 'rejected' ? 'declined'
+        : (r.status === 'approved' && past && worked > 0) ? 'completed'
+        : r.status === 'approved' ? 'acknowledged' : r.status;
+      return { id: r.id, date: r.d, window: `${r.start}–${r.end}`, agent: r.agent, personNo: r.employee_no,
+        function: r.function, requestedMin: Number(r.requested || 0), workedMin: past ? worked : null, phase };
+    });
+    return { from: p[1], to: p[2], frontier, count: items.length, items };
   }
 
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the

@@ -23,6 +23,7 @@ type Day = { date: string; dayName: string; mode: string; hours: Cell[]; totalHc
 type Forecast = { weekStart: string; weekEnd: string; frontier: string; function: string | null; days: Day[]; byHour: any[]; baseline: number[]; summary: any };
 
 const covColor = (v: number | null) => v == null ? '#64748b' : v >= 110 ? '#14b8a6' : v >= 90 ? '#22c55e' : v >= 75 ? '#f59e0b' : '#ef4444';
+const profAr = (p: string) => ({ expert: 'خبير', advanced: 'متقدّم', intermediate: 'متوسّط', beginner: 'مبتدئ' } as any)[p] || p;
 const hh2 = (n: number) => `${String(n).padStart(2, '0')}`;
 const addDays = (iso: string, n: number) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
@@ -39,6 +40,7 @@ export default function ForecastWeekPage() {
   const [seat, setSeat] = useState<{ date: string; fn: string; hour: number; loading: boolean; data: any } | null>(null);
   const [cover, setCover] = useState<any>(null);   // active cross-skill cover dialog
   const [otReq, setOtReq] = useState<any>(null);   // active OT-request dialog
+  const [otLog, setOtLog] = useState<any[]>([]);   // OT requests this week + lifecycle
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -50,6 +52,8 @@ export default function ForecastWeekPage() {
       .then((r: any) => { setD(r.data); if (!weekStart && r.data?.weekStart) setWeekStart(r.data.weekStart); })
       .catch(() => setD(null)).finally(() => setLoading(false));
     apiClient.get(`/attendance-recon/roster-v2/gap-remedies?${qs}`).then((r: any) => setRemedies(r.data)).catch(() => setRemedies(null));
+    if (weekStart) { const we = addDays(weekStart, 6); const oq = new URLSearchParams({ from: weekStart, to: we }); if (fn) oq.set('function', fn);
+      apiClient.get(`/attendance-recon/roster-v2/ot-requests?${oq}`).then((r: any) => setOtLog(r.data?.items || [])).catch(() => setOtLog([])); }
   }, [weekStart, fn]);
   useEffect(() => { const t = setTimeout(load, 150); return () => clearTimeout(t); }, [load]);
 
@@ -150,6 +154,9 @@ export default function ForecastWeekPage() {
         {remedies && remedies.gapCount === 0 && (
           <div className="rounded-2xl p-3 text-[12px] font-semibold" style={{ ...panel, color: '#22c55e', borderColor: 'rgba(34,197,94,0.4)' }}>{ar ? '✓ لا فجوات تغطية في هذا الأسبوع — الجدول يغطّي كل الساعات فوق الخط المرجعي' : '✓ No coverage gaps this week — the schedule clears the baseline every hour'}</div>
         )}
+
+        {/* ── OT LOG (lifecycle: awaiting ack → acknowledged → worked/completed) ── */}
+        {otLog.length > 0 && <OtLog items={otLog} ar={ar} panel={panel} />}
 
         {/* ── REALIZATION DIALS ── */}
         <div className="rounded-2xl p-4" style={panel}>
@@ -298,14 +305,41 @@ function CoverDialog({ cover, ar, onClose, onCommit, weekStart }: any) {
         {seatLoad ? <p className="text-[11px] py-2" style={{ color: 'var(--text-3)' }}>…</p>
           : candidates.length === 0 ? <p className="text-[11px] py-2" style={{ color: '#ef4444' }}>{ar ? 'لا مرشّح متاح على المقعد هذه الساعة — جرّب OT' : 'no candidate on seat this hour — try OT'}</p>
             : <><select value={pick} onChange={e => setPick(e.target.value)} className="w-full mb-1 px-2 py-1.5 rounded-lg text-xs" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}>
-              {candidates.map(c => <option key={c.personNo} value={c.personNo}>{c.skilled ? '✓ ' : ''}{c.name} ({c.shiftCode} {c.start}–{c.end})</option>)}
+              {candidates.map(c => <option key={c.personNo} value={c.personNo}>{c.skilled ? '✓ ' : ''}{c.name} ({c.shiftCode} {c.start}–{c.end}){c.proficiency ? ' · ' + c.proficiency : ''}</option>)}
             </select>
-            {chosen && <p className="text-[10px] mb-3" style={{ color: chosen.skilled ? '#22c55e' : '#f59e0b' }}>{chosen.skilled ? (ar ? `✓ لديه مهارة ${g.fn}` : `✓ skilled in ${g.fn}`) : (ar ? `⚠ بدون مهارة ${g.fn} مسجّلة — تدريب/إشراف موصى` : `⚠ no ${g.fn} skill on file — supervise`)}</p>}</>}
+            {chosen && <p className="text-[10px] mb-3" style={{ color: chosen.skilled ? '#22c55e' : '#f59e0b' }}>{chosen.skilled ? (ar ? `✓ لديه مهارة ${g.fn}${chosen.proficiency ? ' — ' + profAr(chosen.proficiency) : ''}` : `✓ skilled in ${g.fn}${chosen.proficiency ? ' — ' + chosen.proficiency : ''}`) : (ar ? `⚠ بدون مهارة ${g.fn} مسجّلة — تدريب/إشراف موصى` : `⚠ no ${g.fn} skill on file — supervise`)}</p>}</>}
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}>{ar ? 'إلغاء' : 'Cancel'}</button>
           <button disabled={!chosen} onClick={() => onCommit({ personNo: pick, fromFunction: src.fn, toFunction: g.fn, date, startHour: g.hour, endHour: (g.hour + 1) % 24, reason: 'Gap coverage from forecast' })}
             className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: chosen ? 'linear-gradient(135deg,#0ea5e9,#6366f1)' : 'var(--surface-2)', color: chosen ? '#fff' : 'var(--text-3)' }}>{ar ? 'أكّد التغطية + إشعار' : 'Confirm + notify'}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══ OT LOG — lifecycle of OT requests this week ════════════════════════════ */
+function OtLog({ items, ar, panel }: any) {
+  const meta: any = {
+    awaiting_ack: { c: '#f59e0b', ar: 'بانتظار الإقرار', en: 'awaiting ack' },
+    acknowledged: { c: '#0ea5e9', ar: 'أُقِرّ', en: 'acknowledged' },
+    completed: { c: '#22c55e', ar: 'مُنفَّذ ✓', en: 'worked ✓' },
+    declined: { c: '#ef4444', ar: 'مُعتذَر', en: 'declined' },
+  };
+  return (
+    <div className="rounded-2xl p-4" style={panel}>
+      <h3 className="text-sm font-bold mb-3 flex items-center gap-2" style={{ color: 'var(--text-1)' }}><Zap size={15} style={{ color: '#8b5cf6' }} />{ar ? 'سجل الأوفر تايم — دورة الحياة' : 'Overtime log — lifecycle'} <span className="text-[10px] font-normal" style={{ color: 'var(--text-3)' }}>· {ar ? 'طلب → إقرار → تنفيذ (مطلوب مقابل مُنفَّذ)' : 'request → ack → worked (requested vs actual)'}</span></h3>
+      <div className="space-y-1.5">
+        {items.map((o: any) => { const m = meta[o.phase] || { c: 'var(--text-3)', ar: o.phase, en: o.phase }; return (
+          <div key={o.id} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--surface-2)' }}>
+            <span className="w-1.5 h-6 rounded-full flex-shrink-0" style={{ background: m.c }} />
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-semibold truncate" style={{ color: 'var(--text-1)' }}>{o.agent} <span style={{ color: 'var(--text-3)' }}>· {o.date.slice(5)} {o.window}{o.function ? ' · ' + o.function : ''}</span></div>
+              <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>{ar ? 'مطلوب' : 'requested'} {o.requestedMin}{ar ? 'د' : 'm'}{o.workedMin != null ? ` · ${ar ? 'مُنفَّذ' : 'worked'} ${o.workedMin}${ar ? 'د' : 'm'}` : ''}</div>
+            </div>
+            <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold whitespace-nowrap" style={{ background: m.c + '22', color: m.c }}>{ar ? m.ar : m.en}</span>
+          </div>
+        ); })}
       </div>
     </div>
   );
