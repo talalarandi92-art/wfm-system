@@ -897,12 +897,97 @@ export class ReconController {
     const warnings: string[] = [];
     for (const g of groups) { if (g.assigned < g.want) warnings.push(`${g.code}: need ${g.want}, only ${g.assigned} eligible`); if (!g.coversEveryDay) warnings.push(`${g.code}: OFF buffer too thin — some day drops below ${g.perDay}`); if (g.femaleNight > 0) warnings.push(`${g.code}: ${g.femaleNight} female(s) on N — males were assigned first and the male pool is exhausted (rule 6.4) — flag`); }
 
+    // ── ROSTER HEALTH CHECK (Director 2026-07-03): the generator must never leave the
+    //    user blind — prove the assignment covers the demand hour-by-hour BEFORE publish. ──
+    const health = await this.computeWeekHealth(t, fn, mixData.demand, mixData.shiftDefs, groups, warnings);
+
     return {
       from: dFrom, to: dTo, function: fn,
       staffing: { ...mixData.staffing, peopleNeeded, spares: spares.length },
       groups: groups.map(g => ({ code: g.code, category: g.category, perDay: g.perDay, assigned: g.assigned, want: g.want, femaleNight: g.femaleNight, coversEveryDay: g.coversEveryDay, dailyCovered: g.dailyCovered })),
       assignments, spares: spares.map(e => ({ name: e.name })),
       warnings, coversDemand: mixData.verdict.coversAllHours, shiftMix: mixData.shiftMix,
+      health,
+    };
+  }
+
+  /** Post-generation coverage proof: per day × hour Required / Scheduled / Effective
+   *  (shrinkage-adjusted from the function's last-28-day reality), status colors,
+   *  weekend (Thu+Fri) & night focus, totals and rule-based recommended actions.
+   *  Demand basis = mixData.demand (avg hourly HC of the source window — disclosed). */
+  private async computeWeekHealth(t: string, fn: string, demand: number[], shiftDefs: any[], groups: any[], warnings: string[]) {
+    const toMin = (s: string) => { const [h, m] = String(s).split(':').map(Number); return h * 60 + (m || 0); };
+    // shift windows from the mix's real definitions; cross-midnight when end ≤ start
+    const win: Record<string, { ss: number; se: number }> = {};
+    for (const d of shiftDefs || []) { const ss = toMin(d.start), seRaw = toMin(d.end); win[d.code] = { ss, se: seRaw <= ss ? seRaw + 1440 : seRaw }; }
+    const hoursOf = (ss: number, se: number) => { const a = ((ss % 1440) + 1440) % 1440, e = a + (se - ss), out: number[] = []; for (let h = 0; h < 24; h++) { const h0 = h * 60; if ((a < h0 + 60 && Math.min(e, 1440) > h0) || (e > 1440 && e - 1440 > h0)) out.push(h); } return out; };
+
+    // projected shrinkage = the function's own recent unplanned+planned lost-day rate
+    let shrinkRate = 0, shrinkParts = { sick: 0, absent: 0, leave: 0, base: 0 };
+    try {
+      const [s] = await this.ds.query(`
+        SELECT COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent,
+               COUNT(*) FILTER (WHERE presence='leave')::int leave, COUNT(*) FILTER (WHERE presence <> 'off')::int base
+          FROM roster_days WHERE tenant_id=$1 AND COALESCE(role_function,function_name)=$2 AND is_active
+           AND work_date >= (SELECT MAX(work_date) FROM roster_days WHERE tenant_id=$1) - INTERVAL '27 days'`, [t, fn]);
+      shrinkParts = s; shrinkRate = s.base > 0 ? (s.sick + s.absent + s.leave) / s.base : 0;
+    } catch { /* projection unavailable → 0, disclosed below */ }
+
+    const dayNames = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+    const days = dayNames.map((name, di) => {
+      const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, required: demand[h] || 0, scheduled: 0, effective: 0, gap: 0, status: 'grey' as string }));
+      for (const g of groups) {
+        const w = win[g.code]; if (!w) continue;
+        const working = g.members.filter((m: any) => !(m.off || []).includes(di)).length;
+        for (const h of hoursOf(w.ss, w.se)) hours[h].scheduled += working;
+      }
+      for (const c of hours) {
+        c.effective = Math.round(c.scheduled * (1 - shrinkRate) * 10) / 10;
+        c.gap = Math.round((c.effective - c.required) * 10) / 10;
+        c.status = c.required === 0 ? (c.scheduled > 0 ? 'blue' : 'grey')
+          : c.effective >= c.required * 1.3 ? 'yellow'          // notable overstaffing
+          : c.effective >= c.required ? 'green'
+          : c.effective >= c.required * 0.85 ? 'yellow' : 'red';
+      }
+      const open = hours.filter(c => c.required > 0);
+      const covered = open.reduce((s, c) => s + Math.min(c.effective, c.required), 0);
+      const req = open.reduce((s, c) => s + c.required, 0);
+      return { day: name, hours, coveragePct: req ? Math.round(1000 * covered / req) / 10 : 100, red: open.filter(c => c.status === 'red').length, yellow: open.filter(c => c.status === 'yellow').length };
+    });
+
+    const all = days.flatMap(d => d.hours.filter(c => c.required > 0));
+    const sum = (f: (c: any) => number) => Math.round(all.reduce((s, c) => s + f(c), 0) * 10) / 10;
+    const requiredHrs = sum(c => c.required), scheduledHrs = sum(c => c.scheduled), effectiveHrs = sum(c => c.effective);
+    const shortageHrs = sum(c => Math.max(0, c.required - c.effective)), surplusHrs = sum(c => Math.max(0, c.effective - c.required));
+    const coveragePct = requiredHrs ? Math.round(1000 * sum(c => Math.min(c.effective, c.required)) / requiredHrs) / 10 : 100;
+    const critical = all.filter(c => c.status === 'red').length, warning = all.filter(c => c.status === 'yellow').length;
+    const nightHrs = all.filter(c => c.hour >= 22 || c.hour < 6);
+    const nightCoverage = nightHrs.length ? Math.round(1000 * nightHrs.reduce((s, c) => s + Math.min(c.effective, c.required), 0) / Math.max(1, nightHrs.reduce((s, c) => s + c.required, 0))) / 10 : 100;
+    const weekend = { thu: days[5].coveragePct, fri: days[6].coveragePct };
+
+    // rule-based recommended actions — concrete, ranked worst-first
+    const recs: string[] = [];
+    const worstRed = new Map<number, number>();
+    for (const d of days) for (const c of d.hours) if (c.status === 'red') worstRed.set(c.hour, Math.min(worstRed.get(c.hour) ?? 0, c.gap));
+    [...worstRed.entries()].sort((a, b) => a[1] - b[1]).slice(0, 5)
+      .forEach(([h, gap]) => recs.push(`RED ${String(h).padStart(2, '0')}:00 — short ${Math.abs(gap)} HC: add OT, shift a start time into this hour, or move cross-skilled staff`));
+    if (surplusHrs > requiredHrs * 0.15) recs.push(`Overstaffing ${surplusHrs}h vs need — consider trimming the heaviest surplus hours or re-timing shifts`);
+    for (const g of groups) if (g.assigned < g.want) recs.push(`${g.code}: ${g.want - g.assigned} more people needed — cross-skill move, hire, or accept the gap with OT`);
+    if (shrinkRate > 0.12) recs.push(`Projected shrinkage ${Math.round(shrinkRate * 1000) / 10}% is high — review sick/absence/leave before trusting the effective numbers`);
+    if (weekend.thu < 95 || weekend.fri < 95) recs.push(`Weekend (Thu/Fri) coverage ${weekend.thu}% / ${weekend.fri}% — rebalance weekend OFFs`);
+
+    return {
+      basis: 'demand = avg hourly HC of the source window (see generate basis); effective = scheduled × (1 − projected shrinkage)',
+      projectedShrinkagePct: Math.round(shrinkRate * 1000) / 10,
+      shrinkageParts: shrinkParts,
+      totals: { requiredHrs, scheduledHrs, effectiveHrs, shortageHrs, surplusHrs, coveragePct, criticalIntervals: critical, warningIntervals: warning, nightCoveragePct: nightCoverage, weekend },
+      days,
+      acceptable: critical === 0 && coveragePct >= 95,
+      verdictText: critical === 0 && coveragePct >= 95
+        ? `ACCEPTABLE — ${coveragePct}% coverage, no red hours`
+        : `NEEDS ATTENTION — ${coveragePct}% coverage, ${critical} red interval(s), ${warning} warning(s)`,
+      recommendations: recs.length ? recs : ['No action needed — coverage holds across all demand hours'],
+      generatorWarnings: warnings,
     };
   }
 
@@ -910,7 +995,7 @@ export class ReconController {
   /** Expand the weekly assignment into a 7-day grid (employee × Sat→Fri → code/OFF). */
   private weekGrid(wk: any) {
     return wk.assignments.map((a: any) => ({
-      name: a.name, code: a.code, category: a.category, off: a.off, nightLoadPct: a.nightLoadPct,
+      personNo: a.personNo, name: a.name, code: a.code, category: a.category, off: a.off, nightLoadPct: a.nightLoadPct,
       // off is "Sat+Wed" (2 OFF days per week) — mark every listed day OFF
       days: this.weekDays.map(dn => (String(a.off || '').split('+').includes(dn) || a.code === 'OFF/Spare') ? 'OFF' : a.code),
     }));
@@ -932,11 +1017,11 @@ export class ReconController {
       dt.setUTCDate(dt.getUTCDate() + add); weekStart = dt.toISOString().slice(0, 10);
     }
     const label = body?.label || `${wk.function} · ${weekStart}`;
-    const payload = { weekStart, function: wk.function, days: this.weekDays, mix: wk.shiftMix, staffing: wk.staffing, warnings: wk.warnings, grid };
+    const payload = { weekStart, function: wk.function, days: this.weekDays, mix: wk.shiftMix, staffing: wk.staffing, warnings: wk.warnings, grid, health: wk.health };
     const [row] = await this.ds.query(
       `INSERT INTO schedule_drafts(tenant_id, function, week_start, label, payload, created_by) VALUES($1,$2,$3,$4,$5::jsonb,$6) RETURNING id`,
       [t, wk.function, weekStart, label, JSON.stringify(payload), req.user.sub || null]);
-    return { ok: true, id: row.id, weekStart, label, function: wk.function, days: this.weekDays, grid, staffing: wk.staffing, warnings: wk.warnings, mix: wk.shiftMix };
+    return { ok: true, id: row.id, weekStart, label, function: wk.function, days: this.weekDays, grid, staffing: wk.staffing, warnings: wk.warnings, mix: wk.shiftMix, health: wk.health };
   }
 
   /** List recent saved roster drafts. */

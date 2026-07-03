@@ -155,6 +155,67 @@ export default function ScheduleDemandPage() {
           </div>
           <p className="text-[10px] mb-3" style={{ color: 'var(--text-3)' }}>{ar ? 'إسناد شفت الأسبوع + يوم OFF لكل موظف: البنات بدون ميدنايت، النايت للأقل تحميلاً (تدوير عادل)، التدوير الأسبوعي يضمن راحة ≥10 ساعات. اقتراح للمراجعة قبل النشر بالجدول.' : 'each employee gets a weekly shift + OFF day: females no midnight, night to the least-loaded (fair rotation), weekly rotation guarantees ≥10h rest. A proposal to review before publishing to the schedule.'}</p>
           {week && (<>
+            {/* ── ROSTER HEALTH CHECK — the coverage proof BEFORE publish (never publish blind) ── */}
+            {week.health && (
+              <div className="rounded-2xl p-3.5 mb-3" style={{ background: week.health.acceptable ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)', border: `1px solid ${week.health.acceptable ? 'rgba(34,197,94,0.35)' : 'rgba(239,68,68,0.35)'}` }}>
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  {week.health.acceptable ? <CheckCircle2 size={16} style={{ color: '#22c55e' }} /> : <AlertTriangle size={16} style={{ color: '#ef4444' }} />}
+                  <h4 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'فحص صحة الجدول' : 'Roster Health Check'}</h4>
+                  <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold" style={{ background: week.health.acceptable ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', color: week.health.acceptable ? '#22c55e' : '#ef4444' }}>{week.health.verdictText}</span>
+                  <span className="text-[10px]" style={{ color: 'var(--text-3)' }} title={week.health.basis}>{ar ? `انكماش متوقع ${week.health.projectedShrinkagePct}%` : `projected shrinkage ${week.health.projectedShrinkagePct}%`}</span>
+                </div>
+                {/* totals strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-3 text-center">
+                  {[
+                    [ar ? 'ساعات مطلوبة' : 'Required hrs', week.health.totals.requiredHrs, 'var(--text-1)'],
+                    [ar ? 'مجدولة' : 'Scheduled', week.health.totals.scheduledHrs, '#0ea5e9'],
+                    [ar ? 'فعلية متوقعة' : 'Effective', week.health.totals.effectiveHrs, '#818cf8'],
+                    [ar ? 'نقص' : 'Shortage', week.health.totals.shortageHrs, week.health.totals.shortageHrs > 0 ? '#ef4444' : '#22c55e'],
+                    [ar ? 'فائض' : 'Surplus', week.health.totals.surplusHrs, '#f59e0b'],
+                    [ar ? 'التغطية' : 'Coverage', week.health.totals.coveragePct + '%', week.health.totals.coveragePct >= 95 ? '#22c55e' : '#ef4444'],
+                    [ar ? 'الويكند خ/ج' : 'Thu/Fri', `${week.health.totals.weekend.thu}/${week.health.totals.weekend.fri}%`, Math.min(week.health.totals.weekend.thu, week.health.totals.weekend.fri) >= 95 ? '#22c55e' : '#f59e0b'],
+                  ].map(([l, v, c]: any, i: number) => (
+                    <div key={i} className="rounded-xl px-2 py-1.5" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                      <div className="text-[9px] uppercase" style={{ color: 'var(--text-3)' }}>{l}</div>
+                      <div className="text-[13px] font-bold" style={{ color: c }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* 7-day × 24-hour heat grid — click a cell for the numbers */}
+                <div className="overflow-x-auto">
+                  <table className="text-[9px]" style={{ borderCollapse: 'separate', borderSpacing: 2 }}>
+                    <thead><tr><th />{Array.from({ length: 24 }, (_, h) => <th key={h} style={{ color: 'var(--text-3)', minWidth: 18 }}>{h}</th>)}<th style={{ color: 'var(--text-3)' }}>{ar ? 'تغطية' : 'cov'}</th></tr></thead>
+                    <tbody>
+                      {week.health.days.map((dRow: any, di: number) => (
+                        <tr key={di}>
+                          <td className="pe-1 font-bold" style={{ color: di >= 5 ? '#f59e0b' : 'var(--text-2)' }}>{dRow.day}</td>
+                          {dRow.hours.map((c: any) => (
+                            <td key={c.hour} title={`${dRow.day} ${String(c.hour).padStart(2, '0')}:00 · ${ar ? 'مطلوب' : 'req'} ${c.required} · ${ar ? 'مجدول' : 'sched'} ${c.scheduled} · ${ar ? 'فعلي' : 'eff'} ${c.effective} · ${ar ? 'فرق' : 'gap'} ${c.gap}`}
+                              className="rounded" style={{ width: 18, height: 16, cursor: 'default',
+                                background: c.status === 'red' ? '#ef4444' : c.status === 'yellow' ? '#f59e0b' : c.status === 'green' ? '#22c55e' : c.status === 'blue' ? '#6366f1' : 'var(--surface-2)',
+                                opacity: c.status === 'grey' ? 0.35 : 0.9 }} />
+                          ))}
+                          <td className="ps-1 font-bold" style={{ color: dRow.red > 0 ? '#ef4444' : dRow.coveragePct >= 95 ? '#22c55e' : '#f59e0b' }}>{dRow.coveragePct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex items-center gap-3 mt-1.5 text-[9px]" style={{ color: 'var(--text-3)' }}>
+                  {[['#22c55e', ar ? 'جيد' : 'good'], ['#f59e0b', ar ? 'تحذير' : 'warning'], ['#ef4444', ar ? 'نقص حرج' : 'critical'], ['#6366f1', ar ? 'فوق الاحتياج/OT' : 'above demand/OT'], ['var(--surface-2)', ar ? 'لا احتياج' : 'no demand']].map(([c, l], i) => (
+                    <span key={i} className="inline-flex items-center gap-1"><span className="inline-block rounded" style={{ width: 10, height: 10, background: c as string }} />{l}</span>
+                  ))}
+                </div>
+                {/* recommended actions */}
+                <div className="mt-2 space-y-1">
+                  {week.health.recommendations.map((r: string, i: number) => (
+                    <div key={i} className="text-[11px] flex items-start gap-1.5" style={{ color: /^RED/.test(r) ? '#ef4444' : 'var(--text-2)' }}>
+                      <span style={{ color: 'var(--text-3)' }}>•</span>{r}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {week.warnings?.length > 0 && (
               <div className="rounded-xl p-2.5 mb-3 text-[11px]" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: '#f59e0b' }}>
                 <AlertTriangle size={12} className="inline mb-0.5 me-1" />{ar ? 'ملاحظات:' : 'Notes:'} {week.warnings.join(' · ')}
