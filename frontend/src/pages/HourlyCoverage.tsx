@@ -43,7 +43,11 @@ export default function HourlyCoveragePage() {
     setL(false);
   }, [date, fnId]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fnId]);
+  // Debounced reload whenever the date or function filter changes (no onBlur needed)
+  useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
+
+  const inputStyle = { background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' } as React.CSSProperties;
+  const panel = { background: 'var(--surface)', border: '1px solid var(--border)' } as React.CSSProperties;
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
@@ -60,28 +64,28 @@ export default function HourlyCoveragePage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <FunctionFilter />
-          <input type="date" value={date} onChange={e => setDate(e.target.value)} onBlur={load}
+          <input type="date" value={date} onChange={e => setDate(e.target.value)}
             className="text-xs rounded-xl px-3 py-1.5 outline-none"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }} />
+            style={inputStyle} />
         </div>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20"><Loader2 size={24} className="animate-spin" style={{ color: '#475569' }} /></div>
+        <div className="flex items-center justify-center py-20"><Loader2 size={24} className="animate-spin" style={{ color: 'var(--text-3)' }} /></div>
       ) : !data || data.functions.length === 0 ? (
-        <div className="text-center py-20" style={{ color: '#475569' }}>
-          <Activity size={32} className="mx-auto mb-3" style={{ color: '#334155' }} />
+        <div className="text-center py-20" style={{ color: 'var(--text-3)' }}>
+          <Activity size={32} className="mx-auto mb-3" style={{ color: 'var(--text-3)' }} />
           <p className="text-sm">{ar ? 'لا توجد بيانات تغطية لهذا اليوم' : 'No coverage data for this date'}</p>
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-[10px]" style={{ color: '#475569' }}>{data.basis}</p>
+          <p className="text-[10px]" style={{ color: 'var(--text-3)' }}>{data.basis}</p>
           {data.functions.map(fn => {
             const maxVal = Math.max(...fn.hours.flatMap(h => [h.required, h.scheduled]), 1);
             return (
-              <div key={fn.functionId} className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div key={fn.functionId} className="rounded-2xl overflow-hidden" style={panel}>
                 {/* Function header + summary chips */}
-                <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(99,102,241,0.05)' }}>
+                <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap" style={{ borderBottom: '1px solid var(--border)', background: 'rgba(99,102,241,0.05)' }}>
                   <span className="text-sm font-bold" style={{ color: tp(dark) }}>{fn.functionName}</span>
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {fn.summary.worstGap < 0 && (
@@ -107,33 +111,33 @@ export default function HourlyCoveragePage() {
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse">
                     <thead>
-                      <tr style={{ background: 'rgba(0,0,0,0.2)' }}>
+                      <tr style={{ background: 'var(--surface-2)' }}>
                         {[ar ? 'الساعة' : 'Hour', ar ? 'الاحتياج' : 'Required', ar ? 'المجدول' : 'Scheduled', ar ? 'استئذان' : 'Perm', ar ? 'تأخير' : 'Late', ar ? 'خروج' : 'Out', 'OT', ar ? 'المتاح' : 'Available', ar ? 'الفجوة' : 'Gap', ''].map((h, i) => (
-                          <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2" style={{ color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
+                          <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2" style={{ color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {fn.hours.map(h => (
-                        <tr key={h.hour} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: '#94a3b8' }}>{hh(h.hour)}</td>
+                        <tr key={h.hour} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: 'var(--text-2)' }}>{hh(h.hour)}</td>
                           <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: '#818cf8' }}>{h.required}</td>
-                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: '#cbd5e1' }}>{h.scheduled}</td>
-                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.onPermission ? '#a78bfa' : '#334155' }}>{h.onPermission || '·'}</td>
-                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.late ? '#fb923c' : '#334155' }}>{h.late || '·'}</td>
-                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.earlyOut ? '#f87171' : '#334155' }}>{h.earlyOut || '·'}</td>
-                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.ot ? '#22d3ee' : '#334155' }}>{h.ot ? `+${h.ot}` : '·'}</td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: 'var(--text-1)' }}>{h.scheduled}</td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.onPermission ? '#a78bfa' : 'var(--text-3)' }}>{h.onPermission || '·'}</td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.late ? '#fb923c' : 'var(--text-3)' }}>{h.late || '·'}</td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.earlyOut ? '#f87171' : 'var(--text-3)' }}>{h.earlyOut || '·'}</td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.ot ? '#22d3ee' : 'var(--text-3)' }}>{h.ot ? `+${h.ot}` : '·'}</td>
                           <td className="px-3 py-1.5 text-xs tabular-nums font-semibold" style={{ color: '#22d3ee' }}>
                             {h.available}
                             {(h.onSick + h.onAbsent) > 0 && (
-                              <span className="text-[9px] ms-1" style={{ color: '#64748b' }}>
+                              <span className="text-[9px] ms-1" style={{ color: 'var(--text-3)' }}>
                                 ({ar ? 'سيك/غياب' : 'sk/ab'} −{h.onSick + h.onAbsent})
                               </span>
                             )}
                           </td>
                           <td className="px-3 py-1.5 text-xs font-bold tabular-nums" style={{ color: gapColor(h.gap, -1) }}>{h.gap >= 0 ? `+${h.gap}` : h.gap}</td>
                           <td className="px-3 py-1.5" style={{ minWidth: 160 }}>
-                            <div className="relative h-3 rounded" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                            <div className="relative h-3 rounded" style={{ background: 'var(--surface-2)' }}>
                               {/* required marker */}
                               <div className="absolute top-0 bottom-0" style={{ left: `${(h.required / maxVal) * 100}%`, width: 2, background: '#818cf8' }} />
                               {/* available bar */}

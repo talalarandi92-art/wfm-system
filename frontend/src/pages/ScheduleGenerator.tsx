@@ -3,8 +3,9 @@ import {
   Zap, CheckCircle2, AlertTriangle, XCircle,
   RefreshCw, CloudUpload, ChevronDown, ChevronUp,
   Users, Clock, ShieldCheck, SlidersHorizontal,
-  Calendar, ChevronLeft, ChevronRight, Info, Send,
+  Calendar, ChevronLeft, ChevronRight, Info, Send, Lock,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { fmtLocalDate, weekStartSat } from '@/utils/format';
@@ -114,10 +115,10 @@ function CoverageBar({ days, dates }: { days: CoverageDay[]; dates: string[] }) 
 }
 
 // ─── Function Group ───────────────────────────────────────────────────────────
-function FunctionGroup({ fn, dates }: { fn: GeneratorResult['functions'][0]; dates: string[] }) {
+function FunctionGroup({ fn, dates, defaultOpen = false }: { fn: GeneratorResult['functions'][0]; dates: string[]; defaultOpen?: boolean }) {
   const { lang } = useUiStore();
   const ar = lang === 'ar';
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const violations = fn.employees.reduce((a, e) => a + e.weekStats.violationCount, 0);
 
   return (
@@ -371,6 +372,7 @@ export default function ScheduleGeneratorPage() {
   const [publishMsg, setPublishMsg] = useState('');
   const [publishOk, setPublishOk]   = useState(false);
   const [error, setError]       = useState('');
+  const [weekStatus, setWeekStatus] = useState<{ status: 'draft' | 'published' | 'locked'; publishedAt: string | null; lockedAt: string | null } | null>(null);
 
   // Non-empty functions
   const activeFns = functions.filter(f => parseInt(f.employee_count) > 0);
@@ -382,12 +384,20 @@ export default function ScheduleGeneratorPage() {
     ]).then(([wRes, fRes]) => {
       const wks: string[] = wRes.data ?? [];
       setAvailableWeeks(wks);
-      const today = new Date().toISOString().split('T')[0];
+      const today = fmtLocalDate(new Date());
       const future = wks.filter(w => w >= today);
       setSelectedWeek(future[future.length - 1] ?? wks[0] ?? currentSat());
       setFunctions(fRes.data ?? []);
     }).catch(() => {});
   }, []);
+
+  // Week publish/lock status for the selected week (same source as the Schedule grid)
+  useEffect(() => {
+    if (!selectedWeek) return;
+    apiClient.get(`/schedule/week-status?weekStart=${selectedWeek}`)
+      .then(r => setWeekStatus(r.data))
+      .catch(() => setWeekStatus(null));
+  }, [selectedWeek]);
 
   const toggleFn = (id: string) => {
     setSelectedFns(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -397,7 +407,9 @@ export default function ScheduleGeneratorPage() {
 
   const handleGenerate = useCallback(async () => {
     if (!selectedWeek) return;
+    // Reset ALL save/publish state — a new result invalidates any previously-saved draft
     setLoading(true); setError(''); setResult(null); setSaveMsg(''); setSaveOk(false);
+    setSavedVersionId(null); setPublishMsg(''); setPublishOk(false);
     try {
       const body: any = {
         weekStart: selectedWeek,
@@ -447,8 +459,11 @@ export default function ScheduleGeneratorPage() {
 
   // Publish the saved draft → applies the schedule to attendance_records so every
   // agent sees their new shifts. Requires a Save first (needs the version id).
+  // Selected week already published/locked on the live grid → publishing is blocked
+  const weekBlocked = weekStatus?.status === 'published' || weekStatus?.status === 'locked';
+
   const handlePublish = async () => {
-    if (!savedVersionId) return;
+    if (!savedVersionId || weekBlocked) return;
     const arNow = useUiStore.getState().lang === 'ar';
     if (!window.confirm(arNow
       ? 'سيتم نشر الجدول وإرساله لجميع الموظفين (يظهر بجدولهم). متابعة؟'
@@ -459,6 +474,9 @@ export default function ScheduleGeneratorPage() {
       setPublishOk(true);
       const n = res.data?.appliedToAgents ?? 0;
       setPublishMsg(arNow ? `تم النشر — وصل ${n} موظف/يوم لجداول الموظفين ✓` : `Published — ${n} shifts pushed to agents ✓`);
+      // Refresh the week badge — the week is now published
+      apiClient.get(`/schedule/week-status?weekStart=${selectedWeek}`)
+        .then(r => setWeekStatus(r.data)).catch(() => {});
     } catch (e: any) {
       setPublishOk(false);
       setPublishMsg(arNow
@@ -522,7 +540,7 @@ export default function ScheduleGeneratorPage() {
               }}
               className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 dark:text-slate-400
                          hover:text-slate-900 dark:hover:text-white bg-slate-900/5 dark:bg-white/5 transition-colors">
-              <ChevronRight size={16} />
+              {ar ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
             </button>
             <div className="text-center" style={{ minWidth: 160 }}>
               <p className="text-[10px] text-slate-500 uppercase tracking-wider">{ar ? 'فترة التوليد' : 'Period'}</p>
@@ -536,9 +554,32 @@ export default function ScheduleGeneratorPage() {
               }}
               className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 dark:text-slate-400
                          hover:text-slate-900 dark:hover:text-white bg-slate-900/5 dark:bg-white/5 transition-colors">
-              <ChevronLeft size={16} />
+              {ar ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
             </button>
           </div>
+
+          {/* Week publish/lock status badge (same source as the Schedule grid) */}
+          {weekStatus && (() => {
+            const cfg = {
+              draft:     { label: ar ? 'مسودة' : 'Draft',     bg: 'rgba(100,116,139,0.12)', color: '#94a3b8', border: 'rgba(100,116,139,0.25)', Icon: Clock },
+              published: { label: ar ? 'منشور' : 'Published', bg: 'rgba(34,197,94,0.12)',  color: '#4ade80', border: 'rgba(34,197,94,0.3)',    Icon: CheckCircle2 },
+              locked:    { label: ar ? 'مقفل'  : 'Locked',    bg: 'rgba(99,102,241,0.12)', color: '#818cf8', border: 'rgba(99,102,241,0.3)',   Icon: Lock },
+            }[weekStatus.status];
+            const { Icon } = cfg;
+            return (
+              <span
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
+                style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
+                <Icon size={12} />
+                {cfg.label}
+                {weekStatus.status !== 'draft' && (
+                  <Link to="/schedule?tab=schedule" className="underline opacity-80 hover:opacity-100">
+                    {ar ? 'الجدول' : 'Schedule'}
+                  </Link>
+                )}
+              </span>
+            );
+          })()}
 
           {/* Spacer */}
           <div className="flex-1" />
@@ -741,10 +782,11 @@ export default function ScheduleGeneratorPage() {
               </h3>
               <div className="flex gap-1.5 flex-wrap">
                 {[
-                  { code: 'M',  color: '#0ea5e9', labelAr: 'صباحي',        labelEn: 'Morning' },
-                  { code: 'C',  color: '#f59e0b', labelAr: 'ظهيرة',        labelEn: 'Midday' },
-                  { code: 'N',  color: '#8b5cf6', labelAr: 'مسائي',        labelEn: 'Evening' },
-                  { code: 'MD', color: '#6366f1', labelAr: 'منتصف الليل', labelEn: 'Midnight' },
+                  // Canonical categories (backend/src/common/shift-category.ts): M/B/C = Morning/Day family, N = Night, MD/MN = Midnight
+                  { code: 'M',  color: '#0ea5e9', labelAr: 'صباحي',                 labelEn: 'Morning' },
+                  { code: 'C',  color: '#f59e0b', labelAr: 'نهاري — تنتهي 20:00',   labelEn: 'Day (ends 20:00)' },
+                  { code: 'N',  color: '#8b5cf6', labelAr: 'ليلي',                  labelEn: 'Night' },
+                  { code: 'MD', color: '#6366f1', labelAr: 'منتصف الليل',           labelEn: 'Midnight' },
                 ].map(s => (
                   <span key={s.code} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg font-semibold"
                     style={{ background: `${s.color}18`, color: s.color, border: `1px solid ${s.color}30` }}>
@@ -753,8 +795,8 @@ export default function ScheduleGeneratorPage() {
                 ))}
               </div>
             </div>
-            {result.functions.map(fn => (
-              <FunctionGroup key={fn.id} fn={fn} dates={result.dates} />
+            {result.functions.map((fn, i) => (
+              <FunctionGroup key={fn.id} fn={fn} dates={result.dates} defaultOpen={i === 0} />
             ))}
           </div>
 
@@ -768,13 +810,29 @@ export default function ScheduleGeneratorPage() {
                 {saving ? (ar ? 'جاري الحفظ…' : 'Saving…') : (ar ? 'حفظ كمسودة' : 'Save as Draft')}
               </button>
 
-              {savedVersionId && (
-                <button onClick={handlePublish} disabled={publishing}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
-                  style={{ background: 'linear-gradient(135deg,#4f46e5,#6366f1)', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
-                  {publishing ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
-                  {publishing ? (ar ? 'جاري النشر…' : 'Publishing…') : (ar ? 'نشر وإرسال للموظفين' : 'Publish to agents')}
-                </button>
+              <button onClick={handlePublish} disabled={publishing || !savedVersionId || weekBlocked}
+                title={weekBlocked
+                  ? (ar ? 'الأسبوع منشور/مقفل بالفعل' : 'Week already published/locked')
+                  : !savedVersionId ? (ar ? 'احفظ المسودة أولاً' : 'Save as draft first') : undefined}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ background: 'linear-gradient(135deg,#4f46e5,#6366f1)', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
+                {publishing ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
+                {publishing ? (ar ? 'جاري النشر…' : 'Publishing…') : (ar ? 'نشر وإرسال للموظفين' : 'Publish to agents')}
+              </button>
+
+              {!savedVersionId && !weekBlocked && (
+                <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                  <Info size={13} className="flex-shrink-0" />
+                  {ar ? 'النتيجة غير محفوظة — احفظ كمسودة أولاً لتفعيل النشر' : 'Out of sync — save as draft again to enable publish'}
+                </span>
+              )}
+              {weekBlocked && (
+                <span className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-300">
+                  <Lock size={13} className="flex-shrink-0" />
+                  {ar
+                    ? <>هذا الأسبوع {weekStatus?.status === 'locked' ? 'مقفل' : 'منشور'} بالفعل — <Link to="/schedule?tab=schedule" className="underline">افتح الجدول</Link></>
+                    : <>This week is already {weekStatus?.status === 'locked' ? 'locked' : 'published'} — <Link to="/schedule?tab=schedule" className="underline">open Schedule</Link></>}
+                </span>
               )}
 
               <button onClick={handleGenerate} disabled={loading}

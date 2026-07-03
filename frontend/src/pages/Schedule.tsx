@@ -116,7 +116,7 @@ function fmtDate(iso: string, lang: 'ar' | 'en') {
   const day = lang === 'ar' ? DAY_AR[d.getDay()] : DAY_EN[d.getDay()];
   const dd  = d.getDate();
   const mon = lang === 'ar' ? MONTH_AR[d.getMonth()] : d.toLocaleString('en', { month: 'short' });
-  return { day, dd, mon, isToday: iso === new Date().toISOString().split('T')[0] };
+  return { day, dd, mon, isToday: iso === fmtLocalDate(new Date()) };
 }
 
 function shiftPeriod(weekStart: string, direction: -1 | 1, weeks: number): string {
@@ -1587,7 +1587,7 @@ export default function SchedulePage() {
       const weeks: string[] = r.data;
       setAvailWeeks(weeks);
       // Default to latest week that is on or before today
-      const today = new Date().toISOString().split('T')[0];
+      const today = fmtLocalDate(new Date());
       const pastWeek = weeks.find(w => w <= today) ?? weeks[0];
       if (pastWeek) setWeekStart(pastWeek);
     }).catch(() => {});
@@ -1600,15 +1600,16 @@ export default function SchedulePage() {
     const params = new URLSearchParams({ weekStart, weeks: String(weeks) });
     if (selFunction) params.set('functionId', selFunction);
     apiClient.get(`/schedule/grid?${params}`)
-      .then(r => {
-        setGridData(r.data);
-        setExpandedFuncs(new Set());
-      })
+      .then(r => setGridData(r.data))
       .catch(() => setGridData(null))
       .finally(() => setLoading(false));
   }, [weekStart, selFunction, weeks]);
 
   useEffect(() => { loadGrid(); }, [loadGrid]);
+
+  // Collapse groups only when the period/function filters change — a refresh-after-save
+  // (loadGrid from onSaved) keeps the user's expanded groups intact.
+  useEffect(() => { setExpandedFuncs(new Set()); }, [weekStart, selFunction, weeks]);
 
   // ── Period range display ───────────────────────────────────────────────────
   const weekLabel = () => {

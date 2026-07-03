@@ -88,7 +88,18 @@ export default function ScheduleDemandPage() {
         <div className="grid lg:grid-cols-2 gap-3">
           {/* demand vs covered curve */}
           <div className="rounded-2xl p-4" style={panel}>
-            <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-1)' }}>{ar ? 'منحنى الاحتياج مقابل التغطية' : 'Demand vs coverage by hour'}</h3>
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <h3 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'منحنى الاحتياج مقابل التغطية' : 'Demand vs coverage by hour'}</h3>
+              {d.basis && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold" title={d.basis}
+                  style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b' }}>
+                  <AlertTriangle size={10} />
+                  {/replicat|يحاكي/i.test(d.basis)
+                    ? (ar ? 'المصدر: يحاكي الجدول الحالي' : 'Basis: replicates the current schedule')
+                    : d.basis}
+                </span>
+              )}
+            </div>
             <p className="text-[10px] mb-3" style={{ color: 'var(--text-3)' }}>{ar ? 'الرمادي = الاحتياج · الأزرق = ما يغطّيه المزيج المقترح' : 'grey = demand · blue = what the proposed mix covers'}</p>
             <div className="flex items-end gap-1 h-36">
               {d.coverageByHour.map((c: any) => (
