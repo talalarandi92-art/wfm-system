@@ -880,6 +880,191 @@ export class ReconController {
     return payload;
   }
 
+  /* ── LIVE WEEK FORECAST (Director 2026-07-03) ──────────────────────────────────────
+   *  "أشوف الهيدكاونت بالساعة كم رح يكون — سويت جينيريت، والأيام تتعبى فعلي أول بأول من
+   *   الريكويستات والسيك والأوفرتايم والتأخيرات." One 7-day × 24-hour headcount grid where
+   *   each cell BLENDS reality with plan:
+   *     • a day that has reconciled roster_days rows (past / today-so-far) → the ACTUAL
+   *       effective HC (working + OT − tardy/early − perm-late/early) — the SAME cascade as
+   *       /roster-v2/hourly, grouped by day.
+   *     • a day with no actuals yet (future) → the PLANNED HC from the latest non-archived
+   *       schedule version (schedule_entries × shift_codes), then − approved leave (full day)
+   *       − approved permission (window) + approved overtime (window) = plan-after-requests.
+   *   As reconciliation/requests land, past hours fill with truth and the future re-projects.
+   *   Default week = the "seam" (Saturday on/before the actual frontier) so the blend shows. */
+  @Get('roster-v2/week-forecast')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Live 7×24 headcount forecast — actual (past) blended with plan−requests (future), per hour per day' })
+  async weekForecast(@Req() req: any, @Query('weekStart') weekStart?: string, @Query('function') functionName?: string) {
+    const t = req.user.tenantId;
+    // actual frontier = last reconciled day; default the week to the Saturday on/before it (the seam).
+    const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
+    const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
+    const ws = snapSat(weekStart || frontier || new Date().toISOString().slice(0, 10));
+    const dates: string[] = []; { const d = new Date(ws + 'T00:00:00Z'); for (let i = 0; i < 7; i++) { dates.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); } }
+    const weekEnd = dates[6];
+    const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    const fp: any[] = [t, ws, weekEnd];
+    let fnFilter = '';
+    if (functionName) { fp.push(functionName); fnFilter = ` AND COALESCE(role_function,function_name)=$${fp.length}`; }
+    let fnFilterPlan = '';
+    if (functionName) fnFilterPlan = ` AND COALESCE(f.name,'—')=$4`;   // same param slot
+
+    const cov = (start: string, len: string) => {
+      const a0 = `(((${start})%1440+1440)%1440)`, b0 = `(${a0}+(${len}))`;
+      return `((${a0} < h.hh*60+60 AND LEAST(${b0},1440) > h.hh*60) OR (${b0}>1440 AND (${b0}-1440) > h.hh*60))`;
+    };
+    const covWin = (ps: string, pe: string) => // an [start,end) minute window (no wrap) covers hour bucket
+      `(${ps} < h.hh*60+60 AND ${pe} > h.hh*60)`;
+    const pres = `r.presence IN ('office','wfh')`;
+    const credL = `r.sys_late_min BETWEEN 7 AND 240`;
+    const credE = `r.sys_early_min BETWEEN 7 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
+
+    // ── ACTUAL: effective HC per (day, hour) from roster_days, same cascade as /hourly ──
+    const actual = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      r AS (SELECT work_date::text d, person_no, employee_no, shift_start_min ss, shift_end_min se, presence,
+                   permission_type, sys_late_min, sys_early_min, ot_before_min, ot_after_min
+              FROM roster_days
+             WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3 AND shift_start_min IS NOT NULL${fnFilter})
+      SELECT r.d, h.hh AS "hour",
+        COUNT(*) FILTER (WHERE ${pres} AND ${cov('r.ss', 'r.se-r.ss')})::int working,
+        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0 AND ${cov('r.ss-r.ot_before_min', 'r.ot_before_min')})::int ot_before,
+        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_after_min,0)>0 AND ${cov('r.se', 'r.ot_after_min')})::int ot_after,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NULL AND ${cov('r.ss', 'r.sys_late_min')})::int tardy,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NULL AND ${cov('r.se-r.sys_early_min', 'r.sys_early_min')})::int early,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NOT NULL AND ${cov('r.ss', 'r.sys_late_min')})::int perm_late,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NOT NULL AND ${cov('r.se-r.sys_early_min', 'r.sys_early_min')})::int perm_early
+      FROM r CROSS JOIN h GROUP BY r.d, h.hh`, fp).catch(() => []);
+
+    // ── PLAN: planned HC per (day, hour) from the latest non-archived version, ± approved requests ──
+    const plan = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      v AS (SELECT DISTINCT ON (se.employee_id, se.entry_date)
+                   se.employee_id, se.entry_date::text d,
+                   (EXTRACT(HOUR FROM sc.start_time)*60 + EXTRACT(MINUTE FROM sc.start_time))::int ss,
+                   (CASE WHEN sc.end_time <= sc.start_time
+                         THEN EXTRACT(HOUR FROM sc.end_time)*60 + EXTRACT(MINUTE FROM sc.end_time) + 1440
+                         ELSE EXTRACT(HOUR FROM sc.end_time)*60 + EXTRACT(MINUTE FROM sc.end_time) END)::int se_min
+              FROM schedule_entries se
+              JOIN schedule_versions sv ON sv.id = se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
+              JOIN employees e ON e.id = se.employee_id
+              LEFT JOIN functions f ON f.id = e.function_id
+              LEFT JOIN shift_codes sc ON sc.tenant_id = se.tenant_id AND sc.code = se.shift_code_display
+             WHERE se.tenant_id=$1 AND se.entry_date BETWEEN $2 AND $3 AND sc.start_time IS NOT NULL${fnFilterPlan}
+             ORDER BY se.employee_id, se.entry_date, sv.created_at DESC),
+      lv AS (SELECT r.employee_id, gs::date::text d FROM requests r JOIN request_leaves rl ON rl.request_id=r.id
+               CROSS JOIN generate_series(rl.start_date, rl.end_date, interval '1 day') gs
+              WHERE r.tenant_id=$1 AND r.status='approved'),
+      pm AS (SELECT r.employee_id, rp.permission_date::text d,
+                    (EXTRACT(HOUR FROM rp.start_time)*60+EXTRACT(MINUTE FROM rp.start_time))::int ps,
+                    (EXTRACT(HOUR FROM rp.end_time)*60+EXTRACT(MINUTE FROM rp.end_time))::int pe
+               FROM requests r JOIN request_permissions rp ON rp.request_id=r.id
+              WHERE r.tenant_id=$1 AND r.status='approved' AND rp.start_time IS NOT NULL AND rp.end_time IS NOT NULL),
+      ot AS (SELECT r.employee_id, ro.ot_date::text d,
+                    (EXTRACT(HOUR FROM ro.start_time)*60+EXTRACT(MINUTE FROM ro.start_time))::int os,
+                    (EXTRACT(HOUR FROM ro.end_time)*60+EXTRACT(MINUTE FROM ro.end_time))::int oe
+               FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id
+              WHERE r.tenant_id=$1 AND r.status='approved' AND ro.start_time IS NOT NULL AND ro.end_time IS NOT NULL)
+      SELECT v.d, h.hh AS "hour",
+        COUNT(*) FILTER (WHERE v.ss < h.hh*60+60 AND LEAST(v.se_min,1440) > h.hh*60
+                            OR (v.se_min>1440 AND (v.se_min-1440) > h.hh*60))::int plan,
+        COUNT(*) FILTER (WHERE (v.ss < h.hh*60+60 AND LEAST(v.se_min,1440) > h.hh*60
+                            OR (v.se_min>1440 AND (v.se_min-1440) > h.hh*60))
+                           AND NOT EXISTS (SELECT 1 FROM lv WHERE lv.employee_id=v.employee_id AND lv.d=v.d)
+                           AND NOT EXISTS (SELECT 1 FROM pm WHERE pm.employee_id=v.employee_id AND pm.d=v.d AND pm.ps<h.hh*60+60 AND pm.pe>h.hh*60))::int plan_after_req,
+        (SELECT COUNT(*) FROM ot WHERE ot.d=v.d AND ${covWin('ot.os', 'ot.oe')})::int ot_extra
+      FROM v CROSS JOIN h GROUP BY v.d, h.hh`, fp).catch(() => []);
+
+    // ── BASELINE: observed avg scheduled HC per hour over the 28 days before the week ──
+    // (own param list — must reference EXACTLY the params passed; Postgres rejects extras.)
+    const bp: any[] = [t, ws];
+    const fnFilterBase = functionName ? (bp.push(functionName), ` AND COALESCE(role_function,function_name)=$${bp.length}`) : '';
+    const baseRows = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      r AS (SELECT shift_start_min ss, shift_end_min se FROM roster_days
+             WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+               AND work_date >= ($2::date - interval '28 days') AND work_date < $2::date${fnFilterBase}),
+      d AS (SELECT COUNT(DISTINCT work_date)::int n FROM roster_days
+             WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+               AND work_date >= ($2::date - interval '28 days') AND work_date < $2::date)
+      SELECT h.hh AS "hour",
+        (COUNT(*) FILTER (WHERE ${cov('r.ss', 'r.se-r.ss')})::float / NULLIF((SELECT n FROM d),0)) baseline
+      FROM r CROSS JOIN h GROUP BY h.hh`, bp).catch(() => []);
+    const baseline = Array(24).fill(0);
+    for (const b of baseRows) baseline[b.hour] = +(+b.baseline || 0).toFixed(1);
+
+    // ── merge into a 7×24 blended grid ──
+    const aMap: Record<string, any> = {}; for (const r of actual) aMap[`${r.d}|${r.hour}`] = r;
+    const pMap: Record<string, any> = {}; for (const r of plan) pMap[`${r.d}|${r.hour}`] = r;
+    const actualDays = new Set(actual.map((r: any) => r.d));
+    const days = dates.map(d => {
+      const dow = DOW[new Date(d + 'T00:00:00Z').getUTCDay()];
+      const mode = actualDays.has(d) ? 'actual' : (d <= (frontier || '')) ? 'actual' : 'plan';
+      const hours = Array.from({ length: 24 }, (_, hh) => {
+        const a = aMap[`${d}|${hh}`], p = pMap[`${d}|${hh}`];
+        const effective = a ? Math.max(0, a.working + a.ot_before + a.ot_after - a.tardy - a.early - a.perm_late - a.perm_early) : 0;
+        const planHc = p ? p.plan : 0;
+        const planAfterReq = p ? Math.max(0, p.plan_after_req + p.ot_extra) : 0;
+        const hc = mode === 'actual' ? effective : planAfterReq;
+        const req = baseline[hh];
+        return {
+          hour: hh, mode, hc,
+          actual: a ? effective : null,
+          plan: planHc, planAfterReq,
+          required: req,
+          gap: +(hc - req).toFixed(1),
+          coveragePct: req > 0 ? Math.round(100 * hc / req) : null,
+          detail: a ? { working: a.working, otBefore: a.ot_before, otAfter: a.ot_after, tardy: a.tardy, early: a.early, permLate: a.perm_late, permEarly: a.perm_early }
+                    : p ? { plan: p.plan, minusReq: p.plan - p.plan_after_req, plusOt: p.ot_extra } : null,
+        };
+      });
+      const dayHc = hours.reduce((s, x) => s + x.hc, 0);
+      const dayReq = hours.reduce((s, x) => s + x.required, 0);
+      const peak = hours.reduce((mx, x) => x.hc > mx.hc ? x : mx, hours[0]);
+      return { date: d, dayName: dow, mode, hours, totalHc: dayHc, totalRequired: +dayReq.toFixed(1),
+        coveragePct: dayReq > 0 ? Math.round(100 * dayHc / dayReq) : null, peakHour: peak.hour, peakHc: peak.hc,
+        gapHours: hours.filter(x => x.required >= 1 && x.gap < 0).length };
+    });
+
+    // ── week rollups + realization (how much of the week is already reality) ──
+    const actualCount = days.filter(d => d.mode === 'actual').length;
+    const byHour = Array.from({ length: 24 }, (_, hh) => {
+      const cells = days.map(d => d.hours[hh]);
+      const hc = cells.reduce((s, c) => s + c.hc, 0);
+      const req = cells.reduce((s, c) => s + c.required, 0);
+      return { hour: hh, hc, required: +req.toFixed(1), avgHc: +(hc / 7).toFixed(1), gap: +(hc - req).toFixed(1),
+        coveragePct: req > 0 ? Math.round(100 * hc / req) : null };
+    });
+    const weekHc = days.reduce((s, d) => s + d.totalHc, 0);
+    const weekReq = days.reduce((s, d) => s + d.totalRequired, 0);
+    const actualHc = days.filter(d => d.mode === 'actual').reduce((s, d) => s + d.totalHc, 0);
+    const planHcTotal = days.filter(d => d.mode === 'plan').reduce((s, d) => s + d.totalHc, 0);
+    // lost & OT lift across the plan side (approved requests already applied) + the actual side
+    let lostReq = 0, otLift = 0;
+    for (const d of days) for (const x of d.hours) {
+      if (x.detail) {
+        if (x.mode === 'actual') { lostReq += (x.detail.tardy || 0) + (x.detail.early || 0) + (x.detail.permLate || 0) + (x.detail.permEarly || 0); otLift += (x.detail.otBefore || 0) + (x.detail.otAfter || 0); }
+        else { lostReq += (x.detail.minusReq || 0); otLift += (x.detail.plusOt || 0); }
+      }
+    }
+    return {
+      weekStart: ws, weekEnd, frontier, function: functionName || null,
+      days, byHour, baseline,
+      summary: {
+        weekHc, weekRequired: +weekReq.toFixed(1),
+        coveragePct: weekReq > 0 ? Math.round(100 * weekHc / weekReq) : null,
+        actualDays: actualCount, planDays: 7 - actualCount,
+        realizationPct: Math.round(100 * actualCount / 7),   // fraction of the week that is already reality
+        actualHc, planHc: planHcTotal,
+        gapHours: days.reduce((s, d) => s + d.gapHours, 0),
+        lostHc: lostReq, otLiftHc: otLift,
+        peakDay: days.reduce((mx, d) => d.totalHc > mx.totalHc ? d : mx, days[0])?.date,
+      },
+    };
+  }
+
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the
    *  hourly need per function, then greedy set-cover the standard shift windows (real start/end
    *  taken from the data) to cover every hour — and check we have enough active staff. The
