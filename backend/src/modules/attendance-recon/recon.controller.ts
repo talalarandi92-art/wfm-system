@@ -1241,17 +1241,19 @@ export class ReconController {
     const isActual = frontier && date <= frontier;
     const covJs = (ss: number, se: number) => { const len = (se <= ss ? se + 1440 - ss : se - ss); const b0 = ss + len; return (ss < h * 60 + 60 && Math.min(b0, 1440) > h * 60) || (b0 > 1440 && b0 - 1440 > h * 60); };
     const hhmm = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
-    let rows: any[] = [];
+    const p: any[] = [t, date]; let rows: any[] = [];   // function optional — omit for an all-functions seat list
     if (isActual) {
+      let w = `tenant_id=$1 AND is_active AND work_date=$2::date AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`;
+      if (fn) { p.push(fn); w += ` AND COALESCE(role_function,function_name)=$${p.length}`; }
       rows = await this.ds.query(
-        `SELECT person_no, COALESCE(clean_name,name) name, shift_code, shift_start_min ss, shift_end_min se, presence
-           FROM roster_days WHERE tenant_id=$1 AND is_active AND work_date=$2::date
-             AND COALESCE(role_function,function_name)=$3 AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`,
-        [t, date, fn]).catch(() => []);
+        `SELECT person_no, COALESCE(clean_name,name) name, COALESCE(role_function,function_name) fn, shift_code, shift_start_min ss, shift_end_min se, presence
+           FROM roster_days WHERE ${w}`, p).catch(() => []);
     } else {
+      let w = `se.tenant_id=$1 AND se.entry_date=$2::date AND sc.start_time IS NOT NULL`;
+      if (fn) { p.push(fn); w += ` AND COALESCE(f.name,'—')=$${p.length}`; }
       rows = await this.ds.query(
         `SELECT DISTINCT ON (se.employee_id) e.employee_no person_no,
-                TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) name, se.shift_code_display shift_code,
+                TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) name, COALESCE(f.name,'—') fn, se.shift_code_display shift_code,
                 (EXTRACT(HOUR FROM sc.start_time)*60+EXTRACT(MINUTE FROM sc.start_time))::int ss,
                 (CASE WHEN sc.end_time<=sc.start_time THEN EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time)+1440 ELSE EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time) END)::int se,
                 'plan' presence
@@ -1259,13 +1261,12 @@ export class ReconController {
            JOIN schedule_versions sv ON sv.id=se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
            JOIN employees e ON e.id=se.employee_id LEFT JOIN functions f ON f.id=e.function_id
            LEFT JOIN shift_codes sc ON sc.tenant_id=se.tenant_id AND sc.code=se.shift_code_display
-          WHERE se.tenant_id=$1 AND se.entry_date=$2::date AND COALESCE(f.name,'—')=$3 AND sc.start_time IS NOT NULL
-          ORDER BY se.employee_id, sv.created_at DESC`, [t, date, fn]).catch(() => []);
+          WHERE ${w} ORDER BY se.employee_id, sv.created_at DESC`, p).catch(() => []);
     }
     const seated = rows.filter(r => covJs(Number(r.ss), Number(r.se)))
-      .map(r => ({ personNo: r.person_no, name: r.name, shiftCode: r.shift_code, start: hhmm(r.ss), end: hhmm(r.se), presence: r.presence }))
+      .map(r => ({ personNo: r.person_no, name: r.name, fn: r.fn, shiftCode: r.shift_code, start: hhmm(r.ss), end: hhmm(r.se), presence: r.presence }))
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    return { date, function: fn, hour: h, mode: isActual ? 'actual' : 'plan', count: seated.length, agents: seated };
+    return { date, function: fn || null, hour: h, mode: isActual ? 'actual' : 'plan', count: seated.length, agents: seated };
   }
 
   /** CROSS-SKILL COVER — commit a manager's cross-skill pick: create a cross_skill_move, notify the

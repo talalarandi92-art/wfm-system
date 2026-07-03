@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { CalendarRange, ChevronLeft, ChevronRight, Activity, Gauge as GaugeIcon, Zap, TrendingUp, TrendingDown, FileSpreadsheet, Waves } from 'lucide-react';
+import { CalendarRange, ChevronLeft, ChevronRight, Activity, Gauge as GaugeIcon, Zap, TrendingUp, TrendingDown, FileSpreadsheet, Waves, Wand2, Users } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile, useCountUp } from '@/components/dazzle';
@@ -35,6 +35,10 @@ export default function ForecastWeekPage() {
   const [fnList, setFnList] = useState<string[]>([]);
   const [hover, setHover] = useState<{ di: number; hi: number } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [remedies, setRemedies] = useState<any>(null);
+  const [seat, setSeat] = useState<{ date: string; fn: string; hour: number; loading: boolean; data: any } | null>(null);
+  const [cover, setCover] = useState<any>(null);   // active cross-skill cover dialog
+  const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -44,8 +48,25 @@ export default function ForecastWeekPage() {
     apiClient.get(`/attendance-recon/roster-v2/week-forecast?${qs}`)
       .then((r: any) => { setD(r.data); if (!weekStart && r.data?.weekStart) setWeekStart(r.data.weekStart); })
       .catch(() => setD(null)).finally(() => setLoading(false));
+    apiClient.get(`/attendance-recon/roster-v2/gap-remedies?${qs}`).then((r: any) => setRemedies(r.data)).catch(() => setRemedies(null));
   }, [weekStart, fn]);
   useEffect(() => { const t = setTimeout(load, 150); return () => clearTimeout(t); }, [load]);
+
+  // open the who-on-seat popover for a heatmap cell
+  const openSeat = useCallback((date: string, fnName: string, hour: number) => {
+    setSeat({ date, fn: fnName, hour, loading: true, data: null });
+    apiClient.get(`/attendance-recon/roster-v2/on-seat?date=${date}&function=${encodeURIComponent(fnName)}&hour=${hour}`)
+      .then((r: any) => setSeat(s => s ? { ...s, loading: false, data: r.data } : s))
+      .catch(() => setSeat(s => s ? { ...s, loading: false, data: { agents: [], count: 0 } } : s));
+  }, []);
+  // commit a cross-skill cover
+  const commitCover = async (payload: any) => {
+    try {
+      const r: any = await apiClient.post('/attendance-recon/roster-v2/cross-skill-cover', payload);
+      setToast(ar ? `✓ ${r.data.agent} سيغطّي ${r.data.toFunction} (${r.data.window}) — أُرسل إشعار وأُضيف للكاليندر` : `✓ ${r.data.agent} will cover ${r.data.toFunction} (${r.data.window}) — notified + calendar`);
+      setCover(null); setTimeout(() => setToast(null), 5000);
+    } catch { setToast(ar ? '✗ فشل تعيين التغطية' : '✗ cover failed'); setTimeout(() => setToast(null), 4000); }
+  };
   // function list (once)
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/hourly').then((r: any) => setFnList(r.data?.functions || [])).catch(() => {}); }, []);
 
@@ -109,9 +130,17 @@ export default function ForecastWeekPage() {
 
         {/* ── SEAM HEATMAP + cascade ledger ── */}
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_260px] gap-4">
-          <SeamHeatmap d={d} hover={hover} setHover={setHover} ar={ar} panel={panel} />
+          <SeamHeatmap d={d} hover={hover} setHover={setHover} ar={ar} panel={panel} onCell={(date: string, hour: number) => openSeat(date, fn, hour)} />
           <CascadeLedger d={d} hover={hover} ar={ar} panel={panel} />
         </div>
+
+        {/* ── GAP REMEDIES ── */}
+        {remedies && remedies.gapCount > 0 && (
+          <GapRemedies remedies={remedies} ar={ar} panel={panel} onCover={(g: any, src: any) => setCover({ gap: g, src })} />
+        )}
+        {remedies && remedies.gapCount === 0 && (
+          <div className="rounded-2xl p-3 text-[12px] font-semibold" style={{ ...panel, color: '#22c55e', borderColor: 'rgba(34,197,94,0.4)' }}>{ar ? '✓ لا فجوات تغطية في هذا الأسبوع — الجدول يغطّي كل الساعات فوق الخط المرجعي' : '✓ No coverage gaps this week — the schedule clears the baseline every hour'}</div>
+        )}
 
         {/* ── REALIZATION DIALS ── */}
         <div className="rounded-2xl p-4" style={panel}>
@@ -127,6 +156,144 @@ export default function ForecastWeekPage() {
             : '★ Baseline = avg scheduled HC per hour over the trailing 28 days (observed pattern, not Erlang). Plan days reflect the full published schedule; if the reconciled actuals for the period are thin, plan coverage can read high — it converges once the period reconciles from Sprinklr.'}
         </p>
       </>)}
+
+      {/* WHO-ON-SEAT popover */}
+      {seat && <SeatPopover seat={seat} ar={ar} onClose={() => setSeat(null)} />}
+      {/* CROSS-SKILL cover dialog */}
+      {cover && <CoverDialog cover={cover} ar={ar} onClose={() => setCover(null)} onCommit={commitCover} weekStart={weekStart} />}
+      {/* toast */}
+      {toast && (
+        <div className="fixed bottom-5 inset-x-0 flex justify-center z-50 px-4" style={{ pointerEvents: 'none' }}>
+          <div className="rounded-xl px-4 py-2.5 text-[12px] font-semibold shadow-xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-1)', maxWidth: 560 }}>{toast}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══ GAP REMEDIES ═══════════════════════════════════════════════════════════ */
+function GapRemedies({ remedies, ar, panel, onCover }: any) {
+  const sevColor: any = { high: '#ef4444', medium: '#f59e0b', low: '#eab308' };
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? remedies.gaps : remedies.gaps.slice(0, 8);
+  return (
+    <div className="rounded-2xl p-4 space-y-3" style={{ ...panel, borderColor: 'rgba(239,68,68,0.3)' }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--text-1)' }}><Wand2 size={15} style={{ color: '#f97316' }} />{ar ? 'علاج الفجوات — توصيات' : 'Gap remedies — recommendations'}</h3>
+        <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>{remedies.gapCount} {ar ? 'ساعة ناقصة' : 'short hours'}</span>
+        <span className="text-[10px]" style={{ color: 'var(--text-3)' }}>{ar ? 'اضغط «غطِّ» لتنفيذ نقل كروس-سكيل بإشعار وكاليندر' : 'click Cover to run a cross-skill move with notify + calendar'}</span>
+      </div>
+      {/* permission-block advisories */}
+      {remedies.permissionBlocks?.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {remedies.permissionBlocks.slice(0, 8).map((b: any, i: number) => (
+            <span key={i} className="px-2 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1" style={{ background: 'rgba(234,179,8,0.12)', color: '#ca8a04', border: '1px solid rgba(234,179,8,0.3)' }}>
+              🚫 {b.fn}: {ar ? 'لا استئذان' : 'no perm'} {String(b.from).padStart(2, '0')}:00–{String(b.to % 24).padStart(2, '0')}:00
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {shown.map((g: any, i: number) => {
+          const cs = g.remedies.find((r: any) => r.type === 'cross_skill');
+          const ot = g.remedies.find((r: any) => r.type === 'overtime');
+          return (
+            <div key={i} className="rounded-xl p-2.5" style={{ background: 'var(--surface-2)', border: `1px solid ${sevColor[g.severity]}44` }}>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-1.5 h-6 rounded-full" style={{ background: sevColor[g.severity] }} />
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-bold truncate" style={{ color: 'var(--text-1)' }}>{g.fn}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>{String(g.hour).padStart(2, '0')}:00 · {ar ? 'مطلوب' : 'need'} {g.required} · {ar ? 'خطة' : 'plan'} {g.planned}</div>
+                  </div>
+                </div>
+                <span className="text-[13px] font-extrabold whitespace-nowrap" style={{ color: sevColor[g.severity] }}>−{g.deficit}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {cs && (
+                  <button onClick={() => onCover(g, cs.sources[0])} className="px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1" style={{ background: 'rgba(76,201,230,0.15)', color: '#0891b2', border: '1px solid rgba(76,201,230,0.4)' }}>
+                    ① {ar ? 'كروس من' : 'x-skill'} {cs.from} <span style={{ opacity: 0.7 }}>(+{cs.sources[0]?.surplus})</span> → {ar ? 'غطِّ' : 'Cover'}
+                  </button>
+                )}
+                {ot && <span className="px-2 py-1 rounded-lg text-[10px] font-semibold" style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}>② OT ×{ot.take}</span>}
+                <span className="px-2 py-1 rounded-lg text-[10px]" style={{ background: 'var(--surface)', color: 'var(--text-3)', border: '1px solid var(--border)' }}>③ {ar ? 'مِكس' : 'mix'}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {remedies.gaps.length > 8 && <button onClick={() => setShowAll(!showAll)} className="text-[11px] font-semibold" style={{ color: '#818cf8' }}>{showAll ? (ar ? 'إخفاء' : 'show less') : (ar ? `عرض الكل (${remedies.gaps.length})` : `show all (${remedies.gaps.length})`)}</button>}
+    </div>
+  );
+}
+
+/* ══ WHO-ON-SEAT popover ════════════════════════════════════════════════════ */
+function SeatPopover({ seat, ar, onClose }: any) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.35)' }} onClick={onClose}>
+      <div className="rounded-2xl p-4 w-full max-w-md max-h-[75vh] overflow-auto" style={{ background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--text-1)' }}><Users size={15} style={{ color: '#818cf8' }} />{ar ? 'من على المقعد' : 'On seat'}</h3>
+          <button onClick={onClose} style={{ color: 'var(--text-3)' }} className="text-lg leading-none">✕</button>
+        </div>
+        <div className="text-[11px] mb-3 flex items-center gap-2" style={{ color: 'var(--text-3)' }}>
+          <span>{seat.date} · {String(seat.hour).padStart(2, '0')}:00{seat.fn ? ` · ${seat.fn}` : (ar ? ' · كل الفنكشن' : ' · all functions')}</span>
+          {seat.data && <span className="px-2 py-0.5 rounded-lg font-bold" style={{ background: seat.data.mode === 'actual' ? 'rgba(34,197,94,0.15)' : 'rgba(129,140,248,0.15)', color: seat.data.mode === 'actual' ? '#22c55e' : '#818cf8' }}>{seat.data.mode === 'actual' ? (ar ? 'فعلي' : 'actual') : (ar ? 'خطة' : 'plan')} · {seat.data.count}</span>}
+        </div>
+        {seat.loading && <p className="text-[12px] py-6 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'جارٍ التحميل…' : 'loading…'}</p>}
+        {!seat.loading && seat.data && (seat.data.agents.length === 0
+          ? <p className="text-[12px] py-6 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'لا أحد على المقعد هذه الساعة' : 'no one on seat this hour'}</p>
+          : <div className="space-y-1">
+            {seat.data.agents.map((a: any, i: number) => (
+              <div key={i} className="flex items-center gap-2 rounded-lg px-2 py-1.5" style={{ background: 'var(--surface-2)' }}>
+                <div className="w-7 h-7 rounded-full grid place-items-center text-[10px] font-bold flex-shrink-0" style={{ background: 'linear-gradient(135deg,#6366f1,#0ea5e9)', color: '#fff' }}>{(a.name || '?').split(' ').map((x: string) => x[0]).slice(0, 2).join('')}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-semibold truncate" style={{ color: 'var(--text-1)' }}>{a.name}</div>
+                  <div className="text-[10px]" style={{ color: 'var(--text-3)' }}>{a.shiftCode} · {a.start}–{a.end}{a.fn && !seat.fn ? ` · ${a.fn}` : ''}</div>
+                </div>
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: a.presence === 'wfh' ? '#06b6d4' : a.presence === 'plan' ? '#818cf8' : '#22c55e' }} title={a.presence} />
+              </div>
+            ))}
+          </div>)}
+      </div>
+    </div>
+  );
+}
+
+/* ══ CROSS-SKILL cover dialog ═══════════════════════════════════════════════ */
+function CoverDialog({ cover, ar, onClose, onCommit, weekStart }: any) {
+  const g = cover.gap, src = cover.src;
+  const [date, setDate] = useState(weekStart || '');
+  const [seatLoad, setSeatLoad] = useState(true);
+  const [candidates, setCandidates] = useState<any[]>([]);
+  const [pick, setPick] = useState<string>('');
+  // pull candidate agents from the SURPLUS function at that hour on the chosen date
+  useEffect(() => {
+    if (!date) return; setSeatLoad(true);
+    apiClient.get(`/attendance-recon/roster-v2/on-seat?date=${date}&function=${encodeURIComponent(src.fn)}&hour=${g.hour}`)
+      .then((r: any) => { setCandidates(r.data?.agents || []); setPick(r.data?.agents?.[0]?.personNo || ''); })
+      .catch(() => setCandidates([])).finally(() => setSeatLoad(false));
+  }, [date, src.fn, g.hour]);
+  const chosen = candidates.find(c => c.personNo === pick);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={onClose}>
+      <div className="rounded-2xl p-4 w-full max-w-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }} onClick={e => e.stopPropagation()}>
+        <h3 className="text-sm font-bold mb-1" style={{ color: 'var(--text-1)' }}>{ar ? 'تغطية كروس-سكيل' : 'Cross-skill cover'}</h3>
+        <p className="text-[11px] mb-3" style={{ color: 'var(--text-3)' }}>{ar ? `غطِّ نقص «${g.fn}» الساعة ${String(g.hour).padStart(2, '0')}:00 (−${g.deficit}) بموظف من «${src.fn}» (فائض +${src.surplus})` : `cover ${g.fn} @${g.hour}:00 (−${g.deficit}) with an agent from ${src.fn} (surplus +${src.surplus})`}</p>
+        <label className="text-[10px] font-semibold" style={{ color: 'var(--text-3)' }}>{ar ? 'التاريخ' : 'Date'}</label>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full mb-2 px-2 py-1.5 rounded-lg text-xs" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }} />
+        <label className="text-[10px] font-semibold" style={{ color: 'var(--text-3)' }}>{ar ? 'الموظف (من الفائض)' : 'Agent (from surplus)'}</label>
+        {seatLoad ? <p className="text-[11px] py-2" style={{ color: 'var(--text-3)' }}>…</p>
+          : candidates.length === 0 ? <p className="text-[11px] py-2" style={{ color: '#ef4444' }}>{ar ? 'لا مرشّح متاح على المقعد هذه الساعة — جرّب OT' : 'no candidate on seat this hour — try OT'}</p>
+            : <select value={pick} onChange={e => setPick(e.target.value)} className="w-full mb-3 px-2 py-1.5 rounded-lg text-xs" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}>
+              {candidates.map(c => <option key={c.personNo} value={c.personNo}>{c.name} ({c.shiftCode} {c.start}–{c.end})</option>)}
+            </select>}
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}>{ar ? 'إلغاء' : 'Cancel'}</button>
+          <button disabled={!chosen} onClick={() => onCommit({ personNo: pick, fromFunction: src.fn, toFunction: g.fn, date, startHour: g.hour, endHour: (g.hour + 1) % 24, reason: 'Gap coverage from forecast' })}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: chosen ? 'linear-gradient(135deg,#0ea5e9,#6366f1)' : 'var(--surface-2)', color: chosen ? '#fff' : 'var(--text-3)' }}>{ar ? 'أكّد التغطية + إشعار' : 'Confirm + notify'}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -204,7 +371,7 @@ function StaffingRiver({ series, seamIdx, maxY, days, frontier, ar, panel }: any
 }
 
 /* ══ 2. SEAM HEATMAP ════════════════════════════════════════════════════════ */
-function SeamHeatmap({ d, hover, setHover, ar, panel }: any) {
+function SeamHeatmap({ d, hover, setHover, ar, panel, onCell }: any) {
   const cellColor = (c: Cell) => {
     if (c.required < 1 && c.hc === 0) return 'transparent';
     const v = c.coveragePct;
@@ -240,7 +407,8 @@ function SeamHeatmap({ d, hover, setHover, ar, panel }: any) {
                 const intensity = c.hc === 0 ? 0 : Math.min(1, 0.28 + (c.coveragePct != null ? Math.min(c.coveragePct, 140) / 140 : 0.5) * 0.72);
                 return (
                   <div key={hi} onMouseEnter={() => setHover({ di, hi })} onMouseLeave={() => setHover(null)}
-                    title={`${day.dayName} ${hh2(c.hour)}:00 · ${ar ? 'هيدكاونت' : 'HC'} ${c.hc}${c.required >= 1 ? ` / ${ar ? 'مرجعي' : 'req'} ${c.required}` : ''}${c.coveragePct != null ? ` · ${c.coveragePct}%` : ''}`}
+                    onClick={() => onCell && onCell(day.date, c.hour)}
+                    title={`${day.dayName} ${hh2(c.hour)}:00 · ${ar ? 'هيدكاونت' : 'HC'} ${c.hc}${c.required >= 1 ? ` / ${ar ? 'مرجعي' : 'req'} ${c.required}` : ''}${c.coveragePct != null ? ` · ${c.coveragePct}% — اضغط لعرض من على المقعد` : ''}`}
                     style={{
                       height: 20, margin: 1, borderRadius: 3,
                       background: col === 'transparent' ? 'var(--surface-2)' : col,
