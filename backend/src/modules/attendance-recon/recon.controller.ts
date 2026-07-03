@@ -1309,6 +1309,85 @@ export class ReconController {
     finally { await qr.release(); }
   }
 
+  /** REQUEST OT — a manager asks an agent to work overtime to close a gap. Creates an overtime
+   *  request (status pending — awaiting the agent's acknowledgement) + notifies the agent. When the
+   *  agent acknowledges (ot-ack) it becomes approved: the forecast plan overlay (approved OT) reflects
+   *  it AND the OT hours are written onto the roster row for both to see. */
+  @Post('roster-v2/ot-request')
+  @RequirePermissions('schedule.edit')
+  async otRequest(@Req() req: any, @Body() b: { personNo: string; toFunction?: string; date: string; startHour: number; endHour: number; reason?: string }) {
+    const t = req.user.tenantId; const managerId = req.user.id || req.user.sub;
+    if (!b?.personNo || !b?.date || b?.startHour == null || b?.endHour == null) throw new BadRequestException('personNo, date, startHour, endHour required');
+    const [emp] = await this.ds.query(`SELECT id, employee_no, TRIM(CONCAT(first_name_en,' ',COALESCE(last_name_en,''))) name FROM employees WHERE tenant_id=$1 AND employee_no=$2`, [t, b.personNo]);
+    if (!emp) throw new BadRequestException(`Employee ${b.personNo} not found`);
+    const [usr] = await this.ds.query(`SELECT id FROM users WHERE tenant_id=$1 AND employee_id=$2 AND status='active' LIMIT 1`, [t, emp.id]).catch(() => [null]);
+    const [rt] = await this.ds.query(`SELECT id FROM request_types WHERE tenant_id=$1 AND code='overtime' LIMIT 1`, [t]);
+    const [fnRow] = b.toFunction ? await this.ds.query(`SELECT id FROM functions WHERE tenant_id=$1 AND name=$2 LIMIT 1`, [t, b.toFunction]).catch(() => [null]) : [null];
+    const pad = (n: number) => String(n).padStart(2, '0'); const win = `${pad(b.startHour)}:00–${pad(b.endHour)}:00`;
+    const dur = Math.max(0, (b.endHour - b.startHour)) * 60;
+    const qr = this.ds.createQueryRunner(); await qr.connect(); await qr.startTransaction();
+    try {
+      const [rq] = await qr.query(
+        `INSERT INTO requests (tenant_id, request_type_id, requester_id, employee_id, status, notes, submitted_at)
+         VALUES ($1,$2,$3,$4,'pending',$5,NOW()) RETURNING id`,
+        [t, rt?.id ?? null, managerId, emp.id, `OT requested by manager to cover ${b.toFunction || ''} ${win} on ${b.date}. ${b.reason || ''}`]);
+      await qr.query(
+        `INSERT INTO request_overtimes (request_id, ot_date, start_time, end_time, duration_minutes, ot_reason, function_id)
+         VALUES ($1,$2::date,$3::time,$4::time,$5,$6,$7)`,
+        [rq.id, b.date, `${pad(b.startHour)}:00`, `${pad(b.endHour)}:00`, dur, b.reason ?? 'Gap coverage OT', fnRow?.id ?? null]);
+      if (usr?.id) await qr.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id, action_url)
+         VALUES ($1,$2,'overtime.request',$3,$4,$5,$6,'request',$7,'/requests')`,
+        [t, usr.id, `Overtime requested: ${b.date} ${win}`, `طلب أوفر تايم: ${b.date} ${win}`,
+         `Please acknowledge overtime ${win} on ${b.date}${b.toFunction ? ' (' + b.toFunction + ')' : ''}.`, `يرجى الإقرار بأوفر تايم ${win} بتاريخ ${b.date}${b.toFunction ? ' (' + b.toFunction + ')' : ''}.`, rq.id]);
+      await qr.commitTransaction();
+      return { ok: true, requestId: rq.id, agent: emp.name, window: win, date: b.date, status: 'pending', notified: !!usr?.id };
+    } catch (e: any) { await qr.rollbackTransaction(); throw new BadRequestException('OT request failed: ' + (e?.message || e)); }
+    finally { await qr.release(); }
+  }
+
+  /** ACKNOWLEDGE / DECIDE an OT request. On accept → status approved + the OT hours are stamped onto
+   *  the agent's roster_days row (before/after/off-day bucket by window vs shift) so it shows for both;
+   *  the forecast (approved-OT overlay) also reflects it. Callable by the agent or a manager. */
+  @Post('roster-v2/ot-ack')
+  @RequirePermissions('requests.view_own')
+  async otAck(@Req() req: any, @Body() b: { requestId: string; accept: boolean }) {
+    const t = req.user.tenantId;
+    if (!b?.requestId) throw new BadRequestException('requestId required');
+    const [row] = await this.ds.query(
+      `SELECT r.id, r.employee_id, r.requester_id, e.employee_no, ro.ot_date::text d,
+              EXTRACT(HOUR FROM ro.start_time)*60+EXTRACT(MINUTE FROM ro.start_time) os,
+              EXTRACT(HOUR FROM ro.end_time)*60+EXTRACT(MINUTE FROM ro.end_time) oe, ro.duration_minutes dur
+         FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id JOIN employees e ON e.id=r.employee_id
+        WHERE r.tenant_id=$1 AND r.id=$2`, [t, b.requestId]);
+    if (!row) throw new BadRequestException('OT request not found');
+    if (!b.accept) { await this.ds.query(`UPDATE requests SET status='rejected', rejected_at=NOW(), updated_at=NOW() WHERE id=$1`, [b.requestId]); return { ok: true, status: 'rejected' }; }
+    await this.ds.query(`UPDATE requests SET status='approved', approved_l1_at=NOW(), updated_at=NOW() WHERE id=$1`, [b.requestId]);
+    // stamp the OT onto the roster row (if one exists for that agent/day) — before/after/off-day bucket.
+    const [rd] = await this.ds.query(
+      `SELECT shift_start_min ss, shift_end_min se FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3::date AND is_active`,
+      [t, row.employee_no, row.d]).catch(() => [null]);
+    let bucket = 'offday_ot_min', rosterUpdated = false;
+    if (rd && rd.ss != null) {
+      const ss = Number(rd.ss); const seC = rd.se != null ? (Number(rd.se) <= ss ? Number(rd.se) + 1440 : Number(rd.se)) : ss + 540;
+      const os = Number(row.os), oe = Number(row.oe);
+      bucket = oe <= ss ? 'ot_before_min' : os >= seC % 1440 || os >= seC ? 'ot_after_min' : 'ot_after_min';
+    }
+    if (rd) {
+      const res = await this.ds.query(
+        `UPDATE roster_days SET ${bucket} = COALESCE(${bucket},0) + $4 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3::date AND is_active`,
+        [t, row.employee_no, row.d, Number(row.dur)]);
+      rosterUpdated = Array.isArray(res) && typeof res[1] === 'number' ? res[1] > 0 : true;
+    }
+    // notify the manager that the agent acknowledged
+    const [mgr] = await this.ds.query(`SELECT id FROM users WHERE tenant_id=$1 AND id=$2 LIMIT 1`, [t, row.requester_id]).catch(() => [null]);
+    if (mgr?.id) await this.ds.query(
+      `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id, action_url)
+       VALUES ($1,$2,'overtime.acknowledged',$3,$4,$5,$6,'request',$7,'/schedule?tab=forecast')`,
+      [t, mgr.id, 'Overtime acknowledged', 'تم الإقرار بالأوفر تايم', `The agent acknowledged the OT on ${row.d}.`, `أقرّ الموظف بالأوفر تايم بتاريخ ${row.d}.`, b.requestId]).catch(() => {});
+    return { ok: true, status: 'approved', bucket, rosterUpdated, minutes: Number(row.dur) };
+  }
+
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the
    *  hourly need per function, then greedy set-cover the standard shift windows (real start/end
    *  taken from the data) to cover every hour — and check we have enough active staff. The

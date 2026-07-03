@@ -38,6 +38,7 @@ export default function ForecastWeekPage() {
   const [remedies, setRemedies] = useState<any>(null);
   const [seat, setSeat] = useState<{ date: string; fn: string; hour: number; loading: boolean; data: any } | null>(null);
   const [cover, setCover] = useState<any>(null);   // active cross-skill cover dialog
+  const [otReq, setOtReq] = useState<any>(null);   // active OT-request dialog
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -66,6 +67,14 @@ export default function ForecastWeekPage() {
       setToast(ar ? `✓ ${r.data.agent} سيغطّي ${r.data.toFunction} (${r.data.window}) — أُرسل إشعار وأُضيف للكاليندر` : `✓ ${r.data.agent} will cover ${r.data.toFunction} (${r.data.window}) — notified + calendar`);
       setCover(null); setTimeout(() => setToast(null), 5000);
     } catch { setToast(ar ? '✗ فشل تعيين التغطية' : '✗ cover failed'); setTimeout(() => setToast(null), 4000); }
+  };
+  // request OT from an agent to close a gap (pending → agent acknowledges)
+  const commitOt = async (payload: any) => {
+    try {
+      const r: any = await apiClient.post('/attendance-recon/roster-v2/ot-request', payload);
+      setToast(ar ? `✓ طُلب أوفر تايم من ${r.data.agent} (${r.data.window}) — بانتظار إقراره${r.data.notified ? ' · أُرسل إشعار' : ''}` : `✓ OT requested from ${r.data.agent} (${r.data.window}) — awaiting acknowledgement${r.data.notified ? ' · notified' : ''}`);
+      setOtReq(null); setTimeout(() => setToast(null), 6000);
+    } catch { setToast(ar ? '✗ فشل طلب الأوفر تايم' : '✗ OT request failed'); setTimeout(() => setToast(null), 4000); }
   };
   // function list (once)
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/hourly').then((r: any) => setFnList(r.data?.functions || [])).catch(() => {}); }, []);
@@ -136,7 +145,7 @@ export default function ForecastWeekPage() {
 
         {/* ── GAP REMEDIES ── */}
         {remedies && remedies.gapCount > 0 && (
-          <GapRemedies remedies={remedies} ar={ar} panel={panel} onCover={(g: any, src: any) => setCover({ gap: g, src })} />
+          <GapRemedies remedies={remedies} ar={ar} panel={panel} onCover={(g: any, src: any) => setCover({ gap: g, src })} onOt={(g: any) => setOtReq({ gap: g })} />
         )}
         {remedies && remedies.gapCount === 0 && (
           <div className="rounded-2xl p-3 text-[12px] font-semibold" style={{ ...panel, color: '#22c55e', borderColor: 'rgba(34,197,94,0.4)' }}>{ar ? '✓ لا فجوات تغطية في هذا الأسبوع — الجدول يغطّي كل الساعات فوق الخط المرجعي' : '✓ No coverage gaps this week — the schedule clears the baseline every hour'}</div>
@@ -161,6 +170,8 @@ export default function ForecastWeekPage() {
       {seat && <SeatPopover seat={seat} ar={ar} onClose={() => setSeat(null)} />}
       {/* CROSS-SKILL cover dialog */}
       {cover && <CoverDialog cover={cover} ar={ar} onClose={() => setCover(null)} onCommit={commitCover} weekStart={weekStart} />}
+      {/* OT request dialog */}
+      {otReq && <OtDialog otReq={otReq} ar={ar} onClose={() => setOtReq(null)} onCommit={commitOt} weekStart={weekStart} />}
       {/* toast */}
       {toast && (
         <div className="fixed bottom-5 inset-x-0 flex justify-center z-50 px-4" style={{ pointerEvents: 'none' }}>
@@ -172,7 +183,7 @@ export default function ForecastWeekPage() {
 }
 
 /* ══ GAP REMEDIES ═══════════════════════════════════════════════════════════ */
-function GapRemedies({ remedies, ar, panel, onCover }: any) {
+function GapRemedies({ remedies, ar, panel, onCover, onOt }: any) {
   const sevColor: any = { high: '#ef4444', medium: '#f59e0b', low: '#eab308' };
   const [showAll, setShowAll] = useState(false);
   const shown = showAll ? remedies.gaps : remedies.gaps.slice(0, 8);
@@ -215,7 +226,7 @@ function GapRemedies({ remedies, ar, panel, onCover }: any) {
                     ① {ar ? 'كروس من' : 'x-skill'} {cs.from} <span style={{ opacity: 0.7 }}>(+{cs.sources[0]?.surplus})</span> → {ar ? 'غطِّ' : 'Cover'}
                   </button>
                 )}
-                {ot && <span className="px-2 py-1 rounded-lg text-[10px] font-semibold" style={{ background: 'rgba(139,92,246,0.12)', color: '#8b5cf6' }}>② OT ×{ot.take}</span>}
+                {ot && <button onClick={() => onOt(g)} className="px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1" style={{ background: 'rgba(139,92,246,0.15)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.4)' }}>② {ar ? 'اطلب OT' : 'Request OT'} ×{ot.take}</button>}
                 <span className="px-2 py-1 rounded-lg text-[10px]" style={{ background: 'var(--surface)', color: 'var(--text-3)', border: '1px solid var(--border)' }}>③ {ar ? 'مِكس' : 'mix'}</span>
               </div>
             </div>
@@ -292,6 +303,46 @@ function CoverDialog({ cover, ar, onClose, onCommit, weekStart }: any) {
           <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}>{ar ? 'إلغاء' : 'Cancel'}</button>
           <button disabled={!chosen} onClick={() => onCommit({ personNo: pick, fromFunction: src.fn, toFunction: g.fn, date, startHour: g.hour, endHour: (g.hour + 1) % 24, reason: 'Gap coverage from forecast' })}
             className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: chosen ? 'linear-gradient(135deg,#0ea5e9,#6366f1)' : 'var(--surface-2)', color: chosen ? '#fff' : 'var(--text-3)' }}>{ar ? 'أكّد التغطية + إشعار' : 'Confirm + notify'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══ OT request dialog ══════════════════════════════════════════════════════ */
+function OtDialog({ otReq, ar, onClose, onCommit, weekStart }: any) {
+  const g = otReq.gap;
+  const [date, setDate] = useState(weekStart || '');
+  const [seatLoad, setSeatLoad] = useState(true);
+  const [cands, setCands] = useState<any[]>([]);
+  const [pick, setPick] = useState('');
+  // OT candidates = agents of the GAP function whose shift is adjacent to the gap (ends at the hour
+  // before → they extend into it). Pull on-seat of the gap function at hour-1.
+  useEffect(() => {
+    if (!date) return; setSeatLoad(true);
+    const h1 = (g.hour + 23) % 24;
+    apiClient.get(`/attendance-recon/roster-v2/on-seat?date=${date}&function=${encodeURIComponent(g.fn)}&hour=${h1}`)
+      .then((r: any) => { setCands(r.data?.agents || []); setPick(r.data?.agents?.[0]?.personNo || ''); })
+      .catch(() => setCands([])).finally(() => setSeatLoad(false));
+  }, [date, g.fn, g.hour]);
+  const chosen = cands.find(c => c.personNo === pick);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={onClose}>
+      <div className="rounded-2xl p-4 w-full max-w-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }} onClick={e => e.stopPropagation()}>
+        <h3 className="text-sm font-bold mb-1 flex items-center gap-2" style={{ color: 'var(--text-1)' }}><Zap size={15} style={{ color: '#8b5cf6' }} />{ar ? 'طلب أوفر تايم' : 'Request overtime'}</h3>
+        <p className="text-[11px] mb-3" style={{ color: 'var(--text-3)' }}>{ar ? `اطلب من موظف «${g.fn}» يمدّد ساعة لتغطية ${String(g.hour).padStart(2, '0')}:00 (نقص −${g.deficit}). سيصله إشعار للإقرار؛ وعند العمل يُسجَّل الأوفر تايم بالروستر.` : `Ask a ${g.fn} agent to extend 1h to cover ${g.hour}:00 (short −${g.deficit}). They get an acknowledgement; when worked, the OT is stamped on the roster.`}</p>
+        <label className="text-[10px] font-semibold" style={{ color: 'var(--text-3)' }}>{ar ? 'التاريخ' : 'Date'}</label>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full mb-2 px-2 py-1.5 rounded-lg text-xs" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }} />
+        <label className="text-[10px] font-semibold" style={{ color: 'var(--text-3)' }}>{ar ? 'الموظف (شفته ينتهي قبل الساعة)' : 'Agent (shift ends before the hour)'}</label>
+        {seatLoad ? <p className="text-[11px] py-2" style={{ color: 'var(--text-3)' }}>…</p>
+          : cands.length === 0 ? <p className="text-[11px] py-2" style={{ color: '#ef4444' }}>{ar ? 'لا موظف شفته ينتهي قبل هذه الساعة — جرّب كروس-سكيل' : 'no agent ending before this hour — try cross-skill'}</p>
+            : <select value={pick} onChange={e => setPick(e.target.value)} className="w-full mb-3 px-2 py-1.5 rounded-lg text-xs" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}>
+              {cands.map(c => <option key={c.personNo} value={c.personNo}>{c.name} ({c.shiftCode} {c.start}–{c.end})</option>)}
+            </select>}
+        <div className="flex gap-2 justify-end">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}>{ar ? 'إلغاء' : 'Cancel'}</button>
+          <button disabled={!chosen} onClick={() => onCommit({ personNo: pick, toFunction: g.fn, date, startHour: g.hour, endHour: (g.hour + 1) % 24, reason: 'Gap coverage OT from forecast' })}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ background: chosen ? 'linear-gradient(135deg,#8b5cf6,#6366f1)' : 'var(--surface-2)', color: chosen ? '#fff' : 'var(--text-3)' }}>{ar ? 'اطلب + إشعار للإقرار' : 'Request + notify'}</button>
         </div>
       </div>
     </div>
