@@ -811,6 +811,14 @@ export class ReconController {
           otBeforeHc: h.ot_before_hc, otAfterHc: h.ot_after_hc,
           otHours: +((h.ot_before_min + h.ot_after_min) / 60).toFixed(1),     // OT hours actually worked in this hour
           permHours: +((h.perm_late_min + h.perm_early_min) / 60).toFixed(1), // permission hours lost in this hour
+          // ── DURATION dimension (Director 2026-07-03: "كل شي يكون اله ساعات أو دقايق") ──
+          workedHrs: h.working,                                               // person-hours on seat this hour (each on-seat person = 1 person-hour)
+          otBeforeHrs: +(h.ot_before_min / 60).toFixed(1), otAfterHrs: +(h.ot_after_min / 60).toFixed(1),
+          otBeforeMin: h.ot_before_min, otAfterMin: h.ot_after_min,
+          tardyMin: h.tardy_min, earlyMin: h.early_min,
+          tardyHrs: +(h.tardy_min / 60).toFixed(1), earlyHrs: +(h.early_min / 60).toFixed(1),
+          permLateMin: h.perm_late_min, permEarlyMin: h.perm_early_min,
+          permLateHrs: +(h.perm_late_min / 60).toFixed(1), permEarlyHrs: +(h.perm_early_min / 60).toFixed(1),
           conformance: h._cw ? Math.round(h._cs / h._cw) : null,
           avgScheduled: av(h.scheduled), avgWorking: av(h.working),
           avgHcWithOt: av(hcWithOt), avgHcAfterPerm: av(hcAfterPerm), avgEffective: av(effective),
@@ -837,6 +845,14 @@ export class ReconController {
         conformance: cw ? Math.round(csum / cw) : null,
         otBeforeHours: +(ot.ob / 60).toFixed(1), otAfterHours: +(ot.oa / 60).toFixed(1),
         otBeforePct: otTot ? Math.round(100 * ot.ob / otTot) : 0, otAfterPct: otTot ? Math.round(100 * ot.oa / otTot) : 0,
+        // ── DURATION totals: person-hours on seat + OT/tardy/early/permission in hrs & mins ──
+        workedHrs: sum('working'),                                            // total person-hours on seat
+        otBeforeHrs: +(ot.ob / 60).toFixed(1), otAfterHrs: +(ot.oa / 60).toFixed(1), otHrs: +((ot.ob + ot.oa) / 60).toFixed(1),
+        otBeforeMin: ot.ob, otAfterMin: ot.oa,
+        tardyMin: sum('tardyMin'), earlyMin: sum('earlyMin'),
+        tardyHrs: +(sum('tardyMin') / 60).toFixed(1), earlyHrs: +(sum('earlyMin') / 60).toFixed(1),
+        permLateMin: sum('permLateMin'), permEarlyMin: sum('permEarlyMin'),
+        permLateHrs: +(sum('permLateMin') / 60).toFixed(1), permEarlyHrs: +(sum('permEarlyMin') / 60).toFixed(1),
       };
       const peak = rows.reduce((mx, r) => r.effective > mx.effective ? r : mx, rows[0]);
       return { hours: rows, total, peakHour: peak?.hour };
@@ -850,16 +866,20 @@ export class ReconController {
     // 24 hourly rows + TOTAL, same columns as the on-screen table.
     if (format === 'xlsx' && res) {
       const wb = new ExcelJS.Workbook();
-      const HD = ['Hour', 'Scheduled', 'Working', '+OT before', '+OT after', '= After OT', '−Perm late', '−Perm early', '= After perm', '−Tardy', '−Early', '= Effective', 'Sick', 'Absent', 'Leave', 'Shrinkage', 'Shrink %', 'Lost hrs', 'Plan HC', 'Plan −req', 'Coverage %', 'Conformance %', 'OT hrs', 'Perm hrs'];
+      // headcount cascade + KPIs, then the DURATION block (hours/minutes) the Director asked for.
+      const HD = ['Hour', 'Scheduled', 'Working', '+OT before', '+OT after', '= After OT', '−Perm late', '−Perm early', '= After perm', '−Tardy', '−Early', '= Effective', 'Sick', 'Absent', 'Leave', 'Shrinkage', 'Shrink %', 'Lost hrs', 'Plan HC', 'Plan −req', 'Coverage %', 'Conformance %',
+        'Working hrs', 'OT before hrs', 'OT after hrs', 'Total OT hrs', 'Tardy min', 'Early min', 'Perm late min', 'Perm early min'];
       const rowOf = (h: any) => [
         `${String(h.hour).padStart(2, '0')}:00`, h.avgScheduled, h.avgWorking, h.otBeforeHc, h.otAfterHc, h.avgHcWithOt,
         h.permLate, h.permEarly, h.avgHcAfterPerm, h.tardiness, h.earlyOut, h.avgEffective,
         h.sick, h.absent, h.onLeave, h.shrinkage, h.shrinkagePct, h.lostHours, h.avgPlan, h.avgPlanAfterReq,
-        h.coveragePct, h.conformance ?? '', h.otHours, h.permHours];
+        h.coveragePct, h.conformance ?? '',
+        h.workedHrs, h.otBeforeHrs, h.otAfterHrs, h.otHours, h.tardyMin, h.earlyMin, h.permLateMin, h.permEarlyMin];
       const totOf = (tt: any) => ['TOTAL', tt.scheduled, tt.working, tt.otBeforeHc, tt.otAfterHc, tt.hcWithOt,
         tt.permLate, tt.permEarly, tt.hcAfterPerm, tt.tardiness, tt.earlyOut, tt.effective,
         tt.sick ?? '', tt.absent ?? '', tt.onLeave ?? '', tt.shrinkage, tt.shrinkagePct, tt.lostHours ?? '', tt.plan ?? '', tt.planAfterReq ?? '',
-        tt.coveragePct, tt.conformance ?? '', tt.otHours, tt.permHours];
+        tt.coveragePct, tt.conformance ?? '',
+        tt.workedHrs, tt.otBeforeHrs, tt.otAfterHrs, tt.otHrs, tt.tardyMin, tt.earlyMin, tt.permLateMin, tt.permEarlyMin];
       const addSheet = (name: string, view: any) => {
         const ws = wb.addWorksheet(name.slice(0, 31).replace(/[\\/*?:[\]]/g, '·'));
         ws.addRow([`Hourly Analytics — ${name} — ${dFrom} → ${dTo} (${days} days)`]).font = { bold: true };

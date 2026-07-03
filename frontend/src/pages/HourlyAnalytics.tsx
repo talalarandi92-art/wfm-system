@@ -17,6 +17,8 @@ export default function HourlyAnalyticsPage() {
 
   const nav = useNavigate();
   const [exporting, setExporting] = useState(false);
+  // table dimension: headcount cascade vs duration (hours/minutes). Director 2026-07-03.
+  const [tmode, setTmode] = useState<'hc' | 'hrs'>('hc');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -123,7 +125,18 @@ export default function HourlyAnalyticsPage() {
           </div>
         </div>
 
+        {/* dimension toggle — headcount cascade vs hours/minutes (fewer columns → less scroll) */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="inline-flex rounded-xl p-1" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            {(([['hc', ar ? 'عدد' : 'Headcount'], ['hrs', ar ? 'ساعات/دقائق' : 'Hours/mins']]) as [('hc' | 'hrs'), string][]).map(([k, l]) => (
+              <button key={k} onClick={() => setTmode(k)} className="px-3.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: tmode === k ? 'linear-gradient(135deg,#0ea5e9,#6366f1)' : 'transparent', color: tmode === k ? '#fff' : 'var(--text-2)', boxShadow: tmode === k ? '0 2px 8px rgba(99,102,241,0.3)' : 'none' }}>{l}</button>
+            ))}
+          </div>
+          <span className="text-[10px]" style={{ color: 'var(--text-3)' }}>{tmode === 'hc' ? (ar ? 'كم موظف على المقعد كل ساعة' : 'how many agents on seat each hour') : (ar ? 'OT قبل/بعد بالساعات · تأخير/خروج بالدقائق · إجمالي ساعات العمل' : 'OT before/after in hours · tardy/early in minutes · total working hours')}</span>
+        </div>
+
         {/* the hourly table with TOTAL row */}
+        {tmode === 'hc' && (
         <div className="rounded-2xl overflow-auto" style={panel}>
           <table className="w-full text-[11px]">
             <thead className="sticky top-0 z-10" style={{ background: 'var(--surface-2)' }}>
@@ -137,7 +150,7 @@ export default function HourlyAnalyticsPage() {
             </tr>
             <tr>
               {([[ar ? 'الساعة' : 'Hour', 0], [ar ? 'مجدول' : 'Sched', 0], [ar ? 'مداوم' : 'Working', 0], [ar ? '+OT قبل' : '+OT bef', 0], [ar ? '+OT بعد' : '+OT aft', 0], [ar ? '= بعد OT' : '= after OT', 1], [ar ? '−إذن تأخير' : '−Perm late', 0], [ar ? '−إذن مبكر' : '−Perm early', 0], [ar ? '= بعد الإذن' : '= after perm', 1], [ar ? '−تارديشن' : '−Tardy', 0], [ar ? '−خروج مبكر' : '−Early', 0], [ar ? '= الفعلي' : '= Effective', 2], [ar ? 'مرض' : 'Sick', 0], [ar ? 'غياب' : 'Abs', 0], [ar ? 'إجازة' : 'Leave', 0], [ar ? 'شرينكج' : 'Shrink', 1], [ar ? 'ساعات ضائعة' : 'Lost hrs', 1], [ar ? 'خطة HC' : 'Plan HC', 1], [ar ? 'خطة −ريكوستات' : 'Plan −req', 1], [ar ? 'تغطية %' : 'Cov %', 0], [ar ? 'كونف %' : 'Conf %', 0], [ar ? 'ساعات OT' : 'OT hrs', 0], [ar ? 'ساعات إذن' : 'Perm hrs', 0]] as [string, number][]).map(([hd, cp], i) => (
-                <th key={i} className={`px-2 py-2 font-semibold whitespace-nowrap ${i === 0 ? 'text-start' : 'text-center'}`} style={{ color: cp ? 'var(--text-1)' : 'var(--text-3)', fontSize: 10, letterSpacing: '.02em', textTransform: 'uppercase', background: cp ? 'rgba(99,102,241,0.08)' : undefined }}>{hd}</th>
+                <th key={i} className={`px-2 py-2 font-semibold whitespace-nowrap ${i === 0 ? 'text-start sticky start-0 z-20' : 'text-center'}`} style={{ color: cp ? 'var(--text-1)' : 'var(--text-3)', fontSize: 10, letterSpacing: '.02em', textTransform: 'uppercase', background: i === 0 ? 'var(--surface-2)' : (cp ? 'rgba(99,102,241,0.08)' : undefined) }}>{hd}</th>
               ))}
             </tr></thead>
             <tbody>
@@ -145,7 +158,7 @@ export default function HourlyAnalyticsPage() {
                 const cp = (v: any, color = 'var(--text-1)') => <td className="px-2 py-1.5 text-center font-bold" style={{ color, background: 'rgba(99,102,241,0.06)' }}>{v}</td>;
                 return (
                 <tr key={h.hour} className="hover:bg-black/[0.03] dark:hover:bg-white/[0.03] transition-colors" style={{ borderTop: '1px solid var(--border)', opacity: h.scheduled ? 1 : 0.4 }}>
-                  <td className="px-2 py-1.5 font-semibold whitespace-nowrap" style={{ color: h.hour === view.peakHour ? '#0ea5e9' : 'var(--text-1)' }}>{hh(h.hour)}{h.hour === view.peakHour && <span className="text-[9px]"> ★</span>}</td>
+                  <td className="px-2 py-1.5 font-semibold whitespace-nowrap sticky start-0 z-10" style={{ color: h.hour === view.peakHour ? '#0ea5e9' : 'var(--text-1)', background: 'var(--surface)' }}>{hh(h.hour)}{h.hour === view.peakHour && <span className="text-[9px]"> ★</span>}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: 'var(--text-2)' }}>{h.avgScheduled}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: 'var(--text-2)' }}>{h.avgWorking}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: h.otBeforeHc ? '#a78bfa' : 'var(--text-3)' }}>{h.otBeforeHc ? `+${h.otBeforeHc}` : ''}</td>
@@ -172,7 +185,7 @@ export default function HourlyAnalyticsPage() {
               );})}
               {/* TOTAL row */}
               <tr style={{ borderTop: '2px solid var(--border-strong, var(--border))', background: 'var(--surface-2)' }}>
-                <td className="px-2 py-2 font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'الإجمالي' : 'TOTAL'}</td>
+                <td className="px-2 py-2 font-bold sticky start-0 z-10" style={{ color: 'var(--text-1)', background: 'var(--surface-2)' }}>{ar ? 'الإجمالي' : 'TOTAL'}</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: 'var(--text-2)' }}>{view.total.scheduled.toLocaleString()}</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: 'var(--text-2)' }}>{view.total.working.toLocaleString()}</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: '#a78bfa' }}>+{view.total.otBeforeHc.toLocaleString()}</td>
@@ -199,6 +212,58 @@ export default function HourlyAnalyticsPage() {
             </tbody>
           </table>
         </div>
+        )}
+
+        {/* HOURS / MINUTES table — the duration dimension (Director 2026-07-03) */}
+        {tmode === 'hrs' && (() => {
+          const t = view.total;
+          const H = (v: number) => v ? `${(+v).toLocaleString()}` : '';        // hours cell (already /60 on the server)
+          const M = (v: number) => v ? `${(+v).toLocaleString()}` : '';        // minutes cell
+          const cols: { key: string; label: string; unit: 'h' | 'm'; color: string; band: number }[] = [
+            { key: 'workedHrs',    label: ar ? 'ساعات عمل' : 'Working',      unit: 'h', color: 'var(--text-1)', band: 0 },
+            { key: 'otBeforeHrs',  label: ar ? 'OT قبل' : 'OT before',      unit: 'h', color: '#a78bfa', band: 1 },
+            { key: 'otAfterHrs',   label: ar ? 'OT بعد' : 'OT after',       unit: 'h', color: '#8b5cf6', band: 1 },
+            { key: 'otHours',      label: ar ? 'إجمالي OT' : 'Total OT',    unit: 'h', color: '#7c3aed', band: 1 },
+            { key: 'tardyMin',     label: ar ? 'تأخير' : 'Tardy',           unit: 'm', color: '#fb923c', band: 2 },
+            { key: 'earlyMin',     label: ar ? 'خروج مبكر' : 'Early out',   unit: 'm', color: '#f43f5e', band: 2 },
+            { key: 'permLateMin',  label: ar ? 'إذن تأخير' : 'Perm late',   unit: 'm', color: '#0ea5e9', band: 3 },
+            { key: 'permEarlyMin', label: ar ? 'إذن مبكر' : 'Perm early',   unit: 'm', color: '#0284c7', band: 3 },
+            { key: 'lostHours',    label: ar ? 'ساعات ضائعة' : 'Lost hrs',  unit: 'h', color: '#f43f5e', band: 4 },
+          ];
+          const bandColor = ['transparent', 'rgba(139,92,246,0.06)', 'rgba(251,146,60,0.06)', 'rgba(14,165,233,0.06)', 'rgba(244,63,94,0.06)'];
+          return (
+          <div className="rounded-2xl overflow-auto" style={panel}>
+            <table className="w-full text-[11px]">
+              <thead className="sticky top-0 z-10" style={{ background: 'var(--surface-2)' }}>
+                <tr>
+                  <th style={{ background: 'var(--surface-2)' }} />
+                  <th className="px-2 py-1 text-center font-bold" style={{ color: 'var(--text-3)', fontSize: 9, textTransform: 'uppercase' }}>{ar ? 'عمل' : 'Work'}</th>
+                  <th colSpan={3} className="px-2 py-1 text-center font-bold" style={{ color: '#8b5cf6', fontSize: 9, textTransform: 'uppercase', background: 'rgba(139,92,246,0.08)' }}>{ar ? 'أوفر تايم (ساعات)' : 'Overtime (hours)'}</th>
+                  <th colSpan={2} className="px-2 py-1 text-center font-bold" style={{ color: '#fb7185', fontSize: 9, textTransform: 'uppercase', background: 'rgba(251,146,60,0.08)' }}>{ar ? 'تأخير/خروج (دقائق)' : 'Tardy/early (mins)'}</th>
+                  <th colSpan={2} className="px-2 py-1 text-center font-bold" style={{ color: '#38bdf8', fontSize: 9, textTransform: 'uppercase', background: 'rgba(14,165,233,0.08)' }}>{ar ? 'استئذانات (دقائق)' : 'Permissions (mins)'}</th>
+                  <th className="px-2 py-1 text-center font-bold" style={{ color: '#f43f5e', fontSize: 9, textTransform: 'uppercase', background: 'rgba(244,63,94,0.08)' }}>{ar ? 'ضائع' : 'Lost'}</th>
+                </tr>
+                <tr>
+                  <th className="px-2 py-2 font-semibold text-start sticky start-0" style={{ color: 'var(--text-1)', fontSize: 10, textTransform: 'uppercase', background: 'var(--surface-2)' }}>{ar ? 'الساعة' : 'Hour'}</th>
+                  {cols.map(c => <th key={c.key} className="px-2 py-2 font-semibold text-center whitespace-nowrap" style={{ color: 'var(--text-2)', fontSize: 10, textTransform: 'uppercase', background: bandColor[c.band] }}>{c.label}<span style={{ color: 'var(--text-3)', fontSize: 8 }}> {c.unit === 'h' ? (ar ? 'س' : 'h') : (ar ? 'د' : 'm')}</span></th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {view.hours.map((h: any) => (
+                  <tr key={h.hour} className="hover:bg-black/[0.03] dark:hover:bg-white/[0.03]" style={{ borderTop: '1px solid var(--border)', opacity: (h.workedHrs || h.otHours || h.tardyMin || h.earlyMin) ? 1 : 0.4 }}>
+                    <td className="px-2 py-1.5 font-semibold sticky start-0 whitespace-nowrap" style={{ color: h.hour === view.peakHour ? '#0ea5e9' : 'var(--text-1)', background: 'var(--surface)' }}>{hh(h.hour)}{h.hour === view.peakHour && <span className="text-[9px]"> ★</span>}</td>
+                    {cols.map(c => <td key={c.key} className="px-2 py-1.5 text-center" style={{ color: h[c.key] ? c.color : 'var(--text-3)', background: bandColor[c.band], fontWeight: h[c.key] ? 600 : 400 }}>{c.unit === 'h' ? H(h[c.key]) : M(h[c.key])}</td>)}
+                  </tr>
+                ))}
+                <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface-2)' }}>
+                  <td className="px-2 py-2 font-bold sticky start-0" style={{ color: 'var(--text-1)', background: 'var(--surface-2)' }}>{ar ? 'الإجمالي' : 'TOTAL'}</td>
+                  {cols.map(c => <td key={c.key} className="px-2 py-2 text-center font-bold" style={{ color: c.color, background: bandColor[c.band] }}>{c.unit === 'h' ? `${(+(t[c.key] || 0)).toLocaleString()}${ar ? 'س' : 'h'}` : `${(+(t[c.key] || 0)).toLocaleString()}${ar ? 'د' : 'm'}`}</td>)}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          );
+        })()}
         {/* Demand-driven coverage recommendation */}
         {coverage && (
           <div className="rounded-2xl p-4 glow-border-soft" style={{ background: 'var(--surface)', border: '1px solid #0ea5e9' }}>
