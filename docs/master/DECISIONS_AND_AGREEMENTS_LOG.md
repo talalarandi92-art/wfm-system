@@ -450,6 +450,13 @@
 - **Rule:** Rotation/shift-rate fairness is ALWAYS computed on the schedule BEFORE approved shift swaps (approved swaps are reversed before counting). Swapping away your midnight still counts as yours — swaps must never game rotation.
 - **Source:** memory `business_rules`; BR-ROT-003 / BR-SWP-002 in `WFM_BUSINESS_RULES_LIBRARY.md`; `loadYtdDistribution(preSwap=true)` (generator.service.ts:97/224, requests.service.ts:753).
 
+### D-076 — June 1–27 rebuild DEFERRED; roster goes Sprinklr-first going forward
+- **Status:** Confirmed (2026-07-03, Director)
+- **Facts verified live:** roster_days June 1–27 = 103 people / 2733 rows; the correct source workbook (`CC Schedule 26 May 30 and 31 and June to 27.xlsx` › Final) = 116 people → true gap = **13 missing people** (10790, 12122, 12937, 9565, 11571, 9569, 11603, 13827, 11480, 10083, 13234, 13524, 12377), zero extras — NOT the 24 previously estimated. Foundation re-extract verified working (3084 rows / 116 emp), but SRCDIR `Ameyo login and logout.xlsx` + `Login and Logout sprinklr.xlsx` are byte-identical to the `_2830` slices → no full-June attendance sources on disk → dry-run build = 0 records.
+- **Decision:** Director has the original attendance files but chose to DEFER the June fix — "الروستر كامل رح يكون من سبرينكلر الفترة الجاي": from the next period the roster is sourced fully from Sprinklr. June 1–27 stays at 103 people unless revisited. No live data was touched during the investigation (scratch + report file only).
+- **Reopen recipe:** restore the two full-June Ameyo/Sprinklr exports → `MANUAL_FILE=<May30+June-to-27 workbook> MANUAL_SHEET=final RECON_FROM=2026-06-01 RECON_TO=2026-06-27 node scripts/recon-extract-foundation-v2.js` → recon-new-roster/build dry-run → diff → ingest.
+- **Source:** session 2026-07-03; memory `audit_2026_07_03_suffix_normalizer_healthcheck`.
+
 ---
 
 ## Open Items Register (as of 2026-07-02)
@@ -457,7 +464,7 @@
 | # | Item | Status | Blocking on |
 |---|---|---|---|
 | O-1 | Page-consolidation plan (D-068) | Core EXECUTED 2026-07-02 (3 hubs live); Chief-branch nesting + executive-home merge still Needs Approval | Director's go on the 2 sub-items |
-| O-2 | June full rebuild (cross-midnight de-bleed + 116-person foundation, D-065) | Pending | Director re-shares the PREPARED source files |
+| O-2 | June full rebuild (cross-midnight de-bleed + 116-person foundation, D-065) | **DEFERRED per D-076** (true gap = 13 people, not 24; Sprinklr-first from next period) | Director reopening it + the full-June Ameyo/Sprinklr files |
 | O-3 | Full-year re-run from January (D-063 step 2) | Pending | O-2 test pass |
 | O-4 | Shift-category 6-site unification (D-067.3) | Needs Approval (number-changing) | Joint re-validation |
 | O-5 | sc-CTE person-grain aggregation (D-067.2) | Needs Approval (number-changing) | Joint re-validation |
