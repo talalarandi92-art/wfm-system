@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   CalendarClock, Clock, TrendingUp, Home, Building2, FileText,
   Bell, Award, MessageCircle, ChevronLeft, CheckCircle2, XCircle,
-  AlertCircle, Hourglass, CalendarDays, Plane, Activity, Repeat,
+  AlertCircle, Hourglass, CalendarDays, Plane, Activity, Repeat, Zap,
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -121,7 +121,15 @@ export default function AgentHome() {
   const [overview, setOverview]   = useState<Overview | null>(null);
   const [myAtt, setMyAtt]         = useState<MyAttendance | null>(null);
   const [livePerf, setLivePerf]   = useState<any>(null);
+  const [otPending, setOtPending] = useState<any[]>([]);
+  const [otBusy, setOtBusy]       = useState<string | null>(null);
   const [loading, setLoading]     = useState(true);
+
+  const loadOt = () => apiClient.get('/attendance-recon/roster-v2/my-ot-pending').then((r: any) => setOtPending(r.data?.requests || [])).catch(() => setOtPending([]));
+  const decideOt = async (id: string, accept: boolean) => {
+    setOtBusy(id);
+    try { await apiClient.post('/attendance-recon/roster-v2/ot-ack', { requestId: id, accept }); await loadOt(); } finally { setOtBusy(null); }
+  };
 
   useEffect(() => {
     const calls: Promise<any>[] = [
@@ -140,6 +148,7 @@ export default function AgentHome() {
       setMyAtt(mine?.data ?? null);
       setLivePerf(lp?.data ?? null);
     }).catch(() => {}).finally(() => setLoading(false));
+    loadOt();
   }, [employeeId]);
 
   // Refresh live performance every 30s (own live status + today's stats).
@@ -427,6 +436,30 @@ export default function AgentHome() {
             {recent.length === 0 && <p className="text-xs text-slate-600 text-center py-6">{ar ? 'لا توجد بيانات حضور' : 'No attendance data'}</p>}
           </div>
         </div>
+
+        {/* ── OT requests awaiting my acknowledgement ── */}
+        {otPending.length > 0 && (
+          <div className="p-4 rounded-2xl" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.35)' }}>
+            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+              <Zap size={15} style={{ color: '#a78bfa' }} /> {ar ? 'طلبات أوفر تايم بانتظار إقرارك' : 'Overtime awaiting your acknowledgement'}
+              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold" style={{ background: 'rgba(139,92,246,0.25)', color: '#c4b5fd' }}>{otPending.length}</span>
+            </h2>
+            <div className="space-y-2">
+              {otPending.map((o: any) => (
+                <div key={o.id} className="flex items-center justify-between gap-2 rounded-xl p-2.5" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-white">{o.d} · {o.start}–{o.end} <span className="text-slate-400">({o.dur} {ar ? 'دقيقة' : 'min'})</span></div>
+                    <div className="text-[10px] text-slate-400">{o.function ? o.function + ' · ' : ''}{ar ? 'طلب من الإدارة لتغطية نقص' : 'requested by management to cover a gap'}</div>
+                  </div>
+                  <div className="flex gap-1.5 flex-shrink-0">
+                    <button disabled={otBusy === o.id} onClick={() => decideOt(o.id, true)} className="px-2.5 py-1 rounded-lg text-[11px] font-bold" style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80' }}>{ar ? 'أوافق' : 'Accept'}</button>
+                    <button disabled={otBusy === o.id} onClick={() => decideOt(o.id, false)} className="px-2.5 py-1 rounded-lg text-[11px] font-bold" style={{ background: 'rgba(244,63,94,0.15)', color: '#fb7185' }}>{ar ? 'أعتذر' : 'Decline'}</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── My requests ── */}
         <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>

@@ -141,6 +141,27 @@ const STATUS_CONFIG: Record<string, { ar: string; en: string; color: string; bg:
 function fmt(d?: string, ar?: boolean) { return fmtDate(d, ar); }
 
 /* ─── Stat Card ──────────────────────────────────────────────────────────── */
+/* Permission coverage soft-warn — fetches whether the requester's function is under-covered during
+ * the permission window and shows an advisory (never blocks approval). Gap-remedies-consistent. */
+function PermCoverageWarn({ date, fn, time, ar }: { date: string; fn: string; time?: string; ar?: boolean }) {
+  const [warn, setWarn] = useState<any>(null);
+  useEffect(() => {
+    // permissionTime like "20:00-21:00" / "20:00–21:00" / "20:00" → start/end hour
+    const parts = String(time || '').split(/[-–—]/).map(s => s.trim());
+    const hr = (t?: string) => t && /\d/.test(t) ? parseInt(t.split(':')[0], 10) : null;
+    const sh = hr(parts[0]); if (sh == null) { setWarn(null); return; }
+    const ehRaw = hr(parts[1]); const eh = ehRaw != null ? Math.max(ehRaw + (ehRaw === sh ? 1 : 0), sh + 1) : sh + 1;
+    apiClient.get(`/attendance-recon/roster-v2/permission-coverage-check?date=${date}&function=${encodeURIComponent(fn)}&startHour=${sh}&endHour=${eh}`)
+      .then((r: any) => setWarn(r.data)).catch(() => setWarn(null));
+  }, [date, fn, time]);
+  if (!warn?.short) return null;
+  return (
+    <div className="mx-3 mb-2 px-3 py-2 rounded-lg text-[11px] font-semibold text-red-400" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)' }}>
+      {ar ? `🚫 «${fn}» تعاني نقص تغطية في هذه الساعات (نقص حتى ${warn.worst?.deficit ?? ''}) — يُفضّل تأجيل الاستئذان أو تأمين بديل قبل الموافقة` : `🚫 ${fn} is under-covered during this window (short up to ${warn.worst?.deficit ?? ''}) — consider deferring or securing a backup before approving`}
+    </div>
+  );
+}
+
 function StatCard({ label, value, icon: Icon, color, bg }: {
   label: string; value: number; icon: any; color: string; bg: string;
 }) {
@@ -347,6 +368,11 @@ function HcImpactPanel({ requestId, dark, ar = true }: { requestId: string; dark
           style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
           {ar ? '⚠️ الموظف غير مجدول للعمل في هذا اليوم — تحقق من تاريخ الاستئذان' : '⚠️ Employee not scheduled this day — verify the permission date'}
         </div>
+      )}
+
+      {/* Permission: coverage-shortage soft-warn (advisory — never blocks) */}
+      {data.type === 'permission' && data.permissionDate && data.functionName && (
+        <PermCoverageWarn date={data.permissionDate} fn={data.functionName} time={data.permissionTime} ar={ar} />
       )}
 
       {/* Permission: hourly breakdown */}

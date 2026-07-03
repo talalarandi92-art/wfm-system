@@ -1235,7 +1235,7 @@ export class ReconController {
   @Get('roster-v2/on-seat')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Agents on seat for a function+date+hour (actual roster_days, else planned schedule)' })
-  async onSeat(@Req() req: any, @Query('date') date: string, @Query('function') fn: string, @Query('hour') hour: string) {
+  async onSeat(@Req() req: any, @Query('date') date: string, @Query('function') fn: string, @Query('hour') hour: string, @Query('skillFor') skillFor?: string) {
     const t = req.user.tenantId; const h = Math.max(0, Math.min(23, parseInt(hour || '0', 10)));
     const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
     const isActual = frontier && date <= frontier;
@@ -1263,10 +1263,30 @@ export class ReconController {
            LEFT JOIN shift_codes sc ON sc.tenant_id=se.tenant_id AND sc.code=se.shift_code_display
           WHERE ${w} ORDER BY se.employee_id, sv.created_at DESC`, p).catch(() => []);
     }
-    const seated = rows.filter(r => covJs(Number(r.ss), Number(r.se)))
-      .map(r => ({ personNo: r.person_no, name: r.name, fn: r.fn, shiftCode: r.shift_code, start: hhmm(r.ss), end: hhmm(r.se), presence: r.presence }))
+    let seated = rows.filter(r => covJs(Number(r.ss), Number(r.se)))
+      .map(r => ({ personNo: r.person_no, name: r.name, fn: r.fn, shiftCode: r.shift_code, start: hhmm(r.ss), end: hhmm(r.se), presence: r.presence, skilled: undefined as boolean | undefined }))
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    return { date, function: fn || null, hour: h, mode: isActual ? 'actual' : 'plan', count: seated.length, agents: seated };
+    // OPTIONAL skill badge: does each candidate hold the TARGET function's channel skill? (cross-skill)
+    if (skillFor && seated.length) {
+      const code = this.funcToSkillCode(skillFor);
+      const skilledSet = new Set<string>((await this.ds.query(
+        `SELECT e.employee_no FROM employee_skills es JOIN skills s ON s.id=es.skill_id JOIN employees e ON e.id=es.employee_id
+          WHERE es.tenant_id=$1 AND es.status='active' AND s.code=$2 AND e.employee_no = ANY($3)`,
+        [t, code, seated.map(a => a.personNo)]).catch(() => [])).map((r: any) => r.employee_no));
+      seated = seated.map(a => ({ ...a, skilled: skilledSet.has(a.personNo) }));
+    }
+    return { date, function: fn || null, hour: h, mode: isActual ? 'actual' : 'plan', skillFor: skillFor || null, count: seated.length, agents: seated };
+  }
+
+  /** Map a function/channel name → the canonical skill code (for cross-skill matching). */
+  private funcToSkillCode(fnName: string): string {
+    const f = (fnName || '').toLowerCase();
+    if (/inbound|voice|\bomt\b|outbound/.test(f)) return 'VOICE';
+    if (/whatsapp|\bwa\b|chat|\bch\b/.test(f)) return 'CHAT';
+    if (/email|mail/.test(f)) return 'EMAIL';
+    if (/social|\bsm\b/.test(f)) return 'SOCIAL';
+    if (/refund/.test(f)) return 'REFUND';
+    return 'CC';   // customer care / offline / support default
   }
 
   /** CROSS-SKILL COVER — commit a manager's cross-skill pick: create a cross_skill_move, notify the
@@ -1386,6 +1406,58 @@ export class ReconController {
        VALUES ($1,$2,'overtime.acknowledged',$3,$4,$5,$6,'request',$7,'/schedule?tab=forecast')`,
       [t, mgr.id, 'Overtime acknowledged', 'تم الإقرار بالأوفر تايم', `The agent acknowledged the OT on ${row.d}.`, `أقرّ الموظف بالأوفر تايم بتاريخ ${row.d}.`, b.requestId]).catch(() => {});
     return { ok: true, status: 'approved', bucket, rosterUpdated, minutes: Number(row.dur) };
+  }
+
+  /** PERMISSION COVERAGE CHECK — soft-warn before approving a permission: is the function
+   *  under-covered during the permission window? Returns the short hours + deficit so the
+   *  approver sees "coverage is tight here" (advisory, never a hard block). */
+  @Get('roster-v2/permission-coverage-check')
+  @RequirePermissions('attendance.view_team')
+  async permCoverageCheck(@Req() req: any, @Query('date') date: string, @Query('function') fn: string,
+    @Query('startHour') sh: string, @Query('endHour') eh: string) {
+    const t = req.user.tenantId;
+    if (!date || !fn) return { short: false, hours: [] };
+    const s = Math.max(0, parseInt(sh || '0', 10)), e = Math.min(24, parseInt(eh || '24', 10));
+    const covHh = (ss: string, seC: string) => { const len = `(${seC}-${ss})`; return `((${ss} < h.hh*60+60 AND LEAST(${ss}+${len},1440) > h.hh*60) OR ((${ss}+${len})>1440 AND ((${ss}+${len})-1440) > h.hh*60))`; };
+    const SEC = '(CASE WHEN sc.end_time<=sc.start_time THEN EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time)+1440 ELSE EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time) END)';
+    // planned HC per hour for this function ON that date; baseline = 28-day observed per hour
+    const planRows = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      v AS (SELECT DISTINCT ON (se.employee_id) (EXTRACT(HOUR FROM sc.start_time)*60+EXTRACT(MINUTE FROM sc.start_time))::int ss, ${SEC}::int se_c
+              FROM schedule_entries se JOIN schedule_versions sv ON sv.id=se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
+              JOIN employees e ON e.id=se.employee_id LEFT JOIN functions f ON f.id=e.function_id
+              LEFT JOIN shift_codes sc ON sc.tenant_id=se.tenant_id AND sc.code=se.shift_code_display
+             WHERE se.tenant_id=$1 AND se.entry_date=$2::date AND COALESCE(f.name,'—')=$3 AND sc.start_time IS NOT NULL ORDER BY se.employee_id, sv.created_at DESC)
+      SELECT h.hh AS "hour", COUNT(*) FILTER (WHERE ${covHh('v.ss', 'v.se_c')})::int plan FROM v CROSS JOIN h GROUP BY h.hh`, [t, date, fn]).catch(() => []);
+    const baseRows = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      r AS (SELECT shift_start_min ss, (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se_c
+              FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND COALESCE(role_function,function_name)=$3
+                AND work_date >= ($2::date - 28) AND work_date < $2::date),
+      d AS (SELECT GREATEST(COUNT(DISTINCT work_date),1) n FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND work_date >= ($2::date - 28) AND work_date < $2::date)
+      SELECT h.hh AS "hour", ROUND(COUNT(*) FILTER (WHERE ${covHh('r.ss', 'r.se_c')})::numeric/(SELECT n FROM d),1)::float required FROM r CROSS JOIN h GROUP BY h.hh`, [t, date, fn]).catch(() => []);
+    const planH: number[] = Array(24).fill(0), reqH: number[] = Array(24).fill(0);
+    for (const r of planRows) planH[r.hour] = r.plan; for (const r of baseRows) reqH[r.hour] = r.required;
+    const hours: any[] = [];
+    for (let h = s; h < e; h++) { const def = +(reqH[h] - planH[h]).toFixed(1); if (reqH[h] >= 1 && def >= 0.5) hours.push({ hour: h, planned: planH[h], required: reqH[h], deficit: def }); }
+    return { short: hours.length > 0, function: fn, date, window: `${String(s).padStart(2, '0')}:00–${String(e).padStart(2, '0')}:00`, hours, worst: hours.reduce((m, x) => x.deficit > (m?.deficit || 0) ? x : m, null) };
+  }
+
+  /** The current agent's PENDING OT requests (awaiting their acknowledgement) — for AgentHome. */
+  @Get('roster-v2/my-ot-pending')
+  @RequirePermissions('requests.view_own')
+  async myOtPending(@Req() req: any) {
+    const t = req.user.tenantId; const empId = req.user.employeeId;
+    if (!empId) return { requests: [] };
+    const rows = await this.ds.query(
+      `SELECT r.id, r.status, r.notes, ro.ot_date::text d, to_char(ro.start_time,'HH24:MI') start, to_char(ro.end_time,'HH24:MI') "end",
+              ro.duration_minutes dur, f.name function, r.submitted_at
+         FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id
+         JOIN request_types rt ON rt.id=r.request_type_id AND rt.code='overtime'
+         LEFT JOIN functions f ON f.id=ro.function_id
+        WHERE r.tenant_id=$1 AND r.employee_id=$2 AND r.status='pending'
+        ORDER BY ro.ot_date`, [t, empId]).catch(() => []);
+    return { requests: rows };
   }
 
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the

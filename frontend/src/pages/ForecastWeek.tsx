@@ -281,10 +281,11 @@ function CoverDialog({ cover, ar, onClose, onCommit, weekStart }: any) {
   // pull candidate agents from the SURPLUS function at that hour on the chosen date
   useEffect(() => {
     if (!date) return; setSeatLoad(true);
-    apiClient.get(`/attendance-recon/roster-v2/on-seat?date=${date}&function=${encodeURIComponent(src.fn)}&hour=${g.hour}`)
-      .then((r: any) => { setCandidates(r.data?.agents || []); setPick(r.data?.agents?.[0]?.personNo || ''); })
+    // skillFor = the GAP function (where they'll cover) → badge whether the candidate is skilled there
+    apiClient.get(`/attendance-recon/roster-v2/on-seat?date=${date}&function=${encodeURIComponent(src.fn)}&hour=${g.hour}&skillFor=${encodeURIComponent(g.fn)}`)
+      .then((r: any) => { const a = r.data?.agents || []; setCandidates(a); setPick((a.find((x: any) => x.skilled) || a[0])?.personNo || ''); })
       .catch(() => setCandidates([])).finally(() => setSeatLoad(false));
-  }, [date, src.fn, g.hour]);
+  }, [date, src.fn, g.hour, g.fn]);
   const chosen = candidates.find(c => c.personNo === pick);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={onClose}>
@@ -296,9 +297,10 @@ function CoverDialog({ cover, ar, onClose, onCommit, weekStart }: any) {
         <label className="text-[10px] font-semibold" style={{ color: 'var(--text-3)' }}>{ar ? 'الموظف (من الفائض)' : 'Agent (from surplus)'}</label>
         {seatLoad ? <p className="text-[11px] py-2" style={{ color: 'var(--text-3)' }}>…</p>
           : candidates.length === 0 ? <p className="text-[11px] py-2" style={{ color: '#ef4444' }}>{ar ? 'لا مرشّح متاح على المقعد هذه الساعة — جرّب OT' : 'no candidate on seat this hour — try OT'}</p>
-            : <select value={pick} onChange={e => setPick(e.target.value)} className="w-full mb-3 px-2 py-1.5 rounded-lg text-xs" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}>
-              {candidates.map(c => <option key={c.personNo} value={c.personNo}>{c.name} ({c.shiftCode} {c.start}–{c.end})</option>)}
-            </select>}
+            : <><select value={pick} onChange={e => setPick(e.target.value)} className="w-full mb-1 px-2 py-1.5 rounded-lg text-xs" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' }}>
+              {candidates.map(c => <option key={c.personNo} value={c.personNo}>{c.skilled ? '✓ ' : ''}{c.name} ({c.shiftCode} {c.start}–{c.end})</option>)}
+            </select>
+            {chosen && <p className="text-[10px] mb-3" style={{ color: chosen.skilled ? '#22c55e' : '#f59e0b' }}>{chosen.skilled ? (ar ? `✓ لديه مهارة ${g.fn}` : `✓ skilled in ${g.fn}`) : (ar ? `⚠ بدون مهارة ${g.fn} مسجّلة — تدريب/إشراف موصى` : `⚠ no ${g.fn} skill on file — supervise`)}</p>}</>}
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-semibold" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}>{ar ? 'إلغاء' : 'Cancel'}</button>
           <button disabled={!chosen} onClick={() => onCommit({ personNo: pick, fromFunction: src.fn, toFunction: g.fn, date, startHour: g.hour, endHour: (g.hour + 1) % 24, reason: 'Gap coverage from forecast' })}
