@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Clock, CalendarDays, Users, TrendingDown, TrendingUp, Timer, Activity, ShieldCheck } from 'lucide-react';
+import { Clock, Users, TrendingDown, TrendingUp, Timer, Activity, ShieldCheck, FileSpreadsheet, LayoutDashboard } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile } from '@/components/dazzle';
+import { DateRangeBar } from '@/components/DateRangeBar';
 
 /** Hourly analytics (0-23) per function over the approved roster (roster_days):
  *  coverage (scheduled/working/%), permissions, shrinkage (count + %), tardiness,
@@ -13,6 +15,9 @@ export default function HourlyAnalyticsPage() {
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
+  const nav = useNavigate();
+  const [exporting, setExporting] = useState(false);
+
   const load = useCallback(() => {
     setLoading(true);
     const qs = new URLSearchParams(); Object.entries(f).forEach(([k, v]) => { if (v) qs.set(k, v); });
@@ -20,6 +25,18 @@ export default function HourlyAnalyticsPage() {
   }, [f]);
   useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
+
+  const exportXlsx = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const qs = new URLSearchParams(); Object.entries(f).forEach(([k, v]) => { if (v) qs.set(k, v); });
+      qs.set('format', 'xlsx');
+      const r: any = await apiClient.get(`/attendance-recon/roster-v2/hourly?${qs}`, { responseType: 'blob' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(r.data);
+      a.download = `hourly-analytics_${d?.from || ''}_${d?.to || ''}.xlsx`; a.click();
+    } finally { setExporting(false); }
+  };
 
   const inputStyle = { background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' } as React.CSSProperties;
   const panel = { background: 'var(--surface)', border: '1px solid var(--border)' } as React.CSSProperties;
@@ -62,13 +79,18 @@ export default function HourlyAnalyticsPage() {
           <h1 className="text-lg font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'التحليلات بالساعة' : 'Hourly Analytics'}</h1>
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>{ar ? 'التغطية والاستئذانات والشرينكج والتأخير والأوفر تايم لكل ساعة ولكل فنكشن — عدد و% مع توتال (من الجدول المعتمد)' : 'coverage, permissions, shrinkage, tardiness & OT per hour per function — count & % with a total (approved roster)'}</p>
         </div>
-        <div className="flex items-center gap-1.5" style={{ color: 'var(--text-2)' }}><CalendarDays size={14} />
-          <input type="date" value={f.from} onChange={e => set('from', e.target.value)} className="px-2.5 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} /><span className="text-xs">→</span>
-          <input type="date" value={f.to} onChange={e => set('to', e.target.value)} className="px-2.5 py-1.5 rounded-lg text-xs outline-none" style={inputStyle} /></div>
+        <DateRangeBar from={f.from || d?.from || ''} to={f.to || d?.to || ''} onChange={(from: string, to: string) => setF(p => ({ ...p, from, to }))} />
         <select value={f.function} onChange={e => set('function', e.target.value)} className="px-2.5 py-1.5 rounded-lg text-xs outline-none" style={inputStyle}>
           <option value="">{ar ? 'كل الفنكشن' : 'All functions'}</option>{(d?.functions || []).map((x: string) => <option key={x} value={x}>{x}</option>)}</select>
         <input value={f.agent} onChange={e => set('agent', e.target.value)} placeholder={ar ? 'موظف: رقم / اسم / يوزر' : 'Agent: ID / name / user'}
           className="px-2.5 py-1.5 rounded-lg text-xs outline-none w-40" style={inputStyle} />
+        <button onClick={exportXlsx} disabled={exporting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+          style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+          <FileSpreadsheet size={13} />{exporting ? (ar ? 'جارٍ…' : '…') : (ar ? 'تصدير Excel' : 'Export Excel')}</button>
+        <button onClick={() => nav('/dashboard-builder')} title={ar ? 'ابنِ داشبورد بمقاييس الساعة (البعد: ساعة بداية الشيفت)' : 'Build a dashboard with hourly metrics (dim: shift start hour)'}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+          style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)' }}>
+          <LayoutDashboard size={13} />{ar ? 'داشبورد' : 'Dashboard'}</button>
       </div>
       {f.agent && d?.functions?.length > 0 && (
         <div className="flex items-center gap-1.5 flex-wrap text-[10px]" style={{ color: 'var(--text-3)' }}>
@@ -104,7 +126,16 @@ export default function HourlyAnalyticsPage() {
         {/* the hourly table with TOTAL row */}
         <div className="rounded-2xl overflow-auto" style={panel}>
           <table className="w-full text-[11px]">
-            <thead style={{ background: 'var(--surface-2)' }}><tr>
+            <thead className="sticky top-0 z-10" style={{ background: 'var(--surface-2)' }}>
+            {/* group band — the related columns live TOGETHER (actual cascade · shrinkage & lost · plan · KPIs) */}
+            <tr>
+              <th style={{ background: 'var(--surface-2)' }} />
+              <th colSpan={11} className="px-2 py-1 text-center font-bold" style={{ color: '#818cf8', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(99,102,241,0.08)', borderBottom: '1px solid rgba(99,102,241,0.25)' }}>{ar ? 'الهيدكاونت الفعلي — المتسلسلة' : 'Actual headcount — cascade'}</th>
+              <th colSpan={5} className="px-2 py-1 text-center font-bold" style={{ color: '#fb7185', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(244,63,94,0.07)', borderBottom: '1px solid rgba(244,63,94,0.25)' }}>{ar ? 'الشرينكج والساعات الضائعة' : 'Shrinkage & lost'}</th>
+              <th colSpan={2} className="px-2 py-1 text-center font-bold" style={{ color: '#38bdf8', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(14,165,233,0.08)', borderBottom: '1px solid rgba(14,165,233,0.3)' }}>{ar ? 'خطة الجدول (جينيريت + ريكوستات)' : 'Schedule plan (generate + requests)'}</th>
+              <th colSpan={4} className="px-2 py-1 text-center font-bold" style={{ color: 'var(--text-3)', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'var(--surface-2)' }}>{ar ? 'مؤشرات' : 'KPIs'}</th>
+            </tr>
+            <tr>
               {([[ar ? 'الساعة' : 'Hour', 0], [ar ? 'مجدول' : 'Sched', 0], [ar ? 'مداوم' : 'Working', 0], [ar ? '+OT قبل' : '+OT bef', 0], [ar ? '+OT بعد' : '+OT aft', 0], [ar ? '= بعد OT' : '= after OT', 1], [ar ? '−إذن تأخير' : '−Perm late', 0], [ar ? '−إذن مبكر' : '−Perm early', 0], [ar ? '= بعد الإذن' : '= after perm', 1], [ar ? '−تارديشن' : '−Tardy', 0], [ar ? '−خروج مبكر' : '−Early', 0], [ar ? '= الفعلي' : '= Effective', 2], [ar ? 'مرض' : 'Sick', 0], [ar ? 'غياب' : 'Abs', 0], [ar ? 'إجازة' : 'Leave', 0], [ar ? 'شرينكج' : 'Shrink', 1], [ar ? 'ساعات ضائعة' : 'Lost hrs', 1], [ar ? 'خطة HC' : 'Plan HC', 1], [ar ? 'خطة −ريكوستات' : 'Plan −req', 1], [ar ? 'تغطية %' : 'Cov %', 0], [ar ? 'كونف %' : 'Conf %', 0], [ar ? 'ساعات OT' : 'OT hrs', 0], [ar ? 'ساعات إذن' : 'Perm hrs', 0]] as [string, number][]).map(([hd, cp], i) => (
                 <th key={i} className={`px-2 py-2 font-semibold whitespace-nowrap ${i === 0 ? 'text-start' : 'text-center'}`} style={{ color: cp ? 'var(--text-1)' : 'var(--text-3)', fontSize: 10, letterSpacing: '.02em', textTransform: 'uppercase', background: cp ? 'rgba(99,102,241,0.08)' : undefined }}>{hd}</th>
               ))}

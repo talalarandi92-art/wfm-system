@@ -229,6 +229,67 @@ export class GeneratorService {
   }
 
   /**
+   * HOURLY HEALTH per function (Director 2026-07-03: "أشوف الجينيريت عمل هيدكاونت مناسب
+   * لكل فنكشن ولا لا"): planned HC per hour (avg/day) computed from the PROPOSAL itself,
+   * vs the observed baseline = avg scheduled HC per hour per function over the 28 days
+   * before weekStart (roster_days). Hours where planned < 85% of a real baseline are
+   * flagged; a function with flagged hours gets verdict 'review'. Honest: baseline is
+   * the OBSERVED pattern, not an Erlang demand — stated in `basis`.
+   */
+  private async hourlyHealthFromPlan(
+    tenantId: string, weekStart: string, nDays: number,
+    planned: Map<string, number[]>,   // fn name → per-hour covered (person·day) counts
+  ) {
+    const base = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      r AS (SELECT COALESCE(role_function,function_name) fn, shift_start_min ss, shift_end_min se
+              FROM roster_days
+             WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+               AND work_date >= ($2::date - interval '28 days') AND work_date < $2::date),
+      d AS (SELECT COUNT(DISTINCT work_date)::int n FROM roster_days
+             WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+               AND work_date >= ($2::date - interval '28 days') AND work_date < $2::date)
+      SELECT r.fn, h.hh AS "hour",
+        (COUNT(*) FILTER (WHERE ((r.ss%1440+1440)%1440) < h.hh*60+60 AND LEAST(((r.ss%1440+1440)%1440)+(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END),1440) > h.hh*60
+                             OR ((((r.ss%1440+1440)%1440)+(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END))>1440
+                                 AND ((((r.ss%1440+1440)%1440)+(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END))-1440) > h.hh*60)))::float
+          / NULLIF((SELECT n FROM d),0) AS baseline
+      FROM r CROSS JOIN h GROUP BY r.fn, h.hh`, [tenantId, weekStart]).catch(() => []);
+    const baseMap: Record<string, number[]> = {};
+    for (const b of base) {
+      if (!baseMap[b.fn]) baseMap[b.fn] = Array(24).fill(0);
+      baseMap[b.fn][b.hour] = +(+b.baseline || 0).toFixed(1);
+    }
+    const functions = [...planned.entries()].map(([fn, counts]) => {
+      const hours = counts.map((c, h) => {
+        const plan = +(c / nDays).toFixed(1);
+        const baseline = baseMap[fn]?.[h] ?? 0;
+        const ratio = baseline > 0 ? +(plan / baseline).toFixed(2) : null;
+        return { hour: h, planned: plan, baseline, ratio, short: baseline >= 1 && plan < baseline * 0.85 };
+      });
+      const shortHours = hours.filter(x => x.short).map(x => x.hour);
+      return { fn, hours, shortHours, verdict: shortHours.length ? 'review' : 'ok' };
+    }).sort((a, b) => b.hours.reduce((s, x) => s + x.planned, 0) - a.hours.reduce((s, x) => s + x.planned, 0));
+    return {
+      basis: 'baseline = observed avg scheduled HC per hour over the 28 days before the week (not an Erlang demand)',
+      functions,
+      verdict: functions.some(f => f.verdict === 'review') ? 'review' : 'ok',
+    };
+  }
+
+  /** Spread one shift window into per-hour buckets of a fn's counter. */
+  private spreadWindow(counts: number[], startHHMM: string | null, endHHMM: string | null) {
+    if (!startHHMM || !endHHMM) return;
+    const toMin = (t: string) => parseInt(t.split(':')[0], 10) * 60 + parseInt(t.split(':')[1] ?? '0', 10);
+    const s = ((toMin(startHHMM) % 1440) + 1440) % 1440;
+    let e = toMin(endHHMM); if (e <= s) e += 1440;
+    for (let h = 0; h < 24; h++) {
+      const covers = (s < h * 60 + 60 && Math.min(e, 1440) > h * 60) || (e > 1440 && e - 1440 > h * 60);
+      if (covers) counts[h]++;
+    }
+  }
+
+  /**
    * Shift-rate comparison: each employee's rotation distribution BEFORE
    * approved swaps (the fairness basis) vs AFTER (what actually runs).
    * Answers «روتيشن ٪ قبل التبديلات و٪ بعد التبديلات».
@@ -687,9 +748,27 @@ export class GeneratorService {
       }
     }
 
+    // Per-function per-hour planned HC + baseline verdict, attached to every result
+    // (Director 2026-07-03 — the generate must SHOW whether HC per function is adequate).
+    const attachHourlyHealth = async (result: GeneratorResult) => {
+      const planned = new Map<string, number[]>();
+      for (const fn of result.functions) {
+        const counts = planned.get(fn.name) ?? planned.set(fn.name, Array(24).fill(0)).get(fn.name)!;
+        for (const emp of fn.employees) {
+          for (const a of emp.assignments) {
+            if (a.shift?.code && a.shift.code !== 'OFF' && a.shift.start && a.shift.end) {
+              this.spreadWindow(counts, a.shift.start, a.shift.end);
+            }
+          }
+        }
+      }
+      (result as any).hourlyHealth = await this.hourlyHealthFromPlan(tenantId, weekStart, result.dates.length, planned);
+      return result;
+    };
+
     // ── Single week (default path) ────────────────────────────────────────────
     if (weeksCount === 1) {
-      return generateWeeklySchedule(employeesByFunction, ytdDist, lastShifts, weekStart, options, consecDays, onLeave);
+      return attachHourlyHealth(generateWeeklySchedule(employeesByFunction, ytdDist, lastShifts, weekStart, options, consecDays, onLeave));
     }
 
     // ── Multi-week: run engine week by week, feed each week into the next ─────
@@ -814,7 +893,7 @@ export class GeneratorService {
       currentConsecDays = nextConsecDays;
     }
 
-    return combined!;
+    return attachHourlyHealth(combined!);
   }
 
   // ── Save Draft to DB ─────────────────────────────────────────────────────────

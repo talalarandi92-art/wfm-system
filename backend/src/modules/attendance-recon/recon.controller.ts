@@ -631,6 +631,7 @@ export class ReconController {
     @Req() req: any, @Query('from') from?: string, @Query('to') to?: string,
     @Query('function') functionName?: string, @Query('teamLeader') teamLeader?: string,
     @Query('agent') agent?: string, @Query('level') level?: string,
+    @Query('format') format?: string, @Res({ passthrough: true }) res?: Response,
   ) {
     const t = req.user.tenantId;
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
@@ -843,7 +844,40 @@ export class ReconController {
 
     const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0 }, shByFn[fn]) }))
       .sort((a, b) => b.total.scheduled - a.total.scheduled);
-    return { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll }, shAll) };
+    const payload = { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll }, shAll) };
+
+    // Excel export (Director 2026-07-03): one sheet per view (All + each function),
+    // 24 hourly rows + TOTAL, same columns as the on-screen table.
+    if (format === 'xlsx' && res) {
+      const wb = new ExcelJS.Workbook();
+      const HD = ['Hour', 'Scheduled', 'Working', '+OT before', '+OT after', '= After OT', '−Perm late', '−Perm early', '= After perm', '−Tardy', '−Early', '= Effective', 'Sick', 'Absent', 'Leave', 'Shrinkage', 'Shrink %', 'Lost hrs', 'Plan HC', 'Plan −req', 'Coverage %', 'Conformance %', 'OT hrs', 'Perm hrs'];
+      const rowOf = (h: any) => [
+        `${String(h.hour).padStart(2, '0')}:00`, h.avgScheduled, h.avgWorking, h.otBeforeHc, h.otAfterHc, h.avgHcWithOt,
+        h.permLate, h.permEarly, h.avgHcAfterPerm, h.tardiness, h.earlyOut, h.avgEffective,
+        h.sick, h.absent, h.onLeave, h.shrinkage, h.shrinkagePct, h.lostHours, h.avgPlan, h.avgPlanAfterReq,
+        h.coveragePct, h.conformance ?? '', h.otHours, h.permHours];
+      const totOf = (tt: any) => ['TOTAL', tt.scheduled, tt.working, tt.otBeforeHc, tt.otAfterHc, tt.hcWithOt,
+        tt.permLate, tt.permEarly, tt.hcAfterPerm, tt.tardiness, tt.earlyOut, tt.effective,
+        tt.sick ?? '', tt.absent ?? '', tt.onLeave ?? '', tt.shrinkage, tt.shrinkagePct, tt.lostHours ?? '', tt.plan ?? '', tt.planAfterReq ?? '',
+        tt.coveragePct, tt.conformance ?? '', tt.otHours, tt.permHours];
+      const addSheet = (name: string, view: any) => {
+        const ws = wb.addWorksheet(name.slice(0, 31).replace(/[\\/*?:[\]]/g, '·'));
+        ws.addRow([`Hourly Analytics — ${name} — ${dFrom} → ${dTo} (${days} days)`]).font = { bold: true };
+        ws.addRow(HD).font = { bold: true };
+        ws.getRow(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+        ws.getRow(2).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        view.hours.forEach((h: any) => ws.addRow(rowOf(h)));
+        const tr = ws.addRow(totOf(view.total)); tr.font = { bold: true };
+        ws.columns.forEach(c => { c.width = 12; });
+        ws.views = [{ state: 'frozen', ySplit: 2 }];
+      };
+      addSheet('All', payload.all);
+      for (const f of byFunction) addSheet(f.fn || '—', f);
+      res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.set('Content-Disposition', `attachment; filename="hourly-analytics_${dFrom}_${dTo}.xlsx"`);
+      return new StreamableFile(Buffer.from(await wb.xlsx.writeBuffer()));
+    }
+    return payload;
   }
 
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the

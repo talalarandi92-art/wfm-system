@@ -763,6 +763,53 @@ export default function ScheduleGeneratorPage() {
             <FairnessRing fairness={result.fairness} />
           </div>
 
+          {/* Hourly HC health per function — does the generate produce adequate headcount? */}
+          {(result as any).hourlyHealth && (
+            <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: `1px solid ${(result as any).hourlyHealth.verdict === 'ok' ? 'rgba(34,197,94,0.4)' : 'rgba(251,191,36,0.5)'}` }}>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                  <ShieldCheck size={13} style={{ color: (result as any).hourlyHealth.verdict === 'ok' ? '#22c55e' : '#fbbf24' }} />
+                  {ar ? 'فحص الهيدكاونت بالساعة لكل فنكشن' : 'Hourly HC health per function'}
+                </h3>
+                <span className="px-2 py-0.5 rounded-lg text-[11px] font-bold" style={{
+                  background: (result as any).hourlyHealth.verdict === 'ok' ? 'rgba(34,197,94,0.15)' : 'rgba(251,191,36,0.15)',
+                  color: (result as any).hourlyHealth.verdict === 'ok' ? '#22c55e' : '#fbbf24' }}>
+                  {(result as any).hourlyHealth.verdict === 'ok' ? (ar ? '✓ مناسب' : '✓ Adequate') : (ar ? '⚠ يحتاج مراجعة' : '⚠ Needs review')}
+                </span>
+                <span className="text-[10px]" style={{ color: 'var(--text-3)' }}>
+                  {ar ? 'الخط المرجعي = متوسط المجدول بالساعة آخر 28 يوم (نمط ملاحَظ، ليس Erlang)' : (result as any).hourlyHealth.basis}
+                </span>
+              </div>
+              <div className="space-y-2 mt-3">
+                {(result as any).hourlyHealth.functions.map((f: any) => (
+                  <div key={f.fn} className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold w-40 truncate" style={{ color: 'var(--text-2)' }} title={f.fn}>{f.fn}</span>
+                    <div className="flex-1 grid gap-px" style={{ gridTemplateColumns: 'repeat(24,1fr)' }}>
+                      {f.hours.map((h: any) => (
+                        <div key={h.hour} className="h-5 rounded-sm flex items-center justify-center"
+                          title={`${String(h.hour).padStart(2, '0')}:00 · ${ar ? 'الخطة' : 'plan'} ${h.planned}/${ar ? 'يوم' : 'day'} · ${ar ? 'المرجع' : 'baseline'} ${h.baseline}`}
+                          style={{ background: h.baseline < 1 && h.planned === 0 ? 'var(--surface-2)'
+                            : h.short ? 'rgba(239,68,68,0.55)'
+                            : h.ratio != null && h.ratio < 1 ? 'rgba(251,191,36,0.45)'
+                            : 'rgba(34,197,94,0.4)' }}>
+                          <span className="text-[7px] font-bold" style={{ color: 'var(--text-2)' }}>{h.planned >= 1 ? Math.round(h.planned) : ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-bold w-24 text-end" style={{ color: f.verdict === 'ok' ? '#22c55e' : '#ef4444' }}>
+                      {f.verdict === 'ok' ? (ar ? '✓ مناسب' : '✓ OK') : (ar ? `⚠ ${f.shortHours.length} ساعات ناقصة` : `⚠ ${f.shortHours.length} short hrs`)}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex items-center gap-3 text-[9px] pt-1" style={{ color: 'var(--text-3)' }}>
+                  <span><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle me-1" style={{ background: 'rgba(34,197,94,0.4)' }} />{ar ? 'يغطي المرجع' : 'meets baseline'}</span>
+                  <span><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle me-1" style={{ background: 'rgba(251,191,36,0.45)' }} />{ar ? 'أقل قليلًا' : 'slightly under'}</span>
+                  <span><span className="inline-block w-2.5 h-2.5 rounded-sm align-middle me-1" style={{ background: 'rgba(239,68,68,0.55)' }} />{ar ? 'ناقص >15%' : 'short >15%'}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Violations */}
           <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
