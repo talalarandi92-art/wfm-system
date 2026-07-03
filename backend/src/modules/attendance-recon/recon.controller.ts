@@ -716,12 +716,18 @@ export class ReconController {
       GROUP BY r.fn, h.hh`, p);
     const [{ days }] = await this.ds.query(`SELECT COUNT(DISTINCT work_date)::int days FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL`, p);
     // OT hours (and %) per function — the "كم ساعة" summary; per-hour we show the headcount boost.
+    // ob/oa = the within-shift before/after SPLIT (from the reconciliation engine; can be 0 in months
+    //   whose rebuild hasn't run). reg/offd/hol = the REAL OT buckets that make up TRUE_OT (BR-OT-001)
+    //   — summed over wBase (NO shift-timing filter) so OFF-day OT, which sits on OFF rows with no shift
+    //   window, is not silently dropped. TRUE_OT hrs = (reg+offd+hol)/60 — the honest "كم ساعة OT".
     const otAgg = await this.ds.query(`SELECT ${GRP} fn,
-        COALESCE(SUM(ot_before_min) FILTER (WHERE presence IN ('office','wfh')),0)::int ob,
-        COALESCE(SUM(ot_after_min)  FILTER (WHERE presence IN ('office','wfh')),0)::int oa
-      FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL GROUP BY 1`, p);
-    const otByFn: Record<string, { ob: number; oa: number }> = {}; let obAll = 0, oaAll = 0;
-    for (const r of otAgg) { otByFn[r.fn || '—'] = { ob: r.ob, oa: r.oa }; obAll += r.ob; oaAll += r.oa; }
+        COALESCE(SUM(ot_before_min) FILTER (WHERE presence IN ('office','wfh') AND shift_start_min IS NOT NULL),0)::int ob,
+        COALESCE(SUM(ot_after_min)  FILTER (WHERE presence IN ('office','wfh') AND shift_start_min IS NOT NULL),0)::int oa,
+        COALESCE(SUM(ot_min),0)::int reg, COALESCE(SUM(offday_ot_min),0)::int offd, COALESCE(SUM(holiday_ot_min),0)::int hol
+      FROM roster_days WHERE ${wBase} GROUP BY 1`, p);
+    const otByFn: Record<string, { ob: number; oa: number; reg: number; offd: number; hol: number }> = {};
+    let obAll = 0, oaAll = 0, regAll = 0, offdAll = 0, holAll = 0;
+    for (const r of otAgg) { otByFn[r.fn || '—'] = { ob: r.ob, oa: r.oa, reg: r.reg, offd: r.offd, hol: r.hol }; obAll += r.ob; oaAll += r.oa; regAll += r.reg; offdAll += r.offd; holAll += r.hol; }
     // DAY-level shrinkage counts (no timing filter — leave/SL-only rows carry no shift window):
     // the honest totals; the per-hour columns show only what is hour-placeable.
     const shAgg = await this.ds.query(`SELECT ${GRP} fn,
@@ -790,7 +796,7 @@ export class ReconController {
       fnMap[fn][g.hour].plan += g.plan; fnMap[fn][g.hour].plan_after_req += g.plan_after_req;
       all[g.hour].plan += g.plan; all[g.hour].plan_after_req += g.plan_after_req;
     }
-    const enrich = (hours: any[], ot: { ob: number; oa: number }, shDay?: { sick: number; absent: number; leave: number }) => {
+    const enrich = (hours: any[], ot: { ob: number; oa: number; reg?: number; offd?: number; hol?: number }, shDay?: { sick: number; absent: number; leave: number }) => {
       const av = (n: number) => days ? +(n / days).toFixed(1) : 0;
       const rows = hours.map(h => {
         // running cascade: base working → after OT (boosted) → after permission → effective
@@ -849,6 +855,11 @@ export class ReconController {
         workedHrs: sum('working'),                                            // total person-hours on seat
         otBeforeHrs: +(ot.ob / 60).toFixed(1), otAfterHrs: +(ot.oa / 60).toFixed(1), otHrs: +((ot.ob + ot.oa) / 60).toFixed(1),
         otBeforeMin: ot.ob, otAfterMin: ot.oa,
+        // TRUE_OT (BR-OT-001) — the REAL total OT: regular + OFF-day + holiday. This is the honest
+        // "كم ساعة OT" (the before/after split above can read 0 in a not-yet-rebuilt month).
+        otRegHrs: +((ot.reg || 0) / 60).toFixed(1), otOffdayHrs: +((ot.offd || 0) / 60).toFixed(1),
+        otHolidayHrs: +((ot.hol || 0) / 60).toFixed(1),
+        otTrueHrs: +(((ot.reg || 0) + (ot.offd || 0) + (ot.hol || 0)) / 60).toFixed(1),
         tardyMin: sum('tardyMin'), earlyMin: sum('earlyMin'),
         tardyHrs: +(sum('tardyMin') / 60).toFixed(1), earlyHrs: +(sum('earlyMin') / 60).toFixed(1),
         permLateMin: sum('permLateMin'), permEarlyMin: sum('permEarlyMin'),
@@ -858,9 +869,9 @@ export class ReconController {
       return { hours: rows, total, peakHour: peak?.hour };
     };
 
-    const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0 }, shByFn[fn]) }))
+    const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0, reg: 0, offd: 0, hol: 0 }, shByFn[fn]) }))
       .sort((a, b) => b.total.scheduled - a.total.scheduled);
-    const payload = { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll }, shAll) };
+    const payload = { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll, reg: regAll, offd: offdAll, hol: holAll }, shAll) };
 
     // Excel export (Director 2026-07-03): one sheet per view (All + each function),
     // 24 hourly rows + TOTAL, same columns as the on-screen table.

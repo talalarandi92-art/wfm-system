@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Clock, Users, TrendingDown, TrendingUp, Timer, Activity, ShieldCheck, FileSpreadsheet, LayoutDashboard } from 'lucide-react';
+import { Clock, Users, TrendingDown, TrendingUp, Timer, Activity, ShieldCheck, FileSpreadsheet, LayoutDashboard, Flame } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -174,7 +174,8 @@ export default function HourlyAnalyticsPage() {
                   <td className="px-2 py-1.5 text-center" style={{ color: h.absent ? '#ef4444' : 'var(--text-3)' }}>{h.absent || ''}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: h.onLeave ? '#8b5cf6' : 'var(--text-3)' }}>{h.onLeave || ''}</td>
                   <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.shrinkage ? '#f43f5e' : 'var(--text-3)', background: 'rgba(244,63,94,0.06)' }}>{h.shrinkage ? `${h.shrinkage} · ${h.shrinkagePct}%` : ''}</td>
-                  <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.lostHours ? '#f43f5e' : 'var(--text-3)', background: 'rgba(244,63,94,0.06)' }}>{h.lostHours ? h.lostHours.toLocaleString() : ''}</td>
+                  <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.lostHours ? '#f43f5e' : 'var(--text-3)', background: 'rgba(244,63,94,0.06)' }}
+                    title={ar ? `ساعات ضائعة = غياب/مرض مجدول (${h.shrinkage || 0} شخص·ساعة، مثلاً ذيل شفت مساء يعبر منتصف الليل) + تأخير/خروج/إذن (${((h.tardyMin || 0) + (h.earlyMin || 0) + (h.permLateMin || 0) + (h.permEarlyMin || 0))}د)` : `lost = scheduled absence/sick (${h.shrinkage || 0} person·hr, incl. cross-midnight evening tails) + tardy/early/perm (${((h.tardyMin || 0) + (h.earlyMin || 0) + (h.permLateMin || 0) + (h.permEarlyMin || 0))}m)`}>{h.lostHours ? h.lostHours.toLocaleString() : ''}</td>
                   <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.plan ? '#0ea5e9' : 'var(--text-3)', background: 'rgba(14,165,233,0.07)' }}>{h.avgPlan || ''}</td>
                   <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.planAfterReq ? '#0284c7' : 'var(--text-3)', background: 'rgba(14,165,233,0.07)' }}>{h.avgPlanAfterReq || ''}</td>
                   <td className="px-2 py-1.5 text-center font-semibold" style={{ color: covColor(h.coveragePct) }}>{h.scheduled ? `${h.coveragePct}%` : '—'}</td>
@@ -252,7 +253,8 @@ export default function HourlyAnalyticsPage() {
                 {view.hours.map((h: any) => (
                   <tr key={h.hour} className="hover:bg-black/[0.03] dark:hover:bg-white/[0.03]" style={{ borderTop: '1px solid var(--border)', opacity: (h.workedHrs || h.otHours || h.tardyMin || h.earlyMin) ? 1 : 0.4 }}>
                     <td className="px-2 py-1.5 font-semibold sticky start-0 whitespace-nowrap" style={{ color: h.hour === view.peakHour ? '#0ea5e9' : 'var(--text-1)', background: 'var(--surface)' }}>{hh(h.hour)}{h.hour === view.peakHour && <span className="text-[9px]"> ★</span>}</td>
-                    {cols.map(c => <td key={c.key} className="px-2 py-1.5 text-center" style={{ color: h[c.key] ? c.color : 'var(--text-3)', background: bandColor[c.band], fontWeight: h[c.key] ? 600 : 400 }}>{c.unit === 'h' ? H(h[c.key]) : M(h[c.key])}</td>)}
+                    {cols.map(c => <td key={c.key} className="px-2 py-1.5 text-center" style={{ color: h[c.key] ? c.color : 'var(--text-3)', background: bandColor[c.band], fontWeight: h[c.key] ? 600 : 400 }}
+                      title={c.key === 'lostHours' ? (ar ? `ساعات ضائعة = غياب/مرض مجدول (${h.shrinkage || 0} شخص·ساعة) + تأخير/خروج/إذن (${((h.tardyMin || 0) + (h.earlyMin || 0) + (h.permLateMin || 0) + (h.permEarlyMin || 0))}د)` : `lost = scheduled absence/sick (${h.shrinkage || 0} person·hr) + tardy/early/perm (${((h.tardyMin || 0) + (h.earlyMin || 0) + (h.permLateMin || 0) + (h.permEarlyMin || 0))}m)`) : undefined}>{c.unit === 'h' ? H(h[c.key]) : M(h[c.key])}</td>)}
                   </tr>
                 ))}
                 <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface-2)' }}>
@@ -261,6 +263,34 @@ export default function HourlyAnalyticsPage() {
                 </tr>
               </tbody>
             </table>
+          </div>
+          );
+        })()}
+
+        {/* OT REALITY strip — TRUE_OT (regular + OFF-day + holiday). The honest "كم ساعة OT":
+            the per-hour OT-before/after split can read 0 in a not-yet-rebuilt month, but the real
+            OT still lives in the off-day/holiday buckets and is shown here. */}
+        {(() => {
+          const t = view.total; const has = (t.otTrueHrs ?? 0) > 0 || (t.otBeforeHrs ?? 0) > 0 || (t.otAfterHrs ?? 0) > 0;
+          const chip = (label: string, val: number, color: string) => (
+            <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--text-2)' }}>
+              <span className="w-2 h-2 rounded-full" style={{ background: color }} />{label}
+              <b className="tabular-nums" style={{ color: 'var(--text-1)' }}>{(+val || 0).toLocaleString()}{ar ? 'س' : 'h'}</b>
+            </span>
+          );
+          return (
+          <div className="rounded-2xl p-3 flex flex-wrap items-center gap-x-5 gap-y-1.5" style={panel}>
+            <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--text-1)' }}><Flame size={14} style={{ color: '#f97316' }} />{ar ? 'أوفر تايم الحقيقي' : 'Real overtime (TRUE_OT)'}</span>
+            {chip(ar ? 'عادي' : 'Regular', t.otRegHrs ?? 0, '#f59e0b')}
+            {chip(ar ? 'يوم إجازة' : 'Off-day', t.otOffdayHrs ?? 0, '#f97316')}
+            {chip(ar ? 'عطلة رسمية' : 'Holiday', t.otHolidayHrs ?? 0, '#ef4444')}
+            <span className="flex items-center gap-1 text-[12px] font-bold" style={{ color: '#f97316' }}>= {ar ? 'الإجمالي' : 'Total'} {(t.otTrueHrs ?? 0).toLocaleString()}{ar ? 'س' : 'h'}</span>
+            <span className="text-[10px] mx-1" style={{ color: 'var(--text-3)' }}>·</span>
+            {chip(ar ? 'قبل الشفت' : 'Before shift', t.otBeforeHrs ?? 0, '#a78bfa')}
+            {chip(ar ? 'بعد الشفت' : 'After shift', t.otAfterHrs ?? 0, '#8b5cf6')}
+            <span className="text-[10px] w-full" style={{ color: 'var(--text-3)' }}>
+              {ar ? '★ «قبل/بعد الشفت» هو التوزيع داخل اليوم من محرّك المصالحة (قد يكون 0 لشهر لم يُعَد بناؤه بعد)؛ أوفرتايم يوم الإجازة/العطلة يُحتسب للشِفت كامل ولا يُوزّع بالساعة — لذلك أعمدة OT بالساعة قد تكون فارغة بينما الإجمالي الحقيقي هنا.' : '★ "Before/after shift" is the within-day split from the reconciliation engine (can be 0 for a month not yet rebuilt); off-day/holiday OT is whole-shift and not hour-placed — so the per-hour OT columns can be empty while the real total shows here.'}
+            </span>
           </div>
           );
         })()}
