@@ -184,6 +184,13 @@ const bracketNo = s => { const m = String(s||'').match(/\[\s*(\d{3,6})\s*\]/); r
     LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
     WHERE ar.tenant_id = r.tenant_id AND e.employee_no = r.employee_no
       AND ar.attendance_date = r.work_date AND ar.scheduled_start IS NOT NULL`, []);
+  // SELF-HEAL cross-midnight ends (2026-07-03 deep audit): the join above only canonicalizes rows
+  // matched to attendance_records; any other row that still has shift_end_min < shift_start_min is a
+  // legacy raw-wrapped value. Normalize ALL of them to canonical (start+duration) so every consumer
+  // that derives duration from se-ss (rest rule, hourly HC, WFH-HR report) stays correct. Idempotent.
+  const healed = await c.query(`UPDATE roster_days SET shift_end_min = shift_end_min + 1440, crosses_midnight = TRUE
+    WHERE shift_end_min IS NOT NULL AND shift_start_min IS NOT NULL AND shift_end_min < shift_start_min`, []);
+  if (healed.rowCount) console.log('self-healed ' + healed.rowCount + ' cross-midnight end(s) to canonical');
   // system late / early-out vs shift + adherence % (prefer system times, fall back to punch)
   await c.query(`
     UPDATE roster_days SET

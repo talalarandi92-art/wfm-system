@@ -1001,7 +1001,7 @@ export class ReconController {
                    (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se_c,
                    presence, permission_type, sys_late_min, sys_early_min, ot_before_min, ot_after_min
               FROM roster_days
-             WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3 AND shift_start_min IS NOT NULL${fnFilter})
+             WHERE tenant_id=$1 AND is_active AND work_date BETWEEN ($2::date - 1) AND $3 AND shift_start_min IS NOT NULL${fnFilter})
       SELECT b.bi, b.hh AS "hour",
         COUNT(*) FILTER (WHERE ${pres} AND ${covAbs('r.di*1440 + r.ss', 'r.se_c - r.ss')})::int working,
         COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0 AND ${covAbs('r.di*1440 + r.ss - r.ot_before_min', 'r.ot_before_min')})::int ot_before,
@@ -1029,7 +1029,7 @@ export class ReconController {
               JOIN employees e ON e.id = se.employee_id
               LEFT JOIN functions f ON f.id = e.function_id
               LEFT JOIN shift_codes sc ON sc.tenant_id = se.tenant_id AND sc.code = se.shift_code_display
-             WHERE se.tenant_id=$1 AND se.entry_date BETWEEN $2 AND $3 AND sc.start_time IS NOT NULL${fnFilterPlan}
+             WHERE se.tenant_id=$1 AND se.entry_date BETWEEN ($2::date - 1) AND $3 AND sc.start_time IS NOT NULL${fnFilterPlan}
              ORDER BY se.employee_id, se.entry_date, sv.created_at DESC),
       lv AS (SELECT r.employee_id, gs::date::text d FROM requests r JOIN request_leaves rl ON rl.request_id=r.id
                CROSS JOIN generate_series(rl.start_date, rl.end_date, interval '1 day') gs
@@ -1175,7 +1175,7 @@ export class ReconController {
       FROM roster_days WHERE ${w} AND presence IN ('office','wfh')
         AND UPPER(shift_code) !~ '^(OFF|H|L|SL|DL|RES|TER|TRANSFER|COMP|UPL|A)$'
       GROUP BY UPPER(shift_code) HAVING COUNT(*) >= 5 ORDER BY n DESC LIMIT 12`, p);
-    const covHours = (ss: number, se: number) => { const a = (((ss % 1440) + 1440) % 1440), e = a + (se - ss), out: number[] = []; for (let h = 0; h < 24; h++) { const h0 = h * 60; if ((a < h0 + 60 && Math.min(e, 1440) > h0) || (e > 1440 && e - 1440 > h0)) out.push(h); } return out; };
+    const covHours = (ss: number, se: number) => { const a = (((ss % 1440) + 1440) % 1440), e = a + (se <= ss ? se + 1440 - ss : se - ss), out: number[] = []; for (let h = 0; h < 24; h++) { const h0 = h * 60; if ((a < h0 + 60 && Math.min(e, 1440) > h0) || (e > 1440 && e - 1440 > h0)) out.push(h); } return out; };
     const shifts = defs.map((d: any) => ({ code: d.code, ss: d.ss, se: d.se, hrs: covHours(d.ss, d.se), used: d.n }));
     // 3) GREEDY set-cover: add the shift that covers the most still-under-covered demand.
     const assigned = Array(24).fill(0); const mix: Record<string, number> = {}; let guard = 0;
@@ -2416,10 +2416,12 @@ export class ReconController {
     const alignTo = (v: number, ref: number) => { let x = v; while (x < ref - 720) x += 1440; while (x > ref + 720) x -= 1440; return x; };
     // official holidays come from the editable `holidays` table (synced from recon-config.json) — NOT a single
     // hardcoded date, so WFH work on Arafat/Eid/National-Day etc. is correctly treated as holiday work, never HR.
-    const holSet = new Set((await this.ds.query(`SELECT holiday_date::text d FROM holidays WHERE tenant_id=$1`, [t])).rows.map((x: any) => x.d));
+    const holSet = new Set((await this.ds.query(`SELECT holiday_date::text d FROM holidays WHERE tenant_id=$1`, [t]).catch(() => [])).map((x: any) => x.d));
     const out: any[] = [];
     for (const r of rows) {
-      const start = Number(r.shift_start_min), end = Number(r.shift_end_min);
+      // wrap-correct cross-midnight ends (legacy raw rows store end<start) so gross isn't negative
+      // and the cross-midnight fairness guard (crossMid) isn't bypassed for MD/E overnight shifts.
+      const start = Number(r.shift_start_min); let end = Number(r.shift_end_min); if (end <= start) end += 1440;
       const code = (r.shift_code || '').toString();
       const nameLc = (r.clean_name || '').toLowerCase();
       const mother = /7$/.test(code.toLowerCase()) || this.WFH_MOTHERS.some(m => nameLc.includes(m));
@@ -2805,7 +2807,11 @@ export class ReconController {
     // hourly scheduled headcount (avg concurrent by clock-hour, cross-midnight aware)
     const shifts = await this.ds.query(`SELECT shift_start_min ss, shift_end_min se FROM roster_days WHERE ${w} AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL AND shift_end_min IS NOT NULL`, p);
     const mins = new Array(24).fill(0);
-    for (const sh of shifts) { for (let m = Number(sh.ss); m < Number(sh.se); m += 30) { mins[Math.floor((((m % 1440) + 1440) % 1440)) / 60 | 0] += 30; } }
+    for (const sh of shifts) {
+      // wrap-correct cross-midnight ends (legacy raw rows store se<ss) so the loop isn't empty.
+      const ss = Number(sh.ss); let se = Number(sh.se); if (se <= ss) se += 1440;
+      for (let m = ss; m < se; m += 30) { mins[Math.floor((((m % 1440) + 1440) % 1440)) / 60 | 0] += 30; }
+    }
     const days = s.days || 1;
     const hourly = mins.map((pm, h) => ({ hour: h, avgHC: Math.round(pm / 60 / days * 10) / 10 }));
 
@@ -2856,7 +2862,8 @@ export class ReconController {
     const p: any[] = [t, dPrev, d]; let w = `tenant_id=$1 AND work_date IN ($2,$3) AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`;
     if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
     const rows = await this.ds.query(
-      `SELECT work_date::text d, role_function fn, is_active, shift_start_min ss, shift_end_min se,
+      `SELECT work_date::text d, role_function fn, is_active, shift_start_min ss,
+              (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se,
               sys_login_min li, sys_logout_min lo FROM roster_days WHERE ${w} AND is_active`, p);
 
     const fnSet = new Set<string>();
@@ -2988,11 +2995,15 @@ export class ReconController {
       // 10h rest vs the adjacent roster days. Times are minutes from each row's OWN midnight
       // (end may exceed 1440 = cross-midnight), so +1440 bridges consecutive days.
       const adj = await this.ds.query(
-        `SELECT work_date::text d, shift_start_min ss, shift_end_min se FROM roster_days
+        `SELECT work_date::text d, shift_start_min ss,
+                (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se
+           FROM roster_days
            WHERE tenant_id=$1 AND person_no=$2 AND is_active AND shift_start_min IS NOT NULL AND shift_end_min IS NOT NULL
              AND work_date IN ($3::date - 1, $3::date + 1)`, [t, personNo, date]);
       for (const a of adj) {
-        const rest = a.d < date ? (1440 + Number(ss)) - Number(a.se) : (1440 + Number(a.ss)) - Number(se);
+        // adjacent end is now wrap-corrected (canonical); guard against any raw legacy row too.
+        const aSe = Number(a.se) <= Number(a.ss) ? Number(a.se) + 1440 : Number(a.se);
+        const rest = a.d < date ? (1440 + Number(ss)) - aSe : (1440 + Number(a.ss)) - Number(se);
         if (rest < 600) problems.push(`rest rule: only ${Math.max(0, Math.round(rest / 6) / 10)}h rest vs ${a.d} (min 10h, rule 6.6)`);
       }
     }
