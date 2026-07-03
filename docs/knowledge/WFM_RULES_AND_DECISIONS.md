@@ -276,3 +276,30 @@ roster_days WHERE work_date BETWEEN 2026-06-01 AND 2026-06-30` then inserted onl
   `byUser` needs the small prepared "Ameyo login and logout.xlsx" User-ID format) — rebuilding today's corrected June
   needs the user's PREPARED source files re-shared. A partial June re-apply is possible via SQL (username + leave-on-
   holiday) but the cross-midnight de-bleed and the 13 missing people need the rebuild.
+
+## 21. 2026-07-02 — Scheduling-engine overhaul ("أقوى محرّك") — audited, implemented, spec-gated
+A 74-finding deep audit of the WHOLE scheduling chain, then a parallel-lane implementation (commits 85c00b5, 2385c94,
+0ed413f, 13aaf77, f6018f1). **Verified before/after on the SAME generated week (118 employees): fairness 20 → 82,
+OFF exactly 2 per employee (118×2), females on E/EE/MD/MN = 0, coverage 86% → 71% (the honest ×5/6 effect of 2-OFF).**
+- **Generator:** YTD/rotation classification is CODE-FIRST via `common/shift-category` (was hour-drifted → corrupted
+  fairness + broken midnight rotation); classic generate() honors APPROVED LEAVE ('L' assignment — never scheduled,
+  never consumes OFF, out of coverage); OFF default = 2/week; demand path enforces FUNCTION_SHIFT_POLICY (Refund never
+  MD, OMT only B/N) + surplus-OFF capped at the allowance; fairness = max(0, 100 − √((nightVar+midVar)/2)) ⊕ 0.7/0.3
+  weekend; publishVersion has a force-guard (archives replaced versions, audit_logs, skips punch-carrying cells).
+- **Spec gate (permanent):** `generator.engine.spec.ts` + `demand.engine.spec.ts` — 29 tests lock rest (MD→M=0h
+  invalid), exact-2-OFF, no full-pool day-7 OFF, female blocks, function policies, leave semantics. The gate CAUGHT
+  2 real demand bugs (forced-OFF pre-pass never credited planned OFFs; planned-OFF registration ignored the weekly
+  allowance) — both fixed. Run with `npx jest schedule-generator`.
+- **Requests ↔ schedule (THE wiring):** approving a leave-family request now WRITES the live schedule — attendance_records
+  marker + roster_days hr_code (L/SL/DL/COMP/WFH, engine-identical codes) in ONE QueryRunner transaction BEFORE the
+  status flip; permission approvals stamp roster_days.permission_type/duration; requester notified. Security: peer-accept
+  forgery closed, requests self-scoped, L2 approver ≠ L1 approver.
+- **Schedule module:** SQL-injection parameterized; editCell rest vs ADJACENT days (cross-midnight, both directions);
+  female rule by shift END > 20:00 with logged override required; locked/soft-locked weeks enforced server-side;
+  dual-write attendance_records + active roster_days (no ghost edits); break-coverage guard un-no-op'd (live fallback).
+- **roster-v2:** publish/unpublish need `schedule.publish`; generateWeek = 2 spaced OFFs + males-first night; generateMix
+  discloses `basis: replicates current schedule`; change/swap validated (female+rest) with is_active + dual-write.
+- **⚠ OPEN FOR THE DIRECTOR:** (1) weekend definition conflict — generator says Thu/Fri/Sat, roster-v2 SQL says Fri/Sat:
+  needs his ruling then one shared constant; (2) sign-off on the new fairness numbers before the next real publish;
+  (3) generateMix → Erlang livePlan switch (flagged, not flipped); (4) headcount_intervals: write on publish vs retire;
+  (5) Ramadan generator catalog; (6) half-day leave reflection (no half-day marker exists yet).
