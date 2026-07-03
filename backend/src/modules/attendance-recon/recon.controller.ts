@@ -1140,6 +1140,174 @@ export class ReconController {
     };
   }
 
+  /* ── GAP REMEDIES (Director 2026-07-03) — for every under-covered hour, recommend the fix ──
+   *  Vision (CLAUDE.md §11): never hide a gap — show it with the reason + a suggested solution.
+   *  Per (function, hour) over the week: SUPPLY = avg/day planned HC (schedule_entries), REQUIRED =
+   *  28-day observed baseline. A gap → ranked remedies: ① cross-skill from a SURPLUS function that
+   *  hour, ② overtime (extend adjacent shifts), ③ shift-mix add, ④ exception/hire; plus a
+   *  permission-block advisory window (don't approve permissions here — coverage is short). */
+  @Get('roster-v2/gap-remedies')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Per-under-covered-hour remedies: cross-skill / overtime / shift-mix / exception + permission-block windows' })
+  async gapRemedies(@Req() req: any, @Query('weekStart') weekStart?: string, @Query('function') functionName?: string) {
+    const t = req.user.tenantId;
+    const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
+    const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
+    const ws = snapSat(weekStart || frontier || new Date().toISOString().slice(0, 10));
+    const we = new Date(ws + 'T00:00:00Z'); we.setUTCDate(we.getUTCDate() + 6); const weekEnd = we.toISOString().slice(0, 10);
+    const covHh = (ss: string, seC: string) => { // wrap-corrected hour-of-day coverage (len = seC-ss)
+      const len = `(${seC}-${ss})`; return `((${ss} < h.hh*60+60 AND LEAST(${ss}+${len},1440) > h.hh*60) OR ((${ss}+${len})>1440 AND ((${ss}+${len})-1440) > h.hh*60))`;
+    };
+    const SEC = '(CASE WHEN sc.end_time<=sc.start_time THEN EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time)+1440 ELSE EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time) END)';
+    // SUPPLY: avg/day planned HC per (function, hour) from the latest non-archived schedule
+    const planRows = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      v AS (SELECT DISTINCT ON (se.employee_id, se.entry_date) COALESCE(f.name,'—') fn,
+                   (EXTRACT(HOUR FROM sc.start_time)*60+EXTRACT(MINUTE FROM sc.start_time))::int ss, ${SEC}::int se_c
+              FROM schedule_entries se
+              JOIN schedule_versions sv ON sv.id=se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
+              JOIN employees e ON e.id=se.employee_id LEFT JOIN functions f ON f.id=e.function_id
+              LEFT JOIN shift_codes sc ON sc.tenant_id=se.tenant_id AND sc.code=se.shift_code_display
+             WHERE se.tenant_id=$1 AND se.entry_date BETWEEN $2 AND $3 AND sc.start_time IS NOT NULL
+             ORDER BY se.employee_id, se.entry_date, sv.created_at DESC),
+      pd AS (SELECT GREATEST(COUNT(DISTINCT se.entry_date),1) n FROM schedule_entries se JOIN schedule_versions sv ON sv.id=se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published') WHERE se.tenant_id=$1 AND se.entry_date BETWEEN $2 AND $3)
+      SELECT v.fn, h.hh AS "hour", ROUND(COUNT(*) FILTER (WHERE ${covHh('v.ss', 'v.se_c')})::numeric / (SELECT n FROM pd), 1)::float plan
+      FROM v CROSS JOIN h GROUP BY v.fn, h.hh`, [t, ws, weekEnd]).catch(() => []);
+    // REQUIRED: 28-day observed avg scheduled HC per (function, hour)
+    const baseRows = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      r AS (SELECT COALESCE(role_function,function_name) fn, shift_start_min ss,
+                   (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se_c
+              FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+                AND work_date >= ($2::date - 28) AND work_date < $2::date),
+      d AS (SELECT GREATEST(COUNT(DISTINCT work_date),1) n FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND work_date >= ($2::date - 28) AND work_date < $2::date)
+      SELECT r.fn, h.hh AS "hour", ROUND(COUNT(*) FILTER (WHERE ${covHh('r.ss', 'r.se_c')})::numeric / (SELECT n FROM d), 1)::float required
+      FROM r CROSS JOIN h GROUP BY r.fn, h.hh`, [t, ws]).catch(() => []);
+
+    const plan: Record<string, number[]> = {}, reqd: Record<string, number[]> = {};
+    for (const r of planRows) { (plan[r.fn] = plan[r.fn] || Array(24).fill(0))[r.hour] = r.plan; }
+    for (const r of baseRows) { (reqd[r.fn] = reqd[r.fn] || Array(24).fill(0))[r.hour] = r.required; }
+    const fns = [...new Set([...Object.keys(plan), ...Object.keys(reqd)])].filter(f => f && f !== '—' && (!functionName || f === functionName));
+    // surplus per hour per function (for cross-skill sourcing) — EXCLUDE supervisory/record-only
+    // functions (TL/RTA/Resolution/WFM/Senior): they're never pulled to cover an agent gap.
+    const SUPERVISORY = /team leader|\brta\b|resolution specialist|\bwfm\b|senior/i;
+    const surplusAt = (h: number, exclude: string) => Object.keys(plan)
+      .filter(f => f !== exclude && f !== '—' && !SUPERVISORY.test(f))
+      .map(f => ({ fn: f, surplus: +((plan[f]?.[h] || 0) - (reqd[f]?.[h] || 0)).toFixed(1) }))
+      .filter(x => x.surplus >= 0.5).sort((a, b) => b.surplus - a.surplus);
+
+    const gaps: any[] = [];
+    for (const fn of fns) {
+      for (let h = 0; h < 24; h++) {
+        const need = reqd[fn]?.[h] || 0, have = plan[fn]?.[h] || 0; const deficit = +(need - have).toFixed(1);
+        if (need >= 1 && deficit >= 0.5) {
+          const remedies: any[] = [];
+          const src = surplusAt(h, fn);
+          if (src.length) remedies.push({ type: 'cross_skill', rank: 1, label: 'نقل كروس-سكيل', labelEn: 'Cross-skill move',
+            take: Math.min(deficit, src[0].surplus), from: src[0].fn, sources: src.slice(0, 3),
+            detail: `انقل ${Math.ceil(Math.min(deficit, src[0].surplus))} من «${src[0].fn}» (فائض ${src[0].surplus})` });
+          remedies.push({ type: 'overtime', rank: src.length ? 2 : 1, label: 'أوفر تايم', labelEn: 'Overtime',
+            take: Math.ceil(deficit), detail: `مدّد شفت ${Math.ceil(deficit)} موظف بساعة OT لتغطية ${String(h).padStart(2, '0')}:00` });
+          remedies.push({ type: 'shift_mix', rank: 3, label: 'تعديل المِكس', labelEn: 'Shift-mix add',
+            detail: `أضِف شفت ${h >= 16 || h < 2 ? 'مساء/ليل (E/EE/N)' : 'يغطّي هذه الساعة'} في التوليد` });
+          remedies.push({ type: 'exception', rank: 4, label: 'استثناء/توظيف', labelEn: 'Exception / hire', detail: 'لو ما توفّر مصدر — علِّمها للموافقة أو التوظيف' });
+          gaps.push({ fn, hour: h, required: need, planned: have, deficit,
+            severity: deficit >= 3 ? 'high' : deficit >= 1.5 ? 'medium' : 'low', remedies });
+        }
+      }
+    }
+    gaps.sort((a, b) => b.deficit - a.deficit);
+    // permission-block windows: contiguous gap hours per function → "don't approve permissions HH-HH"
+    const blocks: any[] = [];
+    for (const fn of fns) {
+      const hrs = gaps.filter(g => g.fn === fn).map(g => g.hour).sort((a, b) => a - b);
+      let s = null as number | null, p = null as number | null;
+      const flush = (end: number) => { if (s != null) blocks.push({ fn, from: s, to: end + 1, label: `لا تقبل استئذان ${String(s).padStart(2, '0')}:00–${String((end + 1) % 24).padStart(2, '0')}:00 (نقص تغطية)` }); s = null; };
+      for (const h of hrs) { if (s == null) { s = h; p = h; } else if (h === (p as number) + 1) { p = h; } else { flush(p as number); s = h; p = h; } }
+      if (s != null) flush(p as number);
+    }
+    return { weekStart: ws, weekEnd, frontier, function: functionName || null, functions: fns,
+      gapCount: gaps.length, gaps: gaps.slice(0, 60), permissionBlocks: blocks };
+  }
+
+  /** WHO-ON-SEAT — the agents on seat for a function + date + hour (actual for reconciled days,
+   *  planned from the latest schedule for future days). Powers the heatmap-cell roster popover. */
+  @Get('roster-v2/on-seat')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Agents on seat for a function+date+hour (actual roster_days, else planned schedule)' })
+  async onSeat(@Req() req: any, @Query('date') date: string, @Query('function') fn: string, @Query('hour') hour: string) {
+    const t = req.user.tenantId; const h = Math.max(0, Math.min(23, parseInt(hour || '0', 10)));
+    const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
+    const isActual = frontier && date <= frontier;
+    const covJs = (ss: number, se: number) => { const len = (se <= ss ? se + 1440 - ss : se - ss); const b0 = ss + len; return (ss < h * 60 + 60 && Math.min(b0, 1440) > h * 60) || (b0 > 1440 && b0 - 1440 > h * 60); };
+    const hhmm = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
+    let rows: any[] = [];
+    if (isActual) {
+      rows = await this.ds.query(
+        `SELECT person_no, COALESCE(clean_name,name) name, shift_code, shift_start_min ss, shift_end_min se, presence
+           FROM roster_days WHERE tenant_id=$1 AND is_active AND work_date=$2::date
+             AND COALESCE(role_function,function_name)=$3 AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`,
+        [t, date, fn]).catch(() => []);
+    } else {
+      rows = await this.ds.query(
+        `SELECT DISTINCT ON (se.employee_id) e.employee_no person_no,
+                TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) name, se.shift_code_display shift_code,
+                (EXTRACT(HOUR FROM sc.start_time)*60+EXTRACT(MINUTE FROM sc.start_time))::int ss,
+                (CASE WHEN sc.end_time<=sc.start_time THEN EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time)+1440 ELSE EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time) END)::int se,
+                'plan' presence
+           FROM schedule_entries se
+           JOIN schedule_versions sv ON sv.id=se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
+           JOIN employees e ON e.id=se.employee_id LEFT JOIN functions f ON f.id=e.function_id
+           LEFT JOIN shift_codes sc ON sc.tenant_id=se.tenant_id AND sc.code=se.shift_code_display
+          WHERE se.tenant_id=$1 AND se.entry_date=$2::date AND COALESCE(f.name,'—')=$3 AND sc.start_time IS NOT NULL
+          ORDER BY se.employee_id, sv.created_at DESC`, [t, date, fn]).catch(() => []);
+    }
+    const seated = rows.filter(r => covJs(Number(r.ss), Number(r.se)))
+      .map(r => ({ personNo: r.person_no, name: r.name, shiftCode: r.shift_code, start: hhmm(r.ss), end: hhmm(r.se), presence: r.presence }))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    return { date, function: fn, hour: h, mode: isActual ? 'actual' : 'plan', count: seated.length, agents: seated };
+  }
+
+  /** CROSS-SKILL COVER — commit a manager's cross-skill pick: create a cross_skill_move, notify the
+   *  agent, and drop a coverage event on BOTH calendars (agent + manager). One transaction. */
+  @Post('roster-v2/cross-skill-cover')
+  @RequirePermissions('schedule.edit')
+  async crossSkillCover(@Req() req: any, @Body() b: { personNo?: string; fromFunction?: string; toFunction: string; date: string; startHour: number; endHour: number; reason?: string }) {
+    const t = req.user.tenantId; const managerId = req.user.id || req.user.sub;
+    if (!b?.toFunction || !b?.date || b?.startHour == null || b?.endHour == null || !b?.personNo)
+      throw new BadRequestException('personNo, toFunction, date, startHour, endHour are required');
+    const [emp] = await this.ds.query(`SELECT id, employee_no, TRIM(CONCAT(first_name_en,' ',COALESCE(last_name_en,''))) name FROM employees WHERE tenant_id=$1 AND employee_no=$2`, [t, b.personNo]);
+    if (!emp) throw new BadRequestException(`Employee ${b.personNo} not found`);
+    const [usr] = await this.ds.query(`SELECT id FROM users WHERE tenant_id=$1 AND employee_id=$2 AND status='active' LIMIT 1`, [t, emp.id]).catch(() => [null]);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const startAt = `${b.date}T${pad(b.startHour)}:00:00+03:00`, endAt = `${b.date}T${pad(b.endHour)}:00:00+03:00`;
+    const win = `${pad(b.startHour)}:00–${pad(b.endHour)}:00`;
+    const qr = this.ds.createQueryRunner(); await qr.connect(); await qr.startTransaction();
+    try {
+      // 1) calendar event (visible to manager + agent via attendee)
+      const [ev] = await qr.query(
+        `INSERT INTO calendar_events (tenant_id, title, event_type, start_at, end_at, all_day, description, color, status, created_by)
+         VALUES ($1,$2,'cross_skill',$3::timestamptz,$4::timestamptz,false,$5,'#fb923c','scheduled',$6) RETURNING id`,
+        [t, `تغطية: ${emp.name} → ${b.toFunction} (${win})`, startAt, endAt, `Cross-skill coverage of ${b.toFunction}${b.fromFunction ? ' from ' + b.fromFunction : ''}. ${b.reason || ''}`, managerId]);
+      const eventId = ev.id;
+      await qr.query(`INSERT INTO calendar_event_attendees (event_id, user_id, employee_id, role, status) VALUES ($1,$2,$3,'attendee','accepted')`, [eventId, usr?.id ?? null, emp.id]);
+      // 2) cross_skill_move record
+      const [mv] = await qr.query(
+        `INSERT INTO cross_skill_moves (tenant_id, employee_id, from_function, to_function, start_at, end_at, reason, status, requested_by, approved_by, calendar_event_id)
+         VALUES ($1,$2,$3,$4,$5::timestamptz,$6::timestamptz,$7,'approved',$8,$8,$9) RETURNING id`,
+        [t, emp.id, b.fromFunction ?? null, b.toFunction, startAt, endAt, b.reason ?? 'Gap coverage', managerId, eventId]);
+      // 3) notify the agent
+      if (usr?.id) await qr.query(
+        `INSERT INTO notifications (tenant_id, recipient_id, notification_type, title, title_ar, body, body_ar, entity_type, entity_id, action_url)
+         VALUES ($1,$2,'coverage.cross_skill',$3,$4,$5,$6,'cross_skill_move',$7,'/calendar')`,
+        [t, usr.id, `You will cover ${b.toFunction} on ${b.date}`, `ستغطّي ${b.toFunction} بتاريخ ${b.date}`,
+         `Coverage assignment: ${b.toFunction} ${win} on ${b.date}.`, `تعيين تغطية: ${b.toFunction} ${win} بتاريخ ${b.date}.`, mv.id]);
+      await qr.commitTransaction();
+      return { ok: true, moveId: mv.id, eventId, agent: emp.name, notified: !!usr?.id, window: win, date: b.date, toFunction: b.toFunction };
+    } catch (e: any) { await qr.rollbackTransaction(); throw new BadRequestException('cross-skill cover failed: ' + (e?.message || e)); }
+    finally { await qr.release(); }
+  }
+
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the
    *  hourly need per function, then greedy set-cover the standard shift windows (real start/end
    *  taken from the data) to cover every hour — and check we have enough active staff. The
