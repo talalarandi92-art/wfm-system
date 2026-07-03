@@ -50,8 +50,13 @@ module.exports = function build() {
   // optional period the USER defines (e.g. RECON_FROM=2026-06-01 RECON_TO=2026-06-15); defaults to whole horizon
   const FROM = process.env.RECON_FROM || '0000-00-00';
   const TO = process.env.RECON_TO || horizon;
-  // system source mode — June stays 'ameyo-first' (calibrated to the manual). Future: 'sprinklr-only' / 'sprinklr-first'.
-  const SYS_MODE = (process.env.RECON_SYS_MODE || 'ameyo-first').toLowerCase();
+  // system source mode — June stays 'ameyo-first' (calibrated to the manual). From July (D-076,
+  // Director 2026-07-03) the roster is Sprinklr-sourced: set "sysMode" in recon-config.json (or
+  // env RECON_SYS_MODE for a one-off run) to 'sprinklr-first' or 'sprinklr-only'. env wins over config.
+  let cfgSysMode = null;
+  try { cfgSysMode = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'recon-config.json'), 'utf8')).sysMode || null; } catch (e) { /* keep null */ }
+  const SYS_MODE = (process.env.RECON_SYS_MODE || cfgSysMode || 'ameyo-first').toLowerCase();
+  console.log('system source mode: ' + SYS_MODE + (process.env.RECON_SYS_MODE ? ' (env)' : cfgSysMode ? ' (recon-config.json)' : ' (default)'));
 
   const records = [];
   const dq = [];               // data quality issues

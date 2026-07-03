@@ -1,4 +1,6 @@
 {
+  "_note_sysMode": "System-session source mode for the engine: 'ameyo-first' (June calibration — Ameyo primary, Sprinklr fills gaps), 'sprinklr-first', or 'sprinklr-only'. D-076 (Director 2026-07-03): from the NEXT period the roster comes fully from Sprinklr — flip this to 'sprinklr-only' (or 'sprinklr-first') BEFORE the first July upload. A one-off env RECON_SYS_MODE overrides this value.",
+  "sysMode": "ameyo-first",
   "_note": "Editable reconciliation config. Edit the holidays list whenever needed, then re-run: node scripts/recon-refresh.js. Anyone who worked a SCHEDULED shift on one of these dates gets the whole shift credited as HOLIDAY OT, the row is labelled 'Official Holiday', and an ANNUAL-LEAVE (L) day on a holiday is counted as the holiday (returns to the leave balance, not deducted). A cross-midnight shift is owned by its START day, so a holiday/OFF day never re-grabs the previous night's session.",
   "holidays": [
     { "date": "2026-01-01", "name": "New Year" },

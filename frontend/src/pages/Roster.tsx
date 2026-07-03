@@ -261,6 +261,9 @@ export default function RosterPage() {
   const [page, setPage] = useState(0);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // session-source mode for the rebuild (D-076): '' = engine default (recon-config.json).
+  // June was calibrated ameyo-first; from July the Director wants the roster Sprinklr-sourced.
+  const [sysMode, setSysMode] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
@@ -309,6 +312,7 @@ export default function RosterPage() {
       ? 'تشغيل المحرّك المصحّح وإعادة بناء الروستر من هذه الملفات؟\nيطبّق كل القواعد المتفق عليها (عطلة/سيك/غياب/أوفر تايم...) وقابل للتراجع.'
       : 'Run the corrected engine and rebuild the roster from these files?\nRe-applies every agreed rule (holiday/sick/absence/OT…) and is reversible.')) { if (e.target) e.target.value = ''; return; }
     const fd = new FormData(); Array.from(files).forEach(f => fd.append('files', f));
+    if (sysMode) fd.append('sysMode', sysMode); // per-run session-source override (D-076); empty = engine config default
     setUploading(true);
     try {
       const r: any = await apiClient.post('/attendance-recon/recon-refresh', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 });
@@ -405,6 +409,14 @@ export default function RosterPage() {
           <button onClick={() => nav('/capacity?tab=intervals')} className={btn('')} style={{ background:'rgba(6,182,212,0.16)', color:'#67e8f9' }}><BarChart4 size={13} />{ar?'هيدكاونت بالفترات':'Intervals'}</button>
           <button onClick={() => nav('/scorecard?tab=agent360')} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><UserSearch size={13} />{ar?'ملف 360':'Agent 360'}</button>
           <button onClick={hrMatrix} className={btn('')} style={{ background:'rgba(139,92,246,0.18)', color:'#c4b5fd' }}><FileSpreadsheet size={13} />HR Matrix</button>
+          <select value={sysMode} onChange={e => setSysMode(e.target.value)}
+            title={ar?'مصدر جلسات السيستم لإعادة البناء: يونيو = Ameyo أولاً (المعايَر)؛ من يوليو الروستر من Sprinklr (قرار D-076)':'System-session source for the rebuild: June = Ameyo-first (calibrated); from July the roster is Sprinklr-sourced (D-076)'}
+            className={inputCls} style={inputStyle}>
+            <option value="">{ar?'مصدر الجلسات: افتراضي':'Sessions: default'}</option>
+            <option value="ameyo-first">Ameyo-first</option>
+            <option value="sprinklr-first">Sprinklr-first</option>
+            <option value="sprinklr-only">Sprinklr-only</option>
+          </select>
           <button onClick={() => fileRef.current?.click()} title={ar?'ارفع ملفات الشهر (CC Schedule / أودو / استئذانات / Ameyo / Sprinklr) → يشتغل المحرّك المصحّح ويعيد بناء الروستر بكل القواعد المتفق عليها':'Upload the month sources (CC Schedule / Odoo / Permissions / Ameyo / Sprinklr) → runs the corrected engine and rebuilds the roster with every agreed rule'} className={btn('')} style={{ background:'rgba(16,185,129,0.16)', color:'#34d399' }}><Upload size={13} />{uploading?(ar?'جارٍ البناء…':'Rebuilding…'):(ar?'رفع وإعادة بناء':'Upload & Rebuild')}</button>
           <input ref={fileRef} type="file" multiple hidden onChange={onUpload} accept=".xlsx,.xls,.xlsm,.csv" />
           <button onClick={exportCSV} disabled={exporting} title={ar?'تصدير كامل النطاق المحدّد (كل الأيام، مش الصفحة فقط)':'Export the full selected range (all days, not just this page)'} className={btn('')} style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}><Download size={13} />{exporting?(ar?'جارٍ…':'Exporting…'):(ar?'تصدير الكل':'Export all')}</button>

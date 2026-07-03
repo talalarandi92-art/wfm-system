@@ -3025,9 +3025,17 @@ export class ReconController {
       else cb(new BadRequestException(`File type not allowed: ${file.originalname}`), false);
     },
   }))
-  @ApiOperation({ summary: 'Run the CORRECTED reconciliation engine and refresh roster_days (optional source files replace the engine inputs first)' })
-  async reconRefresh(@Req() req: any, @UploadedFiles() files: Array<{ originalname: string; buffer: Buffer }>) {
+  @ApiOperation({ summary: 'Run the CORRECTED reconciliation engine and refresh roster_days (optional source files replace the engine inputs first; optional sysMode overrides the session-source mode for this run)' })
+  async reconRefresh(@Req() req: any, @UploadedFiles() files: Array<{ originalname: string; buffer: Buffer }>, @Body() body?: { sysMode?: string }) {
+    // Per-run session-source mode (D-076): 'ameyo-first' (June calibration) | 'sprinklr-first' | 'sprinklr-only'.
+    // Omitted → the engine falls back to recon-config.json "sysMode", then 'ameyo-first'.
+    const sysMode = (body?.sysMode || '').toLowerCase().trim();
+    if (sysMode && !['ameyo-first', 'sprinklr-first', 'sprinklr-only'].includes(sysMode)) {
+      throw new BadRequestException(`sysMode must be one of ameyo-first | sprinklr-first | sprinklr-only (got "${sysMode}")`);
+    }
     // 1) Optional: drop uploaded files into the engine's source folder, matched by name → canonical name.
+    //    NOTE: the "June" in these stored names is a fixed storage ALIAS, not the data month — a July
+    //    upload overwrites the same canonical slot and the engine reports the ACTUAL ingested range.
     const targets = [
       { rx: /cc schedule|shifts/i, name: 'CC Schedule 26 June..xlsx', role: 'Roster (authority)' },
       { rx: /odoo|fingerprint/i, name: 'Odoo Fingerprint June.xlsx', role: 'Odoo fingerprints' },
@@ -3052,7 +3060,8 @@ export class ReconController {
     try {
       const { stdout, stderr } = await promisify(execFile)(process.execPath,
         ['--max-old-space-size=4096', path.join(scriptsDir, 'recon-refresh.js')],
-        { cwd: path.dirname(scriptsDir), timeout: 8 * 60 * 1000, maxBuffer: 48 * 1024 * 1024, env: process.env });
+        { cwd: path.dirname(scriptsDir), timeout: 8 * 60 * 1000, maxBuffer: 48 * 1024 * 1024,
+          env: sysMode ? { ...process.env, RECON_SYS_MODE: sysMode } : process.env });
       const lines = (stdout + '\n' + stderr).split('\n');
       log = lines.filter((l) => /▶|INGEST OK|✅|❌|FAILED|horizon/.test(l)).slice(-24).join('\n');
       ok = /INGEST OK/.test(stdout) && /✅ DONE/.test(stdout);
@@ -3069,7 +3078,7 @@ export class ReconController {
       `SELECT COUNT(*)::int rows, COUNT(DISTINCT person_no)::int people, MIN(work_date)::text "from", MAX(work_date)::text "to",
               ROUND(SUM(${TRUE_OT})/60.0)::int ot_hours
          FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [req.user.tenantId, rFrom, rTo]);
-    return { ok, error, saved, unmatched, sourceDir: RECON_NEW_DIR, log, roster };
+    return { ok, error, saved, unmatched, sourceDir: RECON_NEW_DIR, log, roster, sysMode: sysMode || null };
   }
 
   @Get('hr-matrix')
