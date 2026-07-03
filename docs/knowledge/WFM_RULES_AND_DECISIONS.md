@@ -303,3 +303,27 @@ OFF exactly 2 per employee (118×2), females on E/EE/MD/MN = 0, coverage 86% →
   needs his ruling then one shared constant; (2) sign-off on the new fairness numbers before the next real publish;
   (3) generateMix → Erlang livePlan switch (flagged, not flipped); (4) headcount_intervals: write on publish vs retire;
   (5) Ramadan generator catalog; (6) half-day leave reflection (no half-day marker exists yet).
+
+## 22. 2026-07-03 — Full audit cycle: A/S-suffix grammar, shared normalizer, Roster Health Check
+- **THE suffix grammar (Director, binding):** ANY valid base shift + `A` = absence (no medical report, HR-Matrix `A`),
+  + `S` = sick leave (medical report, HR-Matrix `SL`). Generic — EE20A/EE20S/M7-3A/M7-3S included. `ABS` is NOT an
+  official code (legacy read-alias of `A` only; never emitted). A/S rows KEEP the base shift + timing for analysis;
+  they count as scheduled-not-actual = unplanned shrinkage. L/H/COMP = planned shrinkage; OFF/RES/TER = not scheduled.
+- **Shared normalizer:** `backend/src/common/shift-normalize.ts` (33-test spec) is the ONE code→(base, status, hrCode,
+  WFH, HC flags, shrinkage type, timing, cross-midnight) mapping. Wired: schedule editCell (accepts suffix codes),
+  timing-sheet import parser. Every new consumer must import it — never re-derive.
+- **Manual-edit integrity:** editCell dual-write now carries presence/hr_code/attendance_code/shift_category into
+  roster_days (was shift columns only → analysis/shrinkage/HR-matrix went stale after manual edits). `override:true`
+  added to the DTO (was documented but unreachable). E2E verified N→NA→override→N.
+- **Roster Health Check (generator must never leave the user blind):** generate-week now returns `health` — 7-day×24h
+  Required/Scheduled/Effective grid (effective = scheduled × (1 − last-28-day sick/absent/leave rate, disclosed)),
+  status colors, weekend Thu+Fri + night focus, totals, ACCEPTABLE verdict (no red hours AND ≥95%), ranked
+  recommended actions. Saved in draft payloads; rendered on the Demand-Schedule page before publish.
+- **Data repairs applied (scripts/fix-absence-holiday-and-permdur.js):** 11 legacy A-on-holiday rows presence
+  holiday→absent (engine parity); June permission_duration backfilled 199/237 from the year-wide Odoo exports
+  (38 unmatched = sources end 06-21/22; the full rebuild will complete them). permissionHrs 0→440.8 in analysis.
+- **⚠ OPEN INCIDENT — June roster missing 24 people:** live roster_days June 1–27 = 103 people (2733 rows) but the
+  source workbook `CC Schedule 26 May 30 and 31 and June to 27.xlsx` contains 120+ incl. Ali Muteb (12937), Hassan
+  Saad (13827) etc. The corrected Jul-2 ingest (3084 rows) was later replaced by a rebuild from the older 103-person
+  foundation. FIX = re-run the engine on the ORIGINAL workbook + full-June system sources (the SRCDIR June-named files
+  currently hold the 28–30 test slices — restore/rename before refresh). Requires the Director per the test-first plan.
