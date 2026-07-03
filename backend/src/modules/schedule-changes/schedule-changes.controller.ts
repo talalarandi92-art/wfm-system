@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { normalizeShiftCode } from '@common/shift-normalize';
 
 /**
  * Schedule Change requests (Phase-1 new type).
@@ -202,6 +203,33 @@ export class ScheduleChangesController {
            (tenant_id, employee_id, attendance_date, attendance_marker, scheduled_start, scheduled_end)
          VALUES ($1,$2,$3::date,$4::attendance_marker_enum,$5,$6)`,
         [tid, row.employee_id, date, marker, start, end],
+      ).catch(() => {});
+    }
+
+    // Dual-write (O-11 / D-051 follow-up): sync the canonical roster_days row too, so the
+    // approved shift change is visible to every roster report. UPDATE-only, skip days that
+    // already carry actual evidence — same convention as editCell / generator publish.
+    const [emp] = await this.ds.query(
+      `SELECT employee_no FROM employees WHERE id = $1 AND tenant_id = $2`,
+      [row.employee_id, tid],
+    ).catch(() => [null]);
+    if (emp?.employee_no) {
+      const norm = normalizeShiftCode(row.requested_shift_code);
+      const presence = norm.status === 'working' ? 'office'
+        : norm.status === 'wfh' ? 'wfh'
+        : norm.status === 'absence' ? 'absent'
+        : norm.status === 'separation' ? 'left'
+        : norm.status === 'unknown' ? null : norm.status;
+      const toMin = (t: string | null) => t == null ? null : parseInt(t.split(':')[0], 10) * 60 + parseInt(t.split(':')[1] ?? '0', 10);
+      await this.ds.query(
+        `UPDATE roster_days
+            SET shift_code = $4, shift_start_min = $5, shift_end_min = $6,
+                presence = COALESCE($7, presence), hr_code = $8, attendance_code = $4,
+                shift_category = $9, crosses_midnight = $10
+          WHERE tenant_id = $1 AND person_no = $2 AND work_date = $3::date AND is_active
+            AND punch_in_min IS NULL AND sys_login_min IS NULL`,
+        [tid, emp.employee_no, date, row.requested_shift_code, toMin(start), toMin(end),
+         presence, norm.hrCode, norm.base ?? row.requested_shift_code, norm.crossesMidnight],
       ).catch(() => {});
     }
 

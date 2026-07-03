@@ -13,6 +13,7 @@ import { generateWeeklySchedule, buildWeekDates } from './generator.engine';
 import { computeShiftMix, assignRoster } from './demand.engine';
 import { CapacityService } from '../capacity/capacity.service';
 import { shiftCategoryFromCode } from '@common/shift-category';
+import { normalizeShiftCode } from '@common/shift-normalize';
 
 const DEFAULT_OPTIONS: GeneratorOptions = {
   minRestHours: 10,
@@ -1040,6 +1041,57 @@ export class GeneratorService {
       [versionId, tenantId],
     );
 
+    // Dual-write (O-11 / D-051 follow-up): mirror the published SCHEDULED fields into the
+    // canonical roster_days rows so roster reports never diverge from the agent-facing
+    // schedule. UPDATE-only — roster_days rows are created by the recon engine, and days
+    // that already carry actual evidence (punch or system login) are left untouched
+    // (same guard as the attendance_records skip above). Raw minutes-of-day storage
+    // mirrors editCell exactly (MD → start 1320 / end 420).
+    const rosterEntries: Array<{ employee_no: string; d: string; code: string; start_min: number | null; end_min: number | null }> =
+      await this.ds.query(
+        `SELECT e.employee_no, se.entry_date::text AS d, se.shift_code_display AS code,
+                (EXTRACT(HOUR FROM sc.start_time)*60 + EXTRACT(MINUTE FROM sc.start_time))::int AS start_min,
+                (EXTRACT(HOUR FROM sc.end_time)*60 + EXTRACT(MINUTE FROM sc.end_time))::int   AS end_min
+           FROM schedule_entries se
+           JOIN employees e ON e.id = se.employee_id
+           LEFT JOIN shift_codes sc ON sc.tenant_id = se.tenant_id AND sc.code = se.shift_code_display
+          WHERE se.schedule_version_id = $1 AND se.tenant_id = $2`,
+        [versionId, tenantId],
+      );
+    let rosterSynced = 0;
+    if (rosterEntries.length) {
+      const vals: any[] = [tenantId];
+      const tuples: string[] = [];
+      for (const en of rosterEntries) {
+        if (!en.code) continue;
+        const norm = normalizeShiftCode(en.code);
+        const presence = norm.status === 'working' ? 'office'
+          : norm.status === 'wfh' ? 'wfh'
+          : norm.status === 'absence' ? 'absent'
+          : norm.status === 'separation' ? 'left'
+          : norm.status === 'unknown' ? null : norm.status;
+        const base = vals.length;
+        vals.push(en.employee_no, en.d, en.code, en.start_min, en.end_min,
+                  presence, norm.hrCode, norm.base ?? en.code, norm.crossesMidnight);
+        tuples.push(`($${base + 1}, $${base + 2}::date, $${base + 3}, $${base + 4}::int, $${base + 5}::int, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}::boolean)`);
+      }
+      if (tuples.length) {
+        const res = await this.ds.query(
+          `UPDATE roster_days rd
+              SET shift_code = v.code, shift_start_min = v.start_min, shift_end_min = v.end_min,
+                  presence = COALESCE(v.presence, rd.presence), hr_code = v.hr_code,
+                  attendance_code = v.code, shift_category = v.base, crosses_midnight = v.xmid
+             FROM (VALUES ${tuples.join(',')}) AS v(person_no, work_date, code, start_min, end_min, presence, hr_code, base, xmid)
+            WHERE rd.tenant_id = $1 AND rd.person_no = v.person_no AND rd.work_date = v.work_date
+              AND rd.is_active
+              AND rd.punch_in_min IS NULL AND rd.sys_login_min IS NULL`,
+          vals,
+        );
+        // UPDATE via ds.query returns [rows, affectedCount] for raw UPDATE ... (tuple form)
+        rosterSynced = Array.isArray(res) && typeof res[1] === 'number' ? res[1] : 0;
+      }
+    }
+
     // Audit the forced replacement — one row per archived version.
     if (conflicts.length && force) {
       for (const c of conflicts) {
@@ -1049,7 +1101,7 @@ export class GeneratorService {
           [tenantId, userId, c.id,
            `Force-published version ${versionId} over ${version.period_start} → ${version.period_end}; ` +
            `archived ${c.status} version ${c.id} ("${c.label ?? ''}"); ` +
-           `applied ${applied?.n ?? 0} row(s) to attendance_records, skipped ${applied?.skipped ?? 0} with actual punch/system data`],
+           `applied ${applied?.n ?? 0} row(s) to attendance_records, skipped ${applied?.skipped ?? 0} with actual punch/system data; synced ${rosterSynced} roster_days row(s)`],
         ).catch(() => {});
       }
     }
@@ -1059,6 +1111,7 @@ export class GeneratorService {
       versionId,
       appliedToAgents: applied?.n ?? 0,
       skippedWithActuals: applied?.skipped ?? 0,
+      rosterDaysSynced: rosterSynced,
       archivedVersionIds: force ? conflicts.map((c: any) => c.id) : [],
     };
   }
