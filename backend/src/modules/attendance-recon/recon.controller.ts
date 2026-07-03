@@ -438,8 +438,8 @@ export class ReconController {
              COUNT(*) FILTER (WHERE ${work} AND cat='night')::int night,
              COUNT(*) FILTER (WHERE ${work} AND cat='midnight')::int midnight,
              COUNT(*) FILTER (WHERE r.presence='off')::int off_days,
-             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) IN (5,6))::int weekend_off,
-             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) NOT IN (5,6))::int weekday_off,
+             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) IN (4,5))::int weekend_off,
+             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) NOT IN (4,5))::int weekday_off,
              (nt.person_no IS NOT NULL) night_team
         FROM r LEFT JOIN fairness_night_team nt ON nt.tenant_id=$1 AND nt.person_no=r.person_no
        WHERE ${w}
@@ -451,10 +451,10 @@ export class ReconController {
     // currently-employed persons (employee_identity.is_active = any employee row active) — used to
     // keep the FORWARD rebalance proposal to schedulable staff while the report keeps full history.
     const activeNow = new Set((await this.ds.query(`SELECT person_no FROM employee_identity WHERE tenant_id=$1 AND is_active`, [t])).map((x: any) => x.person_no));
-    // total weekend (Fri/Sat) dates in the window — the denominator for "what share of
+    // total weekend (THU/FRI — Director's ruling 2026-07-02) dates in the window — the denominator for "what share of
     // available weekends did this person actually get off".
     const totalWeekendDays = Number((await this.ds.query(
-      `SELECT COUNT(DISTINCT work_date)::int n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND EXTRACT(DOW FROM work_date) IN (5,6)`, [t, dFrom, dTo]))[0]?.n || 0);
+      `SELECT COUNT(DISTINCT work_date)::int n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND EXTRACT(DOW FROM work_date) IN (4,5)`, [t, dFrom, dTo]))[0]?.n || 0);
     const agents = rows.map(r => {
       const wd = r.wd || 1, nm = r.night + r.midnight, off = r.off_days || 0;
       // dominant shift category + how "stuck" on it (never rotates) — rotation health
@@ -835,7 +835,7 @@ export class ReconController {
       SELECT person_no, MAX(clean_name) name, MAX(gender) gender,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND sc ~ '^(N|MD|MN)') nm,
-             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (5,6)) woff
+             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5)) woff
         FROM r WHERE person_no IS NOT NULL GROUP BY person_no
        HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh')) >= 1`, [t, dFrom, dTo, fn]))
       .map((e: any) => ({ personNo: e.person_no, name: e.name, male: String(e.gender || '').toLowerCase().startsWith('m'),
@@ -2305,8 +2305,8 @@ export class ReconController {
              COUNT(*) FILTER (WHERE presence='sick')::int sick,
              COUNT(*) FILTER (WHERE presence='absent')::int absent,
              COUNT(*) FILTER (WHERE presence='holiday')::int holiday,
-             COUNT(*) FILTER (WHERE EXTRACT(DOW FROM work_date) IN (5,6))::int weekend,
-             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (5,6))::int "weekendOff",
+             COUNT(*) FILTER (WHERE EXTRACT(DOW FROM work_date) IN (4,5))::int weekend,
+             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5))::int "weekendOff",
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
              COUNT(DISTINCT person_no)::int people, COUNT(DISTINCT work_date)::int days
         FROM roster_days WHERE ${w}`, p);
@@ -2318,7 +2318,7 @@ export class ReconController {
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              COUNT(*) FILTER (WHERE presence='off')::int "off",
              COUNT(*) FILTER (WHERE presence IN ('leave','sick','absent','holiday'))::int lost,
-             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (5,6))::int "weekendOff",
+             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5))::int "weekendOff",
              COUNT(DISTINCT person_no)::int people
         FROM roster_days WHERE ${w} GROUP BY role_function ORDER BY scheduled DESC`, p);
     const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);

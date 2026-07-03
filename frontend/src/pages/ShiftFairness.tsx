@@ -207,7 +207,7 @@ export default function ShiftFairnessPage() {
         {/* OFF distribution — weekday vs weekend split per person */}
         {tab === 'off' && (
           <div className="rounded-2xl p-4" style={panel}>
-            <p className="text-[11px] mb-1" style={{ color: 'var(--text-2)' }}>{ar ? `من كل أوفات الموظف: كم نسبتها أيام عادية (رمادي) وكم ويك-إند جمعة/سبت (أخضر). "حصة الويك-إند" = كم % من إجمالي عطل نهاية الأسبوع بالفترة (${s.totalWeekendDays} يوم) أخذها أوف.` : `of each agent's OFF days: how many fall on weekdays (grey) vs weekend Fri/Sat (green). "weekend share" = % of all ${s.totalWeekendDays} weekend days in the period they got off.`}</p>
+            <p className="text-[11px] mb-1" style={{ color: 'var(--text-2)' }}>{ar ? `من كل أوفات الموظف: كم نسبتها أيام عادية (رمادي) وكم ويك-إند خميس/جمعة (أخضر). "حصة الويك-إند" = كم % من إجمالي عطل نهاية الأسبوع بالفترة (${s.totalWeekendDays} يوم) أخذها أوف.` : `of each agent's OFF days: how many fall on weekdays (grey) vs weekend Thu/Fri (green). "weekend share" = % of all ${s.totalWeekendDays} weekend days in the period they got off.`}</p>
             <p className="text-[10px] mb-3" style={{ color: 'var(--text-3)' }}>{ar ? `متوسط حصة الويك-إند بالبول العادل: ${s.weekendShareAvg}% — مرتّبين من الأقل حظاً` : `fair-pool avg weekend share: ${s.weekendShareAvg}% — sorted least-lucky first`}</p>
             <div className="space-y-1.5 max-h-[520px] overflow-auto pr-1">
               {(d.offDistribution || []).map((a: any, i: number) => (
@@ -262,7 +262,7 @@ export default function ShiftFairnessPage() {
         {/* Weekend-OFF fairness */}
         {tab === 'weekend' && (
           <div className="rounded-2xl p-4" style={panel}>
-            <div className="flex items-center gap-2 mb-1"><CalendarOff size={15} style={{ color: '#f59e0b' }} /><h3 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'الأقل حظاً بالويك-إند أوف (الجمعة/السبت)' : 'Fewest weekend (Fri/Sat) OFFs'}</h3></div>
+            <div className="flex items-center gap-2 mb-1"><CalendarOff size={15} style={{ color: '#f59e0b' }} /><h3 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'الأقل حظاً بالويك-إند أوف (الخميس/الجمعة)' : 'Fewest weekend (Thu/Fri) OFFs'}</h3></div>
             <p className="text-[10px] mb-3" style={{ color: 'var(--text-3)' }}>{ar ? 'موظفون نادراً ياخدوا أوف بالويك-إند — مرشحون لتوزيع أعدل' : 'agents who rarely get a weekend OFF — candidates for a fairer share'}</p>
             <div className="space-y-1.5">{(d.proposal.weekendOffDeprived || []).map((r: any, i: number) => (
               <div key={i} className="flex items-center gap-2 text-[11px]"><span className="flex-1 truncate" style={{ color: 'var(--text-1)' }}>{r.name} <span style={{ color: 'var(--text-3)' }}>· {r.fn}</span></span>

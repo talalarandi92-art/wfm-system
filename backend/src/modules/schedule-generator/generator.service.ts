@@ -400,11 +400,11 @@ export class GeneratorService {
     return this.deriveShiftFromStart(start).code;
   }
 
-  // Helper: is a date a weekend day. Business rule — weekend = Thu/Fri/Sat.
-  // JS getDay(): Sun=0 … Thu=4, Fri=5, Sat=6 → weekend is getDay() >= 4.
+  // Helper: is a date a weekend day. OFFICIAL RULING (Director, 2026-07-02):
+  // weekend = THURSDAY + FRIDAY only. JS getDay(): Thu=4, Fri=5.
   private isWeekend(dateStr: string): boolean {
     const d = new Date(dateStr + 'T00:00:00');
-    return d.getDay() >= 4; // Thu, Fri, Sat
+    return d.getDay() === 4 || d.getDay() === 5; // Thu, Fri
   }
 
   // ── Load YTD shift distribution ─────────────────────────────────────────────

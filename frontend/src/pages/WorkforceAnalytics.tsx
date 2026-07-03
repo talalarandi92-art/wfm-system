@@ -358,7 +358,7 @@ export default function WorkforceAnalyticsPage() {
           {/* ══ SHRINKAGE ══ */}
           {tab === 'shrinkage' && shrink && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {([['overall', ar ? 'الإجمالي' : 'Overall'], ['weekend', ar ? 'الويك إند (خميس/جمعة/سبت)' : 'Weekend (Thu/Fri/Sat)'], ['weekday', ar ? 'أيام الأسبوع' : 'Weekdays']] as const).map(([key, label]) => {
+              {([['overall', ar ? 'الإجمالي' : 'Overall'], ['weekend', ar ? 'الويك إند (خميس/خميس/جمعة)' : 'Weekend (Thu/Thu/Fri)'], ['weekday', ar ? 'أيام الأسبوع' : 'Weekdays']] as const).map(([key, label]) => {
                 const b = shrink[key];
                 return (
                   <div key={key} className="p-5 rounded-2xl" style={card}>
@@ -509,7 +509,7 @@ export default function WorkforceAnalyticsPage() {
             <div className="rounded-2xl overflow-hidden" style={card}>
               <div className="px-4 py-3 border-b border-white/[0.06] text-xs text-slate-400 flex items-center gap-2">
                 <AlertTriangle size={13} className="text-amber-400" />
-                {ar ? 'نسبة حصول كل موظف على راحة في الويك إند (خميس/جمعة/سبت). الأعلى = أكثر عدالة له، الأقل = يحتاج موازنة.' : 'Each employee’s % of weekend days (Thu/Fri/Sat) given off. Low = needs rebalancing.'}
+                {ar ? 'نسبة حصول كل موظف على راحة في الويك إند (خميس/خميس/جمعة). الأعلى = أكثر عدالة له، الأقل = يحتاج موازنة.' : 'Each employee’s % of weekend days (Thu/Thu/Fri) given off. Low = needs rebalancing.'}
               </div>
               <table className="w-full text-xs">
                 <thead><tr className="text-slate-500 text-[10px] uppercase"><th className="px-4 py-2.5 text-start">{ar ? 'الموظف' : 'Employee'}</th><th className="px-4 py-2.5 text-start">{ar ? 'الوظيفة' : 'Function'}</th><th className="px-4 py-2.5 text-center">{ar ? 'أيام ويك إند' : 'Weekend days'}</th><th className="px-4 py-2.5 text-center">{ar ? 'راحات ويك إند' : 'Weekend OFF'}</th><th className="px-4 py-2.5 text-center">{ar ? 'إجمالي الراحات' : 'Total OFF'}</th><th className="px-4 py-2.5 w-36">{ar ? 'حصلوا ويك إند %' : 'Weekends off %'}</th><th className="px-4 py-2.5 text-center">{ar ? 'راحاته بالويك إند %' : 'OFF on weekend %'}</th></tr></thead>

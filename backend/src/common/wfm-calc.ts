@@ -5,12 +5,12 @@
  */
 
 /**
- * Boutiqaat weekend = Thursday (DOW 4) + Friday (5) + Saturday (6). DOW: 0=Sun … 6=Sat.
- * Thu/Fri are the standard weekend; Sat is included because it is in heavy OFF
- * demand. Must stay in sync with generator.service isWeekend and analytics.
+ * Boutiqaat weekend = THURSDAY (DOW 4) + FRIDAY (5) ONLY. DOW: 0=Sun … 6=Sat.
+ * OFFICIAL RULING by the Director 2026-07-02 (resolves the old Thu/Fri/Sat vs
+ * Fri/Sat drift). Must stay in sync with generator isWeekend + all analytics.
  */
 export function isWeekend(dow: number): boolean {
-  return dow >= 4 && dow <= 6;
+  return dow === 4 || dow === 5;
 }
 
 /**

@@ -136,8 +136,8 @@ export interface ShiftDistribution {
   // Individual shift-code counts (M, B, C, N, E, EE, MD, MN…)
   byCodes: Record<string, number>;
   // Weekend fairness
-  weekendOff: number;    // OFF days that fall on Thu/Fri/Sat (getDay 4=Thu, 5=Fri, 6=Sat)
-  weekendWork: number;   // Working days on Thu/Fri/Sat
+  weekendOff: number;    // OFF days that fall on Thu/Fri (getDay 4=Thu, 5=Fri, 6=Sat)
+  weekendWork: number;   // Working days on Thu/Fri
   // Consecutive tracking
   maxConsecutive: number;  // historical max consecutive working days
 }

@@ -1104,45 +1104,96 @@ export class ScheduleService {
     let fnFilter = '';
     if (functionId) { absParams.push(functionId); fnFilter = `AND e.function_id = $${absParams.length}`; }
 
-    // Get sick/absent records
-    const absRows = await this.ds.query(
-      `SELECT
-         ar.employee_id,
-         ar.attendance_date::date::text        AS date,
-         ar.attendance_marker                  AS marker,
-         ar.scheduled_start::text              AS scheduled_start,
-         ar.scheduled_end::text                AS scheduled_end,
-         e.first_name_en, e.last_name_en, e.employee_no,
-         f.name AS function_name,
-         f.id   AS function_id
-       FROM attendance_records ar
-       JOIN employees e ON ar.employee_id = e.id
-       LEFT JOIN functions f ON e.function_id = f.id
-       WHERE ar.tenant_id = $1
-         AND ar.attendance_date BETWEEN $2 AND $3
-         AND ar.attendance_marker IN ('sick','absent')
-         ${fnFilter}
-       ORDER BY ar.attendance_date DESC`,
-      absParams,
-    );
+    // ── SOURCE FIX (Director, 2026-07-02): the grid's SL/A cells live in roster_days (the
+    //    canonical reconciled roster), while this analysis only read attendance_records markers
+    //    → the panel showed EMPTY despite visible sick/absence. When roster_days covers the
+    //    range it is the source of truth; attendance_records stays the fallback for future
+    //    (publish-only) weeks. Codes are case-insensitive; ABS→A; shift-suffix codes
+    //    (MS/BS/CS/NS/ES/EE20S/MDS/MNS + *A) carry their ORIGINAL shift.
+    const rosterCovered = Number((await this.ds.query(
+      `SELECT COUNT(*)::int n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`,
+      [tenantId, from, to]))[0]?.n || 0) > 0;
 
-    // Get total scheduled employees per day (for shrinkage %)
-    const schedRows = await this.ds.query(
-      `SELECT
-         ar.attendance_date::date::text AS date,
-         f.id   AS function_id,
-         COUNT(*) FILTER (WHERE ar.attendance_marker IN ('present','sick','absent','leave')) AS total_scheduled,
-         COUNT(*) FILTER (WHERE ar.attendance_marker = 'present') AS present_count,
-         COUNT(*) FILTER (WHERE ar.attendance_marker IN ('sick','absent')) AS absent_sick_count
-       FROM attendance_records ar
-       JOIN employees e ON ar.employee_id = e.id
-       LEFT JOIN functions f ON e.function_id = f.id
-       WHERE ar.tenant_id = $1
-         AND ar.attendance_date BETWEEN $2 AND $3
-         ${fnFilter}
-       GROUP BY ar.attendance_date, f.id`,
-      absParams,
-    );
+    let absRows: any[];
+    let schedRows: any[];
+    if (rosterCovered) {
+      const rosterFn = functionId
+        ? `AND COALESCE(r.role_function, r.function_name) = (SELECT name FROM functions WHERE id = $4)`
+        : '';
+      absRows = await this.ds.query(
+        `SELECT
+           COALESCE(r.person_no, r.employee_no)              AS employee_id,
+           COALESCE(r.person_no, r.employee_no)              AS employee_no,
+           COALESCE(r.clean_name, r.name)                    AS employee_name,
+           r.work_date::text                                 AS date,
+           CASE WHEN upper(trim(COALESCE(r.hr_code,''))) = 'SL' OR r.presence = 'sick'
+                THEN 'sick' ELSE 'absent' END                AS marker,
+           upper(trim(COALESCE(r.attendance_code, r.shift_code, ''))) AS raw_code,
+           r.shift_start_min, r.shift_end_min,
+           COALESCE(r.role_function, r.function_name)        AS function_name,
+           COALESCE(r.role_function, r.function_name)        AS function_id
+         FROM roster_days r
+         WHERE r.tenant_id = $1 AND r.work_date BETWEEN $2 AND $3 AND r.is_active
+           AND ( r.presence IN ('sick','absent')
+                 OR upper(trim(COALESCE(r.hr_code,''))) IN ('SL','A','ABS') )
+           ${rosterFn}
+         ORDER BY r.work_date DESC`,
+        absParams,
+      );
+      schedRows = await this.ds.query(
+        `SELECT
+           r.work_date::text                          AS date,
+           COALESCE(r.role_function, r.function_name) AS function_id,
+           COUNT(*) FILTER (WHERE r.presence IN ('office','wfh','sick','absent','leave')) AS total_scheduled,
+           COUNT(*) FILTER (WHERE r.presence IN ('office','wfh'))                          AS present_count,
+           COUNT(*) FILTER (WHERE r.presence IN ('sick','absent'))                          AS absent_sick_count
+         FROM roster_days r
+         WHERE r.tenant_id = $1 AND r.work_date BETWEEN $2 AND $3 AND r.is_active
+           ${rosterFn}
+         GROUP BY r.work_date, COALESCE(r.role_function, r.function_name)`,
+        absParams,
+      );
+    } else {
+      // Legacy fallback: markers written by publish + request approvals
+      absRows = await this.ds.query(
+        `SELECT
+           ar.employee_id,
+           e.employee_no,
+           TRIM(e.first_name_en || ' ' || COALESCE(e.last_name_en,'')) AS employee_name,
+           ar.attendance_date::date::text        AS date,
+           ar.attendance_marker                  AS marker,
+           NULL                                  AS raw_code,
+           (EXTRACT(HOUR FROM ar.scheduled_start)*60 + EXTRACT(MINUTE FROM ar.scheduled_start))::int AS shift_start_min,
+           (EXTRACT(HOUR FROM ar.scheduled_end)*60   + EXTRACT(MINUTE FROM ar.scheduled_end))::int   AS shift_end_min,
+           f.name AS function_name,
+           f.id   AS function_id
+         FROM attendance_records ar
+         JOIN employees e ON ar.employee_id = e.id
+         LEFT JOIN functions f ON e.function_id = f.id
+         WHERE ar.tenant_id = $1
+           AND ar.attendance_date BETWEEN $2 AND $3
+           AND ar.attendance_marker IN ('sick','absent')
+           ${fnFilter}
+         ORDER BY ar.attendance_date DESC`,
+        absParams,
+      );
+      schedRows = await this.ds.query(
+        `SELECT
+           ar.attendance_date::date::text AS date,
+           f.id   AS function_id,
+           COUNT(*) FILTER (WHERE ar.attendance_marker IN ('present','sick','absent','leave')) AS total_scheduled,
+           COUNT(*) FILTER (WHERE ar.attendance_marker = 'present') AS present_count,
+           COUNT(*) FILTER (WHERE ar.attendance_marker IN ('sick','absent')) AS absent_sick_count
+         FROM attendance_records ar
+         JOIN employees e ON ar.employee_id = e.id
+         LEFT JOIN functions f ON e.function_id = f.id
+         WHERE ar.tenant_id = $1
+           AND ar.attendance_date BETWEEN $2 AND $3
+           ${fnFilter}
+         GROUP BY ar.attendance_date, f.id`,
+        absParams,
+      );
+    }
 
     // Build a quick lookup: date + functionId → {total, present, absent}
     const schedMap = new Map<string, { total: number; present: number; absentSick: number }>();
@@ -1154,36 +1205,57 @@ export class ScheduleService {
       });
     }
 
-    // Detailed shift-code derivation: Maps start hour → code prefix
-    // Follows the REAL Boutiqaat Timing sheet categories
-    const deriveCode = (start: string | null, marker: 'sick' | 'absent'): {
+    // ── Shift-base metadata (real Timing-sheet families). Operational codes carry the
+    //    ORIGINAL shift as a prefix (NS = sick on N, EE20A = absence on EE20…).
+    const BASE_META: Record<string, { category: string; ar: string; en: string }> = {
+      M:  { category: 'morning',     ar: 'صباحي',           en: 'Morning'     },
+      AM: { category: 'morning',     ar: 'صباحي',           en: 'Morning'     },
+      B:  { category: 'between_b',   ar: 'بين (B)',         en: 'Between B'   },
+      C:  { category: 'between_c',   ar: 'وسط (C)',         en: 'Between C'   },
+      N:  { category: 'night_n',     ar: 'مسائي (N)',       en: 'Night N'     },
+      E:  { category: 'night_e',     ar: 'ليلي (E)',        en: 'Night E'     },
+      EE: { category: 'night_ee',    ar: 'عميق (EE)',       en: 'Deep Night'  },
+      EE20:{ category: 'night_ee',   ar: 'عميق (EE20)',     en: 'Deep Night'  },
+      MD: { category: 'midnight_md', ar: 'منتصف ليل (MD)',  en: 'Midnight MD' },
+      MN: { category: 'midnight_mn', ar: 'فجر (MN)',        en: 'Midnight MN' },
+    };
+    // NS/BS/…/EE20S/MDA → the base shift; plain SL/A/ABS (or unknown) → null.
+    const baseFromRaw = (raw: string | null): string | null => {
+      const U = String(raw || '').toUpperCase().trim();
+      if (!U || U === 'SL' || U === 'A' || U === 'ABS') return null;
+      const m = /^([A-Z0-9]+?)[SA]$/.exec(U);
+      if (m && BASE_META[m[1]]) return m[1];
+      if (BASE_META[U]) return U; // raw already IS the shift (roster kept the code)
+      return null;
+    };
+    const hourBase = (startMin: number | null): string | null => {
+      if (startMin == null) return null;
+      const h = Math.floor((((startMin % 1440) + 1440) % 1440) / 60);
+      if (h >= 6 && h < 9)   return 'M';
+      if (h >= 9 && h < 11)  return 'B';
+      if (h >= 11 && h < 13) return 'C';
+      if (h >= 13 && h < 16) return 'N';
+      if (h >= 16 && h < 18) return 'E';
+      if (h >= 18 && h < 22) return 'EE';
+      if (h === 22)          return 'MD';
+      return 'MN';
+    };
+    const deriveCode = (startMin: number | null, marker: 'sick' | 'absent', rawCode: string | null): {
       code: string; category: string; categoryLabel: { ar: string; en: string };
     } => {
       const suffix = marker === 'sick' ? 'S' : 'A';
-      if (!start) return { code: `?${suffix}`, category: 'unknown', categoryLabel: { ar: 'غير محدد', en: 'Unknown' } };
-
-      const h = parseInt(start.split(':')[0], 10);
-      if (h >= 6 && h < 9)   return { code: `M${suffix}`,  category: 'morning',  categoryLabel: { ar: 'صباحي',             en: 'Morning'  } };
-      if (h >= 9 && h < 11)  return { code: `B${suffix}`,  category: 'between_b',categoryLabel: { ar: 'بين (B)',           en: 'Between B'} };
-      if (h >= 11 && h < 13) return { code: `C${suffix}`,  category: 'between_c',categoryLabel: { ar: 'وسط (C)',           en: 'Between C'} };
-      if (h >= 13 && h < 16) return { code: `N${suffix}`,  category: 'night_n',  categoryLabel: { ar: 'مسائي (N)',         en: 'Night N'  } };
-      if (h >= 16 && h < 18) return { code: `E${suffix}`,  category: 'night_e',  categoryLabel: { ar: 'ليلي (E)',          en: 'Night E'  } };
-      if (h >= 18 && h < 22) return { code: `EE${suffix}`, category: 'night_ee', categoryLabel: { ar: 'عميق (EE)',         en: 'Deep Night'} };
-      if (h === 22)           return { code: `MD${suffix}`, category: 'midnight_md', categoryLabel: { ar: 'منتصف ليل (MD)', en: 'Midnight MD' } };
-      return               { code: `MN${suffix}`, category: 'midnight_mn', categoryLabel: { ar: 'فجر (MN)',             en: 'Midnight MN'} };
+      const base = baseFromRaw(rawCode) ?? hourBase(startMin);
+      if (!base) return { code: `?${suffix}`, category: 'unknown', categoryLabel: { ar: 'غير محدد', en: 'Unknown' } };
+      const meta = BASE_META[base];
+      return { code: `${base}${suffix}`, category: meta.category, categoryLabel: { ar: meta.ar, en: meta.en } };
     };
 
-    // Generate 30-min intervals covering a shift window (start → end)
-    const shiftIntervals = (start: string, end: string): number[] => {
-      const sh = parseInt(start.split(':')[0], 10);
-      const sm = parseInt(start.split(':')[1] ?? '0', 10);
-      let eh = parseInt(end.split(':')[0], 10);
-      const em = parseInt(end.split(':')[1] ?? '0', 10);
-      const startMins = sh * 60 + sm;
-      let endMins = eh * 60 + em;
-      if (endMins <= startMins) endMins += 24 * 60; // cross-midnight
+    // Generate 30-min interval marks covering a shift window (minutes, cross-midnight aware)
+    const shiftIntervalsMin = (startMin: number, endMin: number): number[] => {
+      let e = endMin;
+      if (e <= startMin) e += 24 * 60; // cross-midnight
       const result: number[] = [];
-      for (let m = startMins; m < endMins; m += 30) result.push(m % (24 * 60));
+      for (let m = startMin; m < e; m += 30) result.push(m % (24 * 60));
       return result;
     };
 
@@ -1193,9 +1265,14 @@ export class ScheduleService {
     const byHour: Record<number, { sick: number; absent: number; total: number; impactedHc: number }> = {};
     const details: any[] = [];
 
+    const mmToHHMM = (m: number | null) => m == null ? null :
+      `${String(Math.floor((((m % 1440) + 1440) % 1440) / 60)).padStart(2, '0')}:${String(((m % 60) + 60) % 60).padStart(2, '0')}`;
+
     for (const r of absRows) {
       const marker = r.marker as 'sick' | 'absent';
-      const { code, category, categoryLabel } = deriveCode(r.scheduled_start, marker);
+      const startMin = r.shift_start_min == null ? null : Number(r.shift_start_min);
+      const endMin = r.shift_end_min == null ? null : Number(r.shift_end_min);
+      const { code, category, categoryLabel } = deriveCode(startMin, marker, r.raw_code ?? null);
 
       // By code
       if (!byCode[code]) byCode[code] = { sick: 0, absent: 0, total: 0, category, labelAr: categoryLabel.ar, labelEn: categoryLabel.en };
@@ -1208,13 +1285,9 @@ export class ScheduleService {
       byFunction[fnKey][marker]++;
       byFunction[fnKey].total++;
 
-      // By hour (interval-level impact)
-      if (r.scheduled_start && r.scheduled_end) {
-        const intervals = shiftIntervals(
-          r.scheduled_start.slice(0, 5),
-          r.scheduled_end.slice(0, 5),
-        );
-        for (const minOfDay of intervals) {
+      // By hour (interval-level impact) — from the ORIGINAL shift window when known
+      if (startMin != null && endMin != null) {
+        for (const minOfDay of shiftIntervalsMin(startMin, endMin)) {
           const hourKey = Math.floor(minOfDay / 60);
           if (!byHour[hourKey]) byHour[hourKey] = { sick: 0, absent: 0, total: 0, impactedHc: 0 };
           byHour[hourKey][marker]++;
@@ -1226,7 +1299,7 @@ export class ScheduleService {
       details.push({
         employeeId:    r.employee_id,
         employeeNo:    r.employee_no,
-        employeeName:  `${r.first_name_en} ${r.last_name_en ?? ''}`.trim(),
+        employeeName:  r.employee_name,
         functionId:    r.function_id,
         functionName:  r.function_name,
         date:          r.date,
@@ -1234,8 +1307,8 @@ export class ScheduleService {
         shiftCode:     code,
         category,
         categoryLabel,
-        shiftStart:    r.scheduled_start ? r.scheduled_start.slice(0, 5) : null,
-        shiftEnd:      r.scheduled_end   ? r.scheduled_end.slice(0, 5)   : null,
+        shiftStart:    mmToHHMM(startMin),
+        shiftEnd:      mmToHHMM(endMin),
       });
     }
 
@@ -1272,13 +1345,30 @@ export class ScheduleService {
       impactedHc: byHour[h]?.impactedHc ?? 0,
     }));
 
+    // The AbsencePanel contract: byCategory[{category,label:{ar,en,code},sick,absent,total,pct}]
+    // + mostAffectedShift. (The old endpoint returned only byCode — the panel crashed silently
+    // on byCategory.map, which is the OTHER half of why "Absence Analysis" showed nothing.)
+    const PANEL_FAMILY: Record<string, string> = {
+      morning: 'morning', between_b: 'afternoon', between_c: 'afternoon',
+      night_n: 'night', night_e: 'night', night_ee: 'night',
+      midnight_md: 'midnight', midnight_mn: 'midnight', unknown: 'unknown',
+    };
+    const byCategory = Object.entries(byCode).map(([code, v]) => ({
+      category: PANEL_FAMILY[v.category] ?? 'unknown',
+      label: { ar: v.labelAr, en: v.labelEn, code },
+      sick: v.sick, absent: v.absent, total: v.total,
+      pct: grandTotal ? Math.round((v.total / grandTotal) * 100) : 0,
+    })).sort((a, b) => b.total - a.total);
+
     return {
       period: { from, to, weeks },
       grandTotal,
       grandSick,
       grandAbsent,
+      mostAffectedShift: topCode,
       topAffectedCode: topCode,
       topAffectedHour: topHour ? parseInt(topHour, 10) : null,
+      byCategory,
       byCode: Object.entries(byCode).map(([code, v]) => ({ code, ...v }))
         .sort((a, b) => b.total - a.total),
       byFunction: Object.entries(byFunction).map(([fnId, v]) => ({ functionId: fnId, ...v }))

@@ -238,12 +238,12 @@ export function pickBestShift(
 
 // ─── OFF Day Distribution ─────────────────────────────────────────────────────
 
-// Weekend = Thursday, Friday, Saturday (business rule confirmed by WFM).
+// Weekend = THURSDAY + FRIDAY only — OFFICIAL RULING by the Director 2026-07-02
+// (Saturday is a regular working day; resolves the old Thu/Fri drift).
 // In a Saturday-start 7-day week:
 //   dates[0]=Sat, [1]=Sun, [2]=Mon, [3]=Tue, [4]=Wed, [5]=Thu, [6]=Fri
-// So the weekend day indices are Thu=5, Fri=6, Sat=0.
-const WEEKEND_DAY_INDICES = [5, 6, 0];
-const WEEKDAY_INDICES     = [1, 2, 3, 4]; // Sun, Mon, Tue, Wed
+const WEEKEND_DAY_INDICES = [5, 6];
+const WEEKDAY_INDICES     = [0, 1, 2, 3, 4]; // Sat, Sun, Mon, Tue, Wed
 
 // Week index (whole weeks since epoch) — used only to rotate which days absorb
 // the leftover OFF slots, so the pattern is not byte-identical every week even
@@ -302,7 +302,7 @@ function spreadCapacity(
  * Assign OFF days for the week with FAIR weekend distribution.
  *
  * Structure (business rule — confirmed by WFM):
- *   • With 2 OFF days/week: each employee gets ONE weekend OFF (Thu/Fri/Sat) and
+ *   • With 2 OFF days/week: each employee gets ONE weekend OFF (Thu/Fri) and
  *     ONE mid-week OFF (Sun/Mon/Tue/Wed). The weekend OFF is rationed fairly —
  *     employees with the FEWEST year-to-date weekend OFFs pick first — and both
  *     OFFs rotate week to week so the pattern is never static.
@@ -387,7 +387,7 @@ function assignOffDays(
   sorted.forEach((e) => {
     const taken = new Set<string>();
 
-    // 1) Weekend OFF (Thu/Fri/Sat) — fairness order already prioritises deficit.
+    // 1) Weekend OFF (Thu/Fri) — fairness order already prioritises deficit.
     let widx = pickDayWithCapacity(weekendOrder, capacity, used, taken, dates);
     if (widx < 0) widx = weekendOrder.find(x => !taken.has(dates[x])) ?? WEEKEND_DAY_INDICES[0];
     taken.add(dates[widx]);
