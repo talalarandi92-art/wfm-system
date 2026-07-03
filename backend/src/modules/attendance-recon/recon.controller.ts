@@ -8,7 +8,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { shiftCategoryFromCode, shiftCategoryCaseSql } from '@common/shift-category';
@@ -803,6 +803,9 @@ export class ReconController {
     const allFns = await this.ds.query(`SELECT DISTINCT COALESCE(role_function,function_name) fn FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND presence IN ('office','wfh') ORDER BY 1`, [t, dFrom, dTo]);
     return {
       from: dFrom, to: dTo, function: fn, functions: allFns.map((r: any) => r.fn).filter(Boolean), days,
+      // honest disclosure: "demand" here = the CURRENT schedule's hourly headcount (circular),
+      // not an Erlang/workload-derived requirement — the UI must say so.
+      basis: 'replicates current schedule (not workload-derived)',
       demand, coverageByHour,
       shiftMix: mixRows, shiftDefs: shifts.map((s: any) => ({ code: s.code, start: tFn(s.ss), end: tFn(s.se % 1440), used: s.used })),
       staffing: { shiftsPerDay: totalUnits, activeStaff: active, needWithOff: Math.ceil(totalUnits * 7 / 6), enough: active >= Math.ceil(totalUnits * 7 / 6) },
@@ -836,19 +839,22 @@ export class ReconController {
         FROM r WHERE person_no IS NOT NULL GROUP BY person_no
        HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh')) >= 1`, [t, dFrom, dTo, fn]))
       .map((e: any) => ({ personNo: e.person_no, name: e.name, male: String(e.gender || '').toLowerCase().startsWith('m'),
-        nightLoad: e.wd ? e.nm / e.wd : 0, weekendOff: +e.woff, code: null as string | null, off: null as number | null }));
+        nightLoad: e.wd ? e.nm / e.wd : 0, weekendOff: +e.woff, code: null as string | null, off: null as number[] | null }));
 
     // order shift codes: fill midnight → night → day (hardest constraint first)
     const order = (c: string) => cat(c) === 'midnight' ? 0 : cat(c) === 'night' ? 1 : 2;
     const codes = [...mixData.shiftMix].sort((a: any, b: any) => order(a.code) - order(b.code));
-    const need = (count: number) => Math.ceil(count * 7 / 6);   // people per code to keep `count` working with 1 OFF each
+    const offDays = 2;   // weekly OFF days per person (business rule: 2 OFF / week)
+    const need = (count: number) => Math.ceil(count * 7 / (7 - offDays));   // people per code to keep `count` working with `offDays` OFF each
     let pool = emps.slice();
     const groups: any[] = [];
     for (const m of codes) {
       const c = cat(m.code), want = need(m.count);
       let cands = pool.filter(e => c === 'midnight' ? e.male : true);
-      // night/midnight → least-loaded first (fair rotation); day → most-loaded first (relieve them)
-      cands.sort((a, b) => c === 'day' ? b.nightLoad - a.nightLoad : a.nightLoad - b.nightLoad);
+      // night/midnight → least-loaded first (fair rotation); day → most-loaded first (relieve them).
+      // NIGHT is additionally MALES-FIRST (rule 6.4): a female gets N only once the male pool is exhausted.
+      cands.sort((a, b) => (c === 'night' && a.male !== b.male) ? (a.male ? -1 : 1)
+        : c === 'day' ? b.nightLoad - a.nightLoad : a.nightLoad - b.nightLoad);
       let take = cands.slice(0, want);
       const femaleNight = c === 'night' ? take.filter(e => !e.male).length : 0;
       take.forEach(e => { e.code = m.code; });
@@ -858,23 +864,25 @@ export class ReconController {
     // leftover pool → spare (extra OFF / standby)
     const spares = pool.map(e => ({ ...e, code: 'OFF/Spare' }));
 
-    // OFF days: within each group round-robin a day 0-6 (Sat-based), so each day keeps `perDay` working.
-    // bias: give weekend (idx 5,6) OFF to the most weekend-deprived in the group first.
+    // OFF days: within each group round-robin `offDays` day-slots 0-6 (Sat-based), spaced apart
+    // so each day keeps `perDay` working. bias: give weekend (idx 5,6) OFF to the most
+    // weekend-deprived in the group first.
     for (const g of groups) {
       const sorted = [...g.members].sort((a, b) => a.weekendOff - b.weekendOff);
-      sorted.forEach((e, i) => { e.off = i % 7; });
-      g.dailyCovered = Array.from({ length: 7 }, (_, d) => g.members.filter((e: any) => e.off !== d).length);
+      const spacing = Math.floor(7 / offDays);   // 2 OFF → 3 days apart
+      sorted.forEach((e, i) => { e.off = Array.from({ length: offDays }, (_, k) => (i + k * spacing) % 7); });
+      g.dailyCovered = Array.from({ length: 7 }, (_, d) => g.members.filter((e: any) => !(e.off || []).includes(d)).length);
       g.coversEveryDay = g.dailyCovered.every((n: number) => n >= g.perDay);
     }
 
     const dayNames = ['Sat', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-    const assignments = [...groups.flatMap(g => g.members.map((e: any) => ({ personNo: e.personNo, name: e.name, code: e.code, category: g.category, off: dayNames[e.off ?? 0], nightLoadPct: Math.round(100 * e.nightLoad) }))),
+    const assignments = [...groups.flatMap(g => g.members.map((e: any) => ({ personNo: e.personNo, name: e.name, code: e.code, category: g.category, off: (e.off ?? [0]).map((d: number) => dayNames[d]).join('+'), nightLoadPct: Math.round(100 * e.nightLoad) }))),
       ...spares.map(e => ({ personNo: e.personNo, name: e.name, code: 'OFF/Spare', category: 'spare', off: '—', nightLoadPct: Math.round(100 * e.nightLoad) }))]
       .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
 
     const peopleNeeded = codes.reduce((s: number, m: any) => s + need(m.count), 0);
     const warnings: string[] = [];
-    for (const g of groups) { if (g.assigned < g.want) warnings.push(`${g.code}: need ${g.want}, only ${g.assigned} eligible`); if (!g.coversEveryDay) warnings.push(`${g.code}: OFF buffer too thin — some day drops below ${g.perDay}`); if (g.femaleNight > 0) warnings.push(`${g.code}: ${g.femaleNight} female(s) placed on night (no males left) — flag`); }
+    for (const g of groups) { if (g.assigned < g.want) warnings.push(`${g.code}: need ${g.want}, only ${g.assigned} eligible`); if (!g.coversEveryDay) warnings.push(`${g.code}: OFF buffer too thin — some day drops below ${g.perDay}`); if (g.femaleNight > 0) warnings.push(`${g.code}: ${g.femaleNight} female(s) on N — males were assigned first and the male pool is exhausted (rule 6.4) — flag`); }
 
     return {
       from: dFrom, to: dTo, function: fn,
@@ -890,13 +898,14 @@ export class ReconController {
   private weekGrid(wk: any) {
     return wk.assignments.map((a: any) => ({
       name: a.name, code: a.code, category: a.category, off: a.off, nightLoadPct: a.nightLoadPct,
-      days: this.weekDays.map(dn => (a.off === dn || a.code === 'OFF/Spare') ? 'OFF' : a.code),
+      // off is "Sat+Wed" (2 OFF days per week) — mark every listed day OFF
+      days: this.weekDays.map(dn => (String(a.off || '').split('+').includes(dn) || a.code === 'OFF/Spare') ? 'OFF' : a.code),
     }));
   }
 
   /** SAVE the generated weekly roster as a reviewable DRAFT (held outside the live grid). */
   @Post('roster-v2/generate-week/save')
-  @RequirePermissions('attendance.view_team')
+  @RequirePermissions('schedule.publish')
   @ApiOperation({ summary: 'Save the demand-driven weekly roster as a reviewable draft' })
   async saveWeekDraft(@Req() req: any, @Body() body: { function?: string; from?: string; to?: string; weekStart?: string; label?: string }) {
     const t = req.user.tenantId;
@@ -940,7 +949,7 @@ export class ReconController {
    *  schedule), and uses ON CONFLICT DO NOTHING so it NEVER overwrites an existing schedule — it only
    *  fills empty employee×date cells. Rows are tagged in `notes` so unpublish can cleanly remove them. */
   @Post('roster-v2/publish')
-  @RequirePermissions('attendance.view_team')
+  @RequirePermissions('schedule.publish')
   @ApiOperation({ summary: 'Publish the generated weekly roster into attendance_records (empty week, non-overwriting)' })
   async publishWeek(@Req() req: any, @Body() body: { function?: string; from?: string; to?: string; weekStart?: string }) {
     const t = req.user.tenantId;
@@ -964,7 +973,7 @@ export class ReconController {
     for (const a of wk.assignments) {
       const eid = empMap[a.personNo]; if (!eid) { noEmp++; continue; }
       for (let dI = 0; dI < 7; dI++) {
-        const off = (a.off === this.weekDays[dI]) || a.code === 'OFF/Spare';
+        const off = String(a.off || '').split('+').includes(this.weekDays[dI]) || a.code === 'OFF/Spare';
         const sc = off ? null : scMap[String(a.code).toUpperCase()];
         rows.push([t, eid, addDays(weekStart, dI), sc?.id || null, sc?.ss || null, sc?.se || null, off ? 'off' : 'present', note]);
       }
@@ -986,17 +995,33 @@ export class ReconController {
 
   /** Reverse a publish: delete ONLY the generated rows for a week (tagged in notes). Safe. */
   @Post('roster-v2/unpublish')
-  @RequirePermissions('attendance.view_team')
+  @RequirePermissions('schedule.publish')
   @ApiOperation({ summary: 'Remove the generated rows for a week (only rows this engine wrote)' })
   async unpublishWeek(@Req() req: any, @Body() body: { weekStart: string }) {
     if (!body?.weekStart) throw new BadRequestException('weekStart required');
+    const t = req.user.tenantId;
+    // approved/soft-locked weeks are IMMUTABLE to unpublish — no override, because this deletes
+    // rows wholesale; the only way to change the approved range is re-uploading the schedule
+    // (same soft-lock as assertScheduleEditable, but with the supervisor bypass removed).
+    const lock = await this.getScheduleLock(t);
+    const we = new Date(`${body.weekStart}T00:00:00Z`); we.setUTCDate(we.getUTCDate() + 6);
+    const weekEnd = we.toISOString().slice(0, 10);
+    if (lock && body.weekStart <= lock.to && weekEnd >= lock.from) {
+      throw new ForbiddenException(`Week ${body.weekStart} overlaps the approved/locked schedule range (${lock.from} → ${lock.to}) — unpublish is not allowed; re-upload the schedule to change it.`);
+    }
     const r = await this.ds.query(
       `DELETE FROM attendance_records WHERE tenant_id=$1 AND attendance_date BETWEEN $2::date AND ($2::date + 6) AND notes LIKE '[generated %' RETURNING employee_id`,
-      [req.user.tenantId, body.weekStart]);
+      [t, body.weekStart]);
     // TypeORM returns DELETE..RETURNING as a [rows[], affectedCount] tuple — read the count off whichever shape we got.
     const deleted = Array.isArray(r)
       ? (typeof r[1] === 'number' ? r[1] : (Array.isArray(r[0]) ? r[0].length : r.length))
       : (r?.rowCount || 0);
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, actor_email, action, module, entity_type, new_value, notes)
+       VALUES ($1,$2,$3,'schedule.unpublish','attendance-recon','schedule_week',$4::jsonb,$5)`,
+      [t, req.user.id || req.user.sub || null, req.user.email || null,
+       JSON.stringify({ weekStart: body.weekStart, deleted }),
+       `Removed ${deleted} generated row(s) for week ${body.weekStart}`]).catch(() => {});
     return { ok: true, deleted };
   }
 
@@ -2469,56 +2494,118 @@ export class ReconController {
          WHERE tenant_id=$1 AND role_function=$2 AND work_date=$3 AND is_active AND presence IN ('office','wfh') GROUP BY shift_code`, [t, fn, date]);
     const out: Record<string, number> = {}; for (const r of rows) out[r.shift_code || '—'] = r.n; return out;
   }
+  /** Manual-edit validation for change/swap (rule 6.4 female shifts + rule 6.6 ≥10h rest,
+   *  cross-midnight aware). Returns the violation list — caller blocks unless override:true,
+   *  in which case the violations are applied but flagged in the response + change log. */
+  private async validateShiftChange(t: string, personNo: string, date: string, newCode: string,
+    gender: string | null, ss: number | null, se: number | null): Promise<string[]> {
+    const problems: string[] = [];
+    if (String(gender || '').toLowerCase().startsWith('f')) {
+      const cat = shiftCategoryFromCode(newCode);          // THE canonical classifier (common/shift-category)
+      const endsAfter20 = se != null && Number(se) > 1200; // minutes from midnight; >1440 = cross-midnight (also past 20:00)
+      if (cat === 'midnight') problems.push(`female rule: ${newCode} is a midnight shift (rule 6.4)`);
+      else if (cat === 'night' || endsAfter20) problems.push(`female rule: ${newCode} ends after 20:00 (rule 6.4)`);
+    }
+    if (ss != null && se != null) {
+      // 10h rest vs the adjacent roster days. Times are minutes from each row's OWN midnight
+      // (end may exceed 1440 = cross-midnight), so +1440 bridges consecutive days.
+      const adj = await this.ds.query(
+        `SELECT work_date::text d, shift_start_min ss, shift_end_min se FROM roster_days
+           WHERE tenant_id=$1 AND person_no=$2 AND is_active AND shift_start_min IS NOT NULL AND shift_end_min IS NOT NULL
+             AND work_date IN ($3::date - 1, $3::date + 1)`, [t, personNo, date]);
+      for (const a of adj) {
+        const rest = a.d < date ? (1440 + Number(ss)) - Number(a.se) : (1440 + Number(a.ss)) - Number(se);
+        if (rest < 600) problems.push(`rest rule: only ${Math.max(0, Math.round(rest / 6) / 10)}h rest vs ${a.d} (min 10h, rule 6.6)`);
+      }
+    }
+    return problems;
+  }
+  /** Dual-write: mirror a roster_days shift change into attendance_records (the editable grid)
+   *  for the same employee/date — only when a row exists there AND the code is in shift_codes. */
+  private async mirrorShiftToAttendance(qr: QueryRunner, t: string, personNo: string, date: string, code: string) {
+    await qr.query(
+      `UPDATE attendance_records ar
+          SET scheduled_shift_code_id = sc.id, scheduled_start = sc.start_time, scheduled_end = sc.end_time
+         FROM employees e, shift_codes sc
+        WHERE e.tenant_id=$1 AND e.employee_no=$2
+          AND sc.tenant_id=$1 AND upper(sc.code)=upper($4)
+          AND ar.tenant_id=$1 AND ar.employee_id=e.id AND ar.attendance_date=$3::date`,
+      [t, personNo, date, code]);
+  }
 
   @Post('roster-v2/schedule-change')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Apply a manual shift change to a (person, date) — logs before/after + impact' })
-  async scheduleChange(@Req() req: any, @Body() b: { personNo: string; date: string; newShift: string; reason?: string }) {
+  async scheduleChange(@Req() req: any, @Body() b: { personNo: string; date: string; newShift: string; reason?: string; override?: boolean }) {
     const t = req.user.tenantId;
     if (!b?.personNo || !b?.date || !b?.newShift) throw new BadRequestException('personNo, date and newShift are required');
     await this.assertScheduleEditable(req, b.date);   // soft-lock: blocks non-supervisors in the approved range (audited via changed_by)
     const [cur] = await this.ds.query(
-      `SELECT person_no, clean_name, role_function, shift_code FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 LIMIT 1`, [t, b.personNo, b.date]);
+      `SELECT person_no, clean_name, role_function, shift_code, gender FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active LIMIT 1`, [t, b.personNo, b.date]);
     if (!cur) throw new BadRequestException('No roster row for that person/date');
     const oldShift = cur.shift_code;
+    const { ss, se } = await this.resolveShiftTimes(t, b.newShift);
+    // validate BEFORE applying: female rule (6.4) + 10h rest (6.6) — override:true applies anyway, flagged
+    const violations = await this.validateShiftChange(t, b.personNo, b.date, b.newShift, cur.gender, ss, se);
+    if (violations.length && !b.override) throw new BadRequestException(`Change blocked — ${violations.join('; ')}. Resend with override:true to apply anyway (flagged & logged).`);
     const rateBefore = await this.shiftRate(t, b.personNo, b.date);
     const covBefore = await this.coverageByShift(t, cur.role_function, b.date);
-    const { ss, se } = await this.resolveShiftTimes(t, b.newShift);
-    await this.ds.query(
-      `UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=COALESCE($5,shift_start_min), shift_end_min=COALESCE($6,shift_end_min)
-         WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, b.personNo, b.date, b.newShift, ss, se]);
+    // apply + mirror into attendance_records in ONE real transaction (QueryRunner — ds.query BEGIN/COMMIT is a fake txn)
+    const qr = this.ds.createQueryRunner();
+    await qr.connect(); await qr.startTransaction();
+    try {
+      await qr.query(
+        `UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=COALESCE($5,shift_start_min), shift_end_min=COALESCE($6,shift_end_min)
+           WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personNo, b.date, b.newShift, ss, se]);
+      await this.mirrorShiftToAttendance(qr, t, b.personNo, b.date, b.newShift);
+      await qr.commitTransaction();
+    } catch (e) { await qr.rollbackTransaction(); throw e; } finally { await qr.release(); }
     // after = before shifted by one day from old category to new category
     const rateAfter = { ...rateBefore }; const oc = this.catOf(oldShift), nc = this.catOf(b.newShift);
     rateAfter[oc] = Math.max(0, (rateAfter[oc] || 0) - 1); rateAfter[nc] = (rateAfter[nc] || 0) + 1;
     const covAfter = { ...covBefore }; if (oldShift) covAfter[oldShift] = Math.max(0, (covAfter[oldShift] || 0) - 1); covAfter[b.newShift] = (covAfter[b.newShift] || 0) + 1;
-    const impact = { shiftRate: { before: rateBefore, after: rateAfter }, coverage: { function: cur.role_function, date: b.date, before: covBefore, after: covAfter } };
+    const impact = { shiftRate: { before: rateBefore, after: rateAfter }, coverage: { function: cur.role_function, date: b.date, before: covBefore, after: covAfter }, violations };
     const [log] = await this.ds.query(
       `INSERT INTO schedule_change_log (tenant_id, change_type, work_date, person_no, person_name, old_shift, new_shift, reason, changed_by, approval_status, impact)
        VALUES ($1,'edit',$2,$3,$4,$5,$6,$7,$8,'applied',$9) RETURNING id`,
       [t, b.date, b.personNo, cur.clean_name, oldShift, b.newShift, b.reason || null, req.user.sub || req.user.userId || 'wfm', JSON.stringify(impact)]);
-    return { ok: true, id: log.id, oldShift, newShift: b.newShift, impact };
+    return { ok: true, id: log.id, oldShift, newShift: b.newShift, violations, impact };
   }
 
   @Post('roster-v2/schedule-swap')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Swap shifts between two people on a date — logs both + before/after shift-rate' })
-  async scheduleSwap(@Req() req: any, @Body() b: { personA: string; personB: string; date: string; reason?: string }) {
+  async scheduleSwap(@Req() req: any, @Body() b: { personA: string; personB: string; date: string; reason?: string; override?: boolean }) {
     const t = req.user.tenantId;
     if (!b?.personA || !b?.personB || !b?.date) throw new BadRequestException('personA, personB and date are required');
     await this.assertScheduleEditable(req, b.date);   // soft-lock on the approved schedule range
     const rows = await this.ds.query(
-      `SELECT person_no, clean_name, role_function, shift_code, shift_start_min, shift_end_min FROM roster_days
-         WHERE tenant_id=$1 AND person_no IN ($2,$3) AND work_date=$4`, [t, b.personA, b.personB, b.date]);
+      `SELECT person_no, clean_name, role_function, shift_code, shift_start_min, shift_end_min, gender FROM roster_days
+         WHERE tenant_id=$1 AND person_no IN ($2,$3) AND work_date=$4 AND is_active`, [t, b.personA, b.personB, b.date]);
     const A = rows.find((r: any) => r.person_no === b.personA), B = rows.find((r: any) => r.person_no === b.personB);
     if (!A || !B) throw new BadRequestException('Both people must have a roster row on that date');
+    // validate BOTH directions BEFORE touching anything: female rule (6.4) + 10h rest (6.6)
+    const violations = [
+      ...(await this.validateShiftChange(t, b.personA, b.date, B.shift_code, A.gender, B.shift_start_min, B.shift_end_min)).map((v: string) => `${A.clean_name}: ${v}`),
+      ...(await this.validateShiftChange(t, b.personB, b.date, A.shift_code, B.gender, A.shift_start_min, A.shift_end_min)).map((v: string) => `${B.clean_name}: ${v}`),
+    ];
+    if (violations.length && !b.override) throw new BadRequestException(`Swap blocked — ${violations.join('; ')}. Resend with override:true to apply anyway (flagged & logged).`);
     const rateBeforeA = await this.shiftRate(t, b.personA, b.date), rateBeforeB = await this.shiftRate(t, b.personB, b.date);
-    // swap shift code + times
-    await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, b.personA, b.date, B.shift_code, B.shift_start_min, B.shift_end_min]);
-    await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, b.personB, b.date, A.shift_code, A.shift_start_min, A.shift_end_min]);
+    // swap shift code + times, mirroring both sides into attendance_records in ONE real transaction
+    const qr = this.ds.createQueryRunner();
+    await qr.connect(); await qr.startTransaction();
+    try {
+      await qr.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personA, b.date, B.shift_code, B.shift_start_min, B.shift_end_min]);
+      await qr.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personB, b.date, A.shift_code, A.shift_start_min, A.shift_end_min]);
+      await this.mirrorShiftToAttendance(qr, t, b.personA, b.date, B.shift_code);
+      await this.mirrorShiftToAttendance(qr, t, b.personB, b.date, A.shift_code);
+      await qr.commitTransaction();
+    } catch (e) { await qr.rollbackTransaction(); throw e; } finally { await qr.release(); }
     const adj = (r: Record<string, number>, oldC: string, newC: string) => { const o = { ...r }; o[oldC] = Math.max(0, (o[oldC] || 0) - 1); o[newC] = (o[newC] || 0) + 1; return o; };
     const impact = {
       A: { before: rateBeforeA, after: adj(rateBeforeA, this.catOf(A.shift_code), this.catOf(B.shift_code)) },
       B: { before: rateBeforeB, after: adj(rateBeforeB, this.catOf(B.shift_code), this.catOf(A.shift_code)) },
+      violations,
     };
     const [log] = await this.ds.query(
       `INSERT INTO schedule_change_log (tenant_id, change_type, work_date, person_no, person_name, person_b_no, person_b_name, old_shift, new_shift, old_shift_b, new_shift_b, reason, changed_by, approval_status, impact)

@@ -65,10 +65,11 @@ export class CoverageController {
       baseParams,
     ).catch(() => []);
 
-    // ── Permissions overlapping the date ────────────────────────────────────
+    // ── Permissions overlapping the date (approved erode availability; pending = at-risk) ──
     const perms = await this.ds.query(
       `SELECT COALESCE(rp.function_id, e.function_id) AS function_id,
-              to_char(rp.start_time,'HH24:MI') AS ss, to_char(rp.end_time,'HH24:MI') AS se
+              to_char(rp.start_time,'HH24:MI') AS ss, to_char(rp.end_time,'HH24:MI') AS se,
+              r.status AS status
          FROM request_permissions rp
          JOIN requests r ON r.id = rp.request_id
          LEFT JOIN employees e ON e.id = r.employee_id
@@ -95,19 +96,19 @@ export class CoverageController {
     // ── Aggregate per function ──────────────────────────────────────────────
     type FnAgg = {
       functionId: string; functionName: string;
-      scheduled: number[]; sick: number[]; absent: number[]; permission: number[];
+      scheduled: number[]; sick: number[]; absent: number[]; permission: number[]; pendingPerm: number[];
       late: number[]; earlyOut: number[]; ot: number[];
       reqSum: number[]; histDates: Set<string>;
-      lateCount: number; otCount: number; earlyCount: number; sickCount: number; absentCount: number; permCount: number;
+      lateCount: number; otCount: number; earlyCount: number; sickCount: number; absentCount: number; permCount: number; pendingPermCount: number;
     };
     const fns = new Map<string, FnAgg>();
     const getFn = (id: string, name: string): FnAgg => {
       if (!fns.has(id)) fns.set(id, {
         functionId: id, functionName: name,
         scheduled: Array(24).fill(0), sick: Array(24).fill(0), absent: Array(24).fill(0),
-        permission: Array(24).fill(0), late: Array(24).fill(0), earlyOut: Array(24).fill(0), ot: Array(24).fill(0),
+        permission: Array(24).fill(0), pendingPerm: Array(24).fill(0), late: Array(24).fill(0), earlyOut: Array(24).fill(0), ot: Array(24).fill(0),
         reqSum: Array(24).fill(0), histDates: new Set(),
-        lateCount: 0, otCount: 0, earlyCount: 0, sickCount: 0, absentCount: 0, permCount: 0,
+        lateCount: 0, otCount: 0, earlyCount: 0, sickCount: 0, absentCount: 0, permCount: 0, pendingPermCount: 0,
       });
       return fns.get(id)!;
     };
@@ -148,8 +149,11 @@ export class CoverageController {
     for (const p of perms) {
       const id = p.function_id ?? 'none';
       const a = fns.get(id); if (!a) continue;
-      for (const h of this.hoursCovered(p.ss, p.se)) a.permission[h]++;
-      a.permCount++;
+      // APPROVED permissions actually erode availability; PENDING ones are only at-risk
+      // (they must NOT be subtracted as if already approved — the approver decides).
+      const approved = p.status === 'approved';
+      for (const h of this.hoursCovered(p.ss, p.se)) (approved ? a.permission : a.pendingPerm)[h]++;
+      if (approved) a.permCount++; else a.pendingPermCount++;
     }
     // Required = average present-roster per hour across the historical same-weekdays
     const histByFn = new Map<string, { perDate: Map<string, number[]> }>();
@@ -178,6 +182,7 @@ export class CoverageController {
           hour: h,
           required, scheduled, available,
           onSick: a.sick[h], onAbsent: a.absent[h], onPermission: a.permission[h],
+          atRisk: a.pendingPerm[h],   // pending permissions — would erode `available` if approved
           late: a.late[h], earlyOut: a.earlyOut[h], ot: a.ot[h],
           gap: available - required,
         };
@@ -187,13 +192,13 @@ export class CoverageController {
         hours,
         summary: {
           late: a.lateCount, overtime: a.otCount, earlyOut: a.earlyCount, sick: a.sickCount,
-          absent: a.absentCount, permissions: a.permCount,
+          absent: a.absentCount, permissions: a.permCount, pendingPermissions: a.pendingPermCount,
           worstGap: hours.length ? Math.min(...hours.map(x => x.gap)) : 0,
         },
       };
     }).filter(f => f.hours.length > 0)
       .sort((a, b) => a.functionName.localeCompare(b.functionName));
 
-    return { date, basis: 'required = avg of same-weekday history (last 6); available = scheduled − sick − absent − permission', functions };
+    return { date, basis: 'required = avg of same-weekday history (last 6); available = scheduled − sick − absent − APPROVED permission; pending permissions reported separately as atRisk', functions };
   }
 }
