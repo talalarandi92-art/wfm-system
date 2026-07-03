@@ -105,7 +105,7 @@ export default function HourlyAnalyticsPage() {
         <div className="rounded-2xl overflow-auto" style={panel}>
           <table className="w-full text-[11px]">
             <thead style={{ background: 'var(--surface-2)' }}><tr>
-              {([[ar ? 'الساعة' : 'Hour', 0], [ar ? 'مجدول' : 'Sched', 0], [ar ? 'مداوم' : 'Working', 0], [ar ? '+OT قبل' : '+OT bef', 0], [ar ? '+OT بعد' : '+OT aft', 0], [ar ? '= بعد OT' : '= after OT', 1], [ar ? '−إذن تأخير' : '−Perm late', 0], [ar ? '−إذن مبكر' : '−Perm early', 0], [ar ? '= بعد الإذن' : '= after perm', 1], [ar ? '−تارديشن' : '−Tardy', 0], [ar ? '−خروج مبكر' : '−Early', 0], [ar ? '= الفعلي' : '= Effective', 2], [ar ? 'تغطية %' : 'Cov %', 0], [ar ? 'كونف %' : 'Conf %', 0], [ar ? 'ساعات OT' : 'OT hrs', 0], [ar ? 'ساعات إذن' : 'Perm hrs', 0]] as [string, number][]).map(([hd, cp], i) => (
+              {([[ar ? 'الساعة' : 'Hour', 0], [ar ? 'مجدول' : 'Sched', 0], [ar ? 'مداوم' : 'Working', 0], [ar ? '+OT قبل' : '+OT bef', 0], [ar ? '+OT بعد' : '+OT aft', 0], [ar ? '= بعد OT' : '= after OT', 1], [ar ? '−إذن تأخير' : '−Perm late', 0], [ar ? '−إذن مبكر' : '−Perm early', 0], [ar ? '= بعد الإذن' : '= after perm', 1], [ar ? '−تارديشن' : '−Tardy', 0], [ar ? '−خروج مبكر' : '−Early', 0], [ar ? '= الفعلي' : '= Effective', 2], [ar ? 'مرض' : 'Sick', 0], [ar ? 'غياب' : 'Abs', 0], [ar ? 'إجازة' : 'Leave', 0], [ar ? 'شرينكج' : 'Shrink', 1], [ar ? 'ساعات ضائعة' : 'Lost hrs', 1], [ar ? 'خطة HC' : 'Plan HC', 1], [ar ? 'خطة −ريكوستات' : 'Plan −req', 1], [ar ? 'تغطية %' : 'Cov %', 0], [ar ? 'كونف %' : 'Conf %', 0], [ar ? 'ساعات OT' : 'OT hrs', 0], [ar ? 'ساعات إذن' : 'Perm hrs', 0]] as [string, number][]).map(([hd, cp], i) => (
                 <th key={i} className={`px-2 py-2 font-semibold whitespace-nowrap ${i === 0 ? 'text-start' : 'text-center'}`} style={{ color: cp ? 'var(--text-1)' : 'var(--text-3)', fontSize: 10, letterSpacing: '.02em', textTransform: 'uppercase', background: cp ? 'rgba(99,102,241,0.08)' : undefined }}>{hd}</th>
               ))}
             </tr></thead>
@@ -126,6 +126,13 @@ export default function HourlyAnalyticsPage() {
                   <td className="px-2 py-1.5 text-center" style={{ color: h.tardiness ? '#fb923c' : 'var(--text-3)' }}>{h.tardiness ? `−${h.tardiness}` : ''}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: h.earlyOut ? '#f43f5e' : 'var(--text-3)' }}>{h.earlyOut ? `−${h.earlyOut}` : ''}</td>
                   {cp(h.avgEffective)}
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.sick ? '#f43f5e' : 'var(--text-3)' }}>{h.sick || ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.absent ? '#ef4444' : 'var(--text-3)' }}>{h.absent || ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.onLeave ? '#8b5cf6' : 'var(--text-3)' }}>{h.onLeave || ''}</td>
+                  <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.shrinkage ? '#f43f5e' : 'var(--text-3)', background: 'rgba(244,63,94,0.06)' }}>{h.shrinkage ? `${h.shrinkage} · ${h.shrinkagePct}%` : ''}</td>
+                  <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.lostHours ? '#f43f5e' : 'var(--text-3)', background: 'rgba(244,63,94,0.06)' }}>{h.lostHours ? h.lostHours.toLocaleString() : ''}</td>
+                  <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.plan ? '#0ea5e9' : 'var(--text-3)', background: 'rgba(14,165,233,0.07)' }}>{h.avgPlan || ''}</td>
+                  <td className="px-2 py-1.5 text-center font-semibold" style={{ color: h.planAfterReq ? '#0284c7' : 'var(--text-3)', background: 'rgba(14,165,233,0.07)' }}>{h.avgPlanAfterReq || ''}</td>
                   <td className="px-2 py-1.5 text-center font-semibold" style={{ color: covColor(h.coveragePct) }}>{h.scheduled ? `${h.coveragePct}%` : '—'}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: h.conformance != null ? covColor(h.conformance) : 'var(--text-3)' }}>{h.conformance != null ? `${h.conformance}%` : '—'}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: h.otHours ? '#8b5cf6' : 'var(--text-3)' }}>{h.otHours ? h.otHours.toLocaleString() : ''}</td>
@@ -146,6 +153,13 @@ export default function HourlyAnalyticsPage() {
                 <td className="px-2 py-2 text-center font-bold" style={{ color: '#fb923c' }}>−{view.total.tardiness.toLocaleString()}</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: '#f43f5e' }}>−{view.total.earlyOut.toLocaleString()}</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: 'var(--text-1)', background: 'rgba(99,102,241,0.1)' }}>{view.total.effective.toLocaleString()}</td>
+                <td className="px-2 py-2 text-center font-bold" style={{ color: '#f43f5e' }}>{(view.total.sick ?? 0).toLocaleString()}</td>
+                <td className="px-2 py-2 text-center font-bold" style={{ color: '#ef4444' }}>{(view.total.absent ?? 0).toLocaleString()}</td>
+                <td className="px-2 py-2 text-center font-bold" style={{ color: '#8b5cf6' }}>{(view.total.onLeave ?? 0).toLocaleString()}</td>
+                <td className="px-2 py-2 text-center font-bold" style={{ color: '#f43f5e', background: 'rgba(244,63,94,0.08)' }}>{view.total.shrinkage.toLocaleString()} · {view.total.shrinkagePct}%</td>
+                <td className="px-2 py-2 text-center font-bold" style={{ color: '#f43f5e', background: 'rgba(244,63,94,0.08)' }}>{(view.total.lostHours ?? 0).toLocaleString()}</td>
+                <td className="px-2 py-2 text-center font-bold" style={{ color: '#0ea5e9', background: 'rgba(14,165,233,0.08)' }}>{(view.total.plan ?? 0).toLocaleString()}</td>
+                <td className="px-2 py-2 text-center font-bold" style={{ color: '#0284c7', background: 'rgba(14,165,233,0.08)' }}>{(view.total.planAfterReq ?? 0).toLocaleString()}</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: covColor(view.total.coveragePct) }}>{view.total.coveragePct}%</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: view.total.conformance != null ? covColor(view.total.conformance) : 'var(--text-3)' }}>{view.total.conformance != null ? `${view.total.conformance}%` : '—'}</td>
                 <td className="px-2 py-2 text-center font-bold" style={{ color: '#8b5cf6' }}>{view.total.otHours.toLocaleString()}</td>

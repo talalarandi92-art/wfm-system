@@ -636,16 +636,29 @@ export class ReconController {
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
     const dFrom = from || range?.a, dTo = to || range?.b;
     const p: any[] = [t, dFrom, dTo];
-    let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL`;
+    let wBase = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
     const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
-    if (functionName) w += ` AND ${add('COALESCE(role_function,function_name)=$$', functionName)}`;
-    if (teamLeader)   w += ` AND ${add('team_manager=$$', teamLeader)}`;
+    if (functionName) wBase += ` AND ${add('COALESCE(role_function,function_name)=$$', functionName)}`;
+    if (teamLeader)   wBase += ` AND ${add('team_manager=$$', teamLeader)}`;
     // AGENT-level mode (Director 2026-07-02): same hourly cascade but for one person —
     // agent = person_no or a name fragment; level=agent groups rows per agent name.
     if (agent) {
       p.push(agent, `%${agent.toLowerCase()}%`);
-      w += ` AND (person_no = $${p.length - 1} OR employee_no = $${p.length - 1} OR lower(COALESCE(clean_name,name)) LIKE $${p.length} OR lower(COALESCE(username,'')) LIKE $${p.length})`;
+      wBase += ` AND (person_no = $${p.length - 1} OR employee_no = $${p.length - 1} OR lower(COALESCE(clean_name,name)) LIKE $${p.length} OR lower(COALESCE(username,'')) LIKE $${p.length})`;
     }
+    const w = `${wBase} AND shift_start_min IS NOT NULL`;
+    // Shrinkage rows in some months carry NO shift timing (June suffix rows) — derive the window
+    // from the BASE code's canonical times (BR-SHF-005; a suffix keeps the base shift + timing),
+    // so sick/absence still land in their real hours instead of vanishing from the grid.
+    const stdStart = `CASE regexp_replace(upper(COALESCE(attendance_code,shift_code,'')),'([SA])$','')
+      WHEN 'M' THEN 420 WHEN 'AM' THEN 420 WHEN 'M20' THEN 480 WHEN 'B' THEN 540 WHEN 'B20' THEN 600
+      WHEN 'C' THEN 660 WHEN 'C20' THEN 720 WHEN 'N' THEN 780 WHEN 'N20' THEN 840 WHEN 'E' THEN 960
+      WHEN 'EE' THEN 1080 WHEN 'EE20' THEN 1080 WHEN 'MD' THEN 1320 WHEN 'MN' THEN 1380 END`;
+    const stdEnd = `CASE regexp_replace(upper(COALESCE(attendance_code,shift_code,'')),'([SA])$','')
+      WHEN 'M' THEN 960 WHEN 'AM' THEN 900 WHEN 'M20' THEN 960 WHEN 'B' THEN 1080 WHEN 'B20' THEN 1080
+      WHEN 'C' THEN 1200 WHEN 'C20' THEN 1200 WHEN 'N' THEN 1320 WHEN 'N20' THEN 1320 WHEN 'E' THEN 1500
+      WHEN 'EE' THEN 1620 WHEN 'EE20' THEN 1620 WHEN 'MD' THEN 1860 WHEN 'MN' THEN 1920 END`;
+    const wR = `${wBase} AND (shift_start_min IS NOT NULL OR (presence IN ('sick','absent','leave') AND (${stdStart}) IS NOT NULL))`;
     const GRP = (level === 'agent' || agent)
       ? `COALESCE(clean_name,name) || ' · ' || COALESCE(person_no,employee_no)`
       : `COALESCE(role_function,function_name)`;
@@ -672,9 +685,11 @@ export class ReconController {
     const credE = `r.sys_early_min BETWEEN 7 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
     const grid = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
-      r AS (SELECT ${GRP} fn, person_no, employee_no, shift_start_min ss, shift_end_min se,
+      r AS (SELECT ${GRP} fn, person_no, employee_no,
+                   COALESCE(shift_start_min, ${stdStart}) ss,
+                   COALESCE(shift_end_min,   ${stdEnd})   se,
                    presence, permission_type, sys_late_min, sys_early_min, ot_before_min, ot_after_min, adherence_pct
-              FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL)
+              FROM roster_days WHERE ${wR})
       SELECT r.fn, h.hh AS "hour",
         COUNT(*) FILTER (WHERE ${SHIFT})::int scheduled,
         COUNT(*) FILTER (WHERE ${SHIFT} AND ${pres})::int working,
@@ -693,7 +708,9 @@ export class ReconController {
         COALESCE(SUM(${covMin('r.ss-r.ot_before_min', 'r.ot_before_min')}) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0),0)::int ot_before_min,
         COALESCE(SUM(${covMin('r.se', 'r.ot_after_min')}) FILTER (WHERE ${pres} AND COALESCE(r.ot_after_min,0)>0),0)::int ot_after_min,
         COALESCE(SUM(${covMin('r.ss', 'r.sys_late_min')}) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NOT NULL),0)::int perm_late_min,
-        COALESCE(SUM(${covMin('r.se-r.sys_early_min', 'r.sys_early_min')}) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NOT NULL),0)::int perm_early_min
+        COALESCE(SUM(${covMin('r.se-r.sys_early_min', 'r.sys_early_min')}) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NOT NULL),0)::int perm_early_min,
+        COALESCE(SUM(${covMin('r.ss', 'r.sys_late_min')}) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NULL),0)::int tardy_min,
+        COALESCE(SUM(${covMin('r.se-r.sys_early_min', 'r.sys_early_min')}) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NULL),0)::int early_min
       FROM r CROSS JOIN h
       GROUP BY r.fn, h.hh`, p);
     const [{ days }] = await this.ds.query(`SELECT COUNT(DISTINCT work_date)::int days FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL`, p);
@@ -704,26 +721,90 @@ export class ReconController {
       FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL GROUP BY 1`, p);
     const otByFn: Record<string, { ob: number; oa: number }> = {}; let obAll = 0, oaAll = 0;
     for (const r of otAgg) { otByFn[r.fn || '—'] = { ob: r.ob, oa: r.oa }; obAll += r.ob; oaAll += r.oa; }
+    // DAY-level shrinkage counts (no timing filter — leave/SL-only rows carry no shift window):
+    // the honest totals; the per-hour columns show only what is hour-placeable.
+    const shAgg = await this.ds.query(`SELECT ${GRP} fn,
+        COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent,
+        COUNT(*) FILTER (WHERE presence='leave')::int leave
+      FROM roster_days WHERE ${wBase} AND presence IN ('sick','absent','leave') GROUP BY 1`, p);
+    const shByFn: Record<string, { sick: number; absent: number; leave: number }> = {};
+    const shAll = { sick: 0, absent: 0, leave: 0 };
+    for (const r of shAgg) { shByFn[r.fn || '—'] = { sick: r.sick, absent: r.absent, leave: r.leave }; shAll.sick += r.sick; shAll.absent += r.absent; shAll.leave += r.leave; }
 
-    const FLD = ['scheduled', 'working', 'shrinkage', 'sick', 'absent', 'on_leave', 'permission', 'tardiness', 'perm_late', 'early_out', 'perm_early', 'ot_before_hc', 'ot_after_hc', 'ot_before_min', 'ot_after_min', 'perm_late_min', 'perm_early_min'];
+    // ── PLAN overlay (Director 2026-07-03): the hourly headcount the SCHEDULE will produce —
+    //    latest non-archived version per (employee, date) from schedule_entries × shift_codes,
+    //    minus APPROVED requests: leave spans (full day) and permission windows (per hour).
+    //    Runs in parallel with the actuals so Generate + request approvals reflect immediately.
+    const planGrid = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      v AS (SELECT DISTINCT ON (se.employee_id, se.entry_date)
+                   se.employee_id, se.entry_date, e.employee_no, COALESCE(f.name,'—') fn,
+                   (EXTRACT(HOUR FROM sc.start_time)*60 + EXTRACT(MINUTE FROM sc.start_time))::int ss,
+                   (CASE WHEN sc.end_time <= sc.start_time
+                         THEN EXTRACT(HOUR FROM sc.end_time)*60 + EXTRACT(MINUTE FROM sc.end_time) + 1440
+                         ELSE EXTRACT(HOUR FROM sc.end_time)*60 + EXTRACT(MINUTE FROM sc.end_time) END)::int se_min
+              FROM schedule_entries se
+              JOIN schedule_versions sv ON sv.id = se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
+              JOIN employees e ON e.id = se.employee_id
+              LEFT JOIN functions f ON f.id = e.function_id
+              LEFT JOIN shift_codes sc ON sc.tenant_id = se.tenant_id AND sc.code = se.shift_code_display
+             WHERE se.tenant_id = $1 AND se.entry_date BETWEEN $2 AND $3 AND sc.start_time IS NOT NULL
+             ORDER BY se.employee_id, se.entry_date, sv.created_at DESC),
+      lv AS (SELECT r.employee_id, gs::date d
+               FROM requests r JOIN request_leaves rl ON rl.request_id = r.id
+               CROSS JOIN generate_series(rl.start_date, rl.end_date, interval '1 day') gs
+              WHERE r.tenant_id = $1 AND r.status = 'approved'),
+      pm AS (SELECT r.employee_id, rp.permission_date d,
+                    (EXTRACT(HOUR FROM rp.start_time)*60 + EXTRACT(MINUTE FROM rp.start_time))::int ps,
+                    (EXTRACT(HOUR FROM rp.end_time)*60 + EXTRACT(MINUTE FROM rp.end_time))::int pe
+               FROM requests r JOIN request_permissions rp ON rp.request_id = r.id
+              WHERE r.tenant_id = $1 AND r.status = 'approved' AND rp.start_time IS NOT NULL AND rp.end_time IS NOT NULL)
+      SELECT v.fn, h.hh AS "hour",
+        COUNT(*) FILTER (WHERE v.ss < h.hh*60+60 AND LEAST(v.se_min,1440) > h.hh*60
+                            OR (v.se_min > 1440 AND (v.se_min-1440) > h.hh*60))::int plan,
+        COUNT(*) FILTER (WHERE (v.ss < h.hh*60+60 AND LEAST(v.se_min,1440) > h.hh*60
+                            OR (v.se_min > 1440 AND (v.se_min-1440) > h.hh*60))
+                           AND NOT EXISTS (SELECT 1 FROM lv WHERE lv.employee_id = v.employee_id AND lv.d = v.entry_date)
+                           AND NOT EXISTS (SELECT 1 FROM pm WHERE pm.employee_id = v.employee_id AND pm.d = v.entry_date
+                                             AND pm.ps < h.hh*60+60 AND pm.pe > h.hh*60))::int plan_after_req
+      FROM v CROSS JOIN h GROUP BY v.fn, h.hh`, [t, dFrom, dTo]).catch(() => []);
+    const [{ plan_days } = { plan_days: 0 }] = await this.ds.query(
+      `SELECT COUNT(DISTINCT se.entry_date)::int plan_days
+         FROM schedule_entries se JOIN schedule_versions sv ON sv.id = se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
+        WHERE se.tenant_id = $1 AND se.entry_date BETWEEN $2 AND $3`, [t, dFrom, dTo]).catch(() => [{ plan_days: 0 }]);
+
+    const FLD = ['scheduled', 'working', 'shrinkage', 'sick', 'absent', 'on_leave', 'permission', 'tardiness', 'perm_late', 'early_out', 'perm_early', 'ot_before_hc', 'ot_after_hc', 'ot_before_min', 'ot_after_min', 'perm_late_min', 'perm_early_min', 'tardy_min', 'early_min', 'plan', 'plan_after_req'];
     const blank = () => Array.from({ length: 24 }, (_, hour) => { const o: any = { hour, _cs: 0, _cw: 0 }; FLD.forEach(f => o[f] = 0); return o; });
     const fnMap: Record<string, any[]> = {}; const all = blank();
     for (const g of grid) {
       const fn = g.fn || '—'; if (!fnMap[fn]) fnMap[fn] = blank();
       const c = fnMap[fn][g.hour], a = all[g.hour];
-      for (const f of FLD) { c[f] += g[f]; a[f] += g[f]; }
+      for (const f of FLD) { c[f] += g[f] || 0; a[f] += g[f] || 0; }
       if (g.conformance != null) { const wgt = g.working || 1; c._cs += g.conformance * wgt; c._cw += wgt; a._cs += g.conformance * wgt; a._cw += wgt; }
     }
-    const enrich = (hours: any[], ot: { ob: number; oa: number }) => {
+    // fold the plan overlay in (function labels come from employees.function — may differ from the
+    // roster's per-month role_function; the ALL row is always exact). Skipped in agent mode.
+    if (!agent && level !== 'agent') for (const g of planGrid) {
+      const fn = g.fn || '—'; if (!fnMap[fn]) fnMap[fn] = blank();
+      fnMap[fn][g.hour].plan += g.plan; fnMap[fn][g.hour].plan_after_req += g.plan_after_req;
+      all[g.hour].plan += g.plan; all[g.hour].plan_after_req += g.plan_after_req;
+    }
+    const enrich = (hours: any[], ot: { ob: number; oa: number }, shDay?: { sick: number; absent: number; leave: number }) => {
       const av = (n: number) => days ? +(n / days).toFixed(1) : 0;
       const rows = hours.map(h => {
         // running cascade: base working → after OT (boosted) → after permission → effective
         const hcWithOt = h.working + h.ot_before_hc + h.ot_after_hc;     // ← headcount AFTER overtime
         const hcAfterPerm = hcWithOt - h.perm_late - h.perm_early;        // ← headcount AFTER permissions
         const effective = Math.max(0, hcAfterPerm - h.tardiness - h.early_out);
+        // LOST hours in this hour = full shrinkage hours (scheduled-but-out people) +
+        // credited tardiness/early minutes + permission-covered minutes (Director 2026-07-03)
+        const lostHours = +(h.shrinkage + (h.tardy_min + h.early_min + h.perm_late_min + h.perm_early_min) / 60).toFixed(1);
         return {
           hour: h.hour, scheduled: h.scheduled, working: h.working,
-          hcWithOt, hcAfterPerm, effective,
+          hcWithOt, hcAfterPerm, effective, lostHours,
+          plan: h.plan, planAfterReq: h.plan_after_req,
+          avgPlan: plan_days ? +(h.plan / plan_days).toFixed(1) : 0,
+          avgPlanAfterReq: plan_days ? +(h.plan_after_req / plan_days).toFixed(1) : 0,
           shrinkage: h.shrinkage, sick: h.sick, absent: h.absent, onLeave: h.on_leave, permission: h.permission,
           tardiness: h.tardiness, permLate: h.perm_late, earlyOut: h.early_out, permEarly: h.perm_early,
           otBeforeHc: h.ot_before_hc, otAfterHc: h.ot_after_hc,
@@ -742,6 +823,11 @@ export class ReconController {
       const otTot = ot.ob + ot.oa;
       const total = {
         scheduled: tSched, working: sum('working'), hcWithOt: sum('hcWithOt'), hcAfterPerm: sum('hcAfterPerm'), effective: tEff,
+        lostHours: +sum('lostHours').toFixed(1),
+        plan: sum('plan'), planAfterReq: sum('planAfterReq'), planDays: plan_days,
+        // totals are DAY counts (timing-less leave/SL rows included) — per-hour cells show placements
+        sick: shDay?.sick ?? sum('sick'), absent: shDay?.absent ?? sum('absent'), onLeave: shDay?.leave ?? sum('onLeave'),
+        shrinkDays: shDay ? shDay.sick + shDay.absent + shDay.leave : null,
         shrinkage: tShr, permission: sum('permission'),
         tardiness: sum('tardiness'), permLate: sum('permLate'), earlyOut: sum('earlyOut'), permEarly: sum('permEarly'),
         otBeforeHc: sum('otBeforeHc'), otAfterHc: sum('otAfterHc'),
@@ -755,9 +841,9 @@ export class ReconController {
       return { hours: rows, total, peakHour: peak?.hour };
     };
 
-    const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0 }) }))
+    const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0 }, shByFn[fn]) }))
       .sort((a, b) => b.total.scheduled - a.total.scheduled);
-    return { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll }) };
+    return { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll }, shAll) };
   }
 
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the
