@@ -626,10 +626,11 @@ export class ReconController {
    *  professional hour-by-hour staffing + exception picture HR/RTA asks for. */
   @Get('roster-v2/hourly')
   @RequirePermissions('attendance.view_team')
-  @ApiOperation({ summary: 'Per-hour (0-23) coverage / permissions / shrinkage / tardiness / OT by function' })
+  @ApiOperation({ summary: 'Per-hour (0-23) coverage / permissions / shrinkage / sick / absence / tardiness / OT — by function, or per AGENT (level=agent / agent=<id|name>)' })
   async hourly(
     @Req() req: any, @Query('from') from?: string, @Query('to') to?: string,
     @Query('function') functionName?: string, @Query('teamLeader') teamLeader?: string,
+    @Query('agent') agent?: string, @Query('level') level?: string,
   ) {
     const t = req.user.tenantId;
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
@@ -639,6 +640,15 @@ export class ReconController {
     const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
     if (functionName) w += ` AND ${add('COALESCE(role_function,function_name)=$$', functionName)}`;
     if (teamLeader)   w += ` AND ${add('team_manager=$$', teamLeader)}`;
+    // AGENT-level mode (Director 2026-07-02): same hourly cascade but for one person —
+    // agent = person_no or a name fragment; level=agent groups rows per agent name.
+    if (agent) {
+      p.push(agent, `%${agent.toLowerCase()}%`);
+      w += ` AND (person_no = $${p.length - 1} OR employee_no = $${p.length - 1} OR lower(COALESCE(clean_name,name)) LIKE $${p.length} OR lower(COALESCE(username,'')) LIKE $${p.length})`;
+    }
+    const GRP = (level === 'agent' || agent)
+      ? `COALESCE(clean_name,name) || ' · ' || COALESCE(person_no,employee_no)`
+      : `COALESCE(role_function,function_name)`;
 
     // a person covers hour h (its [h*60,h*60+60) bucket) if the window [start,start+len)
     // — normalized to minute-of-day, cross-midnight & negative aware — overlaps it. One
@@ -662,13 +672,16 @@ export class ReconController {
     const credE = `r.sys_early_min BETWEEN 7 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
     const grid = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
-      r AS (SELECT COALESCE(role_function,function_name) fn, person_no, employee_no, shift_start_min ss, shift_end_min se,
+      r AS (SELECT ${GRP} fn, person_no, employee_no, shift_start_min ss, shift_end_min se,
                    presence, permission_type, sys_late_min, sys_early_min, ot_before_min, ot_after_min, adherence_pct
               FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL)
       SELECT r.fn, h.hh AS "hour",
         COUNT(*) FILTER (WHERE ${SHIFT})::int scheduled,
         COUNT(*) FILTER (WHERE ${SHIFT} AND ${pres})::int working,
         COUNT(*) FILTER (WHERE ${SHIFT} AND r.presence IN ('absent','sick','leave'))::int shrinkage,
+        COUNT(*) FILTER (WHERE ${SHIFT} AND r.presence = 'sick')::int sick,
+        COUNT(*) FILTER (WHERE ${SHIFT} AND r.presence = 'absent')::int absent,
+        COUNT(*) FILTER (WHERE ${SHIFT} AND r.presence = 'leave')::int on_leave,
         COUNT(*) FILTER (WHERE ${SHIFT} AND r.permission_type IS NOT NULL)::int permission,
         ROUND(AVG(r.adherence_pct) FILTER (WHERE ${SHIFT} AND ${pres}),1) conformance,
         COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NULL AND ${cov('r.ss', 'r.sys_late_min')})::int tardiness,
@@ -685,14 +698,14 @@ export class ReconController {
       GROUP BY r.fn, h.hh`, p);
     const [{ days }] = await this.ds.query(`SELECT COUNT(DISTINCT work_date)::int days FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL`, p);
     // OT hours (and %) per function — the "كم ساعة" summary; per-hour we show the headcount boost.
-    const otAgg = await this.ds.query(`SELECT COALESCE(role_function,function_name) fn,
+    const otAgg = await this.ds.query(`SELECT ${GRP} fn,
         COALESCE(SUM(ot_before_min) FILTER (WHERE presence IN ('office','wfh')),0)::int ob,
         COALESCE(SUM(ot_after_min)  FILTER (WHERE presence IN ('office','wfh')),0)::int oa
       FROM roster_days WHERE ${w} AND shift_start_min IS NOT NULL GROUP BY 1`, p);
     const otByFn: Record<string, { ob: number; oa: number }> = {}; let obAll = 0, oaAll = 0;
     for (const r of otAgg) { otByFn[r.fn || '—'] = { ob: r.ob, oa: r.oa }; obAll += r.ob; oaAll += r.oa; }
 
-    const FLD = ['scheduled', 'working', 'shrinkage', 'permission', 'tardiness', 'perm_late', 'early_out', 'perm_early', 'ot_before_hc', 'ot_after_hc', 'ot_before_min', 'ot_after_min', 'perm_late_min', 'perm_early_min'];
+    const FLD = ['scheduled', 'working', 'shrinkage', 'sick', 'absent', 'on_leave', 'permission', 'tardiness', 'perm_late', 'early_out', 'perm_early', 'ot_before_hc', 'ot_after_hc', 'ot_before_min', 'ot_after_min', 'perm_late_min', 'perm_early_min'];
     const blank = () => Array.from({ length: 24 }, (_, hour) => { const o: any = { hour, _cs: 0, _cw: 0 }; FLD.forEach(f => o[f] = 0); return o; });
     const fnMap: Record<string, any[]> = {}; const all = blank();
     for (const g of grid) {
@@ -711,7 +724,7 @@ export class ReconController {
         return {
           hour: h.hour, scheduled: h.scheduled, working: h.working,
           hcWithOt, hcAfterPerm, effective,
-          shrinkage: h.shrinkage, permission: h.permission,
+          shrinkage: h.shrinkage, sick: h.sick, absent: h.absent, onLeave: h.on_leave, permission: h.permission,
           tardiness: h.tardiness, permLate: h.perm_late, earlyOut: h.early_out, permEarly: h.perm_early,
           otBeforeHc: h.ot_before_hc, otAfterHc: h.ot_after_hc,
           otHours: +((h.ot_before_min + h.ot_after_min) / 60).toFixed(1),     // OT hours actually worked in this hour

@@ -33,6 +33,12 @@ class EditCellDto {
   @IsString()
   @MinLength(3)
   reason!: string;
+
+  /** Force past rule violations (female-late / rest) — audited. Without this the
+   *  service's documented "resubmit with override:true" path was unreachable. */
+  @IsOptional()
+  @IsBoolean()
+  override?: boolean;
 }
 
 @ApiTags('Schedule')
@@ -120,6 +126,7 @@ export class ScheduleController {
       body.newShiftCode,
       body.editType,
       body.reason,
+      body.override === true,
     );
   }
 

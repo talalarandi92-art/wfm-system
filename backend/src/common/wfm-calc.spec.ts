@@ -3,14 +3,13 @@ import {
   shrinkagePct, mapLeaveMarker, mimeToAttachmentType, ratingSentiment,
 } from './wfm-calc';
 
-describe('isWeekend (Boutiqaat Thu/Fri/Sat)', () => {
-  it('flags Thursday(4), Friday(5) and Saturday(6)', () => {
+describe('isWeekend (OFFICIAL weekend = Thu + Fri — Director ruling, commit c23a1f5)', () => {
+  it('flags Thursday(4) and Friday(5) only', () => {
     expect(isWeekend(4)).toBe(true);
     expect(isWeekend(5)).toBe(true);
-    expect(isWeekend(6)).toBe(true);
   });
-  it('rejects Sun–Wed', () => {
-    [0, 1, 2, 3].forEach(d => expect(isWeekend(d)).toBe(false));
+  it('rejects Sat–Wed (Saturday starts the WFM week — it is NOT weekend)', () => {
+    [0, 1, 2, 3, 6].forEach(d => expect(isWeekend(d)).toBe(false));
   });
 });
 

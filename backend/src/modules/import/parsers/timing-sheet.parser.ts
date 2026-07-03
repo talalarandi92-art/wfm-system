@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { normalizeShiftCode } from '../../../common/shift-normalize';
 
 export interface ParsedShiftCode {
   code: string;
@@ -33,7 +34,8 @@ const NON_WORKING_CODES = new Set([
 // Leave codes
 const LEAVE_CODES = new Set(['L', 'AL', 'SL', 'DL', 'ML', 'PL', 'EL', 'UPL']);
 
-// Absence codes
+// Absence codes — bare markers only; 'ABS' is a legacy read alias (official HR code is A).
+// Suffix codes (MA/NS/EE20A …) resolve through the shared normalizer below.
 const ABSENCE_CODES = new Set(['A', 'ABS', 'UA']);
 
 /**
@@ -336,8 +338,9 @@ export function parseTimingSheet(
     const isRamadan       = /^r[a-z]|ramadan|رمضان/i.test(code) ||
                             (colDesc >= 0 && /ramadan|رمضان/i.test(String(row[colDesc] ?? '')));
     const isSupervisorShift = /20$/.test(code);
-    const isLeaveCode     = LEAVE_CODES.has(code);
-    const isAbsenceCode   = ABSENCE_CODES.has(code);
+    const norm = normalizeShiftCode(code); // shared grammar: MA/NS/EE20A… = base shift + A/S suffix
+    const isLeaveCode     = LEAVE_CODES.has(code) || norm.status === 'leave';
+    const isAbsenceCode   = ABSENCE_CODES.has(code) || norm.status === 'absence' || norm.status === 'sick';
     const isWorkingShift  = !NON_WORKING_CODES.has(code) && !isLeaveCode && !isAbsenceCode;
 
     // Female restriction: midnight shifts and some night shifts

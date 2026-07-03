@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ForbiddenException 
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { shiftCategoryFromCode } from '../../common/shift-category';
+import { normalizeShiftCode } from '../../common/shift-normalize';
 import { functionAllowsFemaleLate } from '../schedule-generator/generator.types';
 
 // ── Shift code → marker + times lookup ──────────────────────────────────────
@@ -52,7 +53,8 @@ const SHIFT_CODE_MAP: Record<string, { marker: string; start: string | null; end
   DL:   { marker: 'leave',   start: null, end: null }, // death leave
   UPL:  { marker: 'leave',   start: null, end: null }, // unpaid leave
   SL:   { marker: 'sick',    start: null, end: null },
-  ABS:  { marker: 'absent',  start: null, end: null },
+  A:    { marker: 'absent',  start: null, end: null }, // HR-normalized absence (no base shift recorded)
+  ABS:  { marker: 'absent',  start: null, end: null }, // LEGACY input alias only — displays/exports as A
   H:    { marker: 'holiday', start: null, end: null },
 };
 
@@ -80,7 +82,7 @@ function deriveShiftLabel(
   if (marker === 'off')     return { code: 'OFF', category: 'off',     color: '#475569', label: 'إجازة أسبوعية' };
   if (marker === 'leave')   return { code: 'L',   category: 'leave',   color: '#7c3aed', label: 'إجازة سنوية'   };
   if (marker === 'sick')    return { code: 'SL',  category: 'sick',    color: '#dc2626', label: 'إجازة مرضية'   };
-  if (marker === 'absent')  return { code: 'ABS', category: 'absent',  color: '#ef4444', label: 'غياب'           };
+  if (marker === 'absent')  return { code: 'A',   category: 'absent',  color: '#ef4444', label: 'غياب'           }; // HR code is A — 'ABS' was never an official code
   if (marker === 'holiday') return { code: 'H',   category: 'holiday', color: '#0891b2', label: 'عطلة رسمية'    };
 
   // ── No-data / unknown — empty cell, not "—" ─────────────────────────────
@@ -641,11 +643,24 @@ export class ScheduleService {
     await this.assertCellEditable(tenantId, userId, date);
 
     const code = newShiftCode.trim().toUpperCase();
-    const mapping = SHIFT_CODE_MAP[code];
-    if (!mapping)
-      throw new BadRequestException(
-        `Unknown shift code "${code}". Supported: ${Object.keys(SHIFT_CODE_MAP).join(', ')}`,
-      );
+    let mapping = SHIFT_CODE_MAP[code];
+    if (!mapping) {
+      // Suffix grammar (MA/MS … EE20A/EE20S, WFH-*, plain A) resolves through the shared
+      // normalizer — same base timing as the underlying shift, status from the suffix.
+      const norm = normalizeShiftCode(code);
+      if (norm.mapped) {
+        const toTime = (min: number | null) => min == null ? null :
+          `${String(Math.floor((min % 1440) / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}:00`;
+        const marker = norm.status === 'working' || norm.status === 'wfh' ? 'present'
+          : norm.status === 'absence' ? 'absent'
+          : norm.status === 'separation' || norm.status === 'unknown' ? null : norm.status; // sick/leave/holiday/off/comp match the enum
+        if (marker) mapping = { marker, start: toTime(norm.startMin), end: toTime(norm.endMin), wfh: norm.isWfh };
+      }
+      if (!mapping)
+        throw new BadRequestException(
+          `Unknown shift code "${code}". Supported: ${Object.keys(SHIFT_CODE_MAP).join(', ')} + any base shift with A (absence) / S (sick) suffix, e.g. MA, NS, EE20A`,
+        );
+    }
 
     // Fetch current record + employee meta
     const rows = await this.ds.query(
@@ -781,12 +796,23 @@ export class ScheduleService {
           date,
         ],
       );
-      // Dual-write: keep the canonical roster_days row (person_no keyed) in sync when one exists
+      // Dual-write: keep the canonical roster_days row (person_no keyed) in sync when one exists.
+      // MUST carry presence + hr_code + attendance_code too — analysis/shrinkage/HR-Matrix read
+      // those, so updating only the shift columns left every downstream number stale (bug 2026-07-03).
+      const normCell = normalizeShiftCode(code);
+      const presence = normCell.status === 'working' ? 'office'
+        : normCell.status === 'wfh' ? 'wfh'
+        : normCell.status === 'absence' ? 'absent'
+        : normCell.status === 'separation' ? 'left'
+        : normCell.status === 'unknown' ? null : normCell.status; // sick/leave/holiday/off/comp as-is
       await qr.query(
         `UPDATE roster_days
-         SET shift_code = $4, shift_start_min = $5, shift_end_min = $6
+         SET shift_code = $4, shift_start_min = $5, shift_end_min = $6,
+             presence = COALESCE($7, presence), hr_code = $8, attendance_code = $9,
+             shift_category = $10, crosses_midnight = $11
          WHERE tenant_id = $1 AND person_no = $2 AND work_date = $3::date AND is_active`,
-        [tenantId, rec.employee_no, date, code, startMinNum, endMinNum],
+        [tenantId, rec.employee_no, date, code, startMinNum, endMinNum,
+         presence, normCell.hrCode, code, normCell.base ?? code, normCell.crossesMidnight],
       );
       await qr.commitTransaction();
     } catch (err) {

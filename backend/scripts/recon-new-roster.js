@@ -72,8 +72,10 @@ const MOM = { M7: [420, 840], B7: [540, 960], C7: [660, 1080], N7: [780, 1200] }
 // user-confirmed exact times 2026-06-28: M20 08-16, B20 10-18, C20 11-20, N20 14-22
 const RESP = { M20: [480, 960], B20: [600, 1080], C20: [660, 1200], N20: [840, 1320] };
 const MOTHERS = new Set([12375, 12434]); // Haya Al-Muhanna, Shaima Saud
-const SICK_PREFIX = ['MS', 'BS', 'CS', 'NS', 'ES', 'EES', 'MDS', 'MNS', 'N20S', 'M20S', 'B20S', 'C20S'];
-const ABS_PREFIX = ['MA', 'BA', 'CA', 'NA', 'EA', 'EEA', 'MDA', 'MNA', 'N20A', 'M20A'];
+// Director 2026-07-03: ANY valid base shift + S = sick, + A = absence (EE20S/EE20A and
+// M7-3 variants were missing from the old fixed lists). Longest-first so EE20S wins over ES.
+const SICK_PREFIX = ['EE20S', 'M7-3S', 'M20S', 'B20S', 'C20S', 'N20S', 'MDS', 'MNS', 'EES', 'AMS', 'MS', 'BS', 'CS', 'NS', 'ES'];
+const ABS_PREFIX = ['EE20A', 'M7-3A', 'M20A', 'B20A', 'C20A', 'N20A', 'MDA', 'MNA', 'EEA', 'AMA', 'MA', 'BA', 'CA', 'NA', 'EA'];
 
 function classifyCode(rawIn, empId) {
   const raw = String(rawIn || '').trim();
