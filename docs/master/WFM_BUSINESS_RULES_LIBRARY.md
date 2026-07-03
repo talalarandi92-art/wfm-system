@@ -254,14 +254,14 @@
 
 | ID | Item | Status |
 |---|---|---|
-| DRIFT-001 | Shift-category computed 6 conflicting ways (BR-SHF-006 is the canonical mapping) — consolidating CHANGES NUMBERS (shift-rate %, fairness); do with full re-validation, Director's eyes on. | Open (RULES §16; audit 2026-07-01) |
-| DRIFT-002 | Report-builder `sc` CTE 1:N fan-out → grouped scorecard KPIs are day-weighted, not person-weighted. Fix = aggregate at person grain before AVG. | Open (RULES §9, §16) |
+| DRIFT-001 | Shift-category 6-way drift — **analytic sites CLOSED 2026-07-03** (fairness/shift-rate/self-service import `common/shift-category`). Remaining local taxonomies are display-only by design (grid colours, absence-panel PANEL_FAMILY, demand.engine SHIFT_FAMILY) — aligning them is Recommended, Director's eyes on. | Partially closed (2026-07-03) |
+| DRIFT-002 | Report-builder `sc` CTE 1:N fan-out — **CLOSED 2026-07-03**: `sc_rn` ROW_NUMBER per (person, group) + FILTER (sc_rn=1) on every scorecard KPI aggregate; live June diff ≤0.1 pt. | Closed (2026-07-03) |
 | DRIFT-003 | Jan–May cross-midnight de-bleed (Rule B, BR-TIM-003) needs a per-month recon rebuild (built by the other pipeline; ~480 rows can't be SQL-corrected). June's full corrected rebuild also pending the Director's PREPARED source files (post-incident rollback state, RULES §20). | Open |
-| DRIFT-004 | `ot_before_min`/`ot_after_min` NULL after engine ingest (BR-OT-002 detail split) — emit in `_ingest` without changing TRUE_OT semantics; several other MAP-omitted columns too. | Open (audit 2026-07-01) |
+| DRIFT-004 | `ot_before_min`/`ot_after_min` + report columns — **ENGINE CLOSED** (recon-build.js:282-288 emits, recon-ingest maps). Live June rows stay NULL until a rebuild (deferred per D-076); July's first ingest emits them automatically. | Engine closed; data pending next rebuild |
 | DRIFT-005 | Off-day OT from the recon engine (594h vs old pipeline 173h) is the one uncertain field — system-only, no schedule anchor; verify before payroll use. | Open caveat |
 | DRIFT-006 | `headcount_intervals` never INSERTed (the one snapshot exception) — live Hour×Function before/after impact runs on computed queries instead. | Open (as-built) |
 | DRIFT-007 | `roster_days` lacks permission start/end minutes → precise intra-day permission-HC impact impossible (day granularity only; `permission_duration` is a text window). | Data limit |
-| DRIFT-008 | Schedule editCell / demand-publish still WRITE `attendance_records` (reads overlay roster_days) — retarget or badge next. | Open follow-up |
+| DRIFT-008 | editCell / publish / schedule-change writes — **CLOSED 2026-07-03**: all three dual-write roster_days (UPDATE-only, actual-evidence guard; commits 97df531 + 8070d97). | Closed (2026-07-03) |
 
 **Recommended (needs Director approval before any execution):** adopt the single shared shift-category classifier (DRIFT-001); person-grain scorecard aggregation (DRIFT-002); per-month Jan–May rebuild when sources are loaded (DRIFT-003); emit OT before/after split in `_ingest` (DRIFT-004) — all listed in the 2026-07-01 audit batch-2 plan (memory `audit_2026_07_01_and_consolidation`).
 

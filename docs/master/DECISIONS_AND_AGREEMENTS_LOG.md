@@ -463,18 +463,18 @@
 
 | # | Item | Status | Blocking on |
 |---|---|---|---|
-| O-1 | Page-consolidation plan (D-068) | Core EXECUTED 2026-07-02 (3 hubs live); Chief-branch nesting + executive-home merge still Needs Approval | Director's go on the 2 sub-items |
+| O-1 | Page-consolidation plan (D-068) | **FULLY DONE** — core 3 hubs (commits 5f68365/e9f5bb6) + Chief hub 14 tabs & ONE executive home `/command-center` (commit 8f00a4c); all 13 guard routes + dashboard/control-dashboards/wfm-overview redirect to hub tabs. Register verified 2026-07-03 | — |
 | O-2 | June full rebuild (cross-midnight de-bleed + 116-person foundation, D-065) | **DEFERRED per D-076** (true gap = 13 people, not 24; Sprinklr-first from next period) | Director reopening it + the full-June Ameyo/Sprinklr files |
 | O-3 | Full-year re-run from January (D-063 step 2) | Pending | O-2 test pass |
-| O-4 | Shift-category 6-site unification (D-067.3) | Needs Approval (number-changing) | Joint re-validation |
-| O-5 | sc-CTE person-grain aggregation (D-067.2) | Needs Approval (number-changing) | Joint re-validation |
-| O-6 | `ot_before_min`/`ot_after_min` + report-builder columns in corrected ingest (D-067.1) | Confirmed to fix, execution deferred | Careful pass with the Director |
+| O-4 | Shift-category 6-site unification (D-067.3) | **ANALYTIC SITES DONE** (verified 2026-07-03): fairness/shift-rate/self-service all import `@common/shift-category`. Remaining LOCAL taxonomies are display/behaviour by design: Schedule-grid visual colours ('between'), absence-panel PANEL_FAMILY (E→night, B/C→afternoon), demand.engine SHIFT_FAMILY (C→afternoon). **Recommended:** align absence-panel + demand-engine families to canonical (E=evening, C=morning) — changes on-screen groupings, needs Director's eyes | Director decision on the 2 display taxonomies |
+| O-5 | sc-CTE person-grain aggregation (D-067.2) | **DONE & VERIFIED 2026-07-03** — `sc_rn` ROW_NUMBER per (person, group) + `FILTER (WHERE sc_rn=1)` on all scorecard KPI aggregates (recon.controller:321-327/371); live June check: person- vs day-weighted differ ≤0.1 pt | — |
+| O-6 | `ot_before_min`/`ot_after_min` + report-builder columns in corrected ingest (D-067.1) | **ENGINE DONE** (recon-build.js:282-288 emits otBefore/otAfter + week/month/attendance_status/late_category/missing flags; recon-ingest maps all) — verified 2026-07-03. Live June rows still NULL (pre-fix build; rebuild deferred per D-076); first next rebuild backfills automatically | Next rebuild (July or June reopen) |
 | O-7 | Jan–May cross-midnight Rule-B de-bleed (D-058) | Pending | Per-month recon rebuilds |
 | O-8 | Sprinklr login-only recovery (D-057) | Deferred | Recovery method verified |
-| O-9 | Sprinklr-only session mode (D-044) | Deferred | Director says go (future months; June untouched) |
+| O-9 | Sprinklr-only session mode (D-044) | **READY 2026-07-03** (commit 757ed0e) — engine reads `sysMode` from recon-config.json / per-run selector on Upload & Rebuild; June default untouched (ameyo-first). Flip at first July upload per D-076 | First July upload |
 | O-10 | Productivity denominator variant (Staffed−Break vs scheduled hours, D-016) | Built as (a); Director to confirm | Data review |
-| O-11 | editCell / demand-publish still WRITE `attendance_records` (D-051 follow-up) | Pending | Retarget or badge |
-| O-12 | Legacy `roster_daily` re-ingest to surface the WFH fix on `/dashboard` (§4 drift) | Pending | Heavy parse window |
+| O-11 | editCell / demand-publish still WRITE `attendance_records` (D-051 follow-up) | **DONE 2026-07-03** — editCell (commit 97df531), generator publish + schedule-change approval (commit 8070d97) all dual-write roster_days (UPDATE-only, actual-evidence guard) | — |
+| O-12 | Legacy `roster_daily` re-ingest to surface the WFH fix on `/dashboard` (§4 drift) | **DONE 2026-07-03** (Director-approved) — re-ingest impossible (SRC_DIR exports gone); synced presence to canonical roster_days instead: 2,342 rows fixed (1,236 WFH→office…), backup `roster_daily_wfh_bak_20260703`, script `fix-roster-daily-wfh-sync.js` (commit 2757dae) | — |
 
 ---
 
