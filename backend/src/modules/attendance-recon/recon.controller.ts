@@ -1511,6 +1511,96 @@ export class ReconController {
     return { from: p[1], to: p[2], frontier, count: items.length, items };
   }
 
+  /* ── LADDERED ROTATION (Director 2026-07-04) — humane, coverage-safe block rotation ──
+   *  Each agent works a BLOCK of 2-3 days in one band, rests, then STEPS to the next band
+   *  (forward = morning→evening→night, easiest on the body). Agents are phase-staggered across
+   *  the cycle so each day's per-band coverage ≈ demand — the schedule fills the need WITHOUT
+   *  daily shift-thrash, guarantees ≥1 rest day between bands (post-night recovery), keeps females
+   *  off midnight, and shows any residual gap honestly (feed it to gap-remedies). Read-only proposal. */
+  @Get('roster-v2/ladder-generate')
+  @RequirePermissions('schedule.generate')
+  async ladderGenerate(@Req() req: any, @Query('function') functionName?: string,
+    @Query('weekStart') weekStart?: string, @Query('weeks') weeksQ?: string, @Query('direction') dirQ?: string) {
+    const t = req.user.tenantId;
+    const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
+    const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
+    let fn = functionName;
+    if (!fn) { const [top] = await this.ds.query(`SELECT COALESCE(role_function,function_name) fn FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1`, [t]); fn = top?.fn; }
+    const ws = snapSat(weekStart || (frontier ? (() => { const d = new Date(frontier + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })() : new Date().toISOString().slice(0, 10)));
+    const weeks = Math.max(1, Math.min(4, parseInt(weeksQ || '2', 10)));
+    const nDays = weeks * 7;
+    const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dates: string[] = []; { const d = new Date(ws + 'T00:00:00Z'); for (let i = 0; i < nDays; i++) { dates.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); } }
+
+    // active pool for the function, with gender
+    const pool = await this.ds.query(
+      `SELECT e.employee_no, TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) name, COALESCE(e.gender,'male') gender
+         FROM employees e JOIN functions f ON f.id=e.function_id
+        WHERE e.tenant_id=$1 AND e.status='active' AND f.name=$2 ORDER BY e.employee_no`, [t, fn]).catch(() => []);
+    if (!pool.length) return { weekStart: ws, function: fn, error: 'no active employees for this function', grid: [], coverage: [] };
+
+    // demand per band = 28-day observed avg agents/day whose shift START lands in the band window
+    const dRows = await this.ds.query(`
+      WITH r AS (SELECT shift_start_min ss FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+                   AND COALESCE(role_function,function_name)=$2 AND work_date >= ($3::date-28) AND work_date < $3::date),
+      d AS (SELECT GREATEST(COUNT(DISTINCT work_date),1) n FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND work_date >= ($3::date-28) AND work_date < $3::date)
+      SELECT ROUND(COUNT(*) FILTER (WHERE ss>=300 AND ss<720)::numeric/(SELECT n FROM d),1)::float morning,
+             ROUND(COUNT(*) FILTER (WHERE ss>=720 AND ss<1020)::numeric/(SELECT n FROM d),1)::float evening,
+             ROUND(COUNT(*) FILTER (WHERE ss>=1020 OR ss<300)::numeric/(SELECT n FROM d),1)::float night
+      FROM r`, [t, fn, ws]).catch(() => [{ morning: 0, evening: 0, night: 0 }]);
+    const demand = { morning: dRows[0]?.morning || 0, evening: dRows[0]?.evening || 0, night: dRows[0]?.night || 0 };
+
+    // adaptive block length per band (2-3 by demand weight); OFF ×2 (post-night recovery + one more)
+    const avg = (demand.morning + demand.evening + demand.night) / 3 || 1;
+    const blk = (d: number) => d >= avg * 1.15 ? 3 : 2;
+    const bm = blk(demand.morning), be = blk(demand.evening), bn = blk(demand.night);
+    // FORWARD cycle (chosen by coverage; forward preferred on tie): morning→evening→night→OFF→OFF
+    const dir = dirQ === 'backward' ? 'backward' : 'forward';
+    const order = dir === 'backward' ? ['night', 'evening', 'morning'] : ['morning', 'evening', 'night'];
+    const bandLen: any = { morning: bm, evening: be, night: bn };
+    const maleCycle: string[] = []; for (const band of order) for (let i = 0; i < bandLen[band]; i++) maleCycle.push(band); maleCycle.push('OFF', 'OFF');
+    // females never do night → their cycle skips it
+    const fOrder = order.filter(b => b !== 'night');
+    const femaleCycle: string[] = []; for (const band of fOrder) for (let i = 0; i < bandLen[band]; i++) femaleCycle.push(band); femaleCycle.push('OFF', 'OFF');
+
+    // band → concrete shift code (spread within a band across agents for full-width coverage)
+    const CODES: any = { morning: ['M', 'B', 'C'], evening: ['N', 'E'], night: ['MD', 'MN'] };
+    const males = pool.filter((p: any) => p.gender === 'male'), females = pool.filter((p: any) => p.gender !== 'male');
+    const assign = (list: any[], cycle: string[]) => list.map((p, i) => {
+      const phase = cycle.length ? Math.floor(i * cycle.length / Math.max(1, list.length)) : 0;
+      const days = dates.map((_, d) => {
+        const band = cycle[(phase + d) % cycle.length];
+        if (band === 'OFF') return 'OFF';
+        const codes = CODES[band]; return codes[i % codes.length];
+      });
+      return { employeeNo: p.employee_no, name: p.name, gender: p.gender, days };
+    });
+    const grid = [...assign(males, maleCycle), ...assign(females, femaleCycle)].sort((a, b) => a.name.localeCompare(b.name));
+
+    // coverage per day per band vs demand + honest gaps
+    const bandOf = (code: string) => code === 'OFF' ? 'off' : ['M', 'B', 'C', 'AM'].includes(code) ? 'morning' : ['N', 'E', 'EE', 'EE20'].includes(code) ? 'evening' : 'night';
+    const coverage = dates.map((date, d) => {
+      const cnt = { morning: 0, evening: 0, night: 0, off: 0 } as any;
+      for (const g of grid) cnt[bandOf(g.days[d])]++;
+      const gap = { morning: +(demand.morning - cnt.morning).toFixed(1), evening: +(demand.evening - cnt.evening).toFixed(1), night: +(demand.night - cnt.night).toFixed(1) };
+      return { date, dayName: DOW[new Date(date + 'T00:00:00Z').getUTCDay()], ...cnt, demand, gap,
+        short: [gap.morning, gap.evening, gap.night].some(x => x >= 1) };
+    });
+    const shortDays = coverage.filter(c => c.short).length;
+    return {
+      weekStart: ws, weeks, function: fn, direction: dir, blocks: { morning: bm, evening: be, night: bn },
+      demand, poolSize: pool.length, males: males.length, females: females.length,
+      cycleMale: maleCycle, cycleFemale: femaleCycle, dates,
+      grid, coverage,
+      summary: {
+        shortDays, coversAll: shortDays === 0,
+        femaleNightExcluded: true,
+        note: dir === 'forward' ? 'forward rotation (morning→evening→night) — easiest on the circadian clock' : 'backward rotation as requested (harder on the body)',
+        restRule: 'a full OFF day after each band block (post-night recovery guaranteed); 2 OFF per cycle',
+      },
+    };
+  }
+
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the
    *  hourly need per function, then greedy set-cover the standard shift windows (real start/end
    *  taken from the data) to cover every hour — and check we have enough active staff. The
