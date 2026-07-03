@@ -143,8 +143,8 @@ export default function HourlyAnalyticsPage() {
             {/* group band — the related columns live TOGETHER (actual cascade · shrinkage & lost · plan · KPIs) */}
             <tr>
               <th style={{ background: 'var(--surface-2)' }} />
-              <th colSpan={11} className="px-2 py-1 text-center font-bold" style={{ color: '#818cf8', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(99,102,241,0.08)', borderBottom: '1px solid rgba(99,102,241,0.25)' }}>{ar ? 'الهيدكاونت الفعلي — المتسلسلة' : 'Actual headcount — cascade'}</th>
-              <th colSpan={5} className="px-2 py-1 text-center font-bold" style={{ color: '#fb7185', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(244,63,94,0.07)', borderBottom: '1px solid rgba(244,63,94,0.25)' }}>{ar ? 'الشرينكج والساعات الضائعة' : 'Shrinkage & lost'}</th>
+              <th colSpan={11} className="px-2 py-1 text-center font-bold" style={{ color: '#818cf8', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(99,102,241,0.08)', borderBottom: '1px solid rgba(99,102,241,0.25)' }}>{ar ? 'الهيدكاونت الفعلي — المتسلسلة (متوسط/يوم)' : 'Actual headcount — cascade (avg/day)'}</th>
+              <th colSpan={5} className="px-2 py-1 text-center font-bold" style={{ color: '#fb7185', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(244,63,94,0.07)', borderBottom: '1px solid rgba(244,63,94,0.25)' }}>{ar ? 'الشرينكج والضائع (إجمالي المدى)' : 'Shrinkage & lost (period total)'}</th>
               <th colSpan={2} className="px-2 py-1 text-center font-bold" style={{ color: '#38bdf8', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'rgba(14,165,233,0.08)', borderBottom: '1px solid rgba(14,165,233,0.3)' }}>{ar ? 'خطة الجدول (جينيريت + ريكوستات)' : 'Schedule plan (generate + requests)'}</th>
               <th colSpan={4} className="px-2 py-1 text-center font-bold" style={{ color: 'var(--text-3)', fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', background: 'var(--surface-2)' }}>{ar ? 'مؤشرات' : 'KPIs'}</th>
             </tr>
@@ -161,14 +161,14 @@ export default function HourlyAnalyticsPage() {
                   <td className="px-2 py-1.5 font-semibold whitespace-nowrap sticky start-0 z-10" style={{ color: h.hour === view.peakHour ? '#0ea5e9' : 'var(--text-1)', background: 'var(--surface)' }}>{hh(h.hour)}{h.hour === view.peakHour && <span className="text-[9px]"> ★</span>}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: 'var(--text-2)' }}>{h.avgScheduled}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: 'var(--text-2)' }}>{h.avgWorking}</td>
-                  <td className="px-2 py-1.5 text-center" style={{ color: h.otBeforeHc ? '#a78bfa' : 'var(--text-3)' }}>{h.otBeforeHc ? `+${h.otBeforeHc}` : ''}</td>
-                  <td className="px-2 py-1.5 text-center" style={{ color: h.otAfterHc ? '#8b5cf6' : 'var(--text-3)' }}>{h.otAfterHc ? `+${h.otAfterHc}` : ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.avgOtBeforeHc ? '#a78bfa' : 'var(--text-3)' }}>{h.avgOtBeforeHc ? `+${h.avgOtBeforeHc}` : ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.avgOtAfterHc ? '#8b5cf6' : 'var(--text-3)' }}>{h.avgOtAfterHc ? `+${h.avgOtAfterHc}` : ''}</td>
                   {cp(h.avgHcWithOt)}
-                  <td className="px-2 py-1.5 text-center" style={{ color: h.permLate ? '#0ea5e9' : 'var(--text-3)' }}>{h.permLate ? `−${h.permLate}` : ''}</td>
-                  <td className="px-2 py-1.5 text-center" style={{ color: h.permEarly ? '#0ea5e9' : 'var(--text-3)' }}>{h.permEarly ? `−${h.permEarly}` : ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.avgPermLate ? '#0ea5e9' : 'var(--text-3)' }}>{h.avgPermLate ? `−${h.avgPermLate}` : ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.avgPermEarly ? '#0ea5e9' : 'var(--text-3)' }}>{h.avgPermEarly ? `−${h.avgPermEarly}` : ''}</td>
                   {cp(h.avgHcAfterPerm)}
-                  <td className="px-2 py-1.5 text-center" style={{ color: h.tardiness ? '#fb923c' : 'var(--text-3)' }}>{h.tardiness ? `−${h.tardiness}` : ''}</td>
-                  <td className="px-2 py-1.5 text-center" style={{ color: h.earlyOut ? '#f43f5e' : 'var(--text-3)' }}>{h.earlyOut ? `−${h.earlyOut}` : ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.avgTardiness ? '#fb923c' : 'var(--text-3)' }}>{h.avgTardiness ? `−${h.avgTardiness}` : ''}</td>
+                  <td className="px-2 py-1.5 text-center" style={{ color: h.avgEarlyOut ? '#f43f5e' : 'var(--text-3)' }}>{h.avgEarlyOut ? `−${h.avgEarlyOut}` : ''}</td>
                   {cp(h.avgEffective)}
                   <td className="px-2 py-1.5 text-center" style={{ color: h.sick ? '#f43f5e' : 'var(--text-3)' }}>{h.sick || ''}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: h.absent ? '#ef4444' : 'var(--text-3)' }}>{h.absent || ''}</td>

@@ -136,7 +136,13 @@ function StaffingRiver({ series, seamIdx, maxY, days, frontier, ar, panel }: any
   const W = 1000, H = 200, padB = 22, padT = 8;
   const x = (i: number) => (i / (168 - 1)) * W;
   const y = (v: number) => padT + (1 - v / maxY) * (H - padT - padB);
-  const seamX = seamIdx > 0 && seamIdx < 168 ? x(seamIdx) : null;
+  // distinguish all-actual (solid full) from all-plan (hatched full) from mixed (seam split) —
+  // finding #9: a null seam must NOT default an all-plan future to solid 'actual' water.
+  const allActual = days.every((d: any) => d.mode === 'actual');
+  const allPlan = days.every((d: any) => d.mode === 'plan');
+  const seamX = (!allActual && !allPlan && seamIdx > 0 && seamIdx < 168) ? x(seamIdx) : null;
+  const solidW = allPlan ? 0 : (seamX ?? W);      // actual (solid) water extends to here
+  const hatchX = allActual ? W : (seamX ?? 0);    // plan (hatch) water starts here
 
   // hc area path over all 168 points
   const line = series.map((p: any, k: number) => `${k === 0 ? 'M' : 'L'}${x(p.i).toFixed(1)},${y(p.hc).toFixed(1)}`).join(' ');
@@ -165,16 +171,16 @@ function StaffingRiver({ series, seamIdx, maxY, days, frontier, ar, panel }: any
         <defs>
           <linearGradient id="riverActual" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.85" /><stop offset="100%" stopColor="#6366f1" stopOpacity="0.25" /></linearGradient>
           <pattern id="riverPlan" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="6" height="6" fill="#6366f1" opacity="0.06" /><line x1="0" y1="0" x2="0" y2="6" stroke="#818cf8" strokeWidth="1.4" opacity="0.5" /></pattern>
-          <clipPath id="clipL"><rect x="0" y="0" width={seamX ?? W} height={H} /></clipPath>
-          <clipPath id="clipR"><rect x={seamX ?? W} y="0" width={W - (seamX ?? W)} height={H} /></clipPath>
+          <clipPath id="clipL"><rect x="0" y="0" width={solidW} height={H} /></clipPath>
+          <clipPath id="clipR"><rect x={hatchX} y="0" width={W - hatchX} height={H} /></clipPath>
         </defs>
-        {/* actual water (left of seam) */}
-        <path d={area} fill="url(#riverActual)" clipPath="url(#clipL)" />
-        {/* plan water (hatched, right of seam) */}
-        {seamX != null && <path d={area} fill="url(#riverPlan)" clipPath="url(#clipR)" />}
-        {/* hc silhouette line */}
-        <path d={line} fill="none" stroke="#0ea5e9" strokeWidth="1.6" opacity="0.9" clipPath="url(#clipL)" />
-        {seamX != null && <path d={line} fill="none" stroke="#818cf8" strokeWidth="1.6" strokeDasharray="4 3" opacity="0.9" clipPath="url(#clipR)" />}
+        {/* actual water (solid, left of seam / full week when all-actual) */}
+        {solidW > 0 && <path d={area} fill="url(#riverActual)" clipPath="url(#clipL)" />}
+        {/* plan water (hatched, right of seam / full week when all-plan) */}
+        {hatchX < W && <path d={area} fill="url(#riverPlan)" clipPath="url(#clipR)" />}
+        {/* hc silhouette line — solid over actual, dashed over plan */}
+        {solidW > 0 && <path d={line} fill="none" stroke="#0ea5e9" strokeWidth="1.6" opacity="0.9" clipPath="url(#clipL)" />}
+        {hatchX < W && <path d={line} fill="none" stroke="#818cf8" strokeWidth="1.6" strokeDasharray="4 3" opacity="0.9" clipPath="url(#clipR)" />}
         {/* red missing-water pockets */}
         {pockets.map((p, k) => <path key={k} d={p} fill="rgba(239,68,68,0.5)" />)}
         {/* baseline reference */}

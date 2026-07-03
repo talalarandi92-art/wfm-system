@@ -221,6 +221,12 @@ export class ScheduleChangesController {
         : norm.status === 'separation' ? 'left'
         : norm.status === 'unknown' ? null : norm.status;
       const toMin = (t: string | null) => t == null ? null : parseInt(t.split(':')[0], 10) * 60 + parseInt(t.split(':')[1] ?? '0', 10);
+      const sMin = toMin(start);
+      // canonical end (recon convention): raw end <= start ⇒ crosses midnight ⇒ +1440 (MD → 1860),
+      // so consumers deriving duration from se-ss stay correct (audit 2026-07-03 finding #3).
+      let eMin = toMin(end);
+      if (eMin != null && sMin != null && eMin <= sMin) eMin += 1440;
+      const xmid = eMin != null && eMin > 1440;
       await this.ds.query(
         `UPDATE roster_days
             SET shift_code = $4, shift_start_min = $5, shift_end_min = $6,
@@ -228,8 +234,8 @@ export class ScheduleChangesController {
                 shift_category = $9, crosses_midnight = $10
           WHERE tenant_id = $1 AND person_no = $2 AND work_date = $3::date AND is_active
             AND punch_in_min IS NULL AND sys_login_min IS NULL`,
-        [tid, emp.employee_no, date, row.requested_shift_code, toMin(start), toMin(end),
-         presence, norm.hrCode, norm.base ?? row.requested_shift_code, norm.crossesMidnight],
+        [tid, emp.employee_no, date, row.requested_shift_code, sMin, eMin,
+         presence, norm.hrCode, norm.base ?? row.requested_shift_code, xmid],
       ).catch(() => {});
     }
 

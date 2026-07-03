@@ -785,7 +785,11 @@ export class ScheduleService {
     // (same transaction, so the grid overlay never shows a ghost of the old shift)
     const isWfh = mapping.wfh === true;
     const startMinNum = mapping.start != null ? timeStrToMin(mapping.start) : null;
-    const endMinNum   = mapping.end   != null ? timeStrToMin(mapping.end)   : null;
+    // roster_days stores the recon-engine CANONICAL end (start+duration): a cross-midnight end
+    // (<= start) is +1440 (MD → 1860), never raw wall-clock 420 (audit 2026-07-03 finding #3).
+    let endMinNum     = mapping.end   != null ? timeStrToMin(mapping.end)   : null;
+    if (endMinNum != null && startMinNum != null && endMinNum <= startMinNum) endMinNum += 1440;
+    const crossesMidnight = endMinNum != null && endMinNum > 1440;
     const qr = this.ds.createQueryRunner();
     await qr.connect();
     await qr.startTransaction();
@@ -825,7 +829,7 @@ export class ScheduleService {
              shift_category = $10, crosses_midnight = $11
          WHERE tenant_id = $1 AND person_no = $2 AND work_date = $3::date AND is_active`,
         [tenantId, rec.employee_no, date, code, startMinNum, endMinNum,
-         presence, normCell.hrCode, code, normCell.base ?? code, normCell.crossesMidnight],
+         presence, normCell.hrCode, code, normCell.base ?? code, crossesMidnight],
       );
       await qr.commitTransaction();
     } catch (err) {

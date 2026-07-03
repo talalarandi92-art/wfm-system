@@ -658,7 +658,7 @@ export class ReconController {
     const stdEnd = `CASE regexp_replace(upper(COALESCE(attendance_code,shift_code,'')),'([SA])$','')
       WHEN 'M' THEN 960 WHEN 'AM' THEN 900 WHEN 'M20' THEN 960 WHEN 'B' THEN 1080 WHEN 'B20' THEN 1080
       WHEN 'C' THEN 1200 WHEN 'C20' THEN 1200 WHEN 'N' THEN 1320 WHEN 'N20' THEN 1320 WHEN 'E' THEN 1500
-      WHEN 'EE' THEN 1620 WHEN 'EE20' THEN 1620 WHEN 'MD' THEN 1860 WHEN 'MN' THEN 1920 END`;
+      WHEN 'EE' THEN 1560 WHEN 'EE20' THEN 1620 WHEN 'MD' THEN 1860 WHEN 'MN' THEN 1920 END`;
     const wR = `${wBase} AND (shift_start_min IS NOT NULL OR (presence IN ('sick','absent','leave') AND (${stdStart}) IS NOT NULL))`;
     const GRP = (level === 'agent' || agent)
       ? `COALESCE(clean_name,name) || ' · ' || COALESCE(person_no,employee_no)`
@@ -740,6 +740,20 @@ export class ReconController {
     const shByFn: Record<string, { sick: number; absent: number; leave: number }> = {};
     const shAll = { sick: 0, absent: 0, leave: 0 };
     for (const r of shAgg) { shByFn[r.fn || '—'] = { sick: r.sick, absent: r.absent, leave: r.leave }; shAll.sick += r.sick; shAll.absent += r.absent; shAll.leave += r.leave; }
+    // DAY-level CASE counts (distinct person-days) for the TOTAL row — the per-hour cells are
+    // person-HOURS (a person counted once per hour their shift/gap covers), so summing them over 24
+    // hours over-counts a case ~7x. HR reads these as "how many were tardy / on permission", so the
+    // totals must be distinct person-day counts (audit 2026-07-03, finding #1). Per-hour cells untouched.
+    const caseAgg = await this.ds.query(`SELECT ${GRP} fn,
+        COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND permission_type IS NOT NULL)::int permission,
+        COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND ${CRED_LATE} AND permission_type IS NULL)::int tardiness,
+        COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND ${CRED_EARLY} AND permission_type IS NULL)::int early_out,
+        COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND ${CRED_LATE} AND permission_type IS NOT NULL)::int perm_late,
+        COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND ${CRED_EARLY} AND permission_type IS NOT NULL)::int perm_early
+      FROM roster_days WHERE ${wBase} GROUP BY 1`, p);
+    const caseByFn: Record<string, any> = {};
+    const caseAll = { permission: 0, tardiness: 0, early_out: 0, perm_late: 0, perm_early: 0 };
+    for (const r of caseAgg) { caseByFn[r.fn || '—'] = r; for (const k of Object.keys(caseAll)) caseAll[k] += r[k]; }
 
     // ── PLAN overlay (Director 2026-07-03): the hourly headcount the SCHEDULE will produce —
     //    latest non-archived version per (employee, date) from schedule_entries × shift_codes,
@@ -799,7 +813,7 @@ export class ReconController {
       fnMap[fn][g.hour].plan += g.plan; fnMap[fn][g.hour].plan_after_req += g.plan_after_req;
       all[g.hour].plan += g.plan; all[g.hour].plan_after_req += g.plan_after_req;
     }
-    const enrich = (hours: any[], ot: { ob: number; oa: number; reg?: number; offd?: number; hol?: number }, shDay?: { sick: number; absent: number; leave: number }) => {
+    const enrich = (hours: any[], ot: { ob: number; oa: number; reg?: number; offd?: number; hol?: number }, shDay?: { sick: number; absent: number; leave: number }, cases?: { permission: number; tardiness: number; early_out: number; perm_late: number; perm_early: number }) => {
       const av = (n: number) => days ? +(n / days).toFixed(1) : 0;
       const rows = hours.map(h => {
         // running cascade: base working → after OT (boosted) → after permission → effective
@@ -831,6 +845,12 @@ export class ReconController {
           conformance: h._cw ? Math.round(h._cs / h._cw) : null,
           avgScheduled: av(h.scheduled), avgWorking: av(h.working),
           avgHcWithOt: av(hcWithOt), avgHcAfterPerm: av(hcAfterPerm), avgEffective: av(effective),
+          // per-day AVG of the cascade DELTAS (finding #4) — so a row's +OT/−perm/−tardy are on the
+          // SAME per-day scale as the avg checkpoints (avgWorking + avgOtBefore + ... = avgEffective).
+          avgOtBeforeHc: av(h.ot_before_hc), avgOtAfterHc: av(h.ot_after_hc),
+          avgPermLate: av(h.perm_late), avgPermEarly: av(h.perm_early),
+          avgTardiness: av(h.tardiness), avgEarlyOut: av(h.early_out),
+          avgSick: av(h.sick), avgAbsent: av(h.absent), avgOnLeave: av(h.on_leave),
           coveragePct: h.scheduled ? Math.round(100 * effective / h.scheduled) : 0,
           shrinkagePct: h.scheduled ? Math.round(100 * h.shrinkage / h.scheduled) : 0,
         };
@@ -843,11 +863,16 @@ export class ReconController {
         scheduled: tSched, working: sum('working'), hcWithOt: sum('hcWithOt'), hcAfterPerm: sum('hcAfterPerm'), effective: tEff,
         lostHours: +sum('lostHours').toFixed(1),
         plan: sum('plan'), planAfterReq: sum('planAfterReq'), planDays: plan_days,
-        // totals are DAY counts (timing-less leave/SL rows included) — per-hour cells show placements
+        // totals are DISTINCT PERSON-DAY counts (finding #1) — NOT the per-hour sums, which are
+        // person-hours and over-count a case ~7x. Fall back to the hour-sum only if the day-agg is absent.
         sick: shDay?.sick ?? sum('sick'), absent: shDay?.absent ?? sum('absent'), onLeave: shDay?.leave ?? sum('onLeave'),
         shrinkDays: shDay ? shDay.sick + shDay.absent + shDay.leave : null,
-        shrinkage: tShr, permission: sum('permission'),
-        tardiness: sum('tardiness'), permLate: sum('permLate'), earlyOut: sum('earlyOut'), permEarly: sum('permEarly'),
+        // shrinkage TOTAL = distinct sick+absent+leave person-days (reconciles with the breakdown);
+        // shrinkagePct still uses the person-hours ratio below (tShr/tSched) so % stays interval-based.
+        shrinkage: shDay ? shDay.sick + shDay.absent + shDay.leave : tShr,
+        permission: cases?.permission ?? sum('permission'),
+        tardiness: cases?.tardiness ?? sum('tardiness'), permLate: cases?.perm_late ?? sum('permLate'),
+        earlyOut: cases?.early_out ?? sum('earlyOut'), permEarly: cases?.perm_early ?? sum('permEarly'),
         otBeforeHc: sum('otBeforeHc'), otAfterHc: sum('otAfterHc'),
         otHours: +sum('otHours').toFixed(1), permHours: +sum('permHours').toFixed(1),
         coveragePct: tSched ? Math.round(100 * tEff / tSched) : 0, shrinkagePct: tSched ? Math.round(100 * tShr / tSched) : 0,
@@ -872,9 +897,9 @@ export class ReconController {
       return { hours: rows, total, peakHour: peak?.hour };
     };
 
-    const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0, reg: 0, offd: 0, hol: 0 }, shByFn[fn]) }))
+    const byFunction = Object.entries(fnMap).map(([fn, hours]) => ({ fn, ...enrich(hours, otByFn[fn] || { ob: 0, oa: 0, reg: 0, offd: 0, hol: 0 }, shByFn[fn], caseByFn[fn]) }))
       .sort((a, b) => b.total.scheduled - a.total.scheduled);
-    const payload = { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll, reg: regAll, offd: offdAll, hol: holAll }, shAll) };
+    const payload = { from: dFrom, to: dTo, days, functions: byFunction.map(f => f.fn), byFunction, all: enrich(all, { ob: obAll, oa: oaAll, reg: regAll, offd: offdAll, hol: holAll }, shAll, caseAll) };
 
     // Excel export (Director 2026-07-03): one sheet per view (All + each function),
     // 24 hourly rows + TOTAL, same columns as the on-screen table.
@@ -943,7 +968,14 @@ export class ReconController {
     let fnFilter = '';
     if (functionName) { fp.push(functionName); fnFilter = ` AND COALESCE(role_function,function_name)=$${fp.length}`; }
     let fnFilterPlan = '';
-    if (functionName) fnFilterPlan = ` AND COALESCE(f.name,'—')=$4`;   // same param slot
+    let otFnJoin = '', otFnWhere = '';
+    if (functionName) {
+      fnFilterPlan = ` AND COALESCE(f.name,'—')=$4`;   // same param slot ($4)
+      // finding #6/#8: a function-scoped forecast must NOT add company-wide approved OT — scope the
+      // ot CTE to the same function via request_overtimes.function_id.
+      otFnJoin = ` LEFT JOIN functions fo ON fo.id = ro.function_id`;
+      otFnWhere = ` AND fo.name = $4`;
+    }
 
     const cov = (start: string, len: string) => {
       const a0 = `(((${start})%1440+1440)%1440)`, b0 = `(${a0}+(${len}))`;
@@ -955,28 +987,39 @@ export class ReconController {
     const credL = `r.sys_late_min BETWEEN 7 AND 240`;
     const credE = `r.sys_early_min BETWEEN 7 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
 
-    // ── ACTUAL: effective HC per (day, hour) from roster_days, same cascade as /hourly ──
+    // ── ACTUAL: effective HC per (day, hour) from roster_days, placed on the ABSOLUTE calendar ──
+    // A cross-midnight shift (MD 22:00→07:00) physically covers 00:00-07:00 of the NEXT calendar
+    // day; the per-day grid must place that tail on the next day, not the shift's start day
+    // (audit 2026-07-03 finding #2). We work in minutes-from-week-start: each measure's window
+    // [absStart, absStart+len) is matched against the 7×24 buckets and attributed to the bucket's
+    // (day-offset bi, hour), so wrap tails land on the correct calendar day. se_c = canonical end
+    // (raw wall-clock end <= start ⇒ +1440), handling both stored conventions.
+    const covAbs = (s: string, l: string) => `((${s}) < b.bi*1440 + b.hh*60 + 60 AND ((${s})+(${l})) > b.bi*1440 + b.hh*60)`;
     const actual = await this.ds.query(`
-      WITH h AS (SELECT generate_series(0,23) hh),
-      r AS (SELECT work_date::text d, person_no, employee_no, shift_start_min ss, shift_end_min se, presence,
-                   permission_type, sys_late_min, sys_early_min, ot_before_min, ot_after_min
+      WITH b AS (SELECT bi, hh FROM generate_series(0,6) bi CROSS JOIN generate_series(0,23) hh),
+      r AS (SELECT (work_date - $2::date) AS di, person_no, employee_no, shift_start_min ss,
+                   (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se_c,
+                   presence, permission_type, sys_late_min, sys_early_min, ot_before_min, ot_after_min
               FROM roster_days
              WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3 AND shift_start_min IS NOT NULL${fnFilter})
-      SELECT r.d, h.hh AS "hour",
-        COUNT(*) FILTER (WHERE ${pres} AND ${cov('r.ss', '(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END)')})::int working,
-        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0 AND ${cov('r.ss-r.ot_before_min', 'r.ot_before_min')})::int ot_before,
-        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_after_min,0)>0 AND ${cov('r.se', 'r.ot_after_min')})::int ot_after,
-        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NULL AND ${cov('r.ss', 'r.sys_late_min')})::int tardy,
-        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NULL AND ${cov('r.se-r.sys_early_min', 'r.sys_early_min')})::int early,
-        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NOT NULL AND ${cov('r.ss', 'r.sys_late_min')})::int perm_late,
-        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NOT NULL AND ${cov('r.se-r.sys_early_min', 'r.sys_early_min')})::int perm_early
-      FROM r CROSS JOIN h GROUP BY r.d, h.hh`, fp).catch(() => []);
+      SELECT b.bi, b.hh AS "hour",
+        COUNT(*) FILTER (WHERE ${pres} AND ${covAbs('r.di*1440 + r.ss', 'r.se_c - r.ss')})::int working,
+        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_before_min,0)>0 AND ${covAbs('r.di*1440 + r.ss - r.ot_before_min', 'r.ot_before_min')})::int ot_before,
+        COUNT(*) FILTER (WHERE ${pres} AND COALESCE(r.ot_after_min,0)>0 AND ${covAbs('r.di*1440 + r.se_c', 'r.ot_after_min')})::int ot_after,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NULL AND ${covAbs('r.di*1440 + r.ss', 'r.sys_late_min')})::int tardy,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NULL AND ${covAbs('r.di*1440 + r.se_c - r.sys_early_min', 'r.sys_early_min')})::int early,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credL} AND r.permission_type IS NOT NULL AND ${covAbs('r.di*1440 + r.ss', 'r.sys_late_min')})::int perm_late,
+        COUNT(*) FILTER (WHERE ${pres} AND ${credE} AND r.permission_type IS NOT NULL AND ${covAbs('r.di*1440 + r.se_c - r.sys_early_min', 'r.sys_early_min')})::int perm_early
+      FROM r CROSS JOIN b GROUP BY b.bi, b.hh`, fp).catch(() => []);
 
-    // ── PLAN: planned HC per (day, hour) from the latest non-archived version, ± approved requests ──
+    // ── PLAN: planned HC per (day, hour) from the latest non-archived version, ± approved requests.
+    //    Same ABSOLUTE-calendar placement as the actual side (finding #2): a plan MD shift's tail
+    //    lands on the next calendar day. Leave is keyed to the scheduling day (entry_date); permission
+    //    & OT are keyed to the BUCKET's calendar day (ws + bi) so both in-day and wrap are correct. ──
     const plan = await this.ds.query(`
-      WITH h AS (SELECT generate_series(0,23) hh),
+      WITH b AS (SELECT bi, hh FROM generate_series(0,6) bi CROSS JOIN generate_series(0,23) hh),
       v AS (SELECT DISTINCT ON (se.employee_id, se.entry_date)
-                   se.employee_id, se.entry_date::text d,
+                   se.employee_id, se.entry_date::text d, (se.entry_date - $2::date) AS di,
                    (EXTRACT(HOUR FROM sc.start_time)*60 + EXTRACT(MINUTE FROM sc.start_time))::int ss,
                    (CASE WHEN sc.end_time <= sc.start_time
                          THEN EXTRACT(HOUR FROM sc.end_time)*60 + EXTRACT(MINUTE FROM sc.end_time) + 1440
@@ -999,17 +1042,15 @@ export class ReconController {
       ot AS (SELECT r.employee_id, ro.ot_date::text d,
                     (EXTRACT(HOUR FROM ro.start_time)*60+EXTRACT(MINUTE FROM ro.start_time))::int os,
                     (EXTRACT(HOUR FROM ro.end_time)*60+EXTRACT(MINUTE FROM ro.end_time))::int oe
-               FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id
-              WHERE r.tenant_id=$1 AND r.status='approved' AND ro.start_time IS NOT NULL AND ro.end_time IS NOT NULL)
-      SELECT v.d, h.hh AS "hour",
-        COUNT(*) FILTER (WHERE v.ss < h.hh*60+60 AND LEAST(v.se_min,1440) > h.hh*60
-                            OR (v.se_min>1440 AND (v.se_min-1440) > h.hh*60))::int plan,
-        COUNT(*) FILTER (WHERE (v.ss < h.hh*60+60 AND LEAST(v.se_min,1440) > h.hh*60
-                            OR (v.se_min>1440 AND (v.se_min-1440) > h.hh*60))
+               FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id${otFnJoin}
+              WHERE r.tenant_id=$1 AND r.status='approved' AND ro.start_time IS NOT NULL AND ro.end_time IS NOT NULL${otFnWhere})
+      SELECT b.bi, b.hh AS "hour",
+        COUNT(*) FILTER (WHERE ${covAbs('v.di*1440 + v.ss', 'v.se_min - v.ss')})::int plan,
+        COUNT(*) FILTER (WHERE ${covAbs('v.di*1440 + v.ss', 'v.se_min - v.ss')}
                            AND NOT EXISTS (SELECT 1 FROM lv WHERE lv.employee_id=v.employee_id AND lv.d=v.d)
-                           AND NOT EXISTS (SELECT 1 FROM pm WHERE pm.employee_id=v.employee_id AND pm.d=v.d AND pm.ps<h.hh*60+60 AND pm.pe>h.hh*60))::int plan_after_req,
-        (SELECT COUNT(*) FROM ot WHERE ot.d=v.d AND ${covWin('ot.os', 'ot.oe')})::int ot_extra
-      FROM v CROSS JOIN h GROUP BY v.d, h.hh`, fp).catch(() => []);
+                           AND NOT EXISTS (SELECT 1 FROM pm WHERE pm.employee_id=v.employee_id AND pm.d=($2::date + b.bi)::text AND pm.ps<b.hh*60+60 AND pm.pe>b.hh*60))::int plan_after_req,
+        (SELECT COUNT(*) FROM ot WHERE ot.d=($2::date + b.bi)::text AND ot.os<b.hh*60+60 AND ot.oe>b.hh*60)::int ot_extra
+      FROM v CROSS JOIN b GROUP BY b.bi, b.hh`, fp).catch(() => []);
 
     // ── BASELINE: observed avg scheduled HC per hour over the 28 days before the week ──
     // (own param list — must reference EXACTLY the params passed; Postgres rejects extras.)
@@ -1029,15 +1070,15 @@ export class ReconController {
     const baseline = Array(24).fill(0);
     for (const b of baseRows) baseline[b.hour] = +(+b.baseline || 0).toFixed(1);
 
-    // ── merge into a 7×24 blended grid ──
-    const aMap: Record<string, any> = {}; for (const r of actual) aMap[`${r.d}|${r.hour}`] = r;
-    const pMap: Record<string, any> = {}; for (const r of plan) pMap[`${r.d}|${r.hour}`] = r;
-    const actualDays = new Set(actual.map((r: any) => r.d));
-    const days = dates.map(d => {
+    // ── merge into a 7×24 blended grid — actual/plan rows are keyed by day-OFFSET (bi 0-6),
+    //    already placed on the correct calendar day (cross-midnight tails moved to the next day). ──
+    const aMap: Record<string, any> = {}; for (const r of actual) aMap[`${r.bi}|${r.hour}`] = r;
+    const pMap: Record<string, any> = {}; for (const r of plan) pMap[`${r.bi}|${r.hour}`] = r;
+    const days = dates.map((d, di) => {
       const dow = DOW[new Date(d + 'T00:00:00Z').getUTCDay()];
-      const mode = actualDays.has(d) ? 'actual' : (d <= (frontier || '')) ? 'actual' : 'plan';
+      const mode = (frontier && d <= frontier) ? 'actual' : 'plan';
       const hours = Array.from({ length: 24 }, (_, hh) => {
-        const a = aMap[`${d}|${hh}`], p = pMap[`${d}|${hh}`];
+        const a = aMap[`${di}|${hh}`], p = pMap[`${di}|${hh}`];
         const effective = a ? Math.max(0, a.working + a.ot_before + a.ot_after - a.tardy - a.early - a.perm_late - a.perm_early) : 0;
         const planHc = p ? p.plan : 0;
         const planAfterReq = p ? Math.max(0, p.plan_after_req + p.ot_extra) : 0;

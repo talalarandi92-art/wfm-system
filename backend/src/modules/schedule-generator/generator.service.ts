@@ -1124,8 +1124,10 @@ export class GeneratorService {
     // canonical roster_days rows so roster reports never diverge from the agent-facing
     // schedule. UPDATE-only — roster_days rows are created by the recon engine, and days
     // that already carry actual evidence (punch or system login) are left untouched
-    // (same guard as the attendance_records skip above). Raw minutes-of-day storage
-    // mirrors editCell exactly (MD → start 1320 / end 420).
+    // (same guard as the attendance_records skip above). shift_end_min is stored in the
+    // recon engine's CANONICAL form (start+duration, MD → 1860) — a raw wall-clock end
+    // (420) with crosses_midnight=true is internally contradictory and breaks any consumer
+    // that derives duration from se-ss (audit 2026-07-03 finding #3).
     const rosterEntries: Array<{ employee_no: string; d: string; code: string; start_min: number | null; end_min: number | null }> =
       await this.ds.query(
         `SELECT e.employee_no, se.entry_date::text AS d, se.shift_code_display AS code,
@@ -1149,9 +1151,12 @@ export class GeneratorService {
           : norm.status === 'absence' ? 'absent'
           : norm.status === 'separation' ? 'left'
           : norm.status === 'unknown' ? null : norm.status;
+        // canonical end: if the raw wall-clock end is <= start, the shift crosses midnight → +1440.
+        const endCanon = (en.end_min != null && en.start_min != null && en.end_min <= en.start_min) ? en.end_min + 1440 : en.end_min;
+        const xmid = endCanon != null && endCanon > 1440;
         const base = vals.length;
-        vals.push(en.employee_no, en.d, en.code, en.start_min, en.end_min,
-                  presence, norm.hrCode, norm.base ?? en.code, norm.crossesMidnight);
+        vals.push(en.employee_no, en.d, en.code, en.start_min, endCanon,
+                  presence, norm.hrCode, norm.base ?? en.code, xmid);
         tuples.push(`($${base + 1}, $${base + 2}::date, $${base + 3}, $${base + 4}::int, $${base + 5}::int, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}::boolean)`);
       }
       if (tuples.length) {
