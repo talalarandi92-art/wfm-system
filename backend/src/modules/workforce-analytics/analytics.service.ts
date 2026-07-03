@@ -34,16 +34,30 @@ export class AnalyticsService {
    */
   private fnFilter(functionId?: string): { clause: (alias: string) => string; params: string[] } {
     if (!functionId) return { clause: () => '', params: [] };
+    // Fold interns onto their parent team: scoping to a parent function includes
+    // its interns (and vice-versa). Resolve $4 (function_id) to its canonical name
+    // once, then match by canon_fn(name) so "Internship X" and "X" are one pool.
     return {
-      clause: (alias) => ` AND EXISTS (SELECT 1 FROM employees _fe WHERE _fe.id = ${alias}.employee_id AND _fe.function_id = $4)`,
+      clause: (alias) => ` AND EXISTS (SELECT 1 FROM employees _fe JOIN functions _ff ON _ff.id = _fe.function_id WHERE _fe.id = ${alias}.employee_id AND canon_fn(_ff.name) = canon_fn((SELECT name FROM functions WHERE id = $4)))`,
       params: [functionId],
     };
   }
 
-  /** Function list for the analytics filter dropdown. */
+  /** Function list for the analytics filter dropdown.
+   *  Interns are folded onto their parent team (canon_fn): each canonical
+   *  function appears once, with the parent's id (preferring the row whose own
+   *  name is already canonical) and the combined headcount across folded rows. */
   async functions(tenantId: string) {
     return this.ds.query(
-      `SELECT id, name FROM functions WHERE tenant_id=$1 ORDER BY name`,
+      `SELECT
+          (array_agg(f.id ORDER BY (canon_fn(f.name) = f.name) DESC, f.name))[1] AS id,
+          canon_fn(f.name) AS name,
+          COUNT(e.id) AS employee_count
+       FROM functions f
+       LEFT JOIN employees e ON e.function_id = f.id AND e.tenant_id = f.tenant_id
+       WHERE f.tenant_id=$1 AND canon_fn(f.name) IS NOT NULL
+       GROUP BY canon_fn(f.name)
+       ORDER BY canon_fn(f.name)`,
       [tenantId],
     ).catch(() => []);
   }

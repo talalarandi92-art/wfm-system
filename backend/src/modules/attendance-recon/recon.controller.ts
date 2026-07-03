@@ -85,7 +85,7 @@ export class ReconController {
       where += ` AND (lower(COALESCE(r.clean_name,r.name)) ~ $${pName} OR r.username ILIKE $${pHas} OR r.employee_no ILIKE $${pPre} OR r.person_no ILIKE $${pPre})`;
     }
     if (presence) { params.push(presence); where += ` AND r.presence=$${params.length}`; }
-    if (functionId) { params.push(functionId); where += ` AND r.role_function=(SELECT name FROM functions WHERE id=$${params.length})`; }
+    if (functionId) { params.push(functionId); where += ` AND canon_fn(r.role_function)=canon_fn((SELECT name FROM functions WHERE id=$${params.length}))`; }
     if (includeInactive !== '1') where += ` AND r.is_active`;
 
     // distinct shift codes available in the current scope (for the shift filter dropdown) — before the shift filter itself
@@ -118,7 +118,7 @@ export class ReconController {
 
     // OT by function (so the OT spotlight can highlight the heavy teams — e.g. Refund this month)
     const otByFunction = await this.ds.query(
-      `SELECT COALESCE(r.role_function, r.function_name, '—') fn,
+      `SELECT canon_fn(COALESCE(r.role_function, r.function_name, '—')) fn,
               ROUND(SUM(${TRUE_OT})/60.0)::int ot_h,
               ROUND(SUM(COALESCE(offday_ot_min,0))/60.0)::int offday_h,
               COUNT(*) FILTER (WHERE (${TRUE_OT}) > 0)::int ot_days
@@ -173,7 +173,7 @@ export class ReconController {
     let w = `r.tenant_id=$1 AND r.work_date BETWEEN $2 AND $3`;
     const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
     // clean identity layer: real function (not the polluted column), role, and active state
-    if (functionName) w += ` AND ${add('r.role_function=$$', functionName)}`;
+    if (functionName) w += ` AND ${add('canon_fn(r.role_function)=canon_fn($$)', functionName)}`;
     if (role)         w += ` AND ${add('r.role_category=$$', role)}`;
     if (shift)        w += ` AND ${add('upper(r.shift_code) LIKE upper($$)', shift + '%')}`;
     if (teamManager)  w += ` AND ${add('r.team_manager=$$', teamManager)}`;
@@ -226,13 +226,13 @@ export class ReconController {
               ROUND(AVG(adherence_pct),1) conformance, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int late, COALESCE(SUM(ot_after_min),0)::int ot_after
          FROM roster_days r WHERE ${w} GROUP BY ${col} ORDER BY n DESC`, p);
     const [byShift, byFunction, byRole, byTeamManager, byPresence] = await Promise.all([
-      dist('shift_code'), dist('role_function'), dist('role_category'), dist('team_manager'), dist('presence'),
+      dist('shift_code'), dist('canon_fn(role_function)'), dist('role_category'), dist('team_manager'), dist('presence'),
     ]);
 
     // filter dropdown options (real function + role from the clean layer)
     const opts = (col: string) => this.ds.query(`SELECT DISTINCT ${col} v FROM roster_days WHERE tenant_id=$1 AND ${col} IS NOT NULL ORDER BY 1`, [t]);
     const [functions, roles, shifts, teams, days] = await Promise.all([
-      opts('role_function'), opts('role_category'), opts('shift_code'), opts('team_group'), opts('day_name'),
+      opts('canon_fn(role_function)'), opts('role_category'), opts('shift_code'), opts('team_group'), opts('day_name'),
     ]);
 
     // Team-leader audit: a team_manager label is a VERIFIED current TL only if it maps
@@ -336,7 +336,10 @@ export class ReconController {
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
     const p: any[] = [t, q.from || range?.a, q.to || range?.b];
     let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3`;
-    const FILT: Record<string, string> = { function:'role_function', role:'role_category', teamLeader:'team_manager', group:'team_group', shift:'shift_code',
+    // function filter folds interns into the parent (headcount rule); strip the incoming label too so
+    // a raw "Internship …" still matches. (The groupBy/detail function COLUMN stays raw — analysts keep the breakdown.)
+    if (q.function) q.function = String(q.function).replace(/^\s*[Ii]nternship\s+/, '');
+    const FILT: Record<string, string> = { function:'canon_fn(role_function)', role:'role_category', teamLeader:'team_manager', group:'team_group', shift:'shift_code',
       attendanceStatus:'attendance_status', hrStatus:'hr_code', presence:'presence', lateCategory:'late_category', systemSource:'login_src',
       day:'day_name', month:'month_name', dataQuality:'data_quality', person:'person_no' };
     for (const [k, col] of Object.entries(FILT)) if (q[k]) { p.push(q[k]); w += ` AND ${col}=$${p.length}`; }
@@ -422,7 +425,7 @@ export class ReconController {
     const p: any[] = [t, dFrom, dTo];
     let w = `r.tenant_id=$1 AND r.work_date BETWEEN $2 AND $3 AND r.is_active`;
     const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
-    if (functionName) w += ` AND ${add('r.role_function=$$', functionName)}`;
+    if (functionName) w += ` AND ${add('canon_fn(r.role_function)=canon_fn($$)', functionName)}`;
     if (teamLeader)   w += ` AND ${add('r.team_manager=$$', teamLeader)}`;
 
     // THE ONE canonical shift-category mapping (rules §3, common/shift-category.ts) —
@@ -639,7 +642,7 @@ export class ReconController {
     const p: any[] = [t, dFrom, dTo];
     let wBase = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
     const add = (cond: string, val: any) => { p.push(val); return cond.replace('$$', `$${p.length}`); };
-    if (functionName) wBase += ` AND ${add('COALESCE(role_function,function_name)=$$', functionName)}`;
+    if (functionName) wBase += ` AND ${add('canon_fn(COALESCE(role_function,function_name))=canon_fn($$)', functionName)}`;
     if (teamLeader)   wBase += ` AND ${add('team_manager=$$', teamLeader)}`;
     // AGENT-level mode (Director 2026-07-02): same hourly cascade but for one person —
     // agent = person_no or a name fragment; level=agent groups rows per agent name.
@@ -662,7 +665,7 @@ export class ReconController {
     const wR = `${wBase} AND (shift_start_min IS NOT NULL OR (presence IN ('sick','absent','leave') AND (${stdStart}) IS NOT NULL))`;
     const GRP = (level === 'agent' || agent)
       ? `COALESCE(clean_name,name) || ' · ' || COALESCE(person_no,employee_no)`
-      : `COALESCE(role_function,function_name)`;
+      : `canon_fn(COALESCE(role_function,function_name))`;
 
     // a person covers hour h (its [h*60,h*60+60) bucket) if the window [start,start+len)
     // — normalized to minute-of-day, cross-midnight & negative aware — overlaps it. One
@@ -762,7 +765,7 @@ export class ReconController {
     const planGrid = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
       v AS (SELECT DISTINCT ON (se.employee_id, se.entry_date)
-                   se.employee_id, se.entry_date, e.employee_no, COALESCE(f.name,'—') fn,
+                   se.employee_id, se.entry_date, e.employee_no, canon_fn(COALESCE(f.name,'—')) fn,
                    (EXTRACT(HOUR FROM sc.start_time)*60 + EXTRACT(MINUTE FROM sc.start_time))::int ss,
                    (CASE WHEN sc.end_time <= sc.start_time
                          THEN EXTRACT(HOUR FROM sc.end_time)*60 + EXTRACT(MINUTE FROM sc.end_time) + 1440
@@ -966,15 +969,17 @@ export class ReconController {
 
     const fp: any[] = [t, ws, weekEnd];
     let fnFilter = '';
-    if (functionName) { fp.push(functionName); fnFilter = ` AND COALESCE(role_function,function_name)=$${fp.length}`; }
+    if (functionName) { fp.push(functionName); fnFilter = ` AND canon_fn(COALESCE(role_function,function_name))=canon_fn($${fp.length})`; }
     let fnFilterPlan = '';
     let otFnJoin = '', otFnWhere = '';
     if (functionName) {
-      fnFilterPlan = ` AND COALESCE(f.name,'—')=$4`;   // same param slot ($4)
+      // fold interns into the parent on BOTH keys (actuals=role_function, plan=employees.function_id) so
+      // the parent/intern label split can't invent a phantom plan-vs-actual gap (Director headcount rule).
+      fnFilterPlan = ` AND canon_fn(COALESCE(f.name,'—'))=canon_fn($4)`;   // same param slot ($4)
       // finding #6/#8: a function-scoped forecast must NOT add company-wide approved OT — scope the
       // ot CTE to the same function via request_overtimes.function_id.
       otFnJoin = ` LEFT JOIN functions fo ON fo.id = ro.function_id`;
-      otFnWhere = ` AND fo.name = $4`;
+      otFnWhere = ` AND canon_fn(fo.name) = canon_fn($4)`;
     }
 
     const cov = (start: string, len: string) => {
@@ -1055,7 +1060,7 @@ export class ReconController {
     // ── BASELINE: observed avg scheduled HC per hour over the 28 days before the week ──
     // (own param list — must reference EXACTLY the params passed; Postgres rejects extras.)
     const bp: any[] = [t, ws];
-    const fnFilterBase = functionName ? (bp.push(functionName), ` AND COALESCE(role_function,function_name)=$${bp.length}`) : '';
+    const fnFilterBase = functionName ? (bp.push(functionName), ` AND canon_fn(COALESCE(role_function,function_name))=canon_fn($${bp.length})`) : '';
     const baseRows = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
       r AS (SELECT shift_start_min ss, shift_end_min se FROM roster_days
@@ -1162,7 +1167,7 @@ export class ReconController {
     // SUPPLY: avg/day planned HC per (function, hour) from the latest non-archived schedule
     const planRows = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
-      v AS (SELECT DISTINCT ON (se.employee_id, se.entry_date) COALESCE(f.name,'—') fn,
+      v AS (SELECT DISTINCT ON (se.employee_id, se.entry_date) canon_fn(COALESCE(f.name,'—')) fn,
                    (EXTRACT(HOUR FROM sc.start_time)*60+EXTRACT(MINUTE FROM sc.start_time))::int ss, ${SEC}::int se_c
               FROM schedule_entries se
               JOIN schedule_versions sv ON sv.id=se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
@@ -1176,7 +1181,7 @@ export class ReconController {
     // REQUIRED: 28-day observed avg scheduled HC per (function, hour)
     const baseRows = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
-      r AS (SELECT COALESCE(role_function,function_name) fn, shift_start_min ss,
+      r AS (SELECT canon_fn(COALESCE(role_function,function_name)) fn, shift_start_min ss,
                    (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se_c
               FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
                 AND work_date >= ($2::date - 28) AND work_date < $2::date),
@@ -1187,7 +1192,8 @@ export class ReconController {
     const plan: Record<string, number[]> = {}, reqd: Record<string, number[]> = {};
     for (const r of planRows) { (plan[r.fn] = plan[r.fn] || Array(24).fill(0))[r.hour] = r.plan; }
     for (const r of baseRows) { (reqd[r.fn] = reqd[r.fn] || Array(24).fill(0))[r.hour] = r.required; }
-    const fns = [...new Set([...Object.keys(plan), ...Object.keys(reqd)])].filter(f => f && f !== '—' && (!functionName || f === functionName));
+    const fnCanon = functionName ? functionName.replace(/^\s*[Ii]nternship\s+/, '') : functionName;
+    const fns = [...new Set([...Object.keys(plan), ...Object.keys(reqd)])].filter(f => f && f !== '—' && (!fnCanon || f === fnCanon));
     // surplus per hour per function (for cross-skill sourcing) — EXCLUDE supervisory/record-only
     // functions (TL/RTA/Resolution/WFM/Senior): they're never pulled to cover an agent gap.
     const SUPERVISORY = /team leader|\brta\b|resolution specialist|\bwfm\b|senior/i;
@@ -1244,13 +1250,13 @@ export class ReconController {
     const p: any[] = [t, date]; let rows: any[] = [];   // function optional — omit for an all-functions seat list
     if (isActual) {
       let w = `tenant_id=$1 AND is_active AND work_date=$2::date AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`;
-      if (fn) { p.push(fn); w += ` AND COALESCE(role_function,function_name)=$${p.length}`; }
+      if (fn) { p.push(fn); w += ` AND canon_fn(COALESCE(role_function,function_name))=canon_fn($${p.length})`; }
       rows = await this.ds.query(
         `SELECT person_no, COALESCE(clean_name,name) name, COALESCE(role_function,function_name) fn, shift_code, shift_start_min ss, shift_end_min se, presence
            FROM roster_days WHERE ${w}`, p).catch(() => []);
     } else {
       let w = `se.tenant_id=$1 AND se.entry_date=$2::date AND sc.start_time IS NOT NULL`;
-      if (fn) { p.push(fn); w += ` AND COALESCE(f.name,'—')=$${p.length}`; }
+      if (fn) { p.push(fn); w += ` AND canon_fn(COALESCE(f.name,'—'))=canon_fn($${p.length})`; }
       rows = await this.ds.query(
         `SELECT DISTINCT ON (se.employee_id) e.employee_no person_no,
                 TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) name, COALESCE(f.name,'—') fn, se.shift_code_display shift_code,
@@ -1442,12 +1448,12 @@ export class ReconController {
               FROM schedule_entries se JOIN schedule_versions sv ON sv.id=se.schedule_version_id AND sv.status IN ('draft','generated','reviewed','published')
               JOIN employees e ON e.id=se.employee_id LEFT JOIN functions f ON f.id=e.function_id
               LEFT JOIN shift_codes sc ON sc.tenant_id=se.tenant_id AND sc.code=se.shift_code_display
-             WHERE se.tenant_id=$1 AND se.entry_date=$2::date AND COALESCE(f.name,'—')=$3 AND sc.start_time IS NOT NULL ORDER BY se.employee_id, sv.created_at DESC)
+             WHERE se.tenant_id=$1 AND se.entry_date=$2::date AND canon_fn(COALESCE(f.name,'—'))=canon_fn($3) AND sc.start_time IS NOT NULL ORDER BY se.employee_id, sv.created_at DESC)
       SELECT h.hh AS "hour", COUNT(*) FILTER (WHERE ${covHh('v.ss', 'v.se_c')})::int plan FROM v CROSS JOIN h GROUP BY h.hh`, [t, date, fn]).catch(() => []);
     const baseRows = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
       r AS (SELECT shift_start_min ss, (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se_c
-              FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND COALESCE(role_function,function_name)=$3
+              FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND canon_fn(COALESCE(role_function,function_name))=canon_fn($3)
                 AND work_date >= ($2::date - 28) AND work_date < $2::date),
       d AS (SELECT GREATEST(COUNT(DISTINCT work_date),1) n FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND work_date >= ($2::date - 28) AND work_date < $2::date)
       SELECT h.hh AS "hour", ROUND(COUNT(*) FILTER (WHERE ${covHh('r.ss', 'r.se_c')})::numeric/(SELECT n FROM d),1)::float required FROM r CROSS JOIN h GROUP BY h.hh`, [t, date, fn]).catch(() => []);
@@ -1486,7 +1492,7 @@ export class ReconController {
     const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
     const p: any[] = [t, from || '2000-01-01', to || '2999-12-31'];
     let w = `r.tenant_id=$1 AND ro.ot_date BETWEEN $2 AND $3`;
-    if (fn) { p.push(fn); w += ` AND f.name=$${p.length}`; }
+    if (fn) { p.push(fn); w += ` AND canon_fn(f.name)=canon_fn($${p.length})`; }
     const rows = await this.ds.query(
       `SELECT r.id, r.status, ro.ot_date::text d, to_char(ro.start_time,'HH24:MI') start, to_char(ro.end_time,'HH24:MI') "end",
               ro.duration_minutes requested, f.name function, e.employee_no,
@@ -1524,8 +1530,9 @@ export class ReconController {
     const t = req.user.tenantId;
     const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
     const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
-    let fn = functionName;
-    if (!fn) { const [top] = await this.ds.query(`SELECT COALESCE(role_function,function_name) fn FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1`, [t]); fn = top?.fn; }
+    // function key is CANONICAL (interns fold into their parent team for headcount — Director rule)
+    let fn = functionName ? functionName.replace(/^\s*[Ii]nternship\s+/, '') : functionName;
+    if (!fn) { const [top] = await this.ds.query(`SELECT canon_fn(COALESCE(role_function,function_name)) fn FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1`, [t]); fn = top?.fn; }
     const ws = snapSat(weekStart || (frontier ? (() => { const d = new Date(frontier + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })() : new Date().toISOString().slice(0, 10)));
     const weeks = Math.max(1, Math.min(4, parseInt(weeksQ || '2', 10)));
     const nDays = weeks * 7;
@@ -1536,13 +1543,13 @@ export class ReconController {
     const pool = await this.ds.query(
       `SELECT e.employee_no, TRIM(CONCAT(e.first_name_en,' ',COALESCE(e.last_name_en,''))) name, COALESCE(e.gender,'male') gender
          FROM employees e JOIN functions f ON f.id=e.function_id
-        WHERE e.tenant_id=$1 AND e.status='active' AND f.name=$2 ORDER BY e.employee_no`, [t, fn]).catch(() => []);
+        WHERE e.tenant_id=$1 AND e.status='active' AND canon_fn(f.name)=$2 ORDER BY e.employee_no`, [t, fn]).catch(() => []);
     if (!pool.length) return { weekStart: ws, function: fn, error: 'no active employees for this function', grid: [], coverage: [] };
 
     // demand per band = 28-day observed avg agents/day whose shift START lands in the band window
     const dRows = await this.ds.query(`
       WITH r AS (SELECT shift_start_min ss FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
-                   AND COALESCE(role_function,function_name)=$2 AND work_date >= ($3::date-28) AND work_date < $3::date),
+                   AND canon_fn(COALESCE(role_function,function_name))=$2 AND work_date >= ($3::date-28) AND work_date < $3::date),
       d AS (SELECT GREATEST(COUNT(DISTINCT work_date),1) n FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL AND work_date >= ($3::date-28) AND work_date < $3::date)
       SELECT ROUND(COUNT(*) FILTER (WHERE ss>=300 AND ss<720)::numeric/(SELECT n FROM d),1)::float morning,
              ROUND(COUNT(*) FILTER (WHERE ss>=720 AND ss<1020)::numeric/(SELECT n FROM d),1)::float evening,
@@ -1566,12 +1573,17 @@ export class ReconController {
     // band → concrete shift code (spread within a band across agents for full-width coverage)
     const CODES: any = { morning: ['M', 'B', 'C'], evening: ['N', 'E'], night: ['MD', 'MN'] };
     const males = pool.filter((p: any) => p.gender === 'male'), females = pool.filter((p: any) => p.gender !== 'male');
+    // Each agent STEPS FORWARD one cycle-slot every new week (wk), so week-2 is never a copy of
+    // week-1 — fixes the "static fortnight" (a 7-slot female cycle used to repeat exactly). The
+    // cross-agent phase stagger still delivers each day's band coverage; +wk moves the whole cohort
+    // forward together, so the per-day band histogram is only time-shifted (coverage preserved).
     const assign = (list: any[], cycle: string[]) => list.map((p, i) => {
       const phase = cycle.length ? Math.floor(i * cycle.length / Math.max(1, list.length)) : 0;
       const days = dates.map((_, d) => {
-        const band = cycle[(phase + d) % cycle.length];
+        const wk = Math.floor(d / 7);
+        const band = cycle[(phase + wk + d) % cycle.length];
         if (band === 'OFF') return 'OFF';
-        const codes = CODES[band]; return codes[i % codes.length];
+        const codes = CODES[band]; return codes[(i + wk) % codes.length];   // alternate the concrete code week-to-week too
       });
       return { employeeNo: p.employee_no, name: p.name, gender: p.gender, days };
     });
@@ -1612,14 +1624,14 @@ export class ReconController {
     const t = req.user.tenantId;
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
     const dFrom = from || range?.a, dTo = to || range?.b;
-    // pick the function (busiest if not given)
-    let fn = functionName;
+    // pick the function (busiest if not given); function key is CANONICAL (interns fold to parent)
+    let fn = functionName ? functionName.replace(/^\s*[Ii]nternship\s+/, '') : functionName;
     if (!fn) {
-      const top = await this.ds.query(`SELECT COALESCE(role_function,function_name) fn, COUNT(*) n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND presence IN ('office','wfh') GROUP BY 1 ORDER BY n DESC LIMIT 1`, [t, dFrom, dTo]);
+      const top = await this.ds.query(`SELECT canon_fn(COALESCE(role_function,function_name)) fn, COUNT(*) n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND presence IN ('office','wfh') GROUP BY 1 ORDER BY n DESC LIMIT 1`, [t, dFrom, dTo]);
       fn = top[0]?.fn;
     }
     const p = [t, dFrom, dTo, fn];
-    const w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND COALESCE(role_function,function_name)=$4`;
+    const w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND canon_fn(COALESCE(role_function,function_name))=canon_fn($4)`;
     const cov = (start: string, len: string) => {
       const a0 = `(((${start})%1440+1440)%1440)`, b0 = `(${a0}+(${len}))`;
       return `((${a0} < h.hh*60+60 AND LEAST(${b0},1440) > h.hh*60) OR (${b0}>1440 AND (${b0}-1440) > h.hh*60))`;
@@ -1654,7 +1666,7 @@ export class ReconController {
     const [{ active }] = await this.ds.query(`SELECT COUNT(DISTINCT person_no)::int active FROM roster_days WHERE ${w}`, p);
     const tFn = (m: number) => `${String(Math.floor(((m % 1440) + 1440) % 1440 / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
     const mixRows = Object.entries(mix).map(([code, count]) => { const s = shifts.find((x: any) => x.code === code); return { code, count, start: tFn(s.ss), end: tFn(s.se % 1440) }; }).sort((a, b) => b.count - a.count);
-    const allFns = await this.ds.query(`SELECT DISTINCT COALESCE(role_function,function_name) fn FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND presence IN ('office','wfh') ORDER BY 1`, [t, dFrom, dTo]);
+    const allFns = await this.ds.query(`SELECT DISTINCT canon_fn(COALESCE(role_function,function_name)) fn FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND shift_start_min IS NOT NULL AND presence IN ('office','wfh') ORDER BY 1`, [t, dFrom, dTo]);
     return {
       from: dFrom, to: dTo, function: fn, functions: allFns.map((r: any) => r.fn).filter(Boolean), days,
       // honest disclosure: "demand" here = the CURRENT schedule's hourly headcount (circular),
@@ -1685,7 +1697,7 @@ export class ReconController {
     // active people in the function with gender + historical night/mid load + weekend-off share
     const emps = (await this.ds.query(`
       WITH r AS (SELECT person_no, clean_name, gender, presence, work_date, UPPER(COALESCE(shift_category,shift_code,'')) sc FROM roster_days
-                  WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND COALESCE(role_function,function_name)=$4)
+                  WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND canon_fn(COALESCE(role_function,function_name))=canon_fn($4))
       SELECT person_no, MAX(clean_name) name, MAX(gender) gender,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND sc ~ '^(N|MD|MN)') nm,
@@ -1769,7 +1781,7 @@ export class ReconController {
       const [s] = await this.ds.query(`
         SELECT COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent,
                COUNT(*) FILTER (WHERE presence='leave')::int leave, COUNT(*) FILTER (WHERE presence <> 'off')::int base
-          FROM roster_days WHERE tenant_id=$1 AND COALESCE(role_function,function_name)=$2 AND is_active
+          FROM roster_days WHERE tenant_id=$1 AND canon_fn(COALESCE(role_function,function_name))=canon_fn($2) AND is_active
            AND work_date >= (SELECT MAX(work_date) FROM roster_days WHERE tenant_id=$1) - INTERVAL '27 days'`, [t, fn]);
       shrinkParts = s; shrinkRate = s.base > 0 ? (s.sick + s.absent + s.leave) / s.base : 0;
     } catch { /* projection unavailable → 0, disclosed below */ }
@@ -2353,7 +2365,7 @@ export class ReconController {
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
     const dFrom = from || range?.a, dTo = to || range?.b;
     const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
-    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (fn) { p.push(fn); w += ` AND canon_fn(role_function)=canon_fn($${p.length})`; }
     if (tl) { p.push(tl); w += ` AND team_manager=$${p.length}`; }
     const bucket = interval === 'month' ? 'month_name' : 'week_number';
     const rows = await this.ds.query(
@@ -2366,7 +2378,7 @@ export class ReconController {
          FROM roster_days r WHERE ${w} GROUP BY ${bucket} ORDER BY MIN(work_date)`, p);
     // options for the filters
     const [functions, teamLeaders] = await Promise.all([
-      this.ds.query(`SELECT DISTINCT role_function v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]),
+      this.ds.query(`SELECT DISTINCT canon_fn(role_function) v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]),
       this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]),
     ]);
     const label = (r: any) => interval === 'month' ? r.bucket : `W${r.bucket}`;
@@ -2478,11 +2490,11 @@ export class ReconController {
 
     // 4) coverage-risk functions — high sick+absent share of planned-working
     const cov = await this.ds.query(
-      `SELECT role_function fn,
+      `SELECT canon_fn(role_function) fn,
               COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent')) planned,
               COUNT(*) FILTER (WHERE presence IN ('sick','absent')) lost
          FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND role_function IS NOT NULL
-         GROUP BY role_function HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent'))>=20
+         GROUP BY canon_fn(role_function) HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent'))>=20
          AND COUNT(*) FILTER (WHERE presence IN ('sick','absent'))::float / NULLIF(COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent')),0) > 0.12
          ORDER BY COUNT(*) FILTER (WHERE presence IN ('sick','absent'))::float / NULLIF(COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence IN ('sick','absent')),0) DESC LIMIT 4`, [t, dFrom, dTo]);
     for (const r of cov) push('warning', 'coverage', `${r.fn}: ${Math.round(100 * r.lost / r.planned)}% of planned days lost to sick/absent`, `${r.lost} of ${r.planned} planned days`, '/interval-headcount');
@@ -3094,7 +3106,7 @@ export class ReconController {
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
     const dFrom = from || range?.a, dTo = to || range?.b;
     const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
-    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (fn) { p.push(fn); w += ` AND canon_fn(role_function)=canon_fn($${p.length})`; }
     if (tl) { p.push(tl); w += ` AND team_manager=$${p.length}`; }
 
     // Tardiness plausibility cap (240 min). Cross-midnight night shifts (MD/MN/MNR,
@@ -3131,14 +3143,14 @@ export class ReconController {
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int perms
         FROM roster_days WHERE ${w} GROUP BY person_no ORDER BY "otMin" DESC`, p);
     const byFn = await this.ds.query(`
-      SELECT role_function fn, COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min),0)::int "otMin",
+      SELECT canon_fn(role_function) fn, COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min),0)::int "otMin",
              COALESCE(SUM(holiday_ot_min),0)::int "holOtMin", COALESCE(SUM(offday_ot_min),0)::int "offOtMin",
              COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays",
              COUNT(DISTINCT person_no)::int people,
              COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL)::int "lateDays",
              COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL)::int "earlyDays",
              COUNT(*) FILTER (WHERE presence='absent')::int "absentDays", COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int perms
-        FROM roster_days WHERE ${w} GROUP BY role_function ORDER BY "otMin" DESC`, p);
+        FROM roster_days WHERE ${w} GROUP BY canon_fn(role_function) ORDER BY "otMin" DESC`, p);
     const permByType = await this.ds.query(`SELECT permission_type k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY permission_type ORDER BY n DESC`, p);
     const permByShift = await this.ds.query(`SELECT COALESCE(shift_code,'—') k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY shift_code ORDER BY n DESC LIMIT 12`, p);
     const permByDate = await this.ds.query(`SELECT work_date::text k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY work_date ORDER BY n DESC LIMIT 12`, p);
@@ -3146,7 +3158,7 @@ export class ReconController {
     // permission hours (parse the TEXT time-window)
     const perms = await this.ds.query(`SELECT permission_duration d FROM roster_days WHERE ${w} AND permission_type IS NOT NULL AND permission_duration IS NOT NULL`, p);
     const permMin = perms.reduce((a: number, r: any) => a + this.parsePermMin(r.d), 0);
-    const fnOpts = await this.ds.query(`SELECT DISTINCT role_function v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]);
+    const fnOpts = await this.ds.query(`SELECT DISTINCT canon_fn(role_function) v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]);
     const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);
 
     const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -3233,7 +3245,7 @@ export class ReconController {
     const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
     const dFrom = from || range?.a, dTo = to || range?.b;
     const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
-    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (fn) { p.push(fn); w += ` AND canon_fn(role_function)=canon_fn($${p.length})`; }
     if (tl) { p.push(tl); w += ` AND team_manager=$${p.length}`; }
 
     const [s] = await this.ds.query(`
@@ -3255,15 +3267,15 @@ export class ReconController {
     const shiftRate: Record<string, number> = { Morning: 0, Night: 0, Evening: 0, Midnight: 0, Other: 0 };
     for (const c of cats) shiftRate[c.cat] = c.n;
     const byFn = await this.ds.query(`
-      SELECT role_function fn, COUNT(*)::int scheduled,
+      SELECT canon_fn(role_function) fn, COUNT(*)::int scheduled,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              COUNT(*) FILTER (WHERE presence='off')::int "off",
              COUNT(*) FILTER (WHERE presence IN ('leave','sick','absent','holiday'))::int lost,
              COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5))::int "weekendOff",
              COUNT(DISTINCT person_no)::int people
-        FROM roster_days WHERE ${w} GROUP BY role_function ORDER BY scheduled DESC`, p);
+        FROM roster_days WHERE ${w} GROUP BY canon_fn(role_function) ORDER BY scheduled DESC`, p);
     const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);
-    const fnOpts = await this.ds.query(`SELECT DISTINCT role_function v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]);
+    const fnOpts = await this.ds.query(`SELECT DISTINCT canon_fn(role_function) v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]);
 
     // hourly scheduled headcount (avg concurrent by clock-hour, cross-midnight aware)
     const shifts = await this.ds.query(`SELECT shift_start_min ss, shift_end_min se FROM roster_days WHERE ${w} AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL AND shift_end_min IS NOT NULL`, p);
@@ -3321,9 +3333,9 @@ export class ReconController {
     const prev = new Date(d + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1); const dPrev = prev.toISOString().slice(0, 10);
     const stepMin = Math.max(15, Math.min(60, Number(step) || 30));
     const p: any[] = [t, dPrev, d]; let w = `tenant_id=$1 AND work_date IN ($2,$3) AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL`;
-    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (fn) { p.push(fn); w += ` AND canon_fn(role_function)=canon_fn($${p.length})`; }
     const rows = await this.ds.query(
-      `SELECT work_date::text d, role_function fn, is_active, shift_start_min ss,
+      `SELECT work_date::text d, canon_fn(role_function) fn, is_active, shift_start_min ss,
               (CASE WHEN shift_end_min<=shift_start_min THEN shift_end_min+1440 ELSE shift_end_min END) se,
               sys_login_min li, sys_logout_min lo FROM roster_days WHERE ${w} AND is_active`, p);
 
@@ -3376,9 +3388,9 @@ export class ReconController {
        GROUP BY work_date HAVING COUNT(*) > 20 ORDER BY work_date DESC LIMIT 1`, [t]))[0]?.b
       || (await this.ds.query(`SELECT MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0]?.b;
     const p: any[] = [t, d]; let w = `tenant_id=$1 AND work_date=$2 AND is_active`;
-    if (fn) { p.push(fn); w += ` AND role_function=$${p.length}`; }
+    if (fn) { p.push(fn); w += ` AND canon_fn(role_function)=canon_fn($${p.length})`; }
     const rows = await this.ds.query(`
-      SELECT role_function fn,
+      SELECT canon_fn(role_function) fn,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh') OR presence='sick' OR presence='absent')::int planned,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              COUNT(*) FILTER (WHERE presence='office')::int office,
@@ -3389,7 +3401,7 @@ export class ReconController {
              COUNT(*) FILTER (WHERE presence='absent')::int absent,
              COUNT(*) FILTER (WHERE presence='leave')::int leave,
              COUNT(*) FILTER (WHERE presence='off')::int off
-        FROM roster_days r WHERE ${w} GROUP BY role_function ORDER BY planned DESC NULLS LAST`, p);
+        FROM roster_days r WHERE ${w} GROUP BY canon_fn(role_function) ORDER BY planned DESC NULLS LAST`, p);
     const out = rows.filter((r: any) => r.fn).map((r: any) => {
       const lost = r.sick + r.absent;                      // rostered but didn't work
       const noShow = Math.max(0, r.worked - r.present);    // worked-roster but no system login
@@ -3437,7 +3449,7 @@ export class ReconController {
   private async coverageByShift(t: string, fn: string, date: string): Promise<Record<string, number>> {
     const rows = await this.ds.query(
       `SELECT shift_code, COUNT(DISTINCT person_no)::int n FROM roster_days
-         WHERE tenant_id=$1 AND role_function=$2 AND work_date=$3 AND is_active AND presence IN ('office','wfh') GROUP BY shift_code`, [t, fn, date]);
+         WHERE tenant_id=$1 AND canon_fn(role_function)=canon_fn($2) AND work_date=$3 AND is_active AND presence IN ('office','wfh') GROUP BY shift_code`, [t, fn, date]);
     const out: Record<string, number> = {}; for (const r of rows) out[r.shift_code || '—'] = r.n; return out;
   }
   /** Manual-edit validation for change/swap (rule 6.4 female shifts + rule 6.6 ≥10h rest,
@@ -3647,11 +3659,11 @@ export class ReconController {
              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`, [t, dFrom, dTo]);
     const byFn = await this.ds.query(`
-      SELECT role_function fn, COUNT(DISTINCT person_no)::int agents, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+      SELECT canon_fn(role_function) fn, COUNT(DISTINCT person_no)::int agents, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance, COUNT(*) FILTER (WHERE ${CRED_LATE})::int latedays,
              COALESCE(SUM(${TRUE_OT}),0)::int otmin, COUNT(*) FILTER (WHERE presence='sick')::int sick, COUNT(*) FILTER (WHERE presence='absent')::int absent
         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND role_function IS NOT NULL
-        GROUP BY role_function ORDER BY agents DESC`, [t, dFrom, dTo]);
+        GROUP BY canon_fn(role_function) ORDER BY agents DESC`, [t, dFrom, dTo]);
 
     const wb = new ExcelJS.Workbook(); wb.creator = 'WFM System';
     const hrs = (m: number) => Math.round((m || 0) / 60);

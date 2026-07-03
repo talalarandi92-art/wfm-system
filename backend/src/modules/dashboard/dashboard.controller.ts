@@ -95,14 +95,14 @@ export class DashboardController {
              (SELECT MAX(attendance_date) FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE)
            ) AS d
          )
-         SELECT f.name AS function_name,
+         SELECT canon_fn(f.name) AS function_name,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'present') AS present,
            COUNT(*) AS scheduled
          FROM attendance_records ar
          JOIN employees e ON e.id = ar.employee_id
          JOIN functions f ON f.id = e.function_id
          WHERE ar.tenant_id = $1 AND ar.attendance_date = (SELECT d FROM ref)
-         GROUP BY f.name
+         GROUP BY canon_fn(f.name)
          ORDER BY present DESC
          LIMIT 8`, [tid],
       ),

@@ -46,12 +46,15 @@ export class CoverageController {
     ).catch(() => [{ d: null }]);
     const date = dateQ ?? ld?.d ?? new Date().toISOString().slice(0, 10);
 
-    const fnFilter = functionId ? 'AND e.function_id = $3' : '';
+    // Intern functions fold into their parent team's headcount (canon_fn strips the
+    // "Internship " prefix). functionId is a function UUID (from the picker) — resolve it to
+    // its canonical name so picking the parent OR an intern returns the whole folded team.
+    const fnFilter = functionId ? 'AND canon_fn(f.name) = canon_fn((SELECT name FROM functions WHERE id = $3))' : '';
     const baseParams: any[] = functionId ? [tid, date, functionId] : [tid, date];
 
     // ── Target-date roster (scheduled shifts + attendance markers) ──────────
     const roster = await this.ds.query(
-      `SELECT e.function_id, COALESCE(f.name,'—') AS function_name,
+      `SELECT canon_fn(f.name) AS function_key, canon_fn(COALESCE(f.name,'—')) AS function_name,
               to_char(ar.scheduled_start,'HH24:MI') AS ss,
               to_char(ar.scheduled_end,'HH24:MI')   AS se,
               ar.attendance_marker AS marker,
@@ -66,24 +69,30 @@ export class CoverageController {
     ).catch(() => []);
 
     // ── Permissions overlapping the date (approved erode availability; pending = at-risk) ──
+    // Key by canon_fn(name) so it aligns with the roster map (interns fold into parent).
+    // Resolve the name from the permission's own function, else the employee's function.
     const perms = await this.ds.query(
-      `SELECT COALESCE(rp.function_id, e.function_id) AS function_id,
+      `SELECT canon_fn(COALESCE(pf.name, ef.name)) AS function_key,
               to_char(rp.start_time,'HH24:MI') AS ss, to_char(rp.end_time,'HH24:MI') AS se,
               r.status AS status
          FROM request_permissions rp
          JOIN requests r ON r.id = rp.request_id
          LEFT JOIN employees e ON e.id = r.employee_id
+         LEFT JOIN functions pf ON pf.id = rp.function_id
+         LEFT JOIN functions ef ON ef.id = e.function_id
         WHERE r.tenant_id = $1 AND rp.permission_date = $2::date
           AND r.status IN ('approved','pending')`,
       [tid, date],
     ).catch(() => []);
 
     // ── Required from history: same weekday, prior 6 occurrences ────────────
+    // Key by canon_fn(name) to match the roster/perm maps (interns fold into parent).
     const hist = await this.ds.query(
-      `SELECT e.function_id, ar.attendance_date::text AS d,
+      `SELECT canon_fn(f.name) AS function_key, ar.attendance_date::text AS d,
               to_char(ar.scheduled_start,'HH24:MI') AS ss, to_char(ar.scheduled_end,'HH24:MI') AS se
          FROM attendance_records ar
          JOIN employees e ON e.id = ar.employee_id
+         LEFT JOIN functions f ON f.id = e.function_id
         WHERE ar.tenant_id = $1
           AND ar.scheduled_start IS NOT NULL
           AND ar.attendance_marker = 'present'
@@ -114,7 +123,7 @@ export class CoverageController {
     };
 
     for (const r of roster) {
-      const a = getFn(r.function_id ?? 'none', r.function_name);
+      const a = getFn(r.function_key ?? 'none', r.function_name);
       const hrs = this.hoursCovered(r.ss, r.se);
       for (const h of hrs) {
         a.scheduled[h]++;
@@ -147,7 +156,7 @@ export class CoverageController {
       }
     }
     for (const p of perms) {
-      const id = p.function_id ?? 'none';
+      const id = p.function_key ?? 'none';
       const a = fns.get(id); if (!a) continue;
       // APPROVED permissions actually erode availability; PENDING ones are only at-risk
       // (they must NOT be subtracted as if already approved — the approver decides).
@@ -158,7 +167,7 @@ export class CoverageController {
     // Required = average present-roster per hour across the historical same-weekdays
     const histByFn = new Map<string, { perDate: Map<string, number[]> }>();
     for (const r of hist) {
-      const id = r.function_id ?? 'none';
+      const id = r.function_key ?? 'none';
       if (!histByFn.has(id)) histByFn.set(id, { perDate: new Map() });
       const hb = histByFn.get(id)!;
       if (!hb.perDate.has(r.d)) hb.perDate.set(r.d, Array(24).fill(0));

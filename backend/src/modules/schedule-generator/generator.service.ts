@@ -242,7 +242,7 @@ export class GeneratorService {
   ) {
     const base = await this.ds.query(`
       WITH h AS (SELECT generate_series(0,23) hh),
-      r AS (SELECT COALESCE(role_function,function_name) fn, shift_start_min ss, shift_end_min se
+      r AS (SELECT canon_fn(COALESCE(role_function,function_name)) fn, shift_start_min ss, shift_end_min se
               FROM roster_days
              WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
                AND work_date >= ($2::date - interval '28 days') AND work_date < $2::date),
@@ -422,13 +422,16 @@ export class GeneratorService {
     let whereExtra = '';
     const params: any[] = [tenantId];
     if (functionIds && functionIds.length > 0) {
-      whereExtra = ` AND e.function_id = ANY($2::uuid[])`;
+      // Interns fold into their parent team (Director rule): generating for a parent function
+      // pulls in every function whose canonical name matches (e.g. "Internship CH - WA" → "CH - WA"),
+      // so the whole team is scheduled together instead of the parent's own employees only.
+      whereExtra = ` AND canon_fn(f.name) = ANY(ARRAY(SELECT canon_fn(name) FROM functions WHERE id = ANY($2::uuid[])))`;
       params.push(functionIds);
     }
 
     const rows = await this.ds.query(
       `SELECT e.id, e.employee_no, e.first_name_en, e.last_name_en,
-              e.gender, e.employment_type, f.id AS fn_id, f.name AS fn_name
+              e.gender, e.employment_type, f.id AS fn_id, f.name AS fn_name, canon_fn(f.name) AS fn_canon
        FROM employees e
        LEFT JOIN functions f ON e.function_id = f.id
        WHERE e.tenant_id = $1 AND e.status = 'active'${whereExtra}
@@ -436,12 +439,13 @@ export class GeneratorService {
       params,
     );
 
-    // Group by function
+    // Group by CANONICAL function so interns merge into their parent team's schedulable pool
+    // (id here is an in-memory grouping/merge key only — schedule_entries key on employee_id).
     const fnMap = new Map<string, { id: string; name: string; employees: EmployeeInfo[] }>();
     for (const r of rows) {
-      const fnKey = r.fn_id ?? 'no-function';
+      const fnKey = r.fn_canon ?? r.fn_id ?? 'no-function';
       if (!fnMap.has(fnKey)) {
-        fnMap.set(fnKey, { id: fnKey, name: r.fn_name ?? 'بدون قسم', employees: [] });
+        fnMap.set(fnKey, { id: fnKey, name: r.fn_canon ?? r.fn_name ?? 'بدون قسم', employees: [] });
       }
       fnMap.get(fnKey)!.employees.push({
         id:              r.id,
@@ -1217,14 +1221,24 @@ export class GeneratorService {
 
   // ── Functions list ─────────────────────────────────────────────────────────
   async getFunctions(tenantId: string) {
+    // Interns fold into their parent team (canon_fn strips a leading "Internship "):
+    // per-function counts are computed first, then summed under canon_fn so a parent
+    // shows its combined headcount and interns no longer appear as separate options.
     return this.ds.query(
-      `SELECT f.id, f.name, COUNT(DISTINCT e.id) AS employee_count
-       FROM functions f
-       LEFT JOIN employees e ON e.function_id = f.id AND e.tenant_id = $1 AND e.status = 'active'
-       WHERE f.tenant_id = $1
-       GROUP BY f.id, f.name
-       HAVING COUNT(DISTINCT e.id) > 0
-       ORDER BY COUNT(DISTINCT e.id) DESC`,
+      // representative id = the parent row's id (the one whose own name is already canonical);
+      // Postgres has no min(uuid), so pick via array_agg ordered parent-first.
+      `SELECT (array_agg(pf.id ORDER BY (canon_fn(pf.name) = pf.name) DESC, pf.name))[1] AS id,
+              canon_fn(pf.name) AS name, SUM(pf.employee_count) AS employee_count
+       FROM (
+         SELECT f.id, f.name, COUNT(DISTINCT e.id) AS employee_count
+         FROM functions f
+         LEFT JOIN employees e ON e.function_id = f.id AND e.tenant_id = $1 AND e.status = 'active'
+         WHERE f.tenant_id = $1
+         GROUP BY f.id, f.name
+       ) pf
+       GROUP BY canon_fn(pf.name)
+       HAVING SUM(pf.employee_count) > 0
+       ORDER BY SUM(pf.employee_count) DESC`,
       [tenantId],
     );
   }

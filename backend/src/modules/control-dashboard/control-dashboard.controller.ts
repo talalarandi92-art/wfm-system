@@ -88,7 +88,7 @@ export class ControlDashboardController {
     ).catch(() => []);
 
     const byFunction = await this.ds.query(
-      `SELECT COALESCE(f.name,'—') AS name,
+      `SELECT canon_fn(COALESCE(f.name,'—')) AS name,
               COUNT(*) FILTER (WHERE ar.punch_late_minutes > 0) AS late,
               COUNT(*) FILTER (WHERE ar.attendance_marker = 'absent') AS absent,
               COUNT(*) FILTER (WHERE ar.attendance_marker = 'present') AS present
@@ -96,7 +96,7 @@ export class ControlDashboardController {
        JOIN employees e ON e.id = ar.employee_id
        LEFT JOIN functions f ON f.id = e.function_id
        WHERE ar.tenant_id = $1 AND ar.attendance_date = $2::date
-       GROUP BY f.name ORDER BY late DESC, absent DESC LIMIT 10`, [tid, latest],
+       GROUP BY canon_fn(COALESCE(f.name,'—')) ORDER BY late DESC, absent DESC LIMIT 10`, [tid, latest],
     ).catch(() => []);
 
     const num = (v: any) => parseInt(v ?? 0, 10) || 0;

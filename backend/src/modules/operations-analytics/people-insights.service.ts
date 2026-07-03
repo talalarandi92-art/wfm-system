@@ -156,7 +156,7 @@ export class PeopleInsightsService {
     const w = await this.window(tenantId, from, to);
     const rows = await this.ds.query(`
       WITH ${this.cteBlock()}
-      SELECT COALESCE(f.name,'(none)') AS function_name,
+      SELECT canon_fn(COALESCE(f.name,'(none)')) AS function_name,
              COUNT(DISTINCT e.id)::int AS employees,
              SUM(COALESCE(att.working_days,0))::int AS working_days,
              SUM(COALESCE(att.sick_days,0))::int    AS sick_days,
@@ -177,7 +177,7 @@ export class PeopleInsightsService {
         LEFT JOIN sc   ON sc.employee_no=e.employee_no
         LEFT JOIN fcr  ON fcr.employee_id=e.id
        WHERE e.tenant_id=$1
-       GROUP BY f.name
+       GROUP BY canon_fn(COALESCE(f.name,'(none)'))
        ORDER BY employees DESC
     `, [tenantId, w.from, w.to]);
     return { from: w.from, to: w.to, functions: rows };
