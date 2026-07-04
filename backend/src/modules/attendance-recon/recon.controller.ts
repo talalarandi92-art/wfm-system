@@ -1613,6 +1613,64 @@ export class ReconController {
     };
   }
 
+  /** SCHEDULE-GAP BACKFILL (read-only review; from the 2026-07-04 training). Person-days that carry
+   *  NO scheduled shift (OFF / unknown window) yet have a SYSTEM login → the person likely WORKED.
+   *  Propose the most-likely shift by nearest canonical START to the login (the login-only method
+   *  that won the training: ~77% window-accurate; logout ignored because ~17% of sessions bleed).
+   *  NEVER writes; NEVER overrides an explicit shift. Early logins (<05:00) are flagged as a possible
+   *  previous-day cross-midnight TAIL rather than a real new shift. */
+  @Get('roster-v2/gap-backfill')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Propose the likely shift for person-days with system login but no scheduled shift (flagged, read-only)' })
+  async gapBackfill(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string, @Query('function') functionName?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || (range?.b ? `${range.b.slice(0, 7)}-01` : range?.a), dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo];
+    let fnW = '';
+    if (functionName) { p.push(functionName); fnW = ` AND canon_fn(COALESCE(role_function,function_name))=canon_fn($${p.length})`; }
+    // rows with system evidence but no scheduled window (OFF or unknown). Skip legit non-work markers.
+    const rows = await this.ds.query(
+      `SELECT person_no, COALESCE(clean_name,name) name, canon_fn(COALESCE(role_function,function_name)) fn,
+              work_date::text date, shift_code, presence, gender,
+              sys_login_min li, sys_logout_min lo
+         FROM roster_days
+        WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3
+          AND shift_start_min IS NULL AND sys_login_min IS NOT NULL
+          AND COALESCE(presence,'') NOT IN ('sick','leave','absent')${fnW}
+        ORDER BY work_date DESC, name`, p).catch(() => []);
+    // canonical starts (BR-SHF-005), window-deduped — nearest START to the login wins.
+    const START: Record<string, number> = { M: 420, B: 540, C: 660, N: 780, E: 960, EE: 1080, MD: 1320, MN: 1380, AM: 420, M20: 480, B20: 600, N20: 840 };
+    const codes = Object.entries(START);
+    const nearest = (login: number) => {
+      let best = 'M', bd = 1e9;
+      for (const [code, ss] of codes) { const d = Math.min(Math.abs(ss - login), Math.abs(ss - login - 1440), Math.abs(ss - login + 1440)); if (d < bd) { bd = d; best = code; } }
+      return { code: best, off: bd };
+    };
+    const proposals = rows.map((r: any) => {
+      const li = r.li as number;
+      const { code, off } = nearest(li);
+      // females never propose MD/MN (BR-GEN); fall back to the nearest allowed instead.
+      const female = String(r.gender || '').toLowerCase().startsWith('f');
+      let proposed = code;
+      if (female && (code === 'MD' || code === 'MN')) proposed = li < 300 || li >= 1320 ? 'N' : code;
+      const tail = li < 300;   // logged in after midnight → could be yesterday's cross-midnight tail
+      const confidence = tail ? 'low' : off <= 45 ? 'high' : off <= 120 ? 'medium' : 'low';
+      return { personNo: r.person_no, name: r.name, function: r.fn, date: r.date,
+        currentCode: r.shift_code || 'OFF', proposedCode: proposed,
+        loginMinutes: li, login: `${String(Math.floor(li / 60)).padStart(2, '0')}:${String(li % 60).padStart(2, '0')}`,
+        startGapMin: off, confidence,
+        note: tail ? 'login after midnight — may be the previous day\'s cross-midnight shift tail, not a new shift' :
+          (r.currentCode === 'OFF' || r.shift_code === 'OFF') ? 'marked OFF but has a system login — likely worked (OFF-day work / schedule error)' : 'no scheduled window but has a system login' };
+    });
+    const byConf = { high: 0, medium: 0, low: 0 } as any;
+    proposals.forEach((x: any) => byConf[x.confidence]++);
+    return { from: dFrom, to: dTo, function: functionName || null, total: proposals.length,
+      byConfidence: byConf,
+      method: 'nearest canonical shift-start to the system login (login-only; logout ignored — bleed). Read-only proposal — never overrides an explicit shift.',
+      proposals };
+  }
+
   /** DEMAND-DRIVEN shift-mix generator over the canonical roster (roster_days): measure the
    *  hourly need per function, then greedy set-cover the standard shift windows (real start/end
    *  taken from the data) to cover every hour — and check we have enough active staff. The
