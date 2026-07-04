@@ -118,8 +118,15 @@ export class AnalystService {
 
   // ── Coverage / capacity decision per function ───────────────────────────────
   private async assessCoverage(tid: string, date: string, surplusSafe: number) {
+    // Interns fold into their parent team for coverage (canon_fn). We group by the CANONICAL name,
+    // but the analyst_recommendations.function_id column is a UUID FK → resolve each canonical group
+    // to a representative parent function UUID (the row whose own name is already canonical).
+    const parentRows = await this.ds.query(
+      `SELECT canon_fn(name) ck, (array_agg(id ORDER BY (canon_fn(name)=name) DESC, name))[1] pid
+         FROM functions WHERE tenant_id=$1 AND canon_fn(name) IS NOT NULL GROUP BY canon_fn(name)`, [tid]).catch(() => []);
+    const canonToParentId = new Map<string, string>(parentRows.map((r: any) => [r.ck, r.pid]));
     const roster = await this.ds.query(
-      `SELECT e.function_id, COALESCE(f.name,'—') fn,
+      `SELECT canon_fn(COALESCE(f.name,'—')) fk, canon_fn(COALESCE(f.name,'—')) fn,
               to_char(ar.scheduled_start,'HH24:MI') ss, to_char(ar.scheduled_end,'HH24:MI') se,
               ar.attendance_marker marker,
               ar.punch_late_minutes late, ar.punch_early_out_minutes early, ar.ot_minutes ot
@@ -129,29 +136,32 @@ export class AnalystService {
           AND ar.scheduled_start IS NOT NULL
           AND ar.attendance_marker IN ('present','absent','sick')`, [tid, date]).catch(() => []);
     const perms = await this.ds.query(
-      `SELECT COALESCE(rp.function_id, e.function_id) function_id,
+      `SELECT canon_fn(COALESCE(pf.name, ef.name)) fk,
               to_char(rp.start_time,'HH24:MI') ss, to_char(rp.end_time,'HH24:MI') se
          FROM request_permissions rp JOIN requests r ON r.id = rp.request_id
          LEFT JOIN employees e ON e.id = r.employee_id
+         LEFT JOIN functions pf ON pf.id = rp.function_id
+         LEFT JOIN functions ef ON ef.id = e.function_id
         WHERE r.tenant_id = $1 AND rp.permission_date = $2::date AND r.status IN ('approved','pending')`,
       [tid, date]).catch(() => []);
     const hist = await this.ds.query(
-      `SELECT e.function_id, ar.attendance_date::text d,
+      `SELECT canon_fn(f.name) fk, ar.attendance_date::text d,
               to_char(ar.scheduled_start,'HH24:MI') ss, to_char(ar.scheduled_end,'HH24:MI') se
          FROM attendance_records ar JOIN employees e ON e.id = ar.employee_id
+         LEFT JOIN functions f ON f.id = e.function_id
         WHERE ar.tenant_id = $1 AND ar.scheduled_start IS NOT NULL AND ar.attendance_marker = 'present'
           AND ar.attendance_date < $2::date
           AND EXTRACT(DOW FROM ar.attendance_date) = EXTRACT(DOW FROM $2::date)
           AND ar.attendance_date >= $2::date - INTERVAL '7 weeks'`, [tid, date]).catch(() => []);
 
-    type Agg = { id: string; name: string; sched: number[]; down: number[]; reqSum: number[]; dates: Set<string> };
+    type Agg = { id: string; fid: string | null; name: string; sched: number[]; down: number[]; reqSum: number[]; dates: Set<string> };
     const fns = new Map<string, Agg>();
     const get = (id: string, name: string) => {
-      if (!fns.has(id)) fns.set(id, { id, name, sched: Array(24).fill(0), down: Array(24).fill(0), reqSum: Array(24).fill(0), dates: new Set() });
+      if (!fns.has(id)) fns.set(id, { id, fid: canonToParentId.get(id) ?? null, name, sched: Array(24).fill(0), down: Array(24).fill(0), reqSum: Array(24).fill(0), dates: new Set() });
       return fns.get(id)!;
     };
     for (const r of roster) {
-      const a = get(r.function_id ?? 'none', r.fn);
+      const a = get(r.fk ?? 'none', r.fn);
       const hrs = this.hoursCovered(r.ss, r.se);
       for (const h of hrs) {
         a.sched[h]++;
@@ -164,10 +174,10 @@ export class AnalystService {
         for (let i = 0; i < ne; i++) a.down[hrs[hrs.length - 1 - i]]++;
       }
     }
-    for (const p of perms) { const a = fns.get(p.function_id ?? 'none'); if (a) for (const h of this.hoursCovered(p.ss, p.se)) a.down[h]++; }
+    for (const p of perms) { const a = fns.get(p.fk ?? 'none'); if (a) for (const h of this.hoursCovered(p.ss, p.se)) a.down[h]++; }
     const hb = new Map<string, Map<string, number[]>>();
     for (const r of hist) {
-      const id = r.function_id ?? 'none';
+      const id = r.fk ?? 'none';
       if (!hb.has(id)) hb.set(id, new Map());
       const m = hb.get(id)!; if (!m.has(r.d)) m.set(r.d, Array(24).fill(0));
       for (const h of this.hoursCovered(r.ss, r.se)) m.get(r.d)![h]++;
@@ -213,8 +223,8 @@ export class AnalystService {
         recommendationEn += ` ⚠ Hours with no coverage at all: ${hrsList}.`;
       }
 
-      functions.push({ functionId: a.id, functionName: a.name, verdict, bottleneck, uncovered: uncovered.map(x => x.hour), hours: opHours });
-      recs.push({ area: 'coverage', functionId: a.id === 'none' ? null : a.id, functionName: a.name, severity, verdict, title: `التغطية — ${a.name}`, titleEn: `Coverage — ${a.name}`, summary, summaryEn, recommendation, recommendationEn, metrics: { bottleneckHour: bottleneck.hour, bottleneckGap: bottleneck.gap, required: bottleneck.required, available: bottleneck.available, uncovered: uncovered.map(x => x.hour) } });
+      functions.push({ functionId: a.fid, functionName: a.name, verdict, bottleneck, uncovered: uncovered.map(x => x.hour), hours: opHours });
+      recs.push({ area: 'coverage', functionId: a.fid, functionName: a.name, severity, verdict, title: `التغطية — ${a.name}`, titleEn: `Coverage — ${a.name}`, summary, summaryEn, recommendation, recommendationEn, metrics: { bottleneckHour: bottleneck.hour, bottleneckGap: bottleneck.gap, required: bottleneck.required, available: bottleneck.available, uncovered: uncovered.map(x => x.hour) } });
     }
     functions.sort((a, b) => ({ danger: 0, caution: 1, approve: 2 } as any)[a.verdict] - ({ danger: 0, caution: 1, approve: 2 } as any)[b.verdict]);
     const severity: Severity = functions.some(f => f.verdict === 'danger') ? 'risk' : functions.some(f => f.verdict === 'caution') ? 'caution' : 'ok';

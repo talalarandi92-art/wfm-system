@@ -22,6 +22,8 @@ export default function GapReviewPage() {
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
   const [fnList, setFnList] = useState<string[]>([]);
   const [q, setQ] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [applied, setApplied] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     apiClient.get('/schedule-generator/functions')
@@ -49,6 +51,25 @@ export default function GapReviewPage() {
   }, [d, conf, q]);
 
   const by = d?.byConfidence || { high: 0, medium: 0, low: 0 };
+
+  // Apply a proposal → reuses the audited manual-edit path (validation + schedule_change_log +
+  // before/after impact + roster_days/attendance_records mirror). Only fills a gap (OFF/unknown);
+  // the endpoint keeps the version history. override:true because the Director reviewed this row.
+  const applyOne = async (r: any) => {
+    const key = r.personNo + '|' + r.date;
+    if (!window.confirm(ar
+      ? `تطبيق شفت ${r.proposedCode} لـ${r.name} يوم ${r.date}؟ (بينكتب على الروستر ويتسجّل بالسِّجل)`
+      : `Apply shift ${r.proposedCode} to ${r.name} on ${r.date}? (writes to the roster and is logged)`)) return;
+    setBusy(key);
+    try {
+      await apiClient.post('/attendance-recon/roster-v2/schedule-change', {
+        personNo: r.personNo, date: r.date, newShift: r.proposedCode,
+        reason: 'Gap backfill — system login with no scheduled shift (Gap Review)', override: true,
+      });
+      setApplied(a => ({ ...a, [key]: true }));
+    } catch { window.alert(ar ? 'فشل التطبيق — قد يكون الأسبوع مقفولًا' : 'Apply failed — the week may be locked'); }
+    finally { setBusy(null); }
+  };
 
   const exportCsv = () => {
     const head = ['Person', 'Function', 'Date', 'Current', 'Proposed', 'Login', 'GapMin', 'Confidence', 'Note'];
@@ -101,7 +122,7 @@ export default function GapReviewPage() {
         <div className="rounded-2xl p-1 overflow-auto" style={panel}>
           <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
             <thead><tr style={{ color: 'var(--text-3)' }}>
-              {[ar ? 'الموظف' : 'Agent', ar ? 'القسم' : 'Function', ar ? 'التاريخ' : 'Date', ar ? 'الحالي' : 'Current', ar ? 'المقترح' : 'Proposed', ar ? 'الدخول' : 'Login', ar ? 'الثقة' : 'Confidence', ar ? 'ملاحظة' : 'Note'].map((h, i) => (
+              {[ar ? 'الموظف' : 'Agent', ar ? 'القسم' : 'Function', ar ? 'التاريخ' : 'Date', ar ? 'الحالي' : 'Current', ar ? 'المقترح' : 'Proposed', ar ? 'الدخول' : 'Login', ar ? 'الثقة' : 'Confidence', ar ? 'ملاحظة' : 'Note', ''].map((h, i) => (
                 <th key={i} className="text-start px-2.5 py-2 font-semibold" style={{ borderBottom: '1px solid var(--border)' }}>{h}</th>
               ))}
             </tr></thead>
@@ -117,10 +138,16 @@ export default function GapReviewPage() {
                   <td className="px-2.5 py-2"><span className="px-1.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1" style={{ background: night ? 'rgba(99,102,241,0.16)' : 'rgba(14,165,233,0.16)', color: night ? '#818cf8' : '#0ea5e9' }}>{night ? <Moon size={10} /> : <Sun size={10} />}{r.proposedCode}</span></td>
                   <td className="px-2.5 py-2 whitespace-nowrap tabular-nums" style={{ color: 'var(--text-2)' }}>{r.login}</td>
                   <td className="px-2.5 py-2"><span className="px-1.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1" style={{ background: cf.bg, color: cf.c }}><Ic size={10} />{ar ? cf.ar : cf.en}</span></td>
-                  <td className="px-2.5 py-2" style={{ color: 'var(--text-3)', maxWidth: 320 }}>{r.note}</td>
+                  <td className="px-2.5 py-2" style={{ color: 'var(--text-3)', maxWidth: 300 }}>{r.note}</td>
+                  <td className="px-2.5 py-2">{applied[r.personNo + '|' + r.date]
+                    ? <span className="px-2 py-1 rounded text-[10px] font-bold" style={{ background: 'rgba(34,197,94,0.14)', color: '#22c55e' }}>{ar ? '✓ طُبِّق' : '✓ Applied'}</span>
+                    : <button onClick={() => applyOne(r)} disabled={busy === r.personNo + '|' + r.date}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap disabled:opacity-50"
+                        style={{ background: 'linear-gradient(135deg,#06b6d4,#6366f1)', color: '#fff' }}>
+                        {busy === r.personNo + '|' + r.date ? '…' : (ar ? 'طبّق' : 'Apply')}</button>}</td>
                 </tr>
               ); })}
-              {rows.length === 0 && <tr><td colSpan={8} className="px-2.5 py-8 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'لا ثغرات في هذا النطاق 🎉' : 'No gaps in this range 🎉'}</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={9} className="px-2.5 py-8 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'لا ثغرات في هذا النطاق 🎉' : 'No gaps in this range 🎉'}</td></tr>}
             </tbody>
           </table>
         </div>

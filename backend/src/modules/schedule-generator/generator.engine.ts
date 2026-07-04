@@ -516,6 +516,7 @@ function calcFairness(schedules: EmployeeSchedule[]): FairnessReport {
       return {
         employeeId:      es.employee.id,
         name:            es.employee.name,
+        gender:          es.employee.gender,
         morningPct:      Math.round(((es.ytdDist.morning + es.ytdDist.afternoon) / t) * 100),
         eveningPct:      Math.round((es.ytdDist.evening / t) * 100),
         nightPct:        Math.round((es.ytdDist.night / t) * 100),
@@ -533,9 +534,16 @@ function calcFairness(schedules: EmployeeSchedule[]): FairnessReport {
     return Math.round(arr.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / arr.length);
   };
 
-  const nightVar    = variance(details.map(d => d.nightPct));
+  // HARD-shift (night/midnight) fairness must be measured over the RULE-ELIGIBLE pool only:
+  // females are hard-blocked from midnight (and night is exceptional), so counting their forced 0s
+  // is not "unfairness" — it just mixes two populations the rules require to differ, depressing the
+  // score. Midnight variance over non-females; night variance over non-females + any female who
+  // actually carries night (allowFemaleN case). Morning/weekend stay over everyone.
+  const canMid   = (d: any) => String(d.gender || '').toLowerCase() !== 'female';
+  const canNight = (d: any) => canMid(d) || d.nightPct > 0;
+  const nightVar    = variance(details.filter(canNight).map(d => d.nightPct));
   const morningVar  = variance(details.map(d => d.morningPct));
-  const midnightVar = variance(details.map(d => d.midnightPct));
+  const midnightVar = variance(details.filter(canMid).map(d => d.midnightPct));
   const weekendVar  = variance(details.map(d => d.weekendOffPct));
 
   // Shift fairness: 100 - sqrt of the mean night/midnight variance — the HARD
