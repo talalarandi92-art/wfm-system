@@ -19,11 +19,27 @@ MD 22–07(+1) · MN 23–08(+1)`. **No real shift ends at 21:00.** (User flagge
 
 ## Female shift rule (FINAL — configurable, not hardcoded)
 - Business coverage is highest priority. Females normally up to **C** (end 20:00).
-- **N** only if operationally necessary (`'warn'` tier). **MD/MN blocked.**
-- `allowFemaleN` default **false** → females end by C unless a supervisor enables the late-shift toggle.
-- Per-function exception: `femaleAllowLate: true` (e.g. **Outbound/OMT is all-female to 22:00** → splits B/N).
+- **N** (ends 22:00) only if operationally necessary (`'warn'` tier). **E/EE (end 01:00/02:00) and MD/MN are
+  BLOCKED** — gate by the female-blocked CODE (E/EE/MD/MN), NOT the shift category (the "evening" category
+  collapses to "day", which historically leaked E to females — fixed 2026-07-04 in ladder + generateWeek).
+- `allowFemaleN` default **false** → females end by C. When enabled they may take **N only** (never E).
+- **Females must ROTATE across their allowed set (M/B/C), not freeze on one shift** — a generator that pins a
+  woman to a single code is a BUG (category-only fairness caused it; fixed with code-level fairness + a female
+  rotation guard). Enabling `allowFemaleN` adds N to the rotation.
+- Per-function exception: `femaleAllowLate: true` (e.g. **Outbound/OMT is all-female to 22:00** → splits B/N;
+  Director accepted OMT women landing on B-only as a menu constraint, not a freeze bug).
 - Per-generation runtime exception: `GeneratorOptions.femaleLateFunctionIds[]` (picked at generate time).
 - Manual override allowed but MUST create a visible warning + audit log.
+
+## Intern-fold (Director 2026-07-04) — "Internship X" IS the "X" team for headcount
+- ONE helper **`canon_fn(text)`** (migration 068, strips a leading `Internship `) folds interns into the parent
+  at every headcount / coverage / demand / pool / dropdown site. Per-person identity labels stay RAW;
+  function_id/UUID-FK modeling surfaces (capacity Erlang inputs) stay granular. CH-WA pool 25→38.
+
+## Manual edit / swap on a WORKED day → reset stale metrics
+- `late/early/OT/adherence` in `roster_days` are plain columns computed against the shift window. A manual
+  scheduleChange/scheduleSwap/scheduleRevert on a day with punch/login evidence must `staleMetricReset()` them
+  (NULL/zero) so no report shows a wrong value; recon rebuild recomputes. (publish/approve instead SKIP worked days.)
 
 ## Per-function shift policy (`FUNCTION_SHIFT_POLICY`, substring match, covers Internship variants)
 - **Outbound (OMT)** → only `B, N`. **Refund** → `M B C N E EE` (no MD/MN). Others (Inbound, CH-WA) → 24/7.
