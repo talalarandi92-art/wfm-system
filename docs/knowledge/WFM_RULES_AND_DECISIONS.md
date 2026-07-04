@@ -93,6 +93,12 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
   set as HR confirms (also recognizes `*7` codes M7/B7/C7/N7).
 - **Female agents:** normally up to **C (ends 20:00)**; **N only if operationally necessary** (flag it); **never
   MD/MN (midnight)** unless a logged manual override. Configurable, not hardcoded; flag violations.
+- **Female shift boundary (precise — 2026-07-04): E/EE/MD/MN are BLOCKED for females; N is the only
+  "necessity" exception.** E ends 01:00 and EE ends 02:00 — both past C's 20:00 cap → a female must never be
+  assigned E/EE (a common generator leak: the "evening" category collapses to "day", so gate by the female-blocked
+  CODE, not the category). N (ends 22:00) is the ONLY late shift a female may take, and only under the
+  `allowFemaleN` operational-necessity flag. Every generator (ladder, generateWeek, demand.engine, generator.engine)
+  enforces this; the ladder puts females on N via `allowFemaleN=1` and never E.
 - **Females must ROTATE across their allowed set (M/B/C), not freeze on one shift** (fixed 2026-07-04). The
   "up to C / no midnight" rule restricts the *set*, it does NOT mean one fixed shift. A generator that pins
   women to a single code is a BUG: proven on data (generated women averaged 1.39 distinct shifts / 48-of-75
@@ -139,6 +145,18 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
 - **Schedule states:** Draft → Generated → Reviewed → Published → Locked. A **published schedule is never
   overwritten by Generate.** Manual edits after publish require validation + audit + version history +
   before/after impact (coverage, rest, female rule, shift-rate, HC by interval). Soft-lock = admin-edit-with-audit.
+- **Manual edit/swap on a WORKED day must reset the window-derived metrics (2026-07-04).** `late/early/OT/
+  adherence` in `roster_days` are plain stored columns (no trigger), computed against the shift window. If a
+  manual scheduleChange/scheduleSwap/scheduleRevert changes the window on a day that already has punch/login
+  evidence, those metrics are now WRONG — the write NULLs/zeros them (`staleMetricReset()`) so no report shows a
+  stale value; the next recon rebuild recomputes them. (publishVersion + schedule-changes/approve instead SKIP
+  worked days entirely — `punch_in_min IS NULL AND sys_login_min IS NULL`.) The **Gap Review "Apply"** reuses
+  scheduleChange (override) — safe because it only fills OFF/no-shift days (no prior window metrics to corrupt).
+- **Laddered Rotation (`roster-v2/ladder-generate`):** humane 2-3 day blocks, a rest OFF after each (≤3
+  consecutive working days; ≥2 OFF/week), forward M→E→N, coverage proven per band vs 28-day demand. Females are
+  **day-only** (M/B/C) by default; `allowFemaleN=1` lets them cover evening via **N only** (never E). Male blocks
+  are sized by the RESIDUAL demand after females take morning. Read-only proposal — a coverage gap is SHOWN, never
+  hidden by leaking a blocked shift to a female (§11 "never hide a gap").
 
 ## 11. Data Tables Map (NEVER cross-wire)
 - **`roster_days`** = RICH canonical (person_no/role_function/is_active, built by standalone `import-roster-*.js`
