@@ -90,7 +90,8 @@ export class PeopleInsightsService {
     // reference $2/$3 (from/to) harmlessly so the count query — which reuses this
     // WHERE but not the CTEs — supplies the same param count PG expects.
     let where = `e.tenant_id=$1 AND $2::date IS NOT NULL AND $3::date IS NOT NULL`;
-    if (opts.functionId) { params.push(opts.functionId); where += ` AND e.function_id=$${params.length}`; }
+    // Fold interns into the parent team: picking a parent includes its interns (canon_fn on names).
+    if (opts.functionId) { params.push(opts.functionId); where += ` AND e.function_id IN (SELECT id FROM functions WHERE canon_fn(name)=canon_fn((SELECT name FROM functions WHERE id=$${params.length})))`; }
     if (opts.search) {
       params.push(`%${opts.search.toLowerCase()}%`);
       where += ` AND (lower(e.first_name_en||' '||COALESCE(e.last_name_en,'')) LIKE $${params.length} OR e.employee_no ILIKE $${params.length})`;

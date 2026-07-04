@@ -518,7 +518,12 @@ export class CapacityService {
   /* ── Current HC snapshot (from attendance_records) ───────────────────────── */
   async getCurrentHcOverview(tenantId: string, date: string) {
     const rows = await this.ds.query(
-      `SELECT e.function_id, f.name AS func_name, f.channel_type, f.concurrency,
+      // HC snapshot folds interns into their parent team (canon_fn). Channel/concurrency are shared
+      // across a parent and its interns, so MAX collapses them safely; the representative id is the
+      // parent's (canonical-name row first). The Erlang CALCULATION inputs keep function_id granularity
+      // on purpose (that is where per-function channel config is set).
+      `SELECT (array_agg(e.function_id ORDER BY (canon_fn(f.name)=f.name) DESC))[1] AS function_id,
+              canon_fn(f.name) AS func_name, MAX(f.channel_type::text) AS channel_type, MAX(f.concurrency) AS concurrency,
               COUNT(*) AS scheduled_hc,
               SUM(CASE WHEN ar.is_wfh THEN 1 ELSE 0 END) AS wfh_hc,
               COUNT(*) - SUM(CASE WHEN ar.is_wfh THEN 1 ELSE 0 END) AS office_hc
@@ -529,7 +534,7 @@ export class CapacityService {
          AND ar.attendance_date::date = $2::date
          AND ar.scheduled_start IS NOT NULL
          AND f.is_active = true
-       GROUP BY e.function_id, f.name, f.channel_type, f.concurrency
+       GROUP BY canon_fn(f.name)
        ORDER BY scheduled_hc DESC`,
       [tenantId, date],
     );

@@ -132,7 +132,7 @@ export class RotationService implements OnModuleInit {
        FROM employees e
        LEFT JOIN functions f ON e.function_id = f.id
        WHERE e.tenant_id = $1 AND e.status = 'active'
-         ${functionId ? 'AND e.function_id = $2' : ''}
+         ${functionId ? "AND e.function_id IN (SELECT id FROM functions WHERE canon_fn(name)=canon_fn((SELECT name FROM functions WHERE id=$2)))" : ''}
        ORDER BY f.name, e.first_name_en`,
       functionId ? [tenantId, functionId] : [tenantId],
     );
