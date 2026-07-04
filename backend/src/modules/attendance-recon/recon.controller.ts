@@ -811,8 +811,12 @@ export class ReconController {
     }
     // fold the plan overlay in (function labels come from employees.function — may differ from the
     // roster's per-month role_function; the ALL row is always exact). Skipped in agent mode.
+    // When the caller filtered to one function, restrict the plan to it too (the plan CTE groups
+    // every function, so without this the ALL/plan totals would leak other functions' plan HC).
+    const fnCanon = functionName ? functionName.replace(/^\s*[Ii]nternship\s+/, '') : null;
     if (!agent && level !== 'agent') for (const g of planGrid) {
-      const fn = g.fn || '—'; if (!fnMap[fn]) fnMap[fn] = blank();
+      const fn = g.fn || '—'; if (fnCanon && fn !== fnCanon) continue;
+      if (!fnMap[fn]) fnMap[fn] = blank();
       fnMap[fn][g.hour].plan += g.plan; fnMap[fn][g.hour].plan_after_req += g.plan_after_req;
       all[g.hour].plan += g.plan; all[g.hour].plan_after_req += g.plan_after_req;
     }
