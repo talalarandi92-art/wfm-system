@@ -152,6 +152,13 @@ export function assignRoster(
     employees.map(e => [e.id, priorConsecutive.get(e.id) ?? 0]));
   const weekCount = new Map<string, Record<string, number>>(
     employees.map(e => [e.id, { morning: 0, afternoon: 0, evening: 0, night: 0, midnight: 0 }]));
+  // Specific-CODE counts. Category fairness (morning/night/…) alone CANNOT rotate people across
+  // the shifts WITHIN a category — so an employee locked to one category (e.g. a female confined to
+  // day: M/B/C are all 'morning') ties on category-share every day and freezes on one code forever.
+  // Tracking per-code counts lets us break that tie by rotating M→B→C (the fairness the manual
+  // roster had: women averaged 5.4 distinct shifts; the category-only engine gave them 1.4).
+  const codeCount = new Map<string, Record<string, number>>(employees.map(e => [e.id, {}]));
+  const totalOf = (id: string) => { const w = weekCount.get(id)!; return w.morning + w.afternoon + w.evening + w.night + w.midnight; };
   const offUsed = new Map<string, number>(employees.map(e => [e.id, 0]));
   const offToday = new Map<string, Set<string>>(); // date → employee ids OFF
 
@@ -260,11 +267,18 @@ export function assignRoster(
           continue;
         }
 
-        // Fairness: least share of this category (YTD + this week), then least total
+        // Fairness: least share of this CATEGORY (YTD + this week); then rotate the SPECIFIC CODE
+        // (so day-locked employees cycle M→B→C instead of freezing); then least total load; then a
+        // deterministic id tiebreak (never fall back to array order — that is what froze the women).
         pool.sort((a, b) => {
           const wa = weekCount.get(a.id)![cat] + share(ytdDist.get(a.id), cat);
           const wb = weekCount.get(b.id)![cat] + share(ytdDist.get(b.id), cat);
-          return wa - wb;
+          if (Math.abs(wa - wb) > 1e-9) return wa - wb;
+          const ca = codeCount.get(a.id)![code] ?? 0, cb = codeCount.get(b.id)![code] ?? 0;
+          if (ca !== cb) return ca - cb;
+          const ta = totalOf(a.id), tb = totalOf(b.id);
+          if (ta !== tb) return ta - tb;
+          return a.id < b.id ? -1 : 1;
         });
         const chosen = pool[0];
 
@@ -275,6 +289,7 @@ export function assignRoster(
         assignments.push({ employeeId: chosen.id, date, code });
         assignedToday.add(chosen.id);
         weekCount.get(chosen.id)![cat] += 1;
+        codeCount.get(chosen.id)![code] = (codeCount.get(chosen.id)![code] ?? 0) + 1;
         consec.set(chosen.id, (consec.get(chosen.id) ?? 0) + 1);
         prevShift.set(chosen.id, shift);
         count--;

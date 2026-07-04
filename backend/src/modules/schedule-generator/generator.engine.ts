@@ -633,6 +633,21 @@ export function generateWeeklySchedule(
         targetCategory = cats[0].cat;
       }
 
+      // ── Female rotation guard ─────────────────────────────────────────────
+      // The mixed-gender rotation cycle (morning→midnight→night→afternoon) sends a woman to
+      // midnight — which she is BLOCKED from — so she falls back to morning EVERY week and freezes
+      // on one shift (the real bug behind "why am I always on M?"). Rotate her only through the
+      // bands she may actually work: morning↔afternoon by default; + night/evening when the
+      // female-late exception is enabled for her. This restores the variety the manual roster had.
+      if (emp.gender === 'female') {
+        const lateOk = !!options.allowFemaleN || !!options.femaleLateFunctionIds?.includes(emp.functionId);
+        const bands = lateOk ? ['morning', 'afternoon', 'night', 'evening'] : ['morning', 'afternoon'];
+        if (!bands.includes(targetCategory)) {
+          const prev = lastShift?.category && bands.includes(lastShift.category) ? lastShift.category : bands[bands.length - 1];
+          targetCategory = bands[(bands.indexOf(prev) + 1) % bands.length];
+        }
+      }
+
       // ── Consecutive days tracking ─────────────────────────────────────────
       // Soft guideline is ~6 consecutive days, but the OFF structure (one
       // mid-week + one weekend OFF) already keeps runs short, and the business
