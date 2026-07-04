@@ -1,12 +1,13 @@
 import { useSearchParams } from 'react-router-dom';
-import { Clock, ClipboardCheck, Coffee } from 'lucide-react';
+import { Clock, ClipboardCheck, Coffee, SearchCheck } from 'lucide-react';
 import HubTabs from '@/components/HubTabs';
 import { useAuthStore } from '@/store/auth.store';
 import AttendanceDashboard from '@/pages/AttendanceDashboard';
 import AttendanceCorrectionsPage from '@/pages/AttendanceCorrections';
 import BreaksPage from '@/pages/Breaks';
+import GapReviewPage from '@/pages/GapReview';
 
-type HubTab = 'dashboard' | 'corrections' | 'breaks';
+type HubTab = 'dashboard' | 'corrections' | 'breaks' | 'gaps';
 
 // Dashboard + Breaks are management/RTA (attendance.view_team); Corrections is
 // agent self-service (attendance.view_own) so agents keep access to that tab.
@@ -14,6 +15,7 @@ const TABS: { key: HubTab; icon: typeof Clock; ar: string; en: string; permissio
   { key: 'dashboard',   icon: Clock,          ar: 'الحضور',        en: 'Attendance',  permission: 'attendance.view_team' },
   { key: 'corrections', icon: ClipboardCheck, ar: 'تصحيح الحضور',  en: 'Corrections', permission: 'attendance.view_own' },
   { key: 'breaks',      icon: Coffee,         ar: 'البريكات',      en: 'Breaks',      permission: 'attendance.view_team' },
+  { key: 'gaps',        icon: SearchCheck,    ar: 'مراجعة الثغرات', en: 'Gap Review',  permission: 'attendance.view_team' },
 ];
 
 /**
@@ -40,6 +42,7 @@ export default function AttendanceHub() {
       {tab === 'dashboard'   && <AttendanceDashboard />}
       {tab === 'corrections' && <AttendanceCorrectionsPage />}
       {tab === 'breaks'      && <BreaksPage />}
+      {tab === 'gaps'        && <GapReviewPage />}
     </div>
   );
 }
