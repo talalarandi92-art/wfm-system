@@ -25,15 +25,16 @@ export default function LadderRotationPage() {
   const [fnList, setFnList] = useState<string[]>([]);
   const [weeks, setWeeks] = useState(2);
   const [dir, setDir] = useState<'forward' | 'backward' | ''>('');
+  const [femN, setFemN] = useState(false);
   const [d, setD] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { apiClient.get('/attendance-recon/roster-v2/hourly').then((r: any) => { const f = r.data?.functions || []; setFnList(f); if (!fn && f[0]) setFn(f[0]); }).catch(() => {}); }, []);
   const load = useCallback(() => {
     if (!fn) return; setLoading(true);
-    const qs = new URLSearchParams({ function: fn, weeks: String(weeks) }); if (dir) qs.set('direction', dir);
+    const qs = new URLSearchParams({ function: fn, weeks: String(weeks) }); if (dir) qs.set('direction', dir); if (femN) qs.set('allowFemaleN', '1');
     apiClient.get(`/attendance-recon/roster-v2/ladder-generate?${qs}`).then((r: any) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
-  }, [fn, weeks, dir]);
+  }, [fn, weeks, dir, femN]);
   useEffect(() => { const t = setTimeout(load, 150); return () => clearTimeout(t); }, [load]);
 
   const panel = { background: 'var(--surface)', border: '1px solid var(--border)' } as React.CSSProperties;
@@ -55,6 +56,9 @@ export default function LadderRotationPage() {
             <button key={k || 'auto'} onClick={() => setDir(k)} className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: dir === k ? 'linear-gradient(135deg,#8b5cf6,#0ea5e9)' : 'transparent', color: dir === k ? '#fff' : 'var(--text-2)' }}>{l}</button>
           ))}
         </div>
+        <button onClick={() => setFemN(v => !v)} title={ar ? 'استثناء: السماح للإناث بتغطية المسائي عبر N فقط (لا E) عند الحاجة' : 'Exception: let females cover evening via N only (never E) when needed'}
+          className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold" style={{ background: femN ? 'linear-gradient(135deg,#06b6d4,#8b5cf6)' : 'var(--surface-2)', color: femN ? '#fff' : 'var(--text-2)', border: '1px solid var(--border)' }}>
+          {ar ? 'إناث على N' : 'Females on N'} {femN ? '✓' : ''}</button>
       </div>
 
       {loading && <p className="text-sm py-8 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'جارٍ توليد الدوران…' : 'Generating…'}</p>}

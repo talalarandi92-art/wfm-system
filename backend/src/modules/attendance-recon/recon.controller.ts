@@ -1530,8 +1530,12 @@ export class ReconController {
   @Get('roster-v2/ladder-generate')
   @RequirePermissions('schedule.generate')
   async ladderGenerate(@Req() req: any, @Query('function') functionName?: string,
-    @Query('weekStart') weekStart?: string, @Query('weeks') weeksQ?: string, @Query('direction') dirQ?: string) {
+    @Query('weekStart') weekStart?: string, @Query('weeks') weeksQ?: string, @Query('direction') dirQ?: string,
+    @Query('allowFemaleN') allowFemaleNQ?: string) {
     const t = req.user.tenantId;
+    // Females are day-only (up to C) by DEFAULT. allowFemaleN = the "operationally necessary" exception
+    // (rule 6.4): lets females take the evening band via N ONLY (ends 22:00) — NEVER E (ends 01:00).
+    const allowFemaleN = allowFemaleNQ === '1' || allowFemaleNQ === 'true';
     const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
     const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
     // function key is CANONICAL (interns fold into their parent team for headcount — Director rule)
@@ -1561,33 +1565,56 @@ export class ReconController {
       FROM r`, [t, fn, ws]).catch(() => [{ morning: 0, evening: 0, night: 0 }]);
     const demand = { morning: dRows[0]?.morning || 0, evening: dRows[0]?.evening || 0, night: dRows[0]?.night || 0 };
 
-    // adaptive block length per band (2-3 by demand weight); OFF ×2 (post-night recovery + one more)
-    const avg = (demand.morning + demand.evening + demand.night) / 3 || 1;
-    const blk = (d: number) => d >= avg * 1.15 ? 3 : 2;
-    const bm = blk(demand.morning), be = blk(demand.evening), bn = blk(demand.night);
+    // Females are DAY-only (up to C) — they cover the morning band. So the MALES only need to cover the
+    // RESIDUAL demand: morning not already met by the female pool, plus all of evening + night. Sizing the
+    // male blocks by that residual stops males wasting days on an already-covered morning while evening/
+    // night go short (the female pool is ~5/7 of its size working on any day).
+    const males0 = pool.filter((p: any) => p.gender === 'male'), females0 = pool.filter((p: any) => p.gender !== 'male');
+    const femWorking = females0.length * 5 / 7;
+    const maleDem = { morning: Math.max(0, demand.morning - femWorking), evening: demand.evening, night: demand.night };
+    const mAvg = (maleDem.morning + maleDem.evening + maleDem.night) / 3 || 1;
+    const mblk = (x: number) => x >= mAvg * 1.15 ? 3 : x >= mAvg * 0.4 ? 2 : 1;  // tiny residual → a 1-day touch (humane variety)
+    const bm = mblk(maleDem.morning), be = mblk(maleDem.evening), bn = mblk(maleDem.night);
     // FORWARD cycle (chosen by coverage; forward preferred on tie): morning→evening→night→OFF→OFF
     const dir = dirQ === 'backward' ? 'backward' : 'forward';
     const order = dir === 'backward' ? ['night', 'evening', 'morning'] : ['morning', 'evening', 'night'];
     const bandLen: any = { morning: bm, evening: be, night: bn };
-    const maleCycle: string[] = []; for (const band of order) for (let i = 0; i < bandLen[band]; i++) maleCycle.push(band); maleCycle.push('OFF', 'OFF');
-    // females never do night → their cycle skips it
-    const fOrder = order.filter(b => b !== 'night');
-    const femaleCycle: string[] = []; for (const band of fOrder) for (let i = 0; i < bandLen[band]; i++) femaleCycle.push(band); femaleCycle.push('OFF', 'OFF');
+    // Humane cycle: each 2-3 day band BLOCK is followed by a full OFF (rest after each block →
+    // consecutive working days ≤ the block length, never a 7-day streak — the OFF is interleaved,
+    // not dumped at the end, which previously let a week land with 0 OFF once the weekly +wk step
+    // shifted a non-7 cycle). Males step morning→evening→night.
+    const buildCycle = (bands: string[]) => { const c: string[] = []; for (const band of bands) { for (let i = 0; i < bandLen[band]; i++) c.push(band); c.push('OFF'); } return c; };
+    const maleCycle = buildCycle(order);
+    // FEMALES: capped at C by default (day band). A clean 3+2 split with rest = a 7-day cycle
+    // (2 OFF/week, ≤3 consecutive); they rotate M/B/C. When allowFemaleN is set (operational necessity),
+    // they also step into an EVENING block — but the code picker gives them N ONLY, never the blocked E.
+    const femaleCycle: string[] = allowFemaleN
+      ? ['morning', 'morning', 'morning', 'OFF', 'evening', 'evening', 'OFF']
+      : ['morning', 'morning', 'morning', 'OFF', 'morning', 'morning', 'OFF'];
 
-    // band → concrete shift code (spread within a band across agents for full-width coverage)
+    // band → concrete shift code (spread within a band across agents for full-width coverage).
+    // Morning = up to C (female-safe). Evening/night codes are only ever reached by the male cycle.
     const CODES: any = { morning: ['M', 'B', 'C'], evening: ['N', 'E'], night: ['MD', 'MN'] };
     const males = pool.filter((p: any) => p.gender === 'male'), females = pool.filter((p: any) => p.gender !== 'male');
     // Each agent STEPS FORWARD one cycle-slot every new week (wk), so week-2 is never a copy of
     // week-1 — fixes the "static fortnight" (a 7-slot female cycle used to repeat exactly). The
     // cross-agent phase stagger still delivers each day's band coverage; +wk moves the whole cohort
     // forward together, so the per-day band histogram is only time-shifted (coverage preserved).
+    // Walk the cycle continuously (phase+d). The cycles are no longer length-7 (a rest OFF now
+    // follows each block → male 10-11, female 8), so week-2 already differs from week-1 without a
+    // per-week index step — and dropping that step keeps the interleaved OFF intact, so consecutive
+    // working days never exceed a block length (≤3). The concrete code still rotates weekly (+wk) for
+    // within-band variety.
     const assign = (list: any[], cycle: string[]) => list.map((p, i) => {
+      const female = p.gender !== 'male';
       const phase = cycle.length ? Math.floor(i * cycle.length / Math.max(1, list.length)) : 0;
       const days = dates.map((_, d) => {
         const wk = Math.floor(d / 7);
-        const band = cycle[(phase + wk + d) % cycle.length];
+        const band = cycle[(phase + d) % cycle.length];
         if (band === 'OFF') return 'OFF';
-        const codes = CODES[band]; return codes[(i + wk) % codes.length];   // alternate the concrete code week-to-week too
+        // females in the evening band take N ONLY (ends 22:00) — never the blocked E (ends 01:00).
+        const codes = (female && band === 'evening') ? ['N'] : CODES[band];
+        return codes[(i + wk) % codes.length];   // alternate the concrete code week-to-week
       });
       return { employeeNo: p.employee_no, name: p.name, gender: p.gender, days };
     });
@@ -1610,9 +1637,13 @@ export class ReconController {
       grid, coverage,
       summary: {
         shortDays, coversAll: shortDays === 0,
-        femaleNightExcluded: true,
-        note: dir === 'forward' ? 'forward rotation (morning→evening→night) — easiest on the circadian clock' : 'backward rotation as requested (harder on the body)',
-        restRule: 'a full OFF day after each band block (post-night recovery guaranteed); 2 OFF per cycle',
+        femaleNightExcluded: !allowFemaleN, allowFemaleN,
+        femalePolicy: allowFemaleN
+          ? 'females may cover the evening band via N only (ends 22:00) — operational-necessity exception (rule 6.4); never E/MD/MN'
+          : 'females are day-only (up to C, ends 20:00); never evening/night/midnight',
+        note: (dir === 'forward' ? 'forward rotation (morning→evening→night) — easiest on the circadian clock' : 'backward rotation as requested (harder on the body)')
+          + (shortDays > 0 && !allowFemaleN ? ' · evening/night short because males alone cannot cover it — enable allowFemaleN (females on N) or cover the gap with OT/cross-skill' : ''),
+        restRule: 'a full OFF day after each band block (≤3 consecutive working days; females get exactly 2 OFF/week)',
       },
     };
   }
@@ -1776,9 +1807,13 @@ export class ReconController {
     const need = (count: number) => Math.ceil(count * 7 / (7 - offDays));   // people per code to keep `count` working with `offDays` OFF each
     let pool = emps.slice();
     const groups: any[] = [];
+    // Codes a female may NOT be assigned (rule 6.4): E/EE end past midnight and MD/MN are midnight —
+    // all end after the female cap of C (20:00). The category 'evening' collapses to 'day' in cat(),
+    // so gate by the CODE, not the category, or E/EE would silently leak to females.
+    const femaleBlocked = (code: string) => /^(E|MD|MN)/i.test(code);
     for (const m of codes) {
       const c = cat(m.code), want = need(m.count);
-      let cands = pool.filter(e => c === 'midnight' ? e.male : true);
+      let cands = pool.filter(e => (c === 'midnight' || femaleBlocked(m.code)) ? e.male : true);
       // night/midnight → least-loaded first (fair rotation); day → most-loaded first (relieve them).
       // NIGHT is additionally MALES-FIRST (rule 6.4): a female gets N only once the male pool is exhausted.
       cands.sort((a, b) => (c === 'night' && a.male !== b.male) ? (a.male ? -1 : 1)
@@ -3492,6 +3527,22 @@ export class ReconController {
     if (/^(M|B|C|AM)/.test(c)) return 'Morning';
     return 'Other';
   }
+  /** SET-clause fragment: when a manual edit/swap changes the scheduled window on a day that was
+   *  actually WORKED (has punch/login), every metric derived against the OLD window (late/early/OT/
+   *  adherence) is now wrong — NULL/zero it so no report shows a stale value; the next recon rebuild
+   *  recomputes it correctly against the new window. Unworked/future days keep their values. */
+  private staleMetricReset(): string {
+    const ev = '(punch_in_min IS NOT NULL OR sys_login_min IS NOT NULL)';
+    return `, sys_late_min=CASE WHEN ${ev} THEN NULL ELSE sys_late_min END`
+      + `, sys_early_min=CASE WHEN ${ev} THEN NULL ELSE sys_early_min END`
+      + `, late_min=CASE WHEN ${ev} THEN NULL ELSE late_min END`
+      + `, early_min=CASE WHEN ${ev} THEN NULL ELSE early_min END`
+      + `, adherence_pct=CASE WHEN ${ev} THEN NULL ELSE adherence_pct END`
+      + `, late_category=CASE WHEN ${ev} THEN NULL ELSE late_category END`
+      + `, ot_before_min=CASE WHEN ${ev} THEN 0 ELSE ot_before_min END`
+      + `, ot_after_min=CASE WHEN ${ev} THEN 0 ELSE ot_after_min END`
+      + `, ot_min=CASE WHEN ${ev} THEN 0 ELSE ot_min END`;
+  }
   /** Canonical start/end (min) for a shift code, learned from existing roster rows. */
   private async resolveShiftTimes(t: string, code: string): Promise<{ ss: number | null; se: number | null }> {
     const [r] = await this.ds.query(
@@ -3579,7 +3630,7 @@ export class ReconController {
     await qr.connect(); await qr.startTransaction();
     try {
       await qr.query(
-        `UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=COALESCE($5,shift_start_min), shift_end_min=COALESCE($6,shift_end_min)
+        `UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=COALESCE($5,shift_start_min), shift_end_min=COALESCE($6,shift_end_min)${this.staleMetricReset()}
            WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personNo, b.date, b.newShift, ss, se]);
       await this.mirrorShiftToAttendance(qr, t, b.personNo, b.date, b.newShift);
       await qr.commitTransaction();
@@ -3619,8 +3670,8 @@ export class ReconController {
     const qr = this.ds.createQueryRunner();
     await qr.connect(); await qr.startTransaction();
     try {
-      await qr.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personA, b.date, B.shift_code, B.shift_start_min, B.shift_end_min]);
-      await qr.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personB, b.date, A.shift_code, A.shift_start_min, A.shift_end_min]);
+      await qr.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6${this.staleMetricReset()} WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personA, b.date, B.shift_code, B.shift_start_min, B.shift_end_min]);
+      await qr.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6${this.staleMetricReset()} WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, b.personB, b.date, A.shift_code, A.shift_start_min, A.shift_end_min]);
       await this.mirrorShiftToAttendance(qr, t, b.personA, b.date, B.shift_code);
       await this.mirrorShiftToAttendance(qr, t, b.personB, b.date, A.shift_code);
       await qr.commitTransaction();
@@ -3662,11 +3713,11 @@ export class ReconController {
     const rt = async (code: string) => this.resolveShiftTimes(t, code);
     if (log.change_type === 'swap') {
       const a = await rt(log.old_shift), bb = await rt(log.old_shift_b);
-      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, log.person_no, log.work_date, log.old_shift, a.ss, a.se]);
-      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, log.person_b_no, log.work_date, log.old_shift_b, bb.ss, bb.se]);
+      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6${this.staleMetricReset()} WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, log.person_no, log.work_date, log.old_shift, a.ss, a.se]);
+      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6${this.staleMetricReset()} WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, log.person_b_no, log.work_date, log.old_shift_b, bb.ss, bb.se]);
     } else {
       const a = await rt(log.old_shift);
-      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6 WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3`, [t, log.person_no, log.work_date, log.old_shift, a.ss, a.se]);
+      await this.ds.query(`UPDATE roster_days SET shift_code=$4, original_shift_code=$4, shift_start_min=$5, shift_end_min=$6${this.staleMetricReset()} WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3 AND is_active`, [t, log.person_no, log.work_date, log.old_shift, a.ss, a.se]);
     }
     await this.ds.query(`UPDATE schedule_change_log SET reverted=true, approval_status='reverted', updated_at=now() WHERE tenant_id=$1 AND id=$2`, [t, id]);
     return { ok: true, reverted: true };

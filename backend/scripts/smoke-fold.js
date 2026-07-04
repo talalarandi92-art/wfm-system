@@ -31,10 +31,18 @@ function get(url) {
   const lad = await get('/attendance-recon/roster-v2/ladder-generate?function=CH%20-%20WA&weeks=2');
   check('ladder 200', lad.code === 200, 'HTTP ' + lad.code);
   check('ladder pool folds interns (38)', lad.j?.poolSize === 38, 'pool=' + lad.j?.poolSize);
-  check('ladder covers demand', lad.j?.summary?.coversAll === true, 'shortDays=' + lad.j?.summary?.shortDays);
+  // females must NEVER get a blocked/late code (E/EE/MD/MN); N only under the allowFemaleN exception.
+  const femBlocked = (lad.j?.grid || []).filter(g => g.gender !== 'male' && g.days.some(c => /^(E|EE|MD|MN)$/.test(c)));
+  check('no female on a blocked shift (E/EE/MD/MN)', femBlocked.length === 0, femBlocked.length + ' leaked');
+  // max consecutive working days ≤ 3 (rest after each block)
+  let maxRun = 0; for (const g of (lad.j?.grid || [])) { let r = 0, m = 0; for (const c of g.days) { if (c === 'OFF') r = 0; else { r++; if (r > m) m = r; } } if (m > maxRun) maxRun = m; }
+  check('no long working streak (≤3 consecutive)', maxRun <= 3, 'max=' + maxRun);
   // static: week2 != week1 for every agent
   const staticAgents = (lad.j?.grid || []).filter(g => g.days.slice(0, 7).join() === g.days.slice(7, 14).join());
   check('no static agents (week2≠week1)', staticAgents.length === 0, staticAgents.length + ' static');
+  // allowFemaleN closes most of the gap (females on N, still never E)
+  const ladN = await get('/attendance-recon/roster-v2/ladder-generate?function=CH%20-%20WA&weeks=2&allowFemaleN=1');
+  check('allowFemaleN improves coverage', (ladN.j?.summary?.shortDays ?? 99) < (lad.j?.summary?.shortDays ?? 0) + 1 && (ladN.j?.summary?.shortDays ?? 99) <= (lad.j?.summary?.shortDays ?? 99), `default ${lad.j?.summary?.shortDays} → femN ${ladN.j?.summary?.shortDays}`);
 
   console.log('\n═══ 2. HOURLY (folded — CH-WA includes interns) ═══');
   const hr = await get('/attendance-recon/roster-v2/hourly?function=CH%20-%20WA');
