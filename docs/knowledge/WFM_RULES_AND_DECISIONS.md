@@ -21,6 +21,14 @@ Newer overrides older. Real data overrides theory. A feature on mock/demo data i
 - **Function is per-month, from each month's schedule row** — never a global first-wins value. `role_function`
   = `COALESCE(NULLIF(month.function_name,''), static)`. "Social Media" and "Social Media & Email" are BOTH valid
   (kept verbatim per month — sometimes merged, sometimes split).
+- **Intern-fold (Director 2026-07-04): an "Internship X" function IS the "X" team for headcount.** `Internship
+  CH - WA` → `CH - WA`, `Internship Inbound` → `Inbound`, `Internship Offline` → `Offline`, `Internship OMT` →
+  `OMT`. ONE canonical helper **`canon_fn(text)`** (migration 068, IMMUTABLE, strips a leading `Internship `) is
+  the single source of truth; it is wrapped at **every** headcount / coverage / demand / pool / scheduling-pool /
+  dropdown site (recon engine + dashboard/control-dashboard/coverage/capacity-HC/people-insights/generator/
+  rotation/workforce-analytics; two-key coverage endpoints fold BOTH `role_function` and `employees.function_id`).
+  **Per-person identity labels and raw exports KEEP the intern label.** function_id/UUID-FK modeling surfaces
+  (capacity Erlang inputs, analyst FK) stay granular by design. Verified CH-WA pool 25→38 (16 interns merged).
 - Name whitespace is collapsed (`\s+`→space) on every read (double-space split one person into two).
 - Match employees by **ID, never name-only**.
 
@@ -85,6 +93,12 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
   set as HR confirms (also recognizes `*7` codes M7/B7/C7/N7).
 - **Female agents:** normally up to **C (ends 20:00)**; **N only if operationally necessary** (flag it); **never
   MD/MN (midnight)** unless a logged manual override. Configurable, not hardcoded; flag violations.
+- **Females must ROTATE across their allowed set (M/B/C), not freeze on one shift** (fixed 2026-07-04). The
+  "up to C / no midnight" rule restricts the *set*, it does NOT mean one fixed shift. A generator that pins
+  women to a single code is a BUG: proven on data (generated women averaged 1.39 distinct shifts / 48-of-75
+  frozen vs the manual roster's 5.37 / 0-frozen). Both engines now rotate women within their allowed bands
+  (demand.engine: code-level fairness tiebreak; generator.engine: female rotation guard). Enabling
+  `allowFemaleN` additionally rotates them through N/E. See §8.
 - **Male agents:** any shift per business need (subject to rest/fairness/coverage).
 
 ## 8. Rest, Rotation & Fairness
@@ -93,6 +107,15 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
 - **`fairnessScore` = 100 − stdev** of night/midnight load over the fair pool. Optional **night-team carve-out**
   (fixed team vs fair distribution — user's choice, migration 065). **Weekend-OFF fairness** separately scored.
   Live snapshot: fairnessScore 79, weekend-OFF fairness 81.
+- **Shift-VARIETY fairness (2026-07-04): rotate people across specific CODES, not just categories.** An employee
+  locked to one category (e.g. a female to day: M/B/C are all `morning`) ties on category-share and, without a
+  code-level tiebreak, freezes on one code. Both generators now add specific-code rotation so everyone cycles
+  through the shifts they may work. Rule of thumb: if a working roster shows anyone on the *same* shift every day
+  for weeks (and it isn't a fixed night-team member), that is a rotation bug — check the assigner's tiebreak.
+- **Schedule-gap backfill** (`GET /roster-v2/gap-backfill`, read-only): person-days with a system login but no
+  scheduled shift get a *proposed* shift (nearest canonical start to the login; logout ignored — ~17% bleed).
+  Flagged, never writes, never overrides an explicit shift; females never proposed MD/MN; post-midnight logins
+  flagged as a possible previous-day cross-midnight tail. Surfaced at Attendance → Gap Review.
 - Rebalance proposal uses **current staff only**, female = night-only.
 - Shift-rate % = distribution of each person's shifts YTD/MTD/period (count + %), with **before/after impact** on
   edit/swap. Exclude OFF/H/L/S/A/COMP from the working distribution.
