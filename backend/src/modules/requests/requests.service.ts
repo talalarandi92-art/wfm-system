@@ -1463,6 +1463,16 @@ export class RequestsService {
       return this.permissionHcImpact(tenantId, req);
     }
 
+    // ── Overtime: hourly HC before → after (+1) at the OT window ──────────────
+    if (typeCode === 'overtime') {
+      return this.overtimeHcImpact(tenantId, req);
+    }
+
+    // ── Break: live per-function availability + queue → approve-now or defer ──
+    if (typeCode === 'break') {
+      return this.breakHcImpact(tenantId, req);
+    }
+
     return { type: typeCode, dates: [], summary: 'No HC impact for this request type', summaryAr: 'لا يوجد تأثير HC لهذا النوع' };
   }
 
@@ -1724,6 +1734,112 @@ export class RequestsService {
         ? 'تحذير: بعض ساعات الاستئذان قريبة من الحد الأدنى'
         : 'التغطية مقبولة في جميع ساعات الاستئذان',
       overallRisk: !requesterScheduled ? 'warning' : hasCritical ? 'critical' : hasWarning ? 'warning' : 'ok',
+    };
+  }
+
+  /** OT HC impact: at each hour of the OT window show present HC (before) → +1 (after this OT).
+   *  Overtime ADDS coverage (opposite of a permission), so the manager sees the gap it closes. */
+  private async overtimeHcImpact(tenantId: string, req: any) {
+    const [ot] = await this.ds.query(
+      `SELECT ro.ot_date, ro.start_time, ro.end_time, ro.duration_minutes,
+              COALESCE(f2.name, f.name, '—') AS func_name
+         FROM requests r
+         JOIN request_overtimes ro ON ro.request_id = r.id
+         JOIN employees e ON e.id = r.employee_id
+         LEFT JOIN functions f  ON f.id  = e.function_id
+         LEFT JOIN functions f2 ON f2.id = ro.function_id
+        WHERE r.id = $1 AND r.tenant_id = $2`, [req.id, tenantId]);
+    if (!ot || !ot.ot_date || !ot.start_time) return { type: 'overtime', dates: [], summary: 'Overtime data incomplete', summaryAr: 'بيانات الأوفرتايم غير مكتملة' };
+    const funcName = ot.func_name;
+    const otDate = typeof ot.ot_date === 'string' ? ot.ot_date.slice(0, 10) : RequestsService.ymdLocal(new Date(ot.ot_date));
+    const shifts = await this.ds.query(
+      `SELECT person_no, shift_start_min AS ss, shift_end_min AS se, work_date::text AS wd
+         FROM roster_days
+        WHERE tenant_id = $1 AND is_active AND canon_fn(role_function) = canon_fn($2)
+          AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL
+          AND work_date IN ($3::date, $3::date - 1)`, [tenantId, funcName, otDate]);
+    const toMin = (t: string) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+    const covers = (s: any, mod: number): boolean => { const ss = Number(s.ss), se = Number(s.se); if (s.wd < otDate) return se > 1440 && mod < (se - 1440); return mod >= ss && mod < Math.min(se, 1440); };
+    const otStart = toMin(ot.start_time), otEnd = toMin(ot.end_time);
+    const hourly: any[] = [];
+    for (let h = Math.floor(otStart / 60); h < Math.max(Math.ceil(otEnd / 60), Math.floor(otStart / 60) + 1) && hourly.length < 12; h++) {
+      const mid = h * 60 + 30;
+      const scheduled = shifts.filter((s: any) => covers(s, mid)).length;
+      const after = scheduled + 1;                    // the OT ADDS this person
+      const required = Math.max(Math.ceil(scheduled * 0.75), 2);
+      hourly.push({
+        hour: h, label: `${String(h).padStart(2, '0')}:00-${String((h + 1) % 24).padStart(2, '0')}:00`,
+        scheduled, afterApproval: after, requesterWorking: false,
+        gapBefore: Math.max(required - scheduled, 0), gap: Math.max(required - after, 0),
+        risk: scheduled < required - 1 ? 'critical' : scheduled < required ? 'warning' : 'ok',
+      });
+    }
+    const shortHours = hourly.filter(h => h.gapBefore > 0).length;
+    return {
+      type: 'overtime', functionName: funcName, otDate: ot.ot_date,
+      overtimeTime: `${String(ot.start_time).slice(0, 5)} - ${String(ot.end_time).slice(0, 5)}`,
+      durationMinutes: ot.duration_minutes, hourly, overallRisk: 'ok',
+      summary: shortHours > 0 ? `This OT adds coverage where it's short (${shortHours} hr) — approving closes the gap.` : 'This OT adds +1 to coverage during its window.',
+      summaryAr: shortHours > 0 ? `هذا الأوفرتايم يغطّي نقصاً في ${shortHours} ساعة — الموافقة تسدّ الفجوة.` : 'هذا الأوفرتايم يزيد التغطية بواحد خلال فترته.',
+    };
+  }
+
+  /** Break HC impact (live): how many of the SAME function are available NOW vs on break, plus
+   *  the live queue/waiting — so RTA can decide to approve now or defer the break. */
+  private async breakHcImpact(tenantId: string, req: any) {
+    const [bk] = await this.ds.query(
+      `SELECT rb.break_date, rb.start_time, rb.end_time, rb.duration_minutes, COALESCE(f.name, '—') AS func_name
+         FROM requests r JOIN request_breaks rb ON rb.request_id = r.id
+         JOIN employees e ON e.id = r.employee_id LEFT JOIN functions f ON f.id = e.function_id
+        WHERE r.id = $1 AND r.tenant_id = $2`, [req.id, tenantId]);
+    const funcName = bk?.func_name ?? '—';
+    const [nowRow] = await this.ds.query(`SELECT to_char(now() AT TIME ZONE 'Asia/Kuwait','YYYY-MM-DD') d, to_char(now() AT TIME ZONE 'Asia/Kuwait','HH24:MI') hm`);
+    const bDate = bk?.break_date ? (typeof bk.break_date === 'string' ? bk.break_date.slice(0, 10) : RequestsService.ymdLocal(new Date(bk.break_date))) : nowRow.d;
+    const nowMin = (() => { const [h, m] = String(nowRow.hm).split(':').map(Number); return h * 60 + m; })();
+    const shifts = await this.ds.query(
+      `SELECT person_no, shift_start_min AS ss, shift_end_min AS se, work_date::text AS wd FROM roster_days
+        WHERE tenant_id = $1 AND is_active AND canon_fn(role_function) = canon_fn($2) AND presence IN ('office','wfh')
+          AND shift_start_min IS NOT NULL AND work_date IN ($3::date, $3::date - 1)`, [tenantId, funcName, bDate]);
+    const covers = (s: any, mod: number) => { const ss = Number(s.ss), se = Number(s.se); if (s.wd < bDate) return se > 1440 && mod < (se - 1440); return mod >= ss && mod < Math.min(se, 1440); };
+    const scheduledNow = shifts.filter((s: any) => covers(s, nowMin)).length;
+    // on-break now = APPROVED break requests for the same (folded) function overlapping now
+    const [ob] = await this.ds.query(
+      `SELECT COUNT(*)::int n FROM requests r JOIN request_breaks rb ON rb.request_id = r.id
+         JOIN employees e ON e.id = r.employee_id LEFT JOIN functions f ON f.id = e.function_id
+        WHERE r.tenant_id = $1 AND r.status = 'approved' AND rb.break_date = $2::date
+          AND canon_fn(COALESCE(f.name,'—')) = canon_fn($3)
+          AND rb.start_time <= $4::time AND rb.end_time > $4::time`, [tenantId, bDate, funcName, nowRow.hm + ':00']);
+    const onBreakNow = ob?.n ?? 0;
+    const availableNow = Math.max(0, scheduledNow - onBreakNow);
+    const afterApproval = Math.max(0, availableNow - 1);
+    // live queue (Sprinklr snapshot, tenant-wide) — the queue/waiting context
+    let queue: any = null;
+    try {
+      const [snap] = await this.ds.query(`SELECT captured_at, queues_json FROM integration_snapshots WHERE tenant_id = $1 AND source = 'sprinklr' ORDER BY captured_at DESC LIMIT 1`, [tenantId]);
+      if (snap) {
+        const qs = Array.isArray(snap.queues_json) ? snap.queues_json : JSON.parse(snap.queues_json || '[]');
+        queue = {
+          totalWaiting: qs.reduce((s: number, q: any) => s + (q.waiting ?? 0), 0),
+          atRisk: qs.filter((q: any) => (q.slaPct ?? 100) < 80 || (q.waiting ?? 0) > 50).map((q: any) => ({ name: q.queueName, waiting: q.waiting ?? 0, slaPct: q.slaPct ?? 100 })),
+          fresh: Date.now() - new Date(snap.captured_at).getTime() < 5 * 60_000, capturedAt: snap.captured_at,
+        };
+      }
+    } catch { /* no live snapshot available */ }
+    const MIN_AVAILABLE = 3;
+    const queueRisk = !!(queue && ((queue.atRisk?.length ?? 0) > 0 || queue.totalWaiting > 30));
+    const risk = (afterApproval < MIN_AVAILABLE || queueRisk) ? (afterApproval < 1 ? 'critical' : 'warning') : 'ok';
+    return {
+      type: 'break', functionName: funcName,
+      breakTime: bk ? `${String(bk.start_time).slice(0, 5)} - ${String(bk.end_time).slice(0, 5)}` : null,
+      durationMinutes: bk?.duration_minutes,
+      live: { scheduledNow, availableNow, onBreakNow, afterApproval, queue },
+      overallRisk: risk,
+      summary: risk === 'ok'
+        ? `${availableNow} available in ${funcName} now → ${afterApproval} after this break. Safe to approve.`
+        : `Only ${afterApproval} would remain available in ${funcName}${queueRisk ? ' and a queue is at risk' : ''} — consider deferring.`,
+      summaryAr: risk === 'ok'
+        ? `${availableNow} متاح في ${funcName} الآن → ${afterApproval} بعد هذا البريك. آمن للموافقة.`
+        : `سيبقى ${afterApproval} فقط متاحاً في ${funcName}${queueRisk ? ' وهناك طابور معرّض للخطر' : ''} — يُفضّل التأجيل.`,
     };
   }
 }

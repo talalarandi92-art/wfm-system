@@ -249,6 +249,24 @@ interface HcImpactData {
   swapNote?: string;
   swapNoteEn?: string;
   validationSummary?: { restCheckPassed: boolean; genderCheckPassed: boolean; coverageCheckPassed: boolean };
+  // Overtime-specific
+  otDate?: string;
+  overtimeTime?: string;
+  // Break-specific (live)
+  breakTime?: string;
+  live?: {
+    scheduledNow: number; availableNow: number; onBreakNow: number; afterApproval: number;
+    queue?: { totalWaiting: number; atRisk: { name: string; waiting: number; slaPct: number }[]; fresh: boolean; capturedAt: string } | null;
+  };
+}
+
+/** Format any "HH:MM" occurrences in a string to 12-hour with AM/PM (AR: ص/م). */
+function to12(s?: string, ar = true): string {
+  if (!s) return '';
+  return s.replace(/(\d{1,2}):(\d{2})/g, (_, hh, mm) => {
+    const hr = parseInt(hh, 10); const isPm = hr >= 12; const h12 = hr % 12 === 0 ? 12 : hr % 12;
+    return `${h12}:${mm} ${ar ? (isPm ? 'م' : 'ص') : (isPm ? 'PM' : 'AM')}`;
+  });
 }
 
 const RISK_STYLE: Record<string, { color: string; bg: string; ar: string; en: string }> = {
@@ -440,6 +458,74 @@ function HcImpactPanel({ requestId, dark, ar = true }: { requestId: string; dark
                   : '"Present" = number of function staff whose shift covers this hour (including cross-midnight shifts)'}
               </div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Overtime: hourly HC before → after (OT ADDS +1) */}
+      {data.type === 'overtime' && (
+        <div className="px-3 pb-3 space-y-2">
+          <div className="flex items-center gap-3 flex-wrap text-[10px] text-slate-400">
+            {data.overtimeTime && <span>{ar ? 'فترة الأوفرتايم:' : 'OT window:'} <span className="font-bold text-slate-700 dark:text-slate-300">{to12(data.overtimeTime, ar)}</span></span>}
+            {data.durationMinutes !== undefined && <span>{ar ? 'المدة:' : 'Duration:'} <span className="font-bold text-slate-700 dark:text-slate-300">{fmtDuration(data.durationMinutes, ar)}</span></span>}
+          </div>
+          {data.hourly && data.hourly.length > 0 && (
+            <div>
+              <div className="grid grid-cols-4 gap-1 text-[10px] text-slate-500 mb-1 px-1">
+                <div>{ar ? 'الساعة' : 'Hour'}</div>
+                <div className="text-center">{ar ? 'الحالي' : 'Now'}</div>
+                <div className="text-center">{ar ? 'بعد الأوفرتايم' : 'After OT'}</div>
+                <div className="text-center">{ar ? 'المطلوب' : 'Required'}</div>
+              </div>
+              {data.hourly.map((h: any, i: number) => {
+                const rs = RISK_STYLE[h.risk] ?? RISK_STYLE.ok;
+                const gain = h.afterApproval - h.scheduled;
+                return (
+                  <div key={i} className="grid grid-cols-4 gap-1 rounded-lg px-1 py-1.5 mb-0.5 text-xs items-center"
+                    style={{ background: h.gapBefore > 0 ? rs.bg : dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)' }}>
+                    <div className="font-mono text-[10px] text-slate-700 dark:text-slate-300">{to12(h.label, ar)}</div>
+                    <div className="text-center font-semibold" style={{ color: h.gapBefore > 0 ? rs.color : 'inherit' }}>{h.scheduled}{h.gapBefore > 0 && <span className="text-[9px] ms-1">(-{h.gapBefore})</span>}</div>
+                    <div className="text-center font-bold text-emerald-500">{h.afterApproval}{gain > 0 && <span className="text-[9px] ms-1 opacity-80">(+{gain})</span>}</div>
+                    <div className="text-center text-slate-500">{h.scheduled + h.gapBefore}</div>
+                  </div>
+                );
+              })}
+              <div className="mt-1.5 text-[9px] text-slate-500 px-1">
+                {ar ? '"الحالي" = عدد الموظفين المغطّين هذه الساعة قبل الأوفرتايم؛ الأوفرتايم يضيف +1' : '"Now" = staff covering this hour before OT; the OT adds +1'}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Break: LIVE per-function availability + queue → approve now or defer */}
+      {data.type === 'break' && data.live && (
+        <div className="px-3 pb-3 space-y-2">
+          <div className="flex items-center gap-3 flex-wrap text-[10px] text-slate-400">
+            {data.breakTime && <span>{ar ? 'البريك:' : 'Break:'} <span className="font-bold text-slate-700 dark:text-slate-300">{to12(data.breakTime, ar)}</span></span>}
+            {data.durationMinutes !== undefined && <span>{ar ? 'المدة:' : 'Duration:'} <span className="font-bold text-slate-700 dark:text-slate-300">{fmtDuration(data.durationMinutes, ar)}</span></span>}
+            {data.live.queue && <span className={data.live.queue.fresh ? 'text-emerald-500' : 'text-amber-500'}>● {ar ? (data.live.queue.fresh ? 'مباشر' : 'غير محدّث') : (data.live.queue.fresh ? 'live' : 'stale')}</span>}
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            {[
+              { lbl: ar ? 'متاح الآن' : 'Available now', val: data.live.availableNow, c: '#10b981' },
+              { lbl: ar ? 'على بريك' : 'On break', val: data.live.onBreakNow, c: '#f59e0b' },
+              { lbl: ar ? 'بعد الموافقة' : 'After approval', val: data.live.afterApproval, c: data.live.afterApproval < 3 ? '#ef4444' : '#10b981' },
+              { lbl: ar ? 'بالطابور' : 'In queue', val: data.live.queue?.totalWaiting ?? '—', c: (data.live.queue?.totalWaiting ?? 0) > 30 ? '#ef4444' : '#818cf8' },
+            ].map((t, i) => (
+              <div key={i} className="rounded-lg px-2 py-2 text-center" style={{ background: dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)', border: `1px solid ${t.c}25` }}>
+                <div className="text-lg font-bold" style={{ color: t.c }}>{t.val}</div>
+                <div className="text-[9px] text-slate-500 mt-0.5">{t.lbl}</div>
+              </div>
+            ))}
+          </div>
+          {data.live.queue?.atRisk && data.live.queue.atRisk.length > 0 && (
+            <div className="text-[10px] rounded-lg px-2 py-1.5" style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}>
+              ⚠ {ar ? 'طوابير معرّضة للخطر:' : 'Queues at risk:'} {data.live.queue.atRisk.map((q: any) => `${q.name} (${q.waiting}, SLA ${q.slaPct}%)`).join(' · ')}
+            </div>
+          )}
+          {!data.live.queue && (
+            <div className="text-[10px] text-slate-500 px-1">{ar ? 'لا يوجد لقطة طابور مباشرة — التوفّر محسوب من الجدول والبريكات المعتمدة.' : 'No live queue snapshot — availability is from the roster + approved breaks.'}</div>
           )}
         </div>
       )}
