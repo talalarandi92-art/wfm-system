@@ -188,17 +188,23 @@ const absMin = (iso, min) => dayOffset(iso) * 1440 + min;
 const absToDM = (abs) => { const dayIdx = Math.floor(abs / 1440), min = ((abs % 1440) + 1440) % 1440; return { date: new Date(BASE_MS + dayIdx * 86400000).toISOString().slice(0, 10), min }; };
 
 // ---- AMEYO ---- store ALL sessions per employee on the absolute timeline (shift-relative selection happens in build)
+// Read columns BY HEADER NAME, never position (L-009): the file gained a "Username" (full-name) column at col 0,
+// which used to shift every position-read by one and drop ALL login data (matched=0).
 const ameyoSessions = {}; // id -> [{aLogin, aLogout}]
 {
-  const R = loadRaw('Ameyo login and logout.xlsx').slice(1);
+  const rows = loadRaw('Ameyo login and logout.xlsx');
+  const H = (rows[0] || []).map(x => String(x || '').toLowerCase().trim());
+  const ci = (...names) => { for (const n of names) { const i = H.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
+  const cUser = ci('user id', 'userid'), cLd = ci('login date'), cLt = ci('login time'), cOd = ci('logout date'), cOt = ci('logout time');
+  const R = rows.slice(1);
   let matched = 0, unmatched = 0;
   for (const r of R) {
-    const user = String(r[0] || '').toLowerCase().trim();
+    const user = String(r[cUser] || '').toLowerCase().trim();
     const id = F.byUser[user]; if (id == null) { unmatched++; continue; }
-    const loginDate = localDateFromSerial(r[1]); if (!loginDate) continue;
-    const loginMin = serialTimeMin(r[2]); if (loginMin == null) continue;
-    const logoutDate = localDateFromSerial(r[3]) || loginDate;
-    let logoutMin = serialTimeMin(r[4]);
+    const loginDate = localDateFromSerial(r[cLd]); if (!loginDate) continue;
+    const loginMin = serialTimeMin(r[cLt]); if (loginMin == null) continue;
+    const logoutDate = localDateFromSerial(r[cOd]) || loginDate;
+    let logoutMin = serialTimeMin(r[cOt]);
     let aLogin = absMin(loginDate, loginMin);
     let aLogout = logoutMin == null ? aLogin : absMin(logoutDate, logoutMin);
     if (aLogout < aLogin) aLogout = aLogin; // guard
@@ -208,18 +214,25 @@ const ameyoSessions = {}; // id -> [{aLogin, aLogout}]
   console.log('ameyo: matched rows=' + matched + ' unmatched=' + unmatched + ' employees=' + Object.keys(ameyoSessions).length);
 }
 
-// ---- SPRINKLR ---- same; degenerate sessions guarded
+// ---- SPRINKLR ---- same; degenerate sessions guarded. Read BY HEADER NAME (L-009). The Sprinklr `ID` is a
+// USERNAME (m.abdulbaqi) → match byUser, not byEmail. Login/Logout are SEPARATE date-serial + time-fraction
+// columns → combine them (the old code read the date column as a full datetime = midnight, dropping the time).
 const sprinkSessions = {}; // id -> [{aLogin, aLogout}]
 {
   const wb = XLSX.readFile(SRCDIR + 'Login and Logout sprinklr.xlsx', { cellDates: false, raw: true });
-  const R = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, blankrows: false, raw: true }).slice(2);
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, blankrows: false, raw: true });
+  const H = (rows[0] || []).map(x => String(x || '').toLowerCase().trim());
+  const ci = (...names) => { for (const n of names) { const i = H.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
+  const cId = ci('id', 'user id', 'username'), cLd = ci('login date'), cLt = ci('login time'), cOd = ci('logout date'), cOt = ci('logout tim', 'logout time');
+  const R = rows.slice(1);
   let matched = 0, unmatched = 0, degenerate = 0;
   for (const r of R) {
-    const aid = String(r[0] || '').trim(); const lo = aid.toLowerCase();
-    const id = F.byEmail[lo]; if (id == null) { unmatched++; continue; }
-    const li = serialDateTime(r[1]); const lout = serialDateTime(r[2]);
-    if (!li || li.date == null || !lout || lout.date == null) { continue; }
-    const aLogin = absMin(li.date, li.min); const aLogout = absMin(lout.date, lout.min);
+    const lo = String(r[cId] || '').toLowerCase().trim();
+    const id = (F.byUser[lo] != null ? F.byUser[lo] : F.byEmail[lo]); if (id == null) { unmatched++; continue; }
+    const ld = localDateFromSerial(r[cLd]), lt = serialTimeMin(r[cLt]);
+    const od = localDateFromSerial(r[cOd]) || ld, ot = serialTimeMin(r[cOt]);
+    if (!ld || lt == null) { continue; }
+    const aLogin = absMin(ld, lt); const aLogout = ot == null ? aLogin : absMin(od, ot);
     if (aLogout <= aLogin || (aLogout - aLogin) > 16 * 60) { degenerate++; continue; } // same-second / never-closed bleed
     (sprinkSessions[id] = sprinkSessions[id] || []).push({ aLogin, aLogout });
     matched++;
