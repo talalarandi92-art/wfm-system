@@ -20,7 +20,7 @@ const MAP = {
   punch_in_min: 'punchIn', punch_out_min: 'punchOut', sys_login_min: 'sysLogin', sys_logout_min: 'sysLogout', login_src: 'loginSrc',
   late_min: 'lateMin', early_min: 'earlyMin', sys_late_min: 'sysLate', sys_early_min: 'sysEarly',
   ot_min: 'otMin', offday_ot_min: 'offdayOt', holiday_ot_min: 'holidayOt', worked_min: 'worked',
-  adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_type: 'permType', permission_duration: 'permDur',
+  adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_status: 'permissionStatus', permission_type: 'permType', permission_duration: 'permDur',
   comp_off: 'comp', sick: 'sick', hr_code: 'hrCode', attendance_code: 'attCode', mismatch: 'mismatch', data_quality: 'dq',
   username: 'username', total_work_sys_min: 'totalSysMin', daily_note: 'dailyNote', include_tardiness: 'includeTardiness',
   ot_before_min: 'otBefore', ot_after_min: 'otAfter', week_number: 'weekNumber', month_name: 'monthName',
