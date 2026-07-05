@@ -95,3 +95,13 @@ on the next rebuild — the cause of recurring regressions).
 - **Schedule grid** overlays `roster_days` (corrected WFH/holiday/SL/A + canonical times); cell shows the shift code
   DIRECT, no `-WFH` suffix (WFH via 🏠 icon + dotted texture).
 - **Jan–May already consistent** (verified by dry-run); no rebuild. June = recon engine.
+- **OT / tardiness clamps (2026-07-05 audit hardening, commit a33fb22)** — the engine credits the scheduled NET
+  worked, never the raw login→logout span (training: schedule=truth, logout bleeds). In `recon-build.js`:
+  `otNetCap` = schedule net (fallback 480 std / 360 mother) caps holiday & off-day OT on EVERY path;
+  `OT_CEIL=300` caps `ot_min` on every basis incl. punch-derived; `otEligible` blocks OT on
+  absence/sick/sep/unmapped; cross-midnight `sys_late`/`sys_early` capped at `TARDY_CEIL=240` (>240 = logout
+  bleed = DQ); OFF/holiday OT on login-only evidence gets a soft `data_quality` flag (never reversed);
+  `recon-ingest.js` now maps `permission_status`. All enforce EXISTING agreed rules (BR-OT-003/004/001, BR-TRD)
+  the engine under-applied — no new rule. **Most audit defects were STALE rows from older builds** (Jan–May =
+  `import-roster-master.js`; older June recon) — a full rebuild on fresh sources clears them; route all months
+  through recon. Always dry-run to a scratch table + diff before ingest (no blind rebuild).
