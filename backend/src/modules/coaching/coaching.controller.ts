@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { CoachingService } from './coaching.service';
+import { ScheduleSessionDto } from './dto/schedule-session.dto';
 
 @ApiTags('Coaching')
 @ApiBearerAuth()
@@ -42,7 +43,7 @@ export class CoachingController {
   @RequirePermissions('coaching.edit')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Dismiss a flag' })
-  dismiss(@Param('id') id: string, @CurrentUser() user: any, @Body() _body: any) {
+  dismiss(@Param('id') id: string, @CurrentUser() user: any) {
     return this.svc.resolveFlag(user.tenantId, id, 'dismissed', user.id);
   }
 
@@ -50,7 +51,7 @@ export class CoachingController {
   @RequirePermissions('coaching.edit')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Schedule a 1:1 coaching session from a flag' })
-  scheduleSession(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
+  scheduleSession(@Param('id') id: string, @CurrentUser() user: any, @Body() body: ScheduleSessionDto) {
     return this.svc.scheduleSession(user.tenantId, id, user.id, {
       scheduledAt: body?.scheduledAt, durationMinutes: body?.durationMinutes, notes: body?.notes,
     });

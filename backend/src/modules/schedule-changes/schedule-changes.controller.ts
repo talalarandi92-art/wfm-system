@@ -9,6 +9,8 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { normalizeShiftCode } from '@common/shift-normalize';
+import { RejectDto } from '@common/dto/reject.dto';
+import { CreateScheduleChangeDto } from './dto/create-schedule-change.dto';
 
 /**
  * Schedule Change requests (Phase-1 new type).
@@ -63,7 +65,7 @@ export class ScheduleChangesController {
   @Post()
   @RequirePermissions('requests.create')
   @ApiOperation({ summary: 'Submit a schedule change request' })
-  async create(@CurrentUser() user: any, @Body() body: any) {
+  async create(@CurrentUser() user: any, @Body() body: CreateScheduleChangeDto) {
     const tid = user.tenantId;
     if (!body.employeeId || !body.changeDate || !body.requestedShiftCode || !body.reason) {
       throw new BadRequestException('employeeId, changeDate, requestedShiftCode, reason مطلوبة');
@@ -261,7 +263,7 @@ export class ScheduleChangesController {
   @Post(':id/reject')
   @RequirePermissions('requests.approve_l1')
   @ApiOperation({ summary: 'Reject a schedule change' })
-  async reject(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
+  async reject(@Param('id') id: string, @CurrentUser() user: any, @Body() body: RejectDto) {
     await this.ds.query(
       `UPDATE requests SET status = 'rejected', rejected_at = NOW(), rejected_by = $3,
               rejection_reason = $4, updated_at = NOW()

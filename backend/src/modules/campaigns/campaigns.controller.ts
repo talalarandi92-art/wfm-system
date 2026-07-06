@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { UpsertCampaignDto } from './dto/upsert-campaign.dto';
 
 /**
  * Campaign / Blackout Calendar.
@@ -115,7 +116,7 @@ export class CampaignsController {
   @Post()
   @RequirePermissions('hc.edit')
   @ApiOperation({ summary: 'Create a campaign' })
-  async create(@CurrentUser() user: any, @Body() body: any) {
+  async create(@CurrentUser() user: any, @Body() body: UpsertCampaignDto) {
     const [row] = await this.ds.query(
       `INSERT INTO campaigns
          (tenant_id, name, campaign_type, start_date, end_date, restrict_requests,
@@ -129,7 +130,7 @@ export class CampaignsController {
         body.startDate, body.endDate,
         body.restrictRequests ?? true,
         JSON.stringify(Array.isArray(body.restrictedTypes) ? body.restrictedTypes : ['annual', 'shift_swap', 'off_swap', 'wfh']),
-        Math.max(0, Math.min(200, parseInt(body.requiredHcUpliftPct ?? 0, 10) || 0)),
+        Math.max(0, Math.min(200, Number(body.requiredHcUpliftPct ?? 0) || 0)),
         body.color ?? '#f59e0b',
         body.notes ?? null,
         user.id,
@@ -142,7 +143,7 @@ export class CampaignsController {
   @Patch(':id')
   @RequirePermissions('hc.edit')
   @ApiOperation({ summary: 'Update a campaign' })
-  async update(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
+  async update(@Param('id') id: string, @CurrentUser() user: any, @Body() body: UpsertCampaignDto) {
     const map: Record<string, string> = {
       name: 'name', campaignType: 'campaign_type', startDate: 'start_date', endDate: 'end_date',
       restrictRequests: 'restrict_requests', requiredHcUpliftPct: 'required_hc_uplift_pct',

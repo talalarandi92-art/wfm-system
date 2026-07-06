@@ -7,6 +7,8 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { RejectDto } from '@common/dto/reject.dto';
+import { CreateCorrectionDto } from './dto/create-correction.dto';
 
 /**
  * Attendance Correction requests (Phase-1 new type).
@@ -28,7 +30,7 @@ export class AttendanceCorrectionsController {
   @Post()
   @RequirePermissions('requests.create')
   @ApiOperation({ summary: 'Submit an attendance correction request' })
-  async create(@CurrentUser() user: any, @Body() body: any) {
+  async create(@CurrentUser() user: any, @Body() body: CreateCorrectionDto) {
     const tid = user.tenantId;
     if (!body.employeeId || !body.attendanceDate || !body.correctionType || !body.reason) {
       throw new BadRequestException('employeeId, attendanceDate, correctionType, reason مطلوبة');
@@ -181,7 +183,7 @@ export class AttendanceCorrectionsController {
   @Post(':id/reject')
   @RequirePermissions('requests.approve_l1')
   @ApiOperation({ summary: 'Reject a correction' })
-  async reject(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
+  async reject(@Param('id') id: string, @CurrentUser() user: any, @Body() body: RejectDto) {
     await this.ds.query(
       `UPDATE requests SET status = 'rejected', rejected_at = NOW(), rejected_by = $3,
               rejection_reason = $4, updated_at = NOW()

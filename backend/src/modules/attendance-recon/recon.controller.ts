@@ -3693,7 +3693,7 @@ export class ReconController {
   @Post('roster-v2/schedule-change/:id/revert')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Revert a logged schedule change/swap — restores the prior shift(s)' })
-  async scheduleRevert(@Req() req: any, @Body() _b: any, @Query('id') idQ?: string) {
+  async scheduleRevert(@Req() req: any, @Query('id') idQ?: string) {
     const t = req.user.tenantId; const id = idQ || (req.params && req.params.id);
     const [log] = await this.ds.query(`SELECT * FROM schedule_change_log WHERE tenant_id=$1 AND id=$2`, [t, id]);
     if (!log) throw new BadRequestException('Change not found');

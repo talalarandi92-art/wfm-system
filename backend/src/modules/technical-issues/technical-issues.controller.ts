@@ -13,6 +13,7 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
+import { CreateTechIssueDto } from './dto/create-tech-issue.dto';
 
 const UPLOAD_DIR = join(process.cwd(), 'uploads', 'technical-issues');
 if (!existsSync(UPLOAD_DIR)) mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -120,7 +121,7 @@ export class TechnicalIssuesController {
   @UseInterceptors(FileInterceptor('file', { storage, fileFilter, limits: { fileSize: 100 * 1024 * 1024 } }))
   async create(
     @CurrentUser() user: any,
-    @Body() body: any,
+    @Body() body: CreateTechIssueDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
     const tid = this.tid(user);

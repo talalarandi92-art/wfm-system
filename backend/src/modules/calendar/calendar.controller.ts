@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
 
 @ApiTags('Calendar')
 @ApiBearerAuth()
@@ -87,7 +88,7 @@ export class CalendarController {
   @Post('events')
   @RequirePermissions('schedule.edit')   // creating org/company events is a management action
   @ApiOperation({ summary: 'Create a calendar event' })
-  async createEvent(@CurrentUser() user: any, @Body() body: any) {
+  async createEvent(@CurrentUser() user: any, @Body() body: CreateCalendarEventDto) {
     const tid = user.tenantId;
 
     const colorMap: Record<string, string> = {
@@ -150,7 +151,7 @@ export class CalendarController {
 
     // Coaching / meeting → notify RTA & WFM so they review coverage impact before it stands.
     if (body.eventType === 'coaching' || body.eventType === 'meeting') {
-      const when = new Date(body.startAt).toLocaleString('ar-KW', { dateStyle: 'short', timeStyle: 'short' });
+      const when = new Date(body.startAt || Date.now()).toLocaleString('ar-KW', { dateStyle: 'short', timeStyle: 'short' });
       const reviewers = await this.ds.query(
         `SELECT DISTINCT u.id FROM users u
          JOIN user_roles ur ON ur.user_id = u.id
@@ -196,7 +197,7 @@ export class CalendarController {
   @Patch('events/:id')
   @RequirePermissions('schedule.edit')
   @ApiOperation({ summary: 'Update a calendar event' })
-  async updateEvent(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
+  async updateEvent(@Param('id') id: string, @CurrentUser() user: any, @Body() body: UpdateCalendarEventDto) {
     const allowed = ['title', 'start_at', 'end_at', 'location', 'description', 'status', 'color'];
     const sets: string[] = [];
     const vals: any[]    = [user.tenantId, id];
