@@ -428,5 +428,56 @@ unfair" into "provably optimal under the agreed constraints" — and it retires 
 
 ---
 
+---
+
+## 14. ODOO BROWSER BRIDGE — API-free (built 2026-07-06; finish the wiring)
+
+The Odoo/Anthropic **APIs are deferred** (no credentials until the system is proven to management), so we
+built the **browser** path to Odoo — an extension that rides the supervisor's own Odoo web session (like the
+Sprinklr/Ameyo bridges) and needs **no API key**. Do NOT rebuild it; finish the wiring. Memory:
+`odoo_browser_bridge.md`.
+
+**Already built + verified on live data (commits d344366 / 7965ebf / ebd2df9):**
+- `chrome-extension-odoo/` — intercepts Odoo's own data calls (`/web/dataset/*`), pushes records to
+  `POST /integrations/odoo/push` → **migration 069 `odoo_staging`** (idempotent by tenant/model/odoo_id).
+  Bridge login `bridge@boutiqaat.wfm` / `Demo@2026`. Verified: **1,053 real records across 8 Studio models**
+  (hr.sick.leave · attendance.permissions[late/early] · attendance.extra.hours[OT] · comp.off ·
+  comp.off.total.balance · leave.request[Annual/Unpaid] · attendance.official.tasks · hr.back.vacation
+  [resignation/transfer/termination]).
+- Generic mapper `mapOdooRequest` + `GET /integrations/odoo/requests?model=&status=` — person_no extracted
+  from the `[ 13311 ]` employee label; normalized status (confirm/first/second→pending · approve/validate/
+  done→approved · refuse/portal_refuse→refused); fields date/days/hours/type/leaveType/employeeStatus.
+- **migration 070 `attendance_excuses`** + `POST /integrations/odoo/reconcile?from=&to=&apply=` (rta.override,
+  dry-run default): APPROVED request → excuse; VALIDATED technical_issue → excuse kind=`technical`;
+  PENDING → standing alert; REFUSED → "fix hours & resubmit" alert; missing punch/system + no request →
+  "submit a justification" alert. Idempotent. Verified: 643 excuses + 1,047 alerts classified.
+
+**Reality:** the `users` table has only ~8 accounts (admin/RTA/bridge), **0 employee-linked** → agents have
+no WFM login, so in-app **agent** notification delivery is future-gated; `reconcile` returns the `alerts[]`
+list for RTA/WFM to act on now.
+
+**Remaining Odoo steps (do these; Director-agreed rules):**
+1. **Roster HONORS excuses — the core effect.** Make the recon engine read `attendance_excuses` and treat an
+   excused late/early/absence exactly like the existing covered permission (`coversLate`/`coversEarly` in
+   `recon-build.js`): **exclude it from conformance + penalty**, keep `worked`/presence honest, and LABEL the
+   reason on the row (e.g. `data_quality`/a note: "late — validated technical issue"). Rules-in-engine so
+   every rebuild re-applies. Dry-run + diff (payroll-critical). *(Alt if a rebuild isn't available: a
+   read-time LEFT JOIN overlay on the `roster-v2` conformance reads — but the engine path is canonical.)*
+2. **Approved sick/leave → `roster_days` presence** (sick/leave/H) via the engine, replacing the manual
+   Permission&Compo/Sick `.xlsx` inputs with `odoo_staging`.
+3. **Replace the manual Odoo exports:** point the recon `perms{}`/`odoo{}` inputs at `odoo_staging`
+   (`RECON_ODOO_SOURCE=db|xlsx`, diff before cutover) so the whole Supervisor-Requests suite flows live.
+4. **UI:** an `/odoo-requests` page (filter by model/status/employee + Excel export) + an `/alerts` surface
+   (refused/pending/missing-submit per agent) reusing the dazzle kit.
+5. **Scheduled reconcile** (reuse the guard `setInterval` pattern; a sensible recent window — the full-range
+   apply would emit ~800 missing-evidence alerts).
+6. **Agent accounts** (future) so agents receive their own alerts; until then deliver the alert list to RTA/WFM.
+7. `hr.back.vacation` (resignation/transfer/termination) → feed **attrition**, not an excuse.
+
+All Odoo work still obeys §1 operating rules + §4 Definition of Done (RBAC, tenant scope, DTOs, real
+transactions, indexes, audit-logged mutations, tests).
+
+---
+
 *End of brief. Execute Phase 0 → 4 in order, honoring §1, §4, and the token discipline in §0. Report at
 every exit gate. Update the 6 books + memory as you go. Do not rewrite; evolve.*
