@@ -822,12 +822,18 @@ export class ScheduleService {
         : normCell.status === 'absence' ? 'absent'
         : normCell.status === 'separation' ? 'left'
         : normCell.status === 'unknown' ? null : normCell.status; // sick/leave/holiday/off/comp as-is
+      // Worked-day guard (2026-07-06, EXECUTION_BRIEF bug #4): a manual grid edit must NEVER
+      // silently overwrite a canonical roster_days row that already carries REAL attendance
+      // evidence (punch/system login) — same contract as publish/approve, which SKIP worked
+      // days. Deliberate worked-day overrides go through the Roster schedule-change endpoint,
+      // which resets the stale window-derived metrics.
       await qr.query(
         `UPDATE roster_days
          SET shift_code = $4, shift_start_min = $5, shift_end_min = $6,
              presence = COALESCE($7, presence), hr_code = $8, attendance_code = $9,
              shift_category = $10, crosses_midnight = $11
-         WHERE tenant_id = $1 AND person_no = $2 AND work_date = $3::date AND is_active`,
+         WHERE tenant_id = $1 AND person_no = $2 AND work_date = $3::date AND is_active
+           AND punch_in_min IS NULL AND sys_login_min IS NULL`,
         [tenantId, rec.employee_no, date, code, startMinNum, endMinNum,
          presence, normCell.hrCode, code, normCell.base ?? code, crossesMidnight],
       );
