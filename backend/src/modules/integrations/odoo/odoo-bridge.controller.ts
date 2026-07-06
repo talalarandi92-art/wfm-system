@@ -32,10 +32,12 @@ const personNoFrom = (label: any) => { const m = String(label || '').match(/\[\s
 
 function normStatus(raw: any): string {
   const s = String(raw || '').toLowerCase();
-  if (/refuse|reject|cancel|decline/.test(s)) return 'refused';
-  // pending states first, so "to_approve" / "waiting" / "confirm" don't get caught by the generic "approv"
-  if (/confirm|submit|draft|waiting|to.?approv|pending|first|second/.test(s)) return 'pending';
-  if (/approv|validate|valid|done|accept/.test(s)) return 'approved';    // Odoo hr.sick.leave state = "approve"
+  // real Odoo states seen: draft · confirm · approve · approved · validate · done · refuse ·
+  //   portal_refuse · first_approval · second_approval · resumption_approval
+  if (/refuse|reject|cancel|decline/.test(s)) return 'refused';                                   // portal_refuse too
+  // in-chain / not-yet-final states first, so they don't get caught by the generic "approv"
+  if (/draft|confirm|submit|waiting|pending|to.?approv|first|second|resumption/.test(s)) return 'pending';
+  if (/approv|validate|valid|done|accept/.test(s)) return 'approved';
   return s || 'unknown';
 }
 
@@ -43,15 +45,18 @@ function normStatus(raw: any): string {
 function mapOdooRequest(model: string, d: any) {
   const empLabel = m2oLabel(d.employee_id ?? d.x_employee_id ?? d.employee);
   return {
-    model, odooId: d.id, ref: pickF(d, ['name', 'display_name', 'x_name']),
+    model, odooId: d.id, ref: (pickF(d, ['name', 'display_name', 'x_name']) || '').toString().trim() || null,
     personNo: personNoFrom(empLabel) || personNoFrom(pickF(d, ['x_employee', 'employee_name'])),
     employeeName: (empLabel ? String(empLabel).replace(/^\[\s*\d+\s*\]\s*/, '').trim() : pickF(d, ['x_employee', 'employee_name'])) || null,
-    dateFrom: pickF(d, ['date_from', 'request_date_from', 'x_date_from', 'x_date', 'date', 'start_date']),
-    dateTo: pickF(d, ['date_to', 'request_date_to', 'x_date_to', 'end_date']) || pickF(d, ['date_from', 'request_date_from', 'x_date', 'date']),
-    days: num(pickF(d, ['days', 'number_of_days', 'x_days', 'duration_days'])),
+    dateFrom: pickF(d, ['date_from', 'request_date_from', 'x_date_from', 'x_date', 'date', 'start_date', 'back_vacation_date', 'request_date']),
+    dateTo: pickF(d, ['date_to', 'request_date_to', 'x_date_to', 'end_date', 'expected_date']) || pickF(d, ['date_from', 'request_date_from', 'x_date', 'date', 'back_vacation_date']),
+    days: num(pickF(d, ['days', 'number_of_days', 'number_of_days_net', 'x_days', 'duration_days'])),
     hours: num(pickF(d, ['hours', 'x_hours', 'duration_hours', 'number_of_hours', 'x_total_hours', 'total_hours'])),
     timeFrom: pickF(d, ['x_from', 'time_from', 'x_time_from', 'from']),
     timeTo: pickF(d, ['x_to', 'time_to', 'x_time_to', 'to']),
+    type: pickF(d, ['permission_type', 'type']),                                   // late / early / full
+    leaveType: m2oLabel(d.holiday_status_id ?? d.leave_type_id),                   // ANNUAL LEAVE / UNPAID …
+    employeeStatus: pickF(d, ['employee_status']),                                 // resignation / transfer / termination (hr.back.vacation)
     status: normStatus(pickF(d, ['x_status', 'status', 'state_label']) ?? d.state),
     rawState: d.state ?? pickF(d, ['x_status', 'status']) ?? null,
     department: m2oLabel(d.department_id), section: m2oLabel(d.section_id),
