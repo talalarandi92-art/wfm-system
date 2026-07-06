@@ -65,14 +65,28 @@ export class ForecastingService {
       .filter((e: ForecastEvent) => e.multiplier !== 1); // 0% uplift = no volume effect
   }
 
-  /** Average AHT (seconds) over a date range, from agent_daily_stats. */
+  /**
+   * Average AHT (seconds) over a date range.
+   * Primary: agent_daily_stats.aht_seconds (Sprinklr bridge). FALLBACK (2026-07-06, bug #5 —
+   * the primary was 100% NULL, which left requiredHc permanently null and the whole Erlang
+   * staffing layer DEAD): derive AHT = SUM(talk_seconds)/SUM(handled) from contact_volume_daily
+   * (the dense Ameyo daily history) over the window widened to 28 days — the same proven
+   * fallback the Sprinklr contact-forecast uses.
+   */
   async avgAht(tenantId: string, from: string, to: string): Promise<number | null> {
     const [r] = await this.ds.query(
       `SELECT AVG(aht_seconds)::numeric(10,2) AS aht
          FROM agent_daily_stats
         WHERE tenant_id=$1 AND stat_date BETWEEN $2 AND $3 AND aht_seconds > 0`,
       [tenantId, from, to]);
-    return r?.aht != null ? Number(r.aht) : null;
+    if (r?.aht != null) return Number(r.aht);
+    const [f] = await this.ds.query(
+      `SELECT (SUM(talk_seconds)::numeric / NULLIF(SUM(handled),0))::numeric(10,2) AS aht
+         FROM contact_volume_daily
+        WHERE tenant_id=$1 AND vol_date BETWEEN ($2::date - 28) AND $3
+          AND handled > 0 AND talk_seconds > 0`,
+      [tenantId, from, to]).catch(() => [null]);
+    return f?.aht != null ? Number(f.aht) : null;
   }
 
   /**
