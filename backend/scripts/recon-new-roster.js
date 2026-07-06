@@ -241,6 +241,79 @@ const sprinkSessions = {}; // id -> [{aLogin, aLogout}]
   console.log('sprinklr: matched=' + matched + ' unmatched=' + unmatched + ' degenerateSkipped=' + degenerate + ' employees=' + Object.keys(sprinkSessions).length);
 }
 
+// dates whose SYSTEM evidence came from the sheet itself (recon-build relabels login_src honestly)
+const sheetEvidenceDates = new Set();
+
+// ---- EMBEDDED EVIDENCE (Phase-0 supplement, 2026-07-06) ----------------------------------
+// The user's FINAL long-form sheet itself records the evidence per day (Punch In/Out cols 19/20,
+// Permission Type/Duration/Status cols 26–28, Login/Logout System Time cols 29/30). When the four
+// dedicated evidence files don't cover a date (e.g. June 1–27 after the 28–30 slice overwrote the
+// month files), SUPPLEMENT from the sheet — NEVER override a key the dedicated loaders filled.
+// This is the same evidence base those days were originally reconciled from; the point is to
+// re-run it through the CORRECTED engine rules.
+{
+  const SRC = process.env.MANUAL_FILE || (SRCDIR + 'CC Schedule 26 June..xlsx');
+  let wfhCarry = {};
+  try { wfhCarry = JSON.parse(fs.readFileSync(SCRATCH + '/wfh-evidence.json', 'utf8')); } catch (e) { /* none exported */ }
+  try {
+    const wb = XLSX.readFile(SRC, { cellDates: false, raw: true });
+    const sn = wb.SheetNames.find(n => /^(final|shift)/i.test(n)) || wb.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: null, blankrows: false, raw: true });
+    // day-coverage of the dedicated sources: any key on that date means the file covered the date
+    const odooDates = new Set(Object.keys(odoo).map(k => k.split('|')[1]));
+    const permDates = new Set(Object.keys(perms).map(k => k.split('|')[1]));
+    const sysDates = new Set();
+    for (const [id, ss] of Object.entries(ameyoSessions).concat(Object.entries(sprinkSessions)))
+      for (const s of ss) sysDates.add(absToDM(s.aLogin).date);
+    let addO = 0, addP = 0, addS = 0;
+    const t = (v) => (typeof v === 'number') ? serialTimeMin(v) : parseClock(v);
+    for (const r of rows.slice(1)) {
+      const id = (typeof r[4] === 'number') ? r[4] : parseInt(r[4], 10); if (!id || isNaN(id)) continue;
+      const date = (typeof r[0] === 'number') ? localDateFromSerial(r[0]) : null; if (!date) continue;
+      const key = id + '|' + date;
+      // punches + per-DAY WFH location → odoo shape (only if the Odoo file did not cover this DATE).
+      // WFH evidence, in priority order: the sheet's per-day Location col (10) if the export kept it,
+      // else the carried-forward wfh-evidence.json (dumped from live roster_days by
+      // recon-export-wfh-evidence.js — the original file's Location column survives THERE after
+      // later re-exports flattened it to "Office"). The engine's BR-WFH-001 reads it via odoo.status.
+      if (!odooDates.has(date) && !odoo[key]) {
+        const pi = t(r[18]), po = t(r[19]);
+        const dayWFH = /wfh|work from home/i.test(String(r[10] || '')) || !!wfhCarry[key];
+        if (pi != null || po != null || dayWFH) { odoo[key] = { punchIn: pi, punchOut: po, status: dayWFH ? 'WFH' : null }; addO++; }
+      }
+      // system window → one session on the absolute timeline (cross-midnight: logout < login = next day)
+      if (!sysDates.has(date)) {
+        const li = t(r[28]), lo = t(r[29]);
+        if (li != null) {
+          const aLogin = absMin(date, li);
+          let aLogout = lo == null ? aLogin : absMin(date, lo) + (lo < li ? 1440 : 0);
+          (ameyoSessions[id] = ameyoSessions[id] || []).push({ aLogin, aLogout });
+          sheetEvidenceDates.add(date);
+          addS++;
+        }
+      }
+      // permission → perms shape (Duration is a TEXT window "4:00 PM - 6:00 PM" or an hour count — parse, never sum)
+      if (!permDates.has(date) && !perms[key] && r[25] != null && String(r[25]).trim() !== '') {
+        const type = String(r[25]).trim();
+        const status = r[27] == null ? '' : String(r[27]).replace(/\s+/g, ' ').trim();
+        let fromMin = null, toMin = null, hours = null;
+        const dur = r[26];
+        if (typeof dur === 'number') { hours = dur < 1 ? Math.round(dur * 24 * 100) / 100 : dur; } // time-fraction or hour count
+        else if (dur != null) {
+          const parts = String(dur).split(/\s*[-–]\s*/);
+          if (parts.length === 2) { fromMin = parseClock(parts[0]); toMin = parseClock(parts[1]); }
+        }
+        perms[key] = [{ kind: /comp off/i.test(type) ? 'comp' : 'perm', type, fromMin, toMin, hours,
+          approved: /approved/i.test(status), status,
+          covers: /late in/i.test(type) ? 'late' : /early out/i.test(type) ? 'early' : /full day/i.test(type) ? 'full' : /out\/in/i.test(type) ? 'both' : 'other' }];
+        addP++;
+      }
+    }
+    if (addO + addP + addS > 0)
+      console.log('embedded evidence supplemented from ' + SRC.split('/').pop() + ': punches+' + addO + ' systemSessions+' + addS + ' permissions+' + addP);
+  } catch (e) { console.warn('embedded-evidence supplement skipped: ' + e.message); }
+}
+
 // Select the system window for a specific shift: sessions whose login lands within the shift
 // window (+/- tolerance). Returns {loginMin, logoutMin, sessions} RELATIVE to the shift date (Dabs),
 // or null. Cross-midnight safe because everything is on the absolute timeline.
@@ -272,15 +345,20 @@ function pickWindow(sessions, Dabs, schedStartMin, schedEndMin) {
 // data horizon = last date where a MEANINGFUL number of employees have attendance evidence
 let horizon = '0000';
 {
-  const empByDate = {}; // count distinct employees per date from odoo punches (most reliable presence signal)
+  // count distinct employees per date with ANY attendance evidence: an odoo punch OR a system
+  // session (2026-07-06 fix — a punch-only count silently dropped days where the fingerprint
+  // export was missing but 61 employees had system logins, e.g. 2026-06-27).
+  const empByDate = {};
   for (const k in odoo) { const [id, d] = k.split('|'); if (odoo[k].punchIn != null) (empByDate[d] = empByDate[d] || new Set()).add(id); }
+  for (const pool of [ameyoSessions, sprinkSessions])
+    for (const id in pool) for (const s of pool[id]) { const d = absToDM(s.aLogin).date; (empByDate[d] = empByDate[d] || new Set()).add(id); }
   // upper bound = RECON_TO, else the uploaded schedule's last date — NOT a hardcoded June, so ANY month works
   const HZ_CAP = process.env.RECON_TO || (F.meta && F.meta.dateRange && F.meta.dateRange[1]) || '2999-12-31';
   for (const d in empByDate) if (d <= HZ_CAP && empByDate[d].size >= 10 && d > horizon) horizon = d;
 }
-console.log('data horizon (>=10 employees with punches): ' + horizon);
+console.log('data horizon (>=10 employees with punch or system evidence): ' + horizon);
 
-module.exports = { classifyCode, isExcludedRole, F, odoo, perms, ameyoSessions, sprinkSessions, pickWindow, dayOffset, absToDM, horizon, serialToISO, parseClock, hhmm, hhmmss, minToHHMMSS, dayName, OUT_XLSX, SCRATCH };
+module.exports = { classifyCode, isExcludedRole, F, odoo, perms, ameyoSessions, sprinkSessions, sheetEvidenceDates, pickWindow, dayOffset, absToDM, horizon, serialToISO, parseClock, hhmm, hhmmss, minToHHMMSS, dayName, OUT_XLSX, SCRATCH };
 
 // run the build if invoked directly
 if (require.main === module) require('./recon-build')();

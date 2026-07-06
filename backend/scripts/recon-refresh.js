@@ -31,6 +31,10 @@ console.log('=== RECON REFRESH — rebuild the corrected roster + push it LIVE =
 const t0 = Date.now();
 try {
   step('recon-extract-foundation-v2.js', '1/4  foundation from your final "Shifts." sheet (exact shift times)');
+  // Evidence carry-forward (2026-07-06): dump per-day WFH location evidence from the LIVE
+  // roster BEFORE the rebuild — later sheet re-exports flattened the Location column to
+  // "Office", so without this every historical WFH day would misclassify as Office.
+  step('recon-export-wfh-evidence.js', '1.5  carry forward per-day WFH evidence from live roster_days');
   step('recon-new-roster.js', '2/4  corrected reconciliation engine → ingest payload');
   step('recon-ingest.js', '3/4  ingest → LIVE roster_days (backed up first)');
   // Step 4 (2026-07-06, one-spine fix): resync attendance_records from the canonical

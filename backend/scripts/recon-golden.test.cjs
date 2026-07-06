@@ -80,9 +80,10 @@ for (const p of [B + '/.env', B + '/../.env']) if (fs.existsSync(p)) for (const 
     if ((n === 0) === expectZero) console.log('  ✓ ' + name + ' (' + n + ')');
     else { failures++; console.error('  ✗ ' + name + ' → ' + n + ' violating rows'); }
   };
-  // NOTE: invariants apply to CLAMPED slices; pre-clamp history is bounded by the June-28+ engine
-  // era — scope to the era the clamps shipped for (>= 2026-06-28) so the gate is honest.
-  const ERA = "work_date >= '2026-06-28'";
+  // NOTE: invariants apply to CLAMPED slices. Widened to full June on 2026-07-06: June 1–26
+  // was rebuilt through the corrected engine (embedded-evidence supplement run), so the whole
+  // month must hold the clamps. Do not widen past what recon actually rebuilt.
+  const ERA = "work_date >= '2026-06-01'";
   await one('no unflagged ot_min > 300 (era)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND ${ERA} AND ot_min > 300 AND COALESCE(data_quality,'') = ''`);
   await one('no cross-midnight sys_late/early > 240 (era)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND ${ERA} AND crosses_midnight AND (sys_late_min > 240 OR sys_early_min > 240)`);
   await one('OT buckets disjoint (all history)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND ((COALESCE(ot_min,0)>0 AND COALESCE(offday_ot_min,0)>0) OR (COALESCE(ot_min,0)>0 AND COALESCE(holiday_ot_min,0)>0) OR (COALESCE(offday_ot_min,0)>0 AND COALESCE(holiday_ot_min,0)>0))`);

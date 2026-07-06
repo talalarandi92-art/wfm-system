@@ -8,7 +8,7 @@ const fs = require('fs');
 
 module.exports = function build() {
   const M = require('./recon-new-roster');
-  const { classifyCode, isExcludedRole, F, odoo, perms, ameyoSessions, sprinkSessions, pickWindow, dayOffset, absToDM, horizon, hhmm, minToHHMMSS, dayName, OUT_XLSX, SCRATCH } = M;
+  const { classifyCode, isExcludedRole, F, odoo, perms, ameyoSessions, sprinkSessions, sheetEvidenceDates, pickWindow, dayOffset, absToDM, horizon, hhmm, minToHHMMSS, dayName, OUT_XLSX, SCRATCH } = M;
 
   const REQUIRED_STD_NET = 480, REQUIRED_MOM_NET = 360;
   // Official holidays — EDITABLE in scripts/recon-config.json (anyone who works a scheduled shift on one of
@@ -147,6 +147,8 @@ module.exports = function build() {
       else if (sec) { sysSource = secName; sysConf = 'Medium'; sysReason = secName + ' (no ' + primName + ')'; sysLogin = sec.loginMin; sysLogout = sec.logoutMin; }
       // transparency: if the chosen window had a never-closed (bleed) session capped, flag it — the user's manual
       // read may catch a real early-out here. We DON'T auto-decide it (stays as computed); the note prompts review.
+      // honest provenance: this date's system evidence came from the user's sheet, not a live Ameyo export
+      if (sysSource && sheetEvidenceDates && sheetEvidenceDates.has(date)) { sysSource = 'Workbook (recorded)'; sysConf = 'Medium'; sysReason = 'sheet-recorded system times (evidence files do not cover this date)'; }
       const selWin = /^Ameyo/.test(sysSource) ? am : /^Sprinklr/.test(sysSource) ? sp : null;
       if (selWin && selWin.capped) sysReason += ' · logout capped (open session — verify early-out)';
       // LOGIN refinement (matches the user's method): take the EARLIEST plausible login across BOTH sources —
