@@ -10,34 +10,15 @@ import {
   AssignMembersDto,
 } from './rotation.types';
 
-// Re-use the same shift catalog from the generator
-const SHIFT_CATALOG: Record<string, { category: string; code: string }> = {
-  M:   { code: 'M',   category: 'morning'   },
-  B:   { code: 'B',   category: 'morning'   },
-  C:   { code: 'C',   category: 'afternoon' },
-  E:   { code: 'E',   category: 'evening'   },
-  N:   { code: 'N',   category: 'night'     },
-  N2:  { code: 'N2',  category: 'night'     },
-  MD:  { code: 'MD',  category: 'midnight'  },
-  MN:  { code: 'MN',  category: 'midnight'  },
-  OFF: { code: 'OFF', category: 'off'       },
-};
+import { ShiftCategory as CanonCategory, shiftCategoryFromCode, shiftCategoryFromHour } from '@common/shift-category';
 
-// Derive category from start hour
-function categoryFromHour(h: number): string {
-  if (h >= 6  && h < 10) return 'morning';
-  if (h >= 10 && h < 12) return 'morning';
-  if (h >= 12 && h < 14) return 'afternoon';
-  if (h >= 14 && h < 17) return 'evening';
-  if (h >= 17 && h < 20) return 'night';
-  if (h >= 20 && h < 23) return 'night';
-  return 'midnight';
-}
-
-function categoryFromStartTime(startTime: string | null): string {
-  if (!startTime) return 'off';
-  const h = parseInt(startTime.split(':')[0], 10);
-  return categoryFromHour(h);
+// Category comes from @common/shift-category (THE ONE mapping, BR-SHF-006):
+// code-first for schedule_entries, start-hour fallback for attendance_records
+// (which carry no textual shift code). 'afternoon' is not a canonical category —
+// C-shift counts as morning; the response keeps afternoon=0 for API shape.
+function categoryFromStartTime(startTime: string | null): CanonCategory {
+  if (!startTime) return 'other';
+  return shiftCategoryFromHour(parseInt(startTime.split(':')[0], 10));
 }
 
 // Recommended next shift based on fairness + rotation
@@ -58,7 +39,7 @@ function recommendNext(
 
   // Default rotation based on last shift
   const rotMap: Record<string, string> = {
-    M: 'B', B: 'C', C: 'E', E: 'N', N: 'M', N2: 'M', MD: 'M', OFF: 'M',
+    M: 'B', B: 'C', C: 'E', E: 'N', N: 'M', MD: 'M', MN: 'M', OFF: 'M',
   };
   const next = rotMap[lastShiftCode] ?? 'M';
   return { code: next, reason: 'الدوران الطبيعي للورديات' };
@@ -195,13 +176,13 @@ export class RotationService implements OnModuleInit {
       let code = 'M';
       if (r.attendance_marker === 'off') code = 'OFF';
       else if (r.scheduled_start) {
+        // Nearest canonical start (BR-SHF-005): M 07 · B 09 · C 11 · N 13 · E 16 · EE 18 · MD 22.
         const h = parseInt(r.scheduled_start.split(':')[0], 10);
-        if (h >= 6  && h < 10) code = 'M';
-        else if (h >= 10 && h < 12) code = 'B';
-        else if (h >= 12 && h < 14) code = 'C';
-        else if (h >= 14 && h < 17) code = 'E';
-        else if (h >= 17 && h < 20) code = 'N';
-        else if (h >= 20 && h < 23) code = 'N2';
+        if (h >= 5  && h <= 8)  code = 'M';
+        else if (h >= 9  && h <= 10) code = 'B';
+        else if (h >= 11 && h <= 12) code = 'C';
+        else if (h >= 13 && h <= 15) code = 'N';
+        else if (h >= 16 && h <= 21) code = 'E';
         else code = 'MD';
       }
       lastShiftMap.set(r.employee_id, { code, date: r.attendance_date });
@@ -212,29 +193,27 @@ export class RotationService implements OnModuleInit {
     const countMap = new Map<string, Counts>();
     const init = (): Counts => ({ morning: 0, afternoon: 0, evening: 0, night: 0, midnight: 0, off: 0, leave: 0 });
 
-    const processRecord = (empId: string, marker: string, startTime: string | null) => {
+    const processRecord = (empId: string, marker: string, cat: CanonCategory) => {
       if (!countMap.has(empId)) countMap.set(empId, init());
       const c = countMap.get(empId)!;
 
       if (marker === 'off')                                     { c.off++; return; }
       if (['leave','sick','comp','holiday'].includes(marker))   { c.leave++; return; }
       if (marker === 'absent')                                   { return; } // don't count
-      if (!startTime)                                            { return; }
 
-      const cat = categoryFromStartTime(startTime);
-      if (cat === 'morning')   c.morning++;
-      else if (cat === 'afternoon') c.afternoon++;
+      if (cat === 'morning')        c.morning++;
       else if (cat === 'evening')   c.evening++;
       else if (cat === 'night')     c.night++;
       else if (cat === 'midnight')  c.midnight++;
+      // 'other' (no schedule / non-working code) is not a working shift — not counted.
     };
 
-    // Process attendance records
+    // Process attendance records (no textual code — canonical start-hour fallback)
     for (const r of attRows) {
-      processRecord(r.employee_id, r.attendance_marker, r.scheduled_start);
+      processRecord(r.employee_id, r.attendance_marker, categoryFromStartTime(r.scheduled_start));
     }
 
-    // Process schedule entries (merge — avoid double-counting dates)
+    // Process schedule entries (merge — avoid double-counting dates); code-first classification
     const attendanceDates = new Set<string>();
     for (const r of attRows) {
       attendanceDates.add(`${r.employee_id}:${r.attendance_date?.toString()?.slice(0,10)}`);
@@ -242,16 +221,7 @@ export class RotationService implements OnModuleInit {
     for (const r of schedRows) {
       const dateKey = `${r.employee_id}:${r.entry_date?.toString()?.slice(0,10)}`;
       if (attendanceDates.has(dateKey)) continue; // already counted
-      // map shift_code_display to category
-      const shiftCat = SHIFT_CATALOG[r.shift_code_display]?.category;
-      if (!shiftCat) continue;
-      processRecord(r.employee_id, r.attendance_marker ?? 'present',
-        shiftCat === 'off' ? null :
-        shiftCat === 'morning'   ? '07:00' :
-        shiftCat === 'afternoon' ? '12:00' :
-        shiftCat === 'evening'   ? '14:00' :
-        shiftCat === 'night'     ? '17:00' : '23:00',
-      );
+      processRecord(r.employee_id, r.attendance_marker ?? 'present', shiftCategoryFromCode(r.shift_code_display));
     }
 
     // ── Build employee shift-rate objects ─────────────────────────────────────

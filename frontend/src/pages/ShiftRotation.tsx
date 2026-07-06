@@ -91,7 +91,6 @@ function DistBar({ emp }: { emp: EmployeeShiftRate }) {
   const ar = lang === 'ar';
   const segs = [
     { pct: emp.morningPct,   color: '#0ea5e9', labelAr: 'صباحي', labelEn: 'Morning' },
-    { pct: emp.afternoonPct, color: '#f59e0b', labelAr: 'ظهيرة', labelEn: 'Midday'  },
     { pct: emp.eveningPct,   color: '#f97316', labelAr: 'عصري',  labelEn: 'Evening'  },
     { pct: emp.nightPct,     color: '#8b5cf6', labelAr: 'ليلي',  labelEn: 'Night'    },
     { pct: emp.midnightPct,  color: '#1e3a5f', labelAr: 'منتصف', labelEn: 'Midnight' },
@@ -701,9 +700,9 @@ export default function ShiftRotationPage() {
                           <tr style={{ borderBottom: dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.07)' }}>
                             <th className="px-2 py-1.5 text-[10px] font-bold" style={{ color: '#64748b', textAlign: 'start' }}>
                               {ar ? 'الموظف' : 'Employee'}</th>
-                            {(['morning', 'afternoon', 'evening', 'night', 'midnight'] as const).map(c => (
+                            {(['morning', 'evening', 'night', 'midnight'] as const).map(c => (
                               <th key={c} className="px-2 py-1.5 text-[10px] font-bold text-center" style={{ color: '#64748b' }}>
-                                {ar ? ({ morning: 'صباحي', afternoon: 'ظهيرة', evening: 'مسائي', night: 'ليلي', midnight: 'ميدنايت' }[c]) : c}
+                                {ar ? ({ morning: 'صباحي', evening: 'مسائي', night: 'ليلي', midnight: 'ميدنايت' }[c]) : c}
                                 <div className="text-[8px] font-normal">{ar ? 'قبل ← بعد' : 'before → after'}</div>
                               </th>
                             ))}
@@ -716,7 +715,7 @@ export default function ShiftRotationPage() {
                                 <div className="font-semibold" style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>{r.name}</div>
                                 <div className="text-[9px]" style={{ color: '#64748b' }}>#{r.employeeNo} · {r.functionName}</div>
                               </td>
-                              {(['morning', 'afternoon', 'evening', 'night', 'midnight'] as const).map(c => {
+                              {(['morning', 'evening', 'night', 'midnight'] as const).map(c => {
                                 const pre = r.preSwap.byCategory[c]?.pct ?? 0;
                                 const post = r.postSwap.byCategory[c]?.pct ?? 0;
                                 const d = r.deltaPct[c] ?? 0;
@@ -824,11 +823,8 @@ export default function ShiftRotationPage() {
                       <th className="text-start py-3 px-3 text-slate-400 font-medium">{ar ? 'الموظف' : 'Employee'}</th>
                       <th className="text-start py-3 px-3 text-slate-400 font-medium">{ar ? 'الوظيفة' : 'Function'}</th>
                       <th className="text-start py-3 px-3 text-slate-400 font-medium">{ar ? 'المجموعة' : 'Group'}</th>
-                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'صباحي (M+B)' : 'Morning (M+B)'}>
+                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'صباحي (M+B+C)' : 'Morning (M+B+C)'}>
                         <span style={{ color: '#0ea5e9' }}>{ar ? 'صباحي' : 'Morn'}</span>
-                      </th>
-                      <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'ظهيرة (C)' : 'Midday (C)'}>
-                        <span style={{ color: '#f59e0b' }}>{ar ? 'ظهيرة' : 'Mid'}</span>
                       </th>
                       <th className="text-center py-3 px-2 text-slate-400 font-medium min-w-[44px]" title={ar ? 'عصري (E)' : 'Evening (E)'}>
                         <span style={{ color: '#f97316' }}>{ar ? 'عصري' : 'Eve'}</span>
@@ -896,7 +892,6 @@ export default function ShiftRotationPage() {
                           {/* Shift category % columns */}
                           {[
                             { val: emp.morningPct,   color: '#0ea5e9' },
-                            { val: emp.afternoonPct, color: '#f59e0b' },
                             { val: emp.eveningPct,   color: '#f97316' },
                             { val: emp.nightPct,     color: '#8b5cf6' },
                             { val: emp.midnightPct,  color: '#6366f1' },
