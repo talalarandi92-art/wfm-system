@@ -4,6 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
+import { AmeyoService } from './ameyo.service';
 
 /**
  * Ameyo bridge ingest — receives live-monitoring snapshots scraped by the Ameyo
@@ -26,7 +27,10 @@ interface AmeyoSnapshot {
 @ApiTags('Ameyo')
 @Controller({ path: 'integrations/ameyo', version: '1' })
 export class AmeyoController {
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly ds: DataSource,
+    private readonly ameyo: AmeyoService,
+  ) {}
 
   @Post('push')
   @UseGuards(JwtAuthGuard)
@@ -54,20 +58,8 @@ export class AmeyoController {
   @Get('live')
   @UseGuards(JwtAuthGuard)
   @RequirePermissions('rta.view')   // live telephony wallboard — RTA/WFM, not agents
-  @ApiOperation({ summary: 'Latest Ameyo snapshot' })
+  @ApiOperation({ summary: 'Latest Ameyo snapshot — normalized states + computed KPIs + employee links + stale flag' })
   async live(@Request() req: any) {
-    const [row] = await this.ds.query(
-      `SELECT captured_at, queues_json, agents_json, queue_count, agent_count
-         FROM integration_snapshots WHERE tenant_id=$1 AND source='ameyo'
-        ORDER BY captured_at DESC LIMIT 1`, [req.user.tenantId]).catch(() => []);
-    if (!row) return { capturedAt: null, kpis: {}, agents: [], queues: [] };
-    const qj = row.queues_json ?? {};
-    return {
-      capturedAt: row.captured_at,
-      kpis: qj.kpis ?? {},
-      queues: qj.queues ?? [],
-      agents: row.agents_json ?? [],
-      staleSec: Math.round((Date.now() - new Date(row.captured_at).getTime()) / 1000),
-    };
+    return this.ameyo.getLive(req.user.tenantId);
   }
 }
