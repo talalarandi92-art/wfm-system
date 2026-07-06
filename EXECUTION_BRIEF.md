@@ -258,15 +258,30 @@ cutover** (`RECON_ODOO_SOURCE=db|xlsx`). See §9.
 **Exit:** scheduled sync runs unattended, verified vs the Odoo UI for a sample; leave dates correct at the
 UTC boundary; Odoo leaves appear in `roster_days`.
 
-### Phase 3 — AI workforce waves (15 → 35)
-**3a** set `ANTHROPIC_API_KEY` **and fix the default `LLM_MODEL`** first (`llm.service.ts:14` currently
-points at a non-existent `claude-sonnet-4-6` → it fails silently) → verify Advisor/Expert/Chief `llm:true`.
-**3b** extract an `AgentRunner` base scaffold + a distributed lock + an append-only `agent_events` bus
-(replaces the hardcoded team-learning graph). **3c** merge Advisor+Expert; give each agent an adaptive
-baseline store; cache one assessment/tenant/TTL. **3d** move Auto Mode arming behind `automation.manage`
-(not `hc.view`). Then build the 6 NEW agents on the stable spine (§7), Testing Engineer last.
+### Phase 3 — AI workforce waves (15 → 35) — the Director's Enterprise AI Department mandate
+The 35-agent ecosystem (spec: `docs/master/AI_WORKFORCE_ARCHITECTURE.md` — per-agent contract §1, the
+35-agent map §2, shared Enterprise KB + `agent_events` bus §3, collaboration DAG §4). Every agent:
+explainable + audit-logged (no black boxes), human-in-the-loop for regulated/pay actions.
+
+- **W0 — Activate the substrate** *(✅ scaffold LANDED 2026-07-06; key pending)*: default `LLM_MODEL`
+  fixed (`llm.service.ts` — the old `claude-sonnet-4-6` was a non-existent id that 400'd silently;
+  now `claude-sonnet-5`); **migration 073 `agent_events`** (append-only pub/sub backbone, indexed by
+  stream/agent/subject); **`@common/agent-runner.ts`** — publishEvent (evidence payload = the
+  explainability record) / consumeEvents (cross-agent, self-excluding) / runExclusive (Postgres
+  advisory-lock distributed lock — verified: 2-session test, instance B skips while A holds).
+  REMAINING in W0: set `ANTHROPIC_API_KEY` → verify Advisor/Expert/Chief `llm:true`.
+- **W1 — Expose the 13 EXISTS agents** through the runner (rename/surface per §7) + merge Advisor+Expert
+  into the WFM Copilot.
+- **W2 — Extend the 16 PARTIALs** (Live Coverage Guardian, RTA Assistant, Approval Advisor, SLA Risk
+  Predictor, Root Cause, Quality Coach, Productivity, Data-Quality Auditor, Integration Manager…);
+  adaptive baseline stores; one assessment/tenant/TTL cache; Auto-Mode arming behind `automation.manage`.
+- **W3 — Data pipelines the agents need**: forecast AHT unlock, Odoo staging→recon, generator consolidation.
+- **W4 — Build the 6 NEW agents** (Contact-Reason Analyzer, Workforce Simulator, Documentation Writer,
+  Cost Optimizer, Training Planner extensions, Testing Engineer LAST).
 **Exit:** Advisor/Expert/Chief return `llm:true`; `AgentRunner` powers all guards (specs pass); no duplicate
-notifications under a 2-instance test; Auto-Mode write paths reject a `hc.view`-only token.
+notifications under a 2-instance test (advisory lock — already proven at the scaffold level); Auto-Mode
+write paths reject a `hc.view`-only token; each shipped agent's §1 contract documented in
+AI_WORKFORCE_ARCHITECTURE.md §2.
 
 ### Phase 4 — Harden / scale / test *(the "100% production, 100+ users, no slowdown" gate)*
 - **Concurrency/scale (risks 4–8):** install `@nestjs/cache-manager` on the existing Redis (60–180s TTL,

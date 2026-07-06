@@ -11,7 +11,10 @@ import { Injectable, Logger } from '@nestjs/common';
 export class LlmService {
   private readonly log = new Logger('LLM');
   private readonly key = process.env.ANTHROPIC_API_KEY || process.env.LLM_API_KEY || '';
-  private readonly model = process.env.LLM_MODEL || 'claude-sonnet-4-6';
+  // 2026-07-06 (AI Workforce W0): the old default 'claude-sonnet-4-6' is NOT a real model id —
+  // the moment a key was set, every call would 400 silently. 'claude-sonnet-5' is the current
+  // Sonnet id; override per-deployment with LLM_MODEL.
+  private readonly model = process.env.LLM_MODEL || 'claude-sonnet-5';
   private readonly endpoint = process.env.LLM_ENDPOINT || 'https://api.anthropic.com/v1/messages';
 
   isConfigured(): boolean { return !!this.key; }
