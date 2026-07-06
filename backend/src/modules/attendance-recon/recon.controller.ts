@@ -12,6 +12,7 @@ import { DataSource, QueryRunner } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { shiftCategoryFromCode, shiftCategoryCaseSql } from '@common/shift-category';
+import { MATERNITY_7H, TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
 import { ReconService } from './recon.service';
 import { RosterIngestionService } from './roster-ingestion.service';
 
@@ -23,27 +24,9 @@ const SCHEDULE = process.env.RECON_SCHEDULE_FILE || 'C:/Users/t.bassam/Desktop/W
 // "rebuild" uploads land here (matched by filename) before the engine runs.
 const RECON_NEW_DIR = process.env.RECON_NEW_DIR || 'C:/Users/t.bassam/Desktop/new roster/';
 
-/* ── Canonical roster_days metric expressions — ONE source of truth so every report
- *  agrees (no report should silently undercount or inflate).
- *  TRUE_OT: OT lives in THREE DISJOINT buckets — ot_min (regular workday) +
- *    offday_ot_min (OT worked on the employee's OFF day) + holiday_ot_min (OT on a
- *    public holiday). Each roster_days row sits in exactly one bucket, so the real
- *    total is their SUM. Summing ot_min alone undercounts (~28% on the live data).
- *  CRED_LATE/CRED_EARLY: a credible late-in/early-out is 7..240 min (>6 min tolerated,
- *    rule 2026-06-30). Cross-midnight
- *    night shifts (MD/MN/MNR, shift_end>1440) make the post-midnight session tail
- *    read as a multi-hour false late/early — an artifact, not the agent leaving early
- *    — so values >4h are excluded from credible-tardiness counts (HR-safe).
- *  MATERNITY: the maternity-7h mothers (Haya Mohanna 12375, Shaima Saoud 12434) work a
- *    legitimate 7h day, so their ~2h/day early-out is STRUCTURAL/approved, not a
- *    violation — roster_days stores it vs the 9h end (it does not flag maternity), so we
- *    exclude these two from credible EARLY-OUT everywhere (late-in is still counted).
- *    Same fairness carve-out as the WFH HR report. */
-const MATERNITY_7H = "('12375','12434')";
-const TRUE_OT = '(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))';
-// user rule 2026-06-30: tardiness counts only when > 6 min (<=6 tolerated); upper 240 = cross-midnight bleed guard.
-const CRED_LATE = '(sys_late_min BETWEEN 7 AND 240)';
-const CRED_EARLY = `(sys_early_min BETWEEN 7 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`;
+/* Canonical roster_days metric expressions (TRUE_OT / CRED_LATE / CRED_EARLY / MATERNITY_7H)
+ * moved to @common/wfm-metrics (2026-07-06, one-spine fix — EXECUTION_BRIEF bug #2): ONE
+ * definition, imported by every consumer. Never redefine locally. */
 
 @ApiTags('Attendance Reconciliation')
 @ApiBearerAuth()

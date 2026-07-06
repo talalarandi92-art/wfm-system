@@ -30,9 +30,15 @@ const step = (script, label) => {
 console.log('=== RECON REFRESH — rebuild the corrected roster + push it LIVE ===');
 const t0 = Date.now();
 try {
-  step('recon-extract-foundation-v2.js', '1/3  foundation from your final "Shifts." sheet (exact shift times)');
-  step('recon-new-roster.js', '2/3  corrected reconciliation engine → ingest payload');
-  step('recon-ingest.js', '3/3  ingest → LIVE roster_days (backed up first)');
+  step('recon-extract-foundation-v2.js', '1/4  foundation from your final "Shifts." sheet (exact shift times)');
+  step('recon-new-roster.js', '2/4  corrected reconciliation engine → ingest payload');
+  step('recon-ingest.js', '3/4  ingest → LIVE roster_days (backed up first)');
+  // Step 4 (2026-07-06, one-spine fix): resync attendance_records from the canonical
+  // roster_days for the ingested range, so dashboard/RTA/scorecard/coverage (the raw-spine
+  // readers) show the SAME OT/late/presence as the roster pages. Generated future weeks
+  // ('[generated %' notes) are preserved. APPLY=1 = the pipeline just ingested, write for real.
+  process.env.APPLY = '1';
+  step('recon-sync-attendance.js', '4/4  resync attendance_records ← roster_days (one spine)');
   console.log('\n✅ DONE in ' + ((Date.now() - t0) / 1000).toFixed(0) + 's — /roster now shows the corrected reconciliation. Restore: node scripts/recon-ingest.js --restore');
 } catch (e) {
   console.log('\n❌ REFRESH FAILED at a step above. roster_days is unchanged unless the ingest step printed INGEST OK. ' + (e.message || ''));

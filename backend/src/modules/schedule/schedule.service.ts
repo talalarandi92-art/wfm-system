@@ -236,7 +236,7 @@ export class ScheduleService {
         rd.shift_end_min   AS rd_end_min,
         rd.location        AS rd_location,
         rd.sys_late_min    AS rd_late,
-        (COALESCE(rd.ot_min,0)+COALESCE(rd.offday_ot_min,0)+COALESCE(rd.holiday_ot_min,0)) AS rd_ot
+        (COALESCE(rd.ot_min,0)+COALESCE(rd.offday_ot_min,0)+COALESCE(rd.holiday_ot_min,0)) AS rd_ot -- = TRUE_OT (@common/wfm-metrics), rd-aliased
       FROM attendance_records ar
       JOIN employees e ON ar.employee_id = e.id
       LEFT JOIN functions f ON e.function_id = f.id
