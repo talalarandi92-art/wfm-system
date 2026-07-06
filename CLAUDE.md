@@ -1,5 +1,11 @@
 # WFM PROJECT INSTRUCTIONS — FULL MASTER VERSION
 
+> **▶ START HERE (for execution): [`EXECUTION_BRIEF.md`](EXECUTION_BRIEF.md)** — the paste-ready,
+> self-contained plan to take this system to production: whole-system audit (what's done/partial/dead +
+> ranked bugs with `file:line`), a Definition of Done (security · 100+ concurrency · scale · readability),
+> the phased roadmap (Phase 0→4), and the AI-workforce / Odoo-integration / 6-books specs. Read it FIRST
+> when tasked with building or hardening. Evolve the system — do not rewrite.
+
 > **★ ENTERPRISE KNOWLEDGE SUITE (rebuilt 2026-07-02 — the organized presentation layer over everything below):**
 > `docs/master/` holds the 10-file suite: `MASTER_PROJECT_MEMORY.md` (the brain — read FIRST),
 > `WFM_BUSINESS_RULES_LIBRARY.md` (every rule with BR-IDs + status + enforcement path),
