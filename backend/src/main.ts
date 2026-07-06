@@ -53,6 +53,10 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-Slug'],
   });
 
+  // Behind nginx/reverse-proxy: honor X-Forwarded-For so req.ip is the real client
+  // (2026-07-06, risk #15 — without this, IP tracking sees ONE ip for the whole office).
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   // Request body limits — 50 MB for file uploads / Sprinklr payloads
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));

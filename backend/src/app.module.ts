@@ -1,7 +1,8 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { UserThrottlerGuard } from '@common/guards/user-throttler.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard }      from '@common/guards/jwt-auth.guard';
 import { PermissionsGuard }  from '@common/guards/permissions.guard';
@@ -113,7 +114,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ([{
         ttl:   config.get<number>('RATE_LIMIT_TTL_SECONDS', 60) * 1000,
-        limit: config.get<number>('RATE_LIMIT_MAX_REQUESTS', 100),
+        limit: config.get<number>('RATE_LIMIT_MAX_REQUESTS', 300),   // per USER (UserThrottlerGuard); data-heavy hub pages fire many calls
       }]),
     }),
 
@@ -178,9 +179,11 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     BotsModule,
   ],
   providers: [
-    // Guard execution order: Throttler → JWT → Permissions
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Guard order (2026-07-06, risk #15): JWT FIRST so the throttler can key by USER —
+    // per-IP tracking behind one office egress collapsed all users into one bucket
+    // (load test: 23,394/23,492 requests 429'd at 120 concurrent authed users).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: UserThrottlerGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })

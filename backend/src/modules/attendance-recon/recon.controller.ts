@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { shiftCategoryFromCode, shiftCategoryCaseSql } from '@common/shift-category';
 import { MATERNITY_7H, TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
+import { RosterTtlCacheInterceptor, rosterCacheInvalidate } from '@common/ttl-cache.interceptor';
 import { ReconService } from './recon.service';
 import { RosterIngestionService } from './roster-ingestion.service';
 
@@ -611,6 +612,7 @@ export class ReconController {
    *  and OT (before/after) per hour — with a TOTAL row. Cross-midnight aware. The
    *  professional hour-by-hour staffing + exception picture HR/RTA asks for. */
   @Get('roster-v2/hourly')
+  @UseInterceptors(RosterTtlCacheInterceptor)   // 90s TTL — grid recompute was p95≈35s at 120 concurrent (2026-07-06)
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Per-hour (0-23) coverage / permissions / shrinkage / sick / absence / tardiness / OT — by function, or per AGENT (level=agent / agent=<id|name>)' })
   async hourly(
@@ -942,6 +944,7 @@ export class ReconController {
    *   As reconciliation/requests land, past hours fill with truth and the future re-projects.
    *   Default week = the "seam" (Saturday on/before the actual frontier) so the blend shows. */
   @Get('roster-v2/week-forecast')
+  @UseInterceptors(RosterTtlCacheInterceptor)
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Live 7×24 headcount forecast — actual (past) blended with plan−requests (future), per hour per day' })
   async weekForecast(@Req() req: any, @Query('weekStart') weekStart?: string, @Query('function') functionName?: string) {
@@ -3595,6 +3598,7 @@ export class ReconController {
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Apply a manual shift change to a (person, date) — logs before/after + impact' })
   async scheduleChange(@Req() req: any, @Body() b: { personNo: string; date: string; newShift: string; reason?: string; override?: boolean }) {
+    rosterCacheInvalidate();
     const t = req.user.tenantId;
     if (!b?.personNo || !b?.date || !b?.newShift) throw new BadRequestException('personNo, date and newShift are required');
     await this.assertScheduleEditable(req, b.date);   // soft-lock: blocks non-supervisors in the approved range (audited via changed_by)
@@ -3634,6 +3638,7 @@ export class ReconController {
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Swap shifts between two people on a date — logs both + before/after shift-rate' })
   async scheduleSwap(@Req() req: any, @Body() b: { personA: string; personB: string; date: string; reason?: string; override?: boolean }) {
+    rosterCacheInvalidate();
     const t = req.user.tenantId;
     if (!b?.personA || !b?.personB || !b?.date) throw new BadRequestException('personA, personB and date are required');
     await this.assertScheduleEditable(req, b.date);   // soft-lock on the approved schedule range
@@ -3825,6 +3830,7 @@ export class ReconController {
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Parse the source exports once and store the roster in the DB (run after new data lands)' })
   async ingest(@Req() req: any) {
+    rosterCacheInvalidate();
     this.svc.clearCache();   // always recompute from source (don't serve a stale cached run)
     return this.ingestion.ingest(req.user.tenantId, SRC_DIR, SCHEDULE);
   }
@@ -3943,6 +3949,7 @@ export class ReconController {
   }))
   @ApiOperation({ summary: 'Upload source files (Odoo/Ameyo/Sprinklr/schedule) → saved server-side + roster re-ingested' })
   async upload(@Req() req: any, @UploadedFiles() files: Array<{ originalname: string; buffer: Buffer }>) {
+    rosterCacheInvalidate();
     const saved: { name: string; type: string }[] = [];
     for (const f of files || []) {
       const n = f.originalname;
