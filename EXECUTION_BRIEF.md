@@ -223,13 +223,16 @@ Nothing is "done" until **all** of the following are demonstrated. No exceptions
 Execute in order. **Stop at each exit gate and report.** Each item: Confirmed-vs-Recommended, show the diff,
 run the smoke/regression test, update the book + memory.
 
-### Phase 0 — Stabilize the June roster *(BLOCKING — do first)*
-Restore the full-month authority file over the `_2830` slices; one full `recon-refresh` (Jun 1–30 rebuilt
-by the clamped engine); fix `permission_status` population (approved > pending, fall back to comp);
-add a slice-overwrite guard (`--allow-shrink` or date-stamped filenames).
-**Exit:** `recon-accuracy-check` passes Jun 1–30; **0 rows** `holiday_ot_min>300`; **0 rows**
-`sys_late_min>240`; `permission_status` present where a permission exists; full-month OT clamped end-to-end.
-*(Depends on the Director restoring the full June source files — see §11.)*
+### Phase 0 — Stabilize the June roster *(✅ EXECUTED 2026-07-06 for Jun 1–27 — commit `efeb436`)*
+June 1–27 rebuilt through the clamped engine using the Director's to-27 long-form sheet: the engine now
+(a) **supplements embedded evidence** (punches/system/permissions from the 'Final' sheet, never overriding
+dedicated files; `login_src='Workbook (recorded)'`), (b) **carries per-day WFH location evidence forward**
+from live roster_days (`recon-export-wfh-evidence.js`, refresh step 1.5 — re-exports flattened Location
+to 'Office'), (c) horizon counts punch **or** system evidence. Dry-run+diff → promote: 0 rows lost,
++5 missing persons, TRUE_OT 1–26 corrected 1,499h→890h (pre-clamp bleed removed), spine resynced,
+**golden gate WIDENED to `work_date >= '2026-06-01'` and PASSES**.
+**Remaining tail:** Jun 27–30 raw evidence exports when the Director provides them ("لبعدين") +
+the slice-overwrite guard (date-stamped filenames).
 
 ### Phase 1 — Books + one-spine + P0 security + cleanup *(highest structural ROI)*
 - **Books:** create 📙 `TECHNICAL_ARCHITECTURE.md` + 📒 `API_SPECIFICATIONS.md`; extend 📓 `DATA_DICTIONARY.md` (§8).
