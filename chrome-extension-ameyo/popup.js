@@ -145,3 +145,41 @@ $('copy').onclick = async () => {
   load();
   setInterval(load, 3000);
 })();
+
+/* ── Bridge Doctor — 6-stage self-diagnosis so the user never needs DevTools ─────── */
+function runDoctor(st) {
+  const a = lang === 'ar';
+  const c = st.config || {}, snap = st.lastSnapshot || {};
+  const agents = snap.agents?.length ?? 0;
+  const parsed = agents + (snap.kpis ? Object.keys(snap.kpis).length : 0);
+  const authBad = /401|AUTH|login/i.test(st.lastPushStatus || '');
+  return [
+    { ok: c.enabled !== false, label: a ? 'المزامنة مفعّلة' : 'Sync enabled', fix: a ? 'فعّل «تفعيل المزامنة التلقائية»' : 'Enable auto-sync' },
+    { ok: !!st.connected || !!st.ameyoUrl, label: a ? 'تبويب Ameyo مفتوح' : 'Ameyo tab open', fix: a ? 'افتح شاشة Ameyo Live Monitoring وثبّت التبويب (Pin)' : 'Open + pin the Ameyo Live-Monitoring tab' },
+    { ok: (snap.discovery?.length ?? 0) > 0 || agents > 0, label: a ? 'يلتقط بيانات' : 'Capturing data', fix: a ? 'تأكّد إنك بصفحة المراقبة المباشرة نفسها' : 'Make sure you are on the Live-Monitoring page itself' },
+    { ok: parsed > 0, label: a ? 'يقرأ الوكلاء/المؤشرات' : 'Agents/KPIs parsed', fix: a ? 'الجدول ما انقرأ — اضغط «نسخ العيّنات» وأرسلها للشات' : 'Table not parsed — click Copy samples and send it in chat' },
+    { ok: (st.hasToken || st.hasRefreshToken) && !authBad, label: a ? 'مصادقة WFM' : 'WFM auth', fix: a ? 'سجّل الدخول من جديد (إيميل + باسورد)' : 'Sign in again (email + password)' },
+    { ok: st.lastPushStatus === 'ok', label: a ? 'الإرسال للسيرفر' : 'Backend push', fix: st.lastPushStatus === 'never' ? (a ? 'ما أرسل بعد — انتظر أو اضغط «فحص حي»' : 'Never pushed — wait or click Live check') : (a ? 'خطأ: ' + st.lastPushStatus : 'Error: ' + st.lastPushStatus) },
+  ];
+}
+
+(function initDoctor() {
+  const host = document.createElement('div');
+  host.style.cssText = 'margin:10px 16px 14px;border-top:1px solid #1e2740;padding-top:10px';
+  host.innerHTML = '<button id="docBtn" style="width:100%;padding:8px;border-radius:8px;border:1px solid #2a3550;background:transparent;color:#9fb0c3;cursor:pointer;font-size:12.5px">🩺 Doctor</button><div id="docPanel" style="display:none;margin-top:8px"></div>';
+  document.body.appendChild(host);
+  const panel = host.querySelector('#docPanel');
+  async function render() {
+    const st = await chrome.runtime.sendMessage({ type: 'GET_STATUS' }).catch(() => null);
+    if (!st) return;
+    const a = lang === 'ar';
+    const stages = runDoctor(st);
+    const bad = stages.findIndex((x) => !x.ok);
+    const rows = stages.map((x, i) => `<div style="display:flex;gap:7px;align-items:flex-start;font-size:12px;padding:3px 0;color:${x.ok ? '#8aa0b8' : (i === bad ? '#f0a154' : '#5a6b82')}"><span>${x.ok ? '✅' : (i === bad ? '⚠️' : '⬜')}</span><div><b>${x.label}</b>${(!x.ok && i === bad) ? `<br><span style="color:#c9a35b">${x.fix}</span>` : ''}</div></div>`).join('');
+    const verdict = bad < 0 ? (a ? '✅ كل شي شغّال' : '✅ All systems go') : (a ? 'أول مشكلة: ' : 'First blocker: ') + stages[bad].label;
+    panel.innerHTML = `<div style="font-weight:700;font-size:12.5px;margin-bottom:6px;color:${bad < 0 ? '#22c55e' : '#f0a154'}">${verdict}</div>${rows}<div style="display:flex;gap:6px;margin-top:8px"><button id="docLive" style="flex:1;padding:6px;border-radius:7px;border:none;background:#c9a35b;color:#12191f;font-weight:600;cursor:pointer;font-size:11.5px">${a ? 'فحص حي' : 'Live check'}</button><button id="docCopy" style="flex:1;padding:6px;border-radius:7px;border:1px solid #2a3550;background:transparent;color:#9fb0c3;cursor:pointer;font-size:11.5px">${a ? 'نسخ التقرير' : 'Copy report'}</button></div>`;
+    panel.querySelector('#docLive').onclick = async () => { panel.querySelector('#docLive').textContent = '…'; await chrome.runtime.sendMessage({ type: 'PUSH_NOW' }).catch(() => {}); setTimeout(render, 1000); };
+    panel.querySelector('#docCopy').onclick = async () => { const rep = 'WFM Ameyo Bridge Doctor\n' + stages.map((x) => (x.ok ? '[OK] ' : '[XX] ') + x.label).join('\n') + `\nlastPush=${st.lastPushStatus} agents=${st.lastSnapshot?.agents?.length ?? 0} url=${st.ameyoUrl || ''}`; await navigator.clipboard.writeText(rep).catch(() => {}); panel.querySelector('#docCopy').textContent = '✓'; };
+  }
+  host.querySelector('#docBtn').onclick = () => { const open = panel.style.display === 'none'; panel.style.display = open ? 'block' : 'none'; if (open) render(); };
+})();

@@ -62,10 +62,14 @@
     for (const tbl of tables) {
       const heads = Array.from(tbl.querySelectorAll('thead th, thead td, tr:first-child th'))
         .map((h) => (h.textContent || '').trim().toLowerCase());
-      if (!heads.some((h) => /agent\s*name|agent\s*id/.test(h))) continue;
+      // accept the agents grid whether it labels the column "Agent Name/ID" OR uses a plain
+      // Name/User column alongside a status + call/phone/customer/extension column.
+      const looksAgentTable = heads.some((h) => /agent\s*name|agent\s*id/.test(h))
+        || (heads.some((h) => /^status$|agent\s*status/.test(h)) && heads.some((h) => /call|phone|customer|extension|campaign|queue/.test(h)));
+      if (!looksAgentTable) continue;
       const col = (re) => heads.findIndex((h) => re.test(h));
       const ix = {
-        name: col(/agent\s*name/), id: col(/agent\s*id/),
+        name: col(/agent\s*name|^name$|user\s*name|^user$/), id: col(/agent\s*id|^id$|extension|^ext$/),
         autoCall: col(/auto\s*call/), status: col(/^agent\s*status|^status/),
         callStatus: col(/agent\s*call\s*status/), callType: col(/call\s*type/),
         phone: col(/phone/), custStatus: col(/customer\s*call\s*status/),
@@ -121,11 +125,19 @@
   // (a page refresh re-injects the fresh script).
   const dead = () => { try { return !chrome.runtime || !chrome.runtime.id; } catch { return true; } };
 
+  // hash-dedup: only push when the agents/KPIs actually CHANGED (safe near-live cadence),
+  // plus a 30s heartbeat so the backend can still tell fresh from stale.
+  let lastHash = '', lastSentAt = 0;
+  const hashSnap = (s) => { try { return JSON.stringify({ a: s.agents, k: s.kpis, q: s.queues }); } catch { return String(Math.random()); } };
+
   function tick() {
     if (dead()) { clearInterval(timer); return; }
     if (!looksLikeAmeyo()) return;
     const snapshot = buildSnapshot();
     if (!snapshot) return;
+    const h = hashSnap(snapshot), now = Date.now();
+    if (h === lastHash && now - lastSentAt < 30000) return;   // unchanged & within heartbeat → skip
+    lastHash = h; lastSentAt = now;
     try {
       chrome.runtime.sendMessage({ type: 'WFM_AMEYO_SNAPSHOT', snapshot }, (res) => {
         if (chrome.runtime.lastError) return;        // background asleep — ignore

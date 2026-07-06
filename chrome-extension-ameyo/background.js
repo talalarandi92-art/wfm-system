@@ -85,6 +85,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'WFM_AMEYO_SNAPSHOT') { handleSnapshot(msg.snapshot).then((r) => sendResponse(r)); return true; }
   if (msg.type === 'GET_STATUS')  { getStatus().then(sendResponse); return true; }
+  if (msg.type === 'PUSH_NOW')    { pullFromTabs().then(() => getStatus()).then(sendResponse); return true; }
   if (msg.type === 'SAVE_CONFIG') { chrome.storage.local.set({ config: msg.config }).then(() => sendResponse({ ok: true })); return true; }
   if (msg.type === 'TEST_LOGIN')  {
     (async () => { const { config = DEFAULT_CONFIG } = await chrome.storage.local.get('config');
@@ -128,13 +129,17 @@ async function pushToWfm(snapshot, isRetry = false) {
 }
 
 async function getStatus() {
-  const d = await chrome.storage.local.get(['config', 'lastSnapshot', 'lastSnapshotAt', 'lastPushAt', 'lastPushStatus', 'lastHeartbeat', 'lastPushAgentCount', 'ameyoUrl']);
+  const d = await chrome.storage.local.get(['config', 'lastSnapshot', 'lastSnapshotAt', 'lastPushAt', 'lastPushStatus', 'lastHeartbeat', 'lastPushAgentCount', 'ameyoUrl', 'wfmRefreshToken', 'lastLoginAt']);
+  const cfg = d.config ?? DEFAULT_CONFIG;
   return {
-    config: d.config ?? DEFAULT_CONFIG,
+    config: cfg,
     lastSnapshot: d.lastSnapshot ?? null, lastSnapshotAt: d.lastSnapshotAt ?? null,
     lastPushAt: d.lastPushAt ?? null, lastPushStatus: d.lastPushStatus ?? 'never',
     agentCount: d.lastPushAgentCount ?? 0, ameyoUrl: d.ameyoUrl ?? '',
+    lastHeartbeat: d.lastHeartbeat ?? null, lastLoginAt: d.lastLoginAt ?? null,
     connected: Date.now() - (d.lastHeartbeat ?? d.lastSnapshotAt ?? 0) < 90_000,
+    // Doctor signals (never leak the token itself):
+    hasToken: !!cfg.wfmApiToken, hasRefreshToken: !!d.wfmRefreshToken, hasCredentials: !!(cfg.wfmEmail),
   };
 }
 

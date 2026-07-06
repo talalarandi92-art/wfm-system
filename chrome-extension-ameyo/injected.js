@@ -32,8 +32,11 @@
   XMLHttpRequest.prototype.send = function (...a) {
     this.addEventListener('load', () => {
       try {
-        if (interesting(this.__wfmUrl) && this.responseText && this.responseText[0] === '{') {
-          send('xhr', this.__wfmUrl, JSON.parse(this.responseText));
+        const rt = this.responseText;
+        // capture JSON objects AND arrays ([...] live agent/queue feeds) — the {-only
+        // guard silently dropped array responses (same bug fixed in the Sprinklr bridge).
+        if (interesting(this.__wfmUrl) && rt && (rt[0] === '{' || rt[0] === '[')) {
+          send('xhr', this.__wfmUrl, JSON.parse(rt));
         }
       } catch { /* */ }
     });
