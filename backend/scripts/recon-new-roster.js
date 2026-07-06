@@ -23,8 +23,9 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 
-const SCRATCH = 'C:/Users/T573E~1.BAS/AppData/Local/Temp/claude/C--Users-t-bassam-Desktop-WFM-System/63e84c5a-2fd1-476e-8a73-031ad06b92a0/scratchpad/recon';
-const SRCDIR = 'C:/Users/t.bassam/Desktop/new roster/';
+// Scratch + source dirs are env-configurable (2026-07-06, bug #13 — was a hardcoded session-UUID temp path)
+const SCRATCH = (process.env.RECON_SCRATCH || require('path').join(__dirname, '..', '.recon-scratch'));
+const SRCDIR = process.env.RECON_SRCDIR || 'C:/Users/t.bassam/Desktop/new roster/';
 const F = JSON.parse(fs.readFileSync(SCRATCH + '/foundation.json', 'utf8'));
 const OUT_XLSX = (process.env.RECON_OUT || (SRCDIR + 'Roster_Reconciliation_June2026.xlsx'));
 

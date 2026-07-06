@@ -7,7 +7,7 @@
  */
 const fs = require('fs');
 const { getClient } = require('./recon-db');
-const SCRATCH = 'C:/Users/T573E~1.BAS/AppData/Local/Temp/claude/C--Users-t-bassam-Desktop-WFM-System/63e84c5a-2fd1-476e-8a73-031ad06b92a0/scratchpad/recon';
+const SCRATCH = process.env.RECON_SCRATCH || require('path').join(__dirname, '..', '.recon-scratch');
 const TENANT = process.env.RECON_TENANT || 'a0000000-0000-0000-0000-000000000001';
 const FROM = '2026-06-01', TO = '2026-06-30';
 const RESTORE = process.argv.includes('--restore');

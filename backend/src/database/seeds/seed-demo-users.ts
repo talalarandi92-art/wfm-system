@@ -24,6 +24,13 @@ import { DataSource } from 'typeorm';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../..', '.env') });
 
+// PRODUCTION GUARD (2026-07-06, EXECUTION_BRIEF cleanup): shared-password demo accounts must
+// NEVER exist in production. Explicit opt-in with ALLOW_DEMO_SEED=1 for non-prod boxes only.
+if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== '1') {
+  console.error('REFUSED: seed-demo-users creates shared-password accounts — not in production. (ALLOW_DEMO_SEED=1 overrides on a non-prod box.)');
+  process.exit(1);
+}
+
 const TENANT = 'a0000000-0000-0000-0000-000000000001';
 const DEMO_PASSWORD = 'Demo@2026';
 

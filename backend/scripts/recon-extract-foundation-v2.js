@@ -13,7 +13,9 @@
 const ExcelJS = require('exceljs');
 const fs = require('fs');
 const SRC = process.env.MANUAL_FILE || 'C:/Users/t.bassam/Desktop/new roster/CC Schedule 26 June..xlsx';
-const OUT = 'C:/Users/T573E~1.BAS/AppData/Local/Temp/claude/C--Users-t-bassam-Desktop-WFM-System/63e84c5a-2fd1-476e-8a73-031ad06b92a0/scratchpad/recon/foundation.json';
+const SCRATCH = process.env.RECON_SCRATCH || require('path').join(__dirname, '..', '.recon-scratch');
+require('fs').mkdirSync(SCRATCH, { recursive: true });
+const OUT = SCRATCH + '/foundation.json';
 
 const serialToISO = (s) => (typeof s === 'number') ? new Date(Math.round((Math.floor(s) - 25569) * 86400000)).toISOString().slice(0, 10) : null;
 const tmin = (v) => { if (typeof v !== 'number') return null; const f = v - Math.floor(v); return Math.round(f * 1440); }; // excel time fraction -> minutes
