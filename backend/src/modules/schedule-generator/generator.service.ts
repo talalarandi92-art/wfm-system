@@ -12,6 +12,7 @@ import {
 import { generateWeeklySchedule, buildWeekDates } from './generator.engine';
 import { computeShiftMix, assignRoster } from './demand.engine';
 import { CapacityService } from '../capacity/capacity.service';
+import { StaffingService } from '../capacity/staffing.service';
 import { shiftCategoryFromCode } from '@common/shift-category';
 import { normalizeShiftCode } from '@common/shift-normalize';
 
@@ -30,6 +31,7 @@ export class GeneratorService {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly capacity: CapacityService,
+    private readonly staffing: StaffingService,
   ) {}
 
   /* ═══════════════════════════════════════════════════════════════════════════
@@ -54,31 +56,56 @@ export class GeneratorService {
     weekStart = this.snapToSaturday(weekStart);   // workforce week always Sat→Fri
     const dates = buildWeekDates(weekStart);
 
-    // ── 1. Requirement curves from live-plan history ──────────────────────────
-    const histDates: string[] = [];
-    for (let i = 0; i <= 14; i++) {  // include TODAY — often the only measured day early on
-      const d = new Date(Date.now() + 3 * 3600e3 - i * 86400e3);
-      histDates.push(d.toISOString().slice(0, 10));
-    }
-    const plans = await Promise.all(
-      histDates.map(d => this.capacity.getLivePlan(tenantId, d).catch(() => null)),
-    );
+    // ── 1. Requirement curves — PRIMARY: the Staffing Requirement Engine ─────
+    // (Director 2026-07-06: the generator's first constraint is the forecast→Erlang
+    // hourly requirement per function — CPO/AHT/ACW/hold/occupancy/shrinkage/
+    // productivity; rotation & humane rules apply INSIDE that envelope.)
+    // FALLBACK: Sprinklr live-plan history (P90 per weekday) when no forecast data.
+    let forecastByDate: Map<string, number[]> | null = null;
+    let forecastBasis = '';
+    try {
+      // scope the requirement to the same functions the pool is scoped to
+      let functionKeys: string[] | undefined;
+      if (options.functionIds?.length) {
+        const rows = await this.ds.query(
+          `SELECT DISTINCT canon_fn(name) AS k FROM functions WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+          [tenantId, options.functionIds],
+        );
+        functionKeys = rows.map((r: any) => r.k);
+      }
+      const req = await this.staffing.hourlyRequirement(tenantId, weekStart, buildWeekDates(weekStart)[6], { functionKeys });
+      const total = req.days.reduce((s: number, d: any) => s + d.totalCurve48.reduce((a: number, b: number) => a + b, 0), 0);
+      if (total > 0) {
+        forecastByDate = new Map(req.days.map((d: any) => [d.date, d.totalCurve48]));
+        forecastBasis = req.basis;
+      }
+    } catch (e) { /* no staffing params / no volume history → fall back below */ }
 
-    // weekday (0-6) → list of measured 48-curves
+    // weekday (0-6) → list of measured 48-curves (fallback basis)
     const byWeekday = new Map<number, number[][]>();
     const allCurves: number[][] = [];
-    for (let i = 0; i < plans.length; i++) {
-      const p = plans[i];
-      if (!p || p.coverage.measuredIntervals < 4) continue;
-      const curve = p.intervals.map((iv: any) => iv.measured ? (iv.requiredHc ?? 0) : 0);
-      const wd = new Date(histDates[i]).getDay();
-      (byWeekday.get(wd) ?? byWeekday.set(wd, []).get(wd)!).push(curve);
-      allCurves.push(curve);
-    }
-    if (!allCurves.length) {
-      throw new BadRequestException(
-        'No measured workload history yet — keep the Sprinklr bridge running, then retry. ' +
-        'لا يوجد تاريخ حمل مُقاس بعد — شغّل جسر سبرينكلر يوماً ثم أعد المحاولة.');
+    if (!forecastByDate) {
+      const histDates: string[] = [];
+      for (let i = 0; i <= 14; i++) {  // include TODAY — often the only measured day early on
+        const d = new Date(Date.now() + 3 * 3600e3 - i * 86400e3);
+        histDates.push(d.toISOString().slice(0, 10));
+      }
+      const plans = await Promise.all(
+        histDates.map(d => this.capacity.getLivePlan(tenantId, d).catch(() => null)),
+      );
+      for (let i = 0; i < plans.length; i++) {
+        const p = plans[i];
+        if (!p || p.coverage.measuredIntervals < 4) continue;
+        const curve = p.intervals.map((iv: any) => iv.measured ? (iv.requiredHc ?? 0) : 0);
+        const wd = new Date(histDates[i]).getDay();
+        (byWeekday.get(wd) ?? byWeekday.set(wd, []).get(wd)!).push(curve);
+        allCurves.push(curve);
+      }
+      if (!allCurves.length) {
+        throw new BadRequestException(
+          'No forecast basis (staffing engine) and no measured workload history — upload contact volume or keep the Sprinklr bridge running, then retry. ' +
+          'لا يوجد أساس توقع ولا تاريخ حمل مُقاس — ارفع بيانات الفوليوم أو شغّل جسر سبرينكلر ثم أعد المحاولة.');
+      }
     }
 
     const p90 = (vals: number[]) => {
@@ -87,7 +114,7 @@ export class GeneratorService {
     };
     const curveFor = (samples: number[][]): number[] =>
       Array.from({ length: 48 }, (_, i) => p90(samples.map(c => c[i])));
-    const fallback = curveFor(allCurves);
+    const fallback = allCurves.length ? curveFor(allCurves) : new Array(48).fill(0);
 
     // ── 2+3. Per-day mix + roster ────────────────────────────────────────────
     const fns = await this.loadEmployees(tenantId, options.functionIds);
@@ -127,10 +154,14 @@ export class GeneratorService {
     const maxStaffPerDay = Math.max(1, pool.length - Math.ceil(pool.length * options.offDaysPerWeek / 7));
 
     for (const date of dates) {
-      const wd = new Date(date).getDay();
-      const samples = byWeekday.get(wd);
-      const required = (samples?.length ? curveFor(samples) : fallback)
-        .map(v => Math.ceil(v * demandScale));
+      // forecast-erlang curve first; live-plan history only as fallback
+      let base: number[];
+      if (forecastByDate?.get(date)) base = forecastByDate.get(date)!;
+      else {
+        const samples = byWeekday.get(new Date(date).getDay());
+        base = samples?.length ? curveFor(samples) : fallback;
+      }
+      const required = base.map(v => Math.ceil(v * demandScale));
       const day = computeShiftMix(date, required, maxStaffPerDay);
       mixByDate.set(date, day.mix);
       demandDays.push(day);
@@ -204,9 +235,12 @@ export class GeneratorService {
         liveCapturedAt: liveSnap?.captured_at ?? null,
       },
       demand: {
-        basis: byWeekday.size >= 5
-          ? `P90 per weekday over ${allCurves.length} measured days`
-          : `sparse history (${allCurves.length} measured day(s)) — same curve applied to all weekdays; accuracy improves as data accumulates`,
+        basis: forecastByDate
+          ? `STAFFING ENGINE — ${forecastBasis}`
+          : byWeekday.size >= 5
+            ? `P90 per weekday over ${allCurves.length} measured days (live-plan fallback — staffing engine had no volume data)`
+            : `sparse history (${allCurves.length} measured day(s)) — same curve applied to all weekdays; accuracy improves as data accumulates`,
+        source: forecastByDate ? 'forecast-erlang' : 'live-plan-history',
         demandScale,
         days,
       },

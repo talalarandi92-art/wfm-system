@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Body, Query, UseGuards, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, UnauthorizedException } from '@nestjs/common';
 import { CapacityService, VoiceInputs, ChatInputs, EmailInputs } from './capacity.service';
+import { StaffingService } from './staffing.service';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
@@ -8,7 +9,10 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 @UseGuards(JwtAuthGuard)
 @RequirePermissions('hc.view')
 export class CapacityController {
-  constructor(private readonly svc: CapacityService) {}
+  constructor(
+    private readonly svc: CapacityService,
+    private readonly staffing: StaffingService,
+  ) {}
 
   private tid(user: any): string {
     const id = user?.tenantId;
@@ -100,6 +104,45 @@ export class CapacityController {
       ? date!
       : new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
     return this.svc.getFunctionHourly(this.tid(user), d);
+  }
+
+  /* ── Staffing Requirement Engine (forecast → Erlang → generator) ─────────── */
+
+  /** Per-function staffing parameters (CPO/AHT/ACW/Hold/SL/occupancy/shrinkage/productivity). */
+  @Get('staffing/params')
+  getStaffingParams(@CurrentUser() user: any) {
+    return this.staffing.getParams(this.tid(user));
+  }
+
+  @Patch('staffing/params/:functionKey')
+  @RequirePermissions('hc.edit')
+  updateStaffingParams(
+    @CurrentUser() user: any,
+    @Param('functionKey') functionKey: string,
+    @Body() patch: Record<string, any>,
+  ) {
+    return this.staffing.updateParams(this.tid(user), functionKey, patch, user.id);
+  }
+
+  /**
+   * GET /capacity/staffing/requirement?from&to&ordersScale=1.0
+   * THE hourly per-function required-HC (the generator's demand basis):
+   * forecast volume → effective AHT → Erlang-C @ SL/occupancy → productivity → shrinkage.
+   * Full math returned per cell.
+   */
+  @Get('staffing/requirement')
+  getStaffingRequirement(
+    @CurrentUser() user: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('ordersScale') ordersScale?: string,
+    @Query('functions') functions?: string,
+  ) {
+    const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+    return this.staffing.hourlyRequirement(this.tid(user), from || today, to || from || today, {
+      ordersScale: ordersScale ? +ordersScale : undefined,
+      functionKeys: functions ? functions.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    });
   }
 
   /** Saved scenarios */
