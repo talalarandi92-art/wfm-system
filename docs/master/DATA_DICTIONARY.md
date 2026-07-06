@@ -1,9 +1,34 @@
 # WFM Platform — Master Data Dictionary
 
-> **Last rebuilt: 2026-07-02 — full knowledge reconstruction.**
+> **Last rebuilt: 2026-07-02 — full knowledge reconstruction.** *(§0.1 spine/metrics addendum 2026-07-06;
+> migrations now run to `071_chat_permissions.sql` — 069 `odoo_staging`, 070 `attendance_excuses`, 071 chat perms.)*
 > AS-BUILT reference for the live PostgreSQL database `wfm_db` (local, real Boutiqaat contact-center data,
 > 125 base tables, migrations `001_initial_schema.sql` … `067_agent_status_events.sql` in `schema_migrations`).
 > Every column below was verified against the live `information_schema` on 2026-07-02.
+
+## 0.1 The three employee-day spines + canonical metric definitions *(added 2026-07-06 — one-spine fix)*
+
+The three "employee-day" tables are **never interchangeable**:
+
+| Table | Nature | Written by | Read by | Key |
+|---|---|---|---|---|
+| **`roster_days`** | RICH canonical (74 cols: OT buckets, tardiness, presence, hr_code, DQ) | recon engine (steps 1–3) + guarded dual-writes | all `roster-v2/*`, requests HC-impact, analytics | `person_no` + `work_date` |
+| **`attendance_records`** | RAW / published schedule (marker, scheduled times, `ot_minutes`) | schedule publish/editCell + **recon-refresh step 4 resync** (`scripts/recon-sync-attendance.js`) | ~31 readers: dashboard, RTA, scorecard, coverage | `employee_id` + `attendance_date` |
+| **`roster_daily`** | THIN legacy (`payload jsonb`) | legacy `/upload`+`/ingest` only | legacy `/dashboard` only | — |
+
+Since **2026-07-06**, recon-refresh step 4/4 projects `roster_days` → `attendance_records` for the
+ingested range (marker from presence/hr_code · scheduled times from shift minutes · `ot_minutes` =
+TRUE_OT · system/punch late+early · `is_wfh` · missing flags), **preserving** generated future weeks
+(`notes LIKE '[generated %'`). The raw spine can no longer drift from the canonical one.
+
+**Canonical metric definitions** — ONE source: `backend/src/common/wfm-metrics.ts` (import, never redefine):
+
+| Const | Definition | Rule |
+|---|---|---|
+| `TRUE_OT` | `COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0)` — 3 DISJOINT buckets, always summed | BR-OT-001 (RULES §12) |
+| `CRED_LATE` | `sys_late_min BETWEEN 7 AND 240` (>6 min tolerated; >240 = cross-midnight bleed = DQ) | BR-TRD-001/002 |
+| `CRED_EARLY` | same window, `MATERNITY_7H` excluded | BR-TRD + BR-MAT-001 |
+| `MATERNITY_7H` | `('12375','12434')` — excluded from EARLY-OUT only | BR-MAT-001 |
 >
 > Business rules are NOT restated here — for the rule behind a field, follow the cross-reference to
 > `docs/knowledge/WFM_RULES_AND_DECISIONS.md` (cited as **RULES §n**), which always wins over code and over
