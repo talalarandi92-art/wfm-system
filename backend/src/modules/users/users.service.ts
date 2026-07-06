@@ -14,6 +14,16 @@ export class UsersService {
     private config: ConfigService,
   ) {}
 
+  /** Account-lifecycle audit (CLAUDE.md §31 / EXECUTION_BRIEF bug #12) — every user
+   *  create/activate/deactivate/password-set writes an append-only audit_logs row. */
+  private async audit(tenantId: string, action: string, entityId: string, meta?: Record<string, unknown>, actorId?: string | null) {
+    await this.repo.manager.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, metadata)
+       VALUES ($1,$2,$3,'users','user',$4,$5::jsonb)`,
+      [tenantId, actorId ?? null, action, entityId, meta ? JSON.stringify(meta) : null],
+    ).catch(() => { /* audit must never block the operation */ });
+  }
+
   async findById(id: string, tenantId: string): Promise<User> {
     const user = await this.repo.findOne({
       where: { id, tenantId },
@@ -49,7 +59,7 @@ export class UsersService {
       throw new BadRequestException('Password must include lowercase, uppercase, and a digit.');
   }
 
-  async setPassword(userId: string, plainPassword: string): Promise<void> {
+  async setPassword(userId: string, plainPassword: string, actorId?: string | null): Promise<void> {
     this.assertStrongPassword(plainPassword);
     const rounds = this.config.get<number>('BCRYPT_ROUNDS', 12);
     const hash = await bcrypt.hash(plainPassword, rounds);
@@ -58,21 +68,25 @@ export class UsersService {
       mustChangePassword: false,
       passwordChangedAt: new Date(),
     } as any);
+    const u = await this.repo.findOne({ where: { id: userId } });
+    if (u) await this.audit(u.tenantId, 'user.password_set', userId, undefined, actorId);
   }
 
-  async activate(userId: string, tenantId: string): Promise<void> {
+  async activate(userId: string, tenantId: string, actorId?: string | null): Promise<void> {
     const user = await this.findById(userId, tenantId);
     if (user.status === 'active') return;
     await this.repo.update(userId, { status: 'active' });
+    await this.audit(tenantId, 'user.activated', userId, { from: user.status }, actorId);
   }
 
-  async deactivate(userId: string, tenantId: string): Promise<void> {
+  async deactivate(userId: string, tenantId: string, actorId?: string | null): Promise<void> {
     await this.findById(userId, tenantId);
     await this.repo.update(userId, {
       status: 'inactive',
       refreshTokenHash: null,
       refreshTokenExpiresAt: null,
     } as any);
+    await this.audit(tenantId, 'user.deactivated', userId, undefined, actorId);
   }
 
   async createUser(data: {
@@ -101,6 +115,8 @@ export class UsersService {
       mustChangePassword: true,
     });
 
-    return this.repo.save(user);
+    const saved = await this.repo.save(user);
+    await this.audit(data.tenantId, 'user.created', saved.id, { email: saved.email, status: saved.status });
+    return saved;
   }
 }

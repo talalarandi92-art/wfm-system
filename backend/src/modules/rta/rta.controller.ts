@@ -47,9 +47,11 @@ export class RtaController {
         [tid, refDate],
       ),
 
-      // Per function breakdown
+      // Per function breakdown — intern-fold (2026-07-06, EXECUTION_BRIEF bug #10):
+      // "Internship X" headcounts into "X" (canon_fn); function_id = the parent's id.
       this.ds.query(
-        `SELECT f.name AS function_name, f.id AS function_id,
+        `SELECT canon_fn(f.name) AS function_name,
+           (array_agg(f.id ORDER BY (canon_fn(f.name) = f.name) DESC))[1] AS function_id,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'present') AS present,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'present' AND ar.is_wfh) AS wfh,
            COUNT(*) FILTER (WHERE ar.attendance_marker IN ('absent','sick')) AS absent,
@@ -62,7 +64,7 @@ export class RtaController {
          JOIN employees e ON e.id = ar.employee_id
          JOIN functions f ON f.id = e.function_id
          WHERE ar.tenant_id = $1 AND ar.attendance_date = $2
-         GROUP BY f.id, f.name
+         GROUP BY canon_fn(f.name)
          ORDER BY present DESC`,
         [tid, refDate],
       ),

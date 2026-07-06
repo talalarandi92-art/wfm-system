@@ -662,23 +662,41 @@ export class RequestsService {
 
     const approverId = await this.resolveUserIdOrNull(tenantId, dto.approverId);
 
-    // Write the approval to the live schedule FIRST. If it throws (e.g. a missing
-    // schedule row), the request stays pending rather than approved-but-unapplied.
-    if (isSwap) {
-      await this.applySwap(tenantId, requestId, approverId);
-    } else if (['annual_leave', 'sick_leave', 'death_leave', 'comp_off', 'wfh', 'emergency_leave'].includes(req.type_code)) {
-      await this.applyLeaveToSchedule(tenantId, requestId, req.type_code, approverId);
-    } else if (req.type_code === 'permission') {
-      await this.applyPermissionToRoster(tenantId, requestId);
-    }
-
-    await this.ds.query(
+    // IDEMPOTENCY GUARD (2026-07-06, EXECUTION_BRIEF bug #7): claim the request ATOMICALLY
+    // (first-wins conditional UPDATE) BEFORE applying, so two concurrent approvals can never
+    // BOTH run applySwap/applyLeaveToSchedule and double-stamp the schedule/roster. If the
+    // apply fails we release the claim — preserving the old "stays pending on failure" contract.
+    const claimRes = await this.ds.query(
       `UPDATE requests
        SET status = 'approved', approved_l1_at = NOW(),
            approver_l1_id = $2, current_approver_id = NULL, updated_at = NOW()
-       WHERE id = $1 AND tenant_id = $3`,
-      [requestId, approverId, tenantId],
+       WHERE id = $1 AND tenant_id = $3 AND status = $4
+       RETURNING id`,
+      [requestId, approverId, tenantId, req.status],
     );
+    // raw UPDATE..RETURNING via ds.query returns [rows, rowCount] (TypeORM gotcha)
+    const claimed = Array.isArray(claimRes?.[0]) ? claimRes[0] : claimRes;
+    if (!claimed?.length) {
+      throw new BadRequestException('الطلب ليس في انتظار الموافقة (ربما عولج للتو)');
+    }
+
+    try {
+      if (isSwap) {
+        await this.applySwap(tenantId, requestId, approverId);
+      } else if (['annual_leave', 'sick_leave', 'death_leave', 'comp_off', 'wfh', 'emergency_leave'].includes(req.type_code)) {
+        await this.applyLeaveToSchedule(tenantId, requestId, req.type_code, approverId);
+      } else if (req.type_code === 'permission') {
+        await this.applyPermissionToRoster(tenantId, requestId);
+      }
+    } catch (e) {
+      // apply failed → release the claim so the request stays actionable (old contract)
+      await this.ds.query(
+        `UPDATE requests SET status = $2, approved_l1_at = NULL, approver_l1_id = NULL, updated_at = NOW()
+         WHERE id = $1 AND tenant_id = $3 AND status = 'approved'`,
+        [requestId, req.status, tenantId],
+      ).catch(() => {});
+      throw e;
+    }
 
     await this.ds.query(
       `INSERT INTO audit_logs (tenant_id, actor_id, action, module, entity_type, entity_id, notes)
@@ -1518,7 +1536,7 @@ export class RequestsService {
                   COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no <> $3) AS after_approval,
                   COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no  = $3) AS requester_working
            FROM roster_days
-           WHERE tenant_id = $1 AND is_active AND role_function = $2 AND work_date = $4::date`,
+           WHERE tenant_id = $1 AND is_active AND canon_fn(role_function) = canon_fn($2) AND work_date = $4::date`,   // intern-fold (bug #10): Internship X counts toward X coverage
           [tenantId, funcName, reqNo, d],
         );
         const total   = parseInt(hcRow[0]?.total ?? '0');
@@ -1651,7 +1669,7 @@ export class RequestsService {
     const shifts = await this.ds.query(
       `SELECT person_no, shift_start_min AS ss, shift_end_min AS se, work_date::text AS wd
        FROM roster_days
-       WHERE tenant_id = $1 AND is_active AND role_function = $2
+       WHERE tenant_id = $1 AND is_active AND canon_fn(role_function) = canon_fn($2)   -- intern-fold (bug #10)
          AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL
          AND work_date IN ($3::date, $3::date - 1)`,
       [tenantId, funcName, permDate],
