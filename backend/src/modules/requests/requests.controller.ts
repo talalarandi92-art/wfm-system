@@ -73,19 +73,23 @@ export class RequestsController {
   }
 
   /* ── Swap candidates ────────────────────────────────────────────────── */
+  // IDOR fix 2026-07-06: non-team callers are FORCED to their own employeeId — only
+  // requests.view_team/view_all may pass an arbitrary id (scopeEmployeeId returns undefined).
   @Get('swap-candidates')
   swapCandidates(
     @CurrentUser() user: any,
     @Query('employeeId') employeeId: string,
     @Query('date') date: string,
   ) {
-    return this.svc.getSwapCandidates(this.tid(user), employeeId, date);
+    const scoped = this.scopeEmployeeId(user);
+    return this.svc.getSwapCandidates(this.tid(user), scoped ?? employeeId, date);
   }
 
   /* ── Peer-pending list (for a specific employee) ───────────────────── */
   @Get('peer-pending')
   peerPending(@CurrentUser() user: any, @Query('employeeId') employeeId: string) {
-    return this.svc.getPeerPending(this.tid(user), employeeId);
+    const scoped = this.scopeEmployeeId(user);
+    return this.svc.getPeerPending(this.tid(user), scoped ?? employeeId);
   }
 
   /* ── Unified list ───────────────────────────────────────────────────── */

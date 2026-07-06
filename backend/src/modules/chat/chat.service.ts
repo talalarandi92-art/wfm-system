@@ -152,15 +152,30 @@ export class ChatService {
   }
 
   // ── Members ───────────────────────────────────────────────────────────────
+  // IDOR fix (2026-07-06, EXECUTION_BRIEF risk #2): every member operation now authorizes the
+  // CALLER — membership for reads, channel-admin (or org-level chat.manage) for mutations.
+  // Previously any authenticated user could join any channel by id, enumerate/remove members,
+  // and grant themselves is_admin.
 
-  async joinChannel(channelId: string, userId: string) {
+  /** Caller must be a member; with admin=true, an is_admin member. chat.manage bypasses. */
+  private async assertChannelAccess(channelId: string, callerId: string, opts: { admin?: boolean; bypass?: boolean } = {}) {
+    if (opts.bypass) return;
+    const m = await this.memberRepo.findOne({ where: { channelId, userId: callerId } });
+    if (!m) throw new ForbiddenException('Not a member of this channel');
+    if (opts.admin && !m.isAdmin) throw new ForbiddenException('Channel admin required');
+  }
+
+  async joinChannel(channelId: string, userId: string, callerId?: string, bypass = false) {
+    // A caller may join THEMSELVES (self-join); adding someone else requires channel admin.
+    if (callerId && callerId !== userId) await this.assertChannelAccess(channelId, callerId, { admin: true, bypass });
     const existing = await this.memberRepo.findOne({ where: { channelId, userId } });
     if (existing) return existing;
     const m = this.memberRepo.create({ channelId, userId });
     return this.memberRepo.save(m);
   }
 
-  async getChannelMembers(channelId: string) {
+  async getChannelMembers(channelId: string, callerId?: string, bypass = false) {
+    if (callerId) await this.assertChannelAccess(channelId, callerId, { bypass });
     return this.dataSource.query(`
       SELECT cm.user_id AS id, cm.is_admin, cm.joined_at,
              u.first_name || ' ' || u.last_name AS name,
@@ -173,12 +188,15 @@ export class ChatService {
     `, [channelId]);
   }
 
-  async removeMember(channelId: string, userId: string) {
+  async removeMember(channelId: string, userId: string, callerId?: string, bypass = false) {
+    // A caller may remove THEMSELVES (leave); removing someone else requires channel admin.
+    if (callerId && callerId !== userId) await this.assertChannelAccess(channelId, callerId, { admin: true, bypass });
     await this.memberRepo.delete({ channelId, userId });
     return { ok: true };
   }
 
-  async setMemberAdmin(channelId: string, userId: string, isAdmin: boolean) {
+  async setMemberAdmin(channelId: string, userId: string, isAdmin: boolean, callerId?: string, bypass = false) {
+    if (callerId) await this.assertChannelAccess(channelId, callerId, { admin: true, bypass });
     await this.memberRepo.update({ channelId, userId }, { isAdmin });
     return { ok: true };
   }

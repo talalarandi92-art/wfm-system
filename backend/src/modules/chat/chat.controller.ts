@@ -115,19 +115,25 @@ export class ChatController {
     return this.chatService.markRead(channelId, req.user.id);
   }
 
+  // Member operations authorize the CALLER (IDOR fix 2026-07-06): membership for reads,
+  // channel-admin for mutations; org-level chat.manage bypasses (moderation).
+  private canManage(req: any): boolean {
+    return (req.user?.permissionCodes ?? []).includes('chat.manage');
+  }
+
   @Get('channels/:id/members')
-  getMembers(@Param('id') channelId: string) {
-    return this.chatService.getChannelMembers(channelId);
+  getMembers(@Param('id') channelId: string, @Req() req: any) {
+    return this.chatService.getChannelMembers(channelId, req.user.id, this.canManage(req));
   }
 
   @Post('channels/:id/members')
-  addMember(@Param('id') channelId: string, @Body() body: { userId: string }) {
-    return this.chatService.joinChannel(channelId, body.userId);
+  addMember(@Param('id') channelId: string, @Body() body: { userId: string }, @Req() req: any) {
+    return this.chatService.joinChannel(channelId, body.userId, req.user.id, this.canManage(req));
   }
 
   @Delete('channels/:id/members/:userId')
-  removeMember(@Param('id') channelId: string, @Param('userId') userId: string) {
-    return this.chatService.removeMember(channelId, userId);
+  removeMember(@Param('id') channelId: string, @Param('userId') userId: string, @Req() req: any) {
+    return this.chatService.removeMember(channelId, userId, req.user.id, this.canManage(req));
   }
 
   @Patch('channels/:id/members/:userId/admin')
@@ -135,8 +141,9 @@ export class ChatController {
     @Param('id') channelId: string,
     @Param('userId') userId: string,
     @Body() body: { isAdmin: boolean },
+    @Req() req: any,
   ) {
-    return this.chatService.setMemberAdmin(channelId, userId, body.isAdmin);
+    return this.chatService.setMemberAdmin(channelId, userId, body.isAdmin, req.user.id, this.canManage(req));
   }
 
   @Get('channels/:id/export')
