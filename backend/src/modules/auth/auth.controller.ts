@@ -12,7 +12,7 @@ import { RefreshDto } from './dto/refresh.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { MfaTokenDto, MfaDisableDto } from './dto/mfa.dto';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
-import { Public } from '@common/decorators/permissions.decorator';
+import { Public, AuthOnly } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { User } from '@database/entities/user.entity';
 
@@ -42,6 +42,7 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @AuthOnly()
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
@@ -60,6 +61,7 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @AuthOnly()
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { ttl: 60000, limit: 5 } })
@@ -71,6 +73,7 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @AuthOnly()
   @Post('mfa/setup')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
@@ -80,6 +83,7 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @AuthOnly()
   @Post('mfa/enable')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
@@ -89,6 +93,7 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @AuthOnly()
   @Post('mfa/disable')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
@@ -98,6 +103,7 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @AuthOnly()
   @Get('me')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Get current user profile and permissions' })

@@ -70,6 +70,7 @@ export class UsersController {
 
   /** Suggest employee matches for a user (by name similarity) — suggestion only, human confirms */
   @Get(':id/employee-suggestions')
+  @RequirePermissions('users.view')
   @ApiOperation({ summary: 'Suggest employees to link to this user (name match)' })
   async suggestions(@CurrentUser() user: any, @Param('id') id: string) {
     const u = await this.ds.query(

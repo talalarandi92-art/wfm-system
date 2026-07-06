@@ -75,6 +75,7 @@ export class TechnicalIssuesController {
 
   // ── List ───────────────────────────────────────────────────────────────────
   @Get()
+  @RequirePermissions('tech_issues.view')
   async list(
     @CurrentUser() user: any,
     @Query('status') status?: string,
@@ -162,6 +163,7 @@ export class TechnicalIssuesController {
 
   // ── Detail ─────────────────────────────────────────────────────────────────
   @Get(':id')
+  @RequirePermissions('tech_issues.view')
   async getOne(@CurrentUser() user: any, @Param('id') id: string) {
     const tid = this.tid(user);
     const [issue] = await this.ds.query(
@@ -194,6 +196,7 @@ export class TechnicalIssuesController {
 
   // ── Add attachment ─────────────────────────────────────────────────────────
   @Post(':id/attachments')
+  @RequirePermissions('tech_issues.create')
   @UseInterceptors(FileInterceptor('file', { storage, fileFilter, limits: { fileSize: 100 * 1024 * 1024 } }))
   async addAttachment(
     @CurrentUser() user: any,
@@ -221,6 +224,7 @@ export class TechnicalIssuesController {
 
   // ── Delete attachment ──────────────────────────────────────────────────────
   @Delete(':id/attachments/:aid')
+  @RequirePermissions('tech_issues.create')
   async deleteAttachment(
     @CurrentUser() user: any,
     @Param('id') id: string,
@@ -338,6 +342,7 @@ export class TechnicalIssuesController {
 
   // ── HTML Report for sharing ────────────────────────────────────────────────
   @Get(':id/report')
+  @RequirePermissions('tech_issues.view')
   async htmlReport(
     @CurrentUser() user: any,
     @Param('id') id: string,

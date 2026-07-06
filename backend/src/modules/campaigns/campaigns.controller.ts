@@ -6,6 +6,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 /**
@@ -16,6 +17,7 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 @ApiTags('Campaigns')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('hc.view')   // deny-by-default flip 2026-07-06 — campaign windows drive Required-HC; writes override below
 @Controller({ path: 'campaigns', version: '1' })
 export class CampaignsController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
@@ -111,6 +113,7 @@ export class CampaignsController {
 
   /* ── Create ───────────────────────────────────────────────────────────── */
   @Post()
+  @RequirePermissions('hc.edit')
   @ApiOperation({ summary: 'Create a campaign' })
   async create(@CurrentUser() user: any, @Body() body: any) {
     const [row] = await this.ds.query(
@@ -137,6 +140,7 @@ export class CampaignsController {
 
   /* ── Update ───────────────────────────────────────────────────────────── */
   @Patch(':id')
+  @RequirePermissions('hc.edit')
   @ApiOperation({ summary: 'Update a campaign' })
   async update(@Param('id') id: string, @CurrentUser() user: any, @Body() body: any) {
     const map: Record<string, string> = {
@@ -164,6 +168,7 @@ export class CampaignsController {
 
   /* ── Delete ───────────────────────────────────────────────────────────── */
   @Delete(':id')
+  @RequirePermissions('hc.edit')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a campaign' })
   async remove(@Param('id') id: string, @CurrentUser() user: any) {

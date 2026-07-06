@@ -12,6 +12,7 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 @ApiTags('Calendar')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('schedule.view')   // deny-by-default flip 2026-07-06 — reads; management writes override below
 @Controller({ path: 'calendar', version: '1' })
 export class CalendarController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}

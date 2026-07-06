@@ -7,6 +7,7 @@ import { Throttle } from '@nestjs/throttler';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { ChatService } from './chat.service';
 
 // Allowlist — only safe document/media types may be uploaded to chat.
@@ -52,6 +53,8 @@ function mimeToType(mime: string): string {
 }
 
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('chat.view')   // deny-by-default flip 2026-07-06: all roles hold chat.view (migration 071);
+                                   // member/admin authorization is enforced in the service (membership + is_admin)
 @Controller('chat')
 export class ChatController {
   constructor(private chatService: ChatService) {}

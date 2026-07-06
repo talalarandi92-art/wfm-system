@@ -84,6 +84,7 @@ export class OdooBridgeController {
 
   @Post('push')
   @UseGuards(JwtAuthGuard)
+  @RequirePermissions('rta.view')   // bridge service account (role rta) — mirrors the Sprinklr push gating
   @ApiOperation({ summary: 'Ingest Odoo records scraped from the browser session (extension bridge)' })
   async push(@Request() req: any, @Body() body: OdooPush) {
     const tid = req.user.tenantId;

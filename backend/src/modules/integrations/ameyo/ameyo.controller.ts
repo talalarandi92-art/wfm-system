@@ -34,6 +34,7 @@ export class AmeyoController {
 
   @Post('push')
   @UseGuards(JwtAuthGuard)
+  @RequirePermissions('rta.view')   // bridge service account (role rta) — mirrors the Sprinklr push gating
   @ApiOperation({ summary: 'Receive an Ameyo live-monitoring snapshot from the extension' })
   async push(@Request() req: any, @Body() snap: AmeyoSnapshot) {
     const tid = req.user.tenantId;

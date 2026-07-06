@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { HealthGuardService } from '@modules/health-guard/health-guard.service';
 import { SecurityGuardService } from '@modules/security-guard/security-guard.service';
@@ -16,6 +17,7 @@ import { SmokeTestService } from '@modules/smoke-test/smoke-test.service';
 @ApiTags('Diagnostics')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('audit.view')   // deny-by-default flip 2026-07-06 — exposes security/health posture
 @Controller({ path: 'diagnostics', version: '1' })
 export class DiagnosticsController {
   constructor(

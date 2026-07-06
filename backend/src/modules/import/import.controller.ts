@@ -76,6 +76,7 @@ export class ImportController {
 
   /** List available sheet names in an uploaded file */
   @Post('sheets')
+  @RequirePermissions('attendance.import')
   @ApiOperation({ summary: 'Return sheet names from an uploaded workbook' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
@@ -100,6 +101,7 @@ export class ImportController {
 
   /** Get preview + paginated rows for a batch */
   @Get(':batchId/preview')
+  @RequirePermissions('import.view')
   @ApiOperation({ summary: 'Get parsed preview rows for a batch' })
   @ApiParam({ name: 'batchId', type: String })
   @ApiQuery({ name: 'page', required: false, type: Number })

@@ -5,7 +5,7 @@ import { DataSource } from 'typeorm';
 import { IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
-import { RequirePermissions } from '@common/decorators/permissions.decorator';
+import { RequirePermissions, AuthOnly } from '@common/decorators/permissions.decorator';
 
 class UpdateSettingDto {
   @IsOptional() value: any;
@@ -60,6 +60,7 @@ export class SettingsController {
   }
 
   @Get('shift-codes')
+  @AuthOnly()   // reference lookup used by dropdowns across the app (all roles)
   @ApiOperation({ summary: 'Shift code dictionary' })
   async shiftCodes(@CurrentUser() user: any) {
     const rows = await this.ds.query(
@@ -104,6 +105,7 @@ export class SettingsController {
   }
 
   @Get('functions')
+  @AuthOnly()   // reference lookup used by dropdowns across the app (all roles)
   @ApiOperation({ summary: 'Functions list with headcount' })
   async functions(@CurrentUser() user: any) {
     return this.ds.query(

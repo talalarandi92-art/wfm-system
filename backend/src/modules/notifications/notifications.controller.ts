@@ -3,11 +3,13 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
+import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 
 @ApiTags('Notifications')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('notifications.view')   // deny-by-default flip 2026-07-06 (all roles hold it; reads + self mark-read)
 @Controller({ path: 'notifications', version: '1' })
 export class NotificationsController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
