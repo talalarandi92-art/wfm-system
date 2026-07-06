@@ -39,6 +39,10 @@ try {
   // ('[generated %' notes) are preserved. APPLY=1 = the pipeline just ingested, write for real.
   process.env.APPLY = '1';
   step('recon-sync-attendance.js', '4/4  resync attendance_records ← roster_days (one spine)');
+  // GATE (2026-07-06, risk #9): the golden master asserts the pay rules on the SHIPPED data
+  // (classifyCode dictionary + pickWindow bleed + live clamps). A refresh that violates a pay
+  // invariant FAILS the pipeline — restore with: node scripts/recon-ingest.js --restore
+  step('recon-golden.test.cjs', 'GATE  golden-master pay-rule check');
   console.log('\n✅ DONE in ' + ((Date.now() - t0) / 1000).toFixed(0) + 's — /roster now shows the corrected reconciliation. Restore: node scripts/recon-ingest.js --restore');
 } catch (e) {
   console.log('\n❌ REFRESH FAILED at a step above. roster_days is unchanged unless the ingest step printed INGEST OK. ' + (e.message || ''));
