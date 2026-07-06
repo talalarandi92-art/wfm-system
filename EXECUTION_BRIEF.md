@@ -240,7 +240,13 @@ add a slice-overwrite guard (`--allow-shrink` or date-stamped filenames).
   recon writes + audit every mutation.
 - **Correctness:** editCell one-line guard (risk 4); approve idempotency (risk 7); `canon_fn()` in
   permission HC-impact + RTA (risk 10); requests IDOR self-scope (risk 10b).
-- **Consolidate/cleanup:** 3 generators → 1; rotation hour-buckets → `common/shift-category`; parameterize
+- **Consolidate/cleanup:** ~~3 generators → 1~~ **RESOLVED-AS-ANALYZED 2026-07-06** — mapped all three:
+  the RULE layer is already ONE (demand engine imports `calcRestHours`/`allowedShiftCodes`/female policy
+  from the classic engine + `generator.types.ts`; the ladder is structurally female-safe — females can
+  only reach the morning band). The residual divergence is OFF-placement + fairness-scoring STRATEGY
+  (classic = YTD/weekend-fair, demand = lowest-demand-day + 35% cap), both Director-tested products;
+  merging them CHANGES scheduling outputs → **Needs Approval** before any behavioral merge (BR-APP-006).
+  rotation hour-buckets → `common/shift-category` ✅ done (commit 8b0d89a); parameterize
   recon paths via env; retire dead code (§3.4); user-lifecycle `audit_logs` (risk 12); guard demo-seed;
   replace `@Body() body: any` with DTOs (risk 14); `trust proxy` + user-keyed Redis throttler (risk 15).
 - **Cheap scale wins:** add the `canon_fn` + covering indexes + `pg_trgm` name-search index (risks 5,13);
