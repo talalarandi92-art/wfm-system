@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "WFM Bridge — Odoo Connector",
+  "version": "0.1.0",
+  "description": "Reads Odoo Supervisor-Requests (leave / OT / comp / permission / attendance) from your open Odoo session and syncs them to the WFM Platform — no API key needed.",
+
+  "permissions": ["storage", "alarms", "tabs", "notifications"],
+
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://wfm.boutiqaat.com/*",
+    "*://*/*"
+  ],
+
+  "background": { "service_worker": "background.js" },
+
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+
+  "web_accessible_resources": [
+    { "resources": ["injected.js"], "matches": ["*://*/*"] }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "WFM Odoo Bridge"
+  }
+}
