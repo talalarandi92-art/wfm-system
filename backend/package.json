@@ -16,7 +16,8 @@
     "migrate": "node scripts/migrate.js",
     "migrate:status": "node scripts/migrate.js --status",
     "seed:admin": "ts-node -r tsconfig-paths/register src/database/seeds/seed-admin.ts",
-    "seed:demo": "ts-node -r tsconfig-paths/register src/database/seeds/seed-demo-users.ts"
+    "seed:demo": "ts-node -r tsconfig-paths/register src/database/seeds/seed-demo-users.ts",
+    "verify": "node scripts/verify-all.cjs"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.27",
