@@ -75,7 +75,7 @@ export class GeneratorController {
   @RequirePermissions('schedule.generate')
   generateDemand(
     @Request() req: any,
-    @Body() body: { weekStart: string; options?: any },
+    @Body() body: GenerateDto,   // validated: offStrategy IsIn, rotationFairness IsBoolean, bounds on offDaysPerWeek/internProductivity (was `options?: any` — bypassed the DTO)
   ) {
     return this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
   }
@@ -89,7 +89,7 @@ export class GeneratorController {
   @RequirePermissions('schedule.create')
   async saveDemand(
     @Request() req: any,
-    @Body() body: { weekStart: string; options?: any; label?: string },
+    @Body() body: SaveDto,   // validated (SaveDto extends GenerateDto) — was `options?: any`, bypassing the DTO
   ) {
     const result = await this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
     const versionId = await this.svc.saveDemandDraft(req.user.tenantId, result, req.user.userId, body.label);
