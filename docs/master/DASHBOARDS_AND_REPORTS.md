@@ -153,6 +153,10 @@ The executive flagship single-screen (first sidebar item, Crown icon). `CommandC
 KPIs, unit-aware actuals (AHT = minutes; Response-Time = Excel day-fraction ×1440; pct KPIs ×100).
 Scoring rules (bands, round-half-up, sick-day penalty, quiz-commitment) per Rules doc §9 and the
 `scorecard-builder` skill. **Decisions supported:** monthly performance review, wallboard ranking.
+- **Performance tab (`GET /scorecard/analyze`) — repointed 2026-07-07:** cumulative cross-month series
+  now reads canonical `scorecard_monthly` (13 months of Net Points, alias-aware `employee_identity` fold)
+  instead of the single-month `scorecard_entries` batch; weak-KPI/coaching detail stays on the latest
+  batch (source labelled in `insights.kpiSource`). Verified vs the May 2026 SCORED workbook (82/82 match).
 
 ### DASH-10 · Hourly Analytics — `/analytics?tab=hourly` (Confirmed / Built 2026-06-23)
 `HourlyAnalytics.tsx`; endpoint `roster-v2/hourly` — per hour 0–23 × function on `roster_days`.
