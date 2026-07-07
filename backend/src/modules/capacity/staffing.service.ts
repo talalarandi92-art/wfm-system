@@ -1,5 +1,7 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import * as XLSX from 'xlsx';
+import { AgentRunner } from '@common/agent-runner';
 
 /* ═════════════════════════════════════════════════════════════════════════════
  *  STAFFING REQUIREMENT ENGINE — forecast → Erlang → hourly required HC
@@ -93,8 +95,34 @@ export interface HourRequirement {
 }
 
 @Injectable()
-export class StaffingService {
+export class StaffingService implements OnModuleInit {
+  private readonly logger = new Logger(StaffingService.name);
   constructor(private readonly ds: DataSource) {}
+
+  /** AI-workforce W1 "Staffing Observer": rolls Sprinklr snapshots into the learning
+   *  store every hour — advisory-lock exclusive, so multi-instance deploys stay safe.
+   *  Disable with STAFFING_OBSERVER=0. */
+  onModuleInit() {
+    if (process.env.STAFFING_OBSERVER === '0') return;
+    const runner = new AgentRunner(this.ds, 'staffing-observer');
+    const tick = async () => {
+      try {
+        await runner.runExclusive(async () => {
+          const tenants = await this.ds.query(`SELECT DISTINCT tenant_id FROM staffing_params`);
+          for (const t of tenants) {
+            const r = await this.rollupObservations(t.tenant_id, 26);
+            if (r.hourChannelCells > 0) {
+              await runner.publishEvent(t.tenant_id, 'learning',
+                { what: 'staffing.observations.rollup', cells: r.hourChannelCells, snapshots: r.snapshotRows },
+                { severity: 'info' }).catch(() => {});
+            }
+          }
+        });
+      } catch (e: any) { this.logger.warn(`staffing-observer tick skipped: ${e.message}`); }
+    };
+    setTimeout(tick, 30_000);                 // first pass shortly after boot
+    setInterval(tick, 60 * 60 * 1000);        // then hourly
+  }
 
   /* ── params ──────────────────────────────────────────────────────────────── */
   async getParams(tenantId: string): Promise<StaffingParams[]> {
@@ -207,9 +235,10 @@ export class StaffingService {
     if (days < 1 || days > 35) throw new BadRequestException('range must be 1..35 days');
     const ordersScale = Math.min(3, Math.max(0.3, opts?.ordersScale ?? 1));
 
-    const [params, facts] = await Promise.all([
+    const [params, facts, learned] = await Promise.all([
       this.getParams(tenantId),
       this.channelFacts(tenantId, from),
+      this.learnedCurves(tenantId).catch(() => ({} as Record<string, Record<number, Record<number, number>>>)),
     ]);
     const scoped = params.filter(p => p.isStaffed &&
       (!opts?.functionKeys?.length || opts.functionKeys.includes(p.functionKey)));
@@ -235,9 +264,27 @@ export class StaffingService {
             const talk = p.ahtSec ?? facts.ahtBy[ch] ?? 300;
             ahtWeighted += v * (talk + p.holdSec + p.acwSec);
           }
-          const ahtEff = volume > 0 ? ahtWeighted / volume : 0;
-          // 2-4. Erlang / concurrency / throughput → agents that must be AVAILABLE
-          const erlangs = (volume * ahtEff) / 3600;
+          // share-weighted AHT fallback: when the learned floor supplies workload on an
+          // hour with zero forecast volume, Erlang still needs a real AHT (0 would spin
+          // findMinAgents to its iteration cap).
+          let shareAht = 0, shareSum = 0;
+          for (const [ch, share] of Object.entries(p.channelMix)) {
+            const talk = p.ahtSec ?? facts.ahtBy[ch] ?? 300;
+            shareAht += (share as number) * (talk + p.holdSec + p.acwSec);
+            shareSum += (share as number);
+          }
+          const ahtEff = volume > 0 ? ahtWeighted / volume : (shareSum > 0 ? shareAht / shareSum : 300);
+          // 2-4. Erlang / concurrency / throughput → agents that must be AVAILABLE.
+          // LEARNED floor: where the Sprinklr learning store has measured P90 concurrent
+          // load (Erlangs, incl. waiting) for this weekday×hour, never staff below it —
+          // measurement beats estimation (volume×AHT) when they disagree upward.
+          let learnedErl = 0;
+          for (const [ch, share] of Object.entries(p.channelMix)) {
+            const v = learned[ch]?.[dow]?.[h];
+            if (v != null) learnedErl += v * (share as number);
+          }
+          const estimated = (volume * ahtEff) / 3600;
+          const erlangs = Math.max(estimated, learnedErl * ordersScale);
           let agents = 0, serverCapacity = 0;   // capacity = agents × effective servers/agent
           if (erlangs > 0) {
             if (p.model === 'throughput') {
@@ -296,5 +343,248 @@ export class StaffingService {
       ordersPeriod: facts.ordersPeriod,
       days: result,
     };
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+   *  EVENT / PERIOD FORECAST (Director 2026-07-07): fill an Excel with the
+   *  expected demand for a date range + the agents you actually have per
+   *  function → the engine answers, per function: required peak, gap, HOW MANY
+   *  INTERNS TO HIRE (gap ÷ intern productivity, ceil) and the SL you'd run at
+   *  with current staff vs after hiring (reverse Erlang at the worst hour).
+   * ═══════════════════════════════════════════════════════════════════════════ */
+
+  /** The sample template the Director downloads, fills and uploads back. */
+  async eventTemplate(tenantId: string): Promise<Buffer> {
+    const params = (await this.getParams(tenantId)).filter(p => p.isStaffed);
+    const fnCols = params.map(p => p.functionKey);
+    const today = new Date();
+    const d0 = new Date(today.getTime() + 7 * 86400000);
+    const wb = XLSX.utils.book_new();
+
+    const instructions = [
+      ['WFM — Event / Period Forecast Template'],
+      [''],
+      ['1. Daily_Forecast sheet: one row per DAY of the event. Fill Orders (expected orders that day)'],
+      ['   and the expected CONTACTS per function (calls/chats/emails offered that day).'],
+      ['   Add or remove date rows as needed — the range is taken from the rows you fill.'],
+      ['2. Available_Agents sheet: how many agents you actually HAVE per function for the period,'],
+      ['   and the intern productivity factor (0.70 = an intern delivers 70% of an agent).'],
+      ['3. Save and upload the file in Capacity → Staffing Engine → Event Forecast.'],
+      [''],
+      ['The engine computes, per function: hourly required HC (your intraday profile × Erlang-C at'],
+      ['the SL target and occupancy cap, + ACW/Hold, ÷ productivity, ÷ (1−shrinkage)), the gap vs'],
+      ['your available agents, INTERNS TO HIRE to close it, and the projected SL before/after.'],
+      [''],
+      ['كيفية الاستخدام: عبّي شيت Daily_Forecast يوم بيوم (الطلبات المتوقعة + الكونتاكتس المتوقعة لكل'],
+      ['فنكشن)، وشيت Available_Agents (عدد الوكلاء المتاحين لكل فنكشن + إنتاجية الإنترن)، واحفظ وارفع.'],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(instructions), 'Instructions');
+
+    const fcHeader = ['Date', 'Orders', ...fnCols];
+    const fcRows = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(d0.getTime() + i * 86400000).toISOString().slice(0, 10);
+      return [d, 5000, ...fnCols.map(() => 100)];
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([fcHeader, ...fcRows]), 'Daily_Forecast');
+
+    const avHeader = ['Function', 'AvailableAgents', 'InternProductivity'];
+    const avRows = params.map(p => [p.functionKey, 10, 0.7]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([avHeader, ...avRows]), 'Available_Agents');
+
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  }
+
+  /** Parse the uploaded workbook, run the math, persist + return the verdict. */
+  async uploadEventForecast(tenantId: string, userId: string | null, fileName: string, buf: Buffer, eventName?: string) {
+    const wb = XLSX.read(buf, { type: 'buffer' });
+    const fcWs = wb.Sheets['Daily_Forecast'];
+    const avWs = wb.Sheets['Available_Agents'];
+    if (!fcWs || !avWs) throw new BadRequestException('Workbook must contain Daily_Forecast and Available_Agents sheets (use the downloaded template)');
+
+    const fcRows: any[][] = XLSX.utils.sheet_to_json(fcWs, { header: 1, defval: null, blankrows: false });
+    const avRows: any[][] = XLSX.utils.sheet_to_json(avWs, { header: 1, defval: null, blankrows: false });
+    const header = (fcRows[0] ?? []).map((h: any) => String(h ?? '').trim());
+    const fnCols = header.slice(2).filter(Boolean);
+    if (header[0] !== 'Date' || !fnCols.length) throw new BadRequestException('Daily_Forecast header must be: Date | Orders | <function columns>');
+
+    const toISO = (v: any): string | null => {
+      if (typeof v === 'number') return new Date(Math.round((Math.floor(v) - 25569) * 86400000)).toISOString().slice(0, 10);
+      const s = String(v ?? '').trim();
+      return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
+    };
+    const daily = fcRows.slice(1)
+      .map(r => ({ date: toISO(r[0]), orders: +(r[1] ?? 0) || 0, contacts: Object.fromEntries(fnCols.map((f, i) => [f, +(r[2 + i] ?? 0) || 0])) }))
+      .filter(r => !!r.date) as { date: string; orders: number; contacts: Record<string, number> }[];
+    if (!daily.length) throw new BadRequestException('No dated rows found in Daily_Forecast');
+    daily.sort((a, b) => a.date.localeCompare(b.date));
+
+    const available: Record<string, { agents: number; internProductivity: number }> = {};
+    for (const r of avRows.slice(1)) {
+      const fn = String(r[0] ?? '').trim(); if (!fn) continue;
+      available[fn] = { agents: +(r[1] ?? 0) || 0, internProductivity: Math.min(Math.max(+(r[2] ?? 0.7) || 0.7, 0.2), 1) };
+    }
+
+    const [params, facts] = await Promise.all([this.getParams(tenantId), this.channelFacts(tenantId, daily[0].date)]);
+    const byKey = new Map(params.map(p => [p.functionKey, p]));
+
+    const perFunction: any[] = [];
+    for (const fn of fnCols) {
+      const p = byKey.get(fn);
+      if (!p) { perFunction.push({ functionKey: fn, error: 'unknown function (not in staffing_params)' }); continue; }
+      // blended intraday profile + measured AHT across the function's channel mix
+      const mixEntries = Object.entries(p.channelMix);
+      const mixTotal = mixEntries.reduce((s, [, v]) => s + (v as number), 0) || 1;
+      const prof = new Array(48).fill(0);
+      let talk = 0;
+      for (const [ch, share] of mixEntries) {
+        const w = (share as number) / mixTotal;
+        (facts.profBy[ch] ?? new Array(48).fill(1 / 48)).forEach((v, i) => { prof[i] += v * w; });
+        talk += (p.ahtSec ?? facts.ahtBy[ch] ?? 300) * w;
+      }
+      const profSum = prof.reduce((a, b) => a + b, 0) || 1;
+      const ahtEff = talk + p.holdSec + p.acwSec;
+      const eff = p.model === 'concurrency' ? effectiveServersPerAgent(p.concurrency, p.marginalEff) : 1;
+
+      // worst (peak-demand) day drives the hire decision; every day reported
+      let periodPeakRequired = 0, worst: any = null;
+      const days = daily.map(d => {
+        const hours = Array.from({ length: 24 }, (_, h) => {
+          const vol = d.contacts[fn] * ((prof[h * 2] + prof[h * 2 + 1]) / profSum);
+          const erl = (vol * ahtEff) / 3600;
+          let agents = 0;
+          if (erl > 0) {
+            if (p.model === 'throughput') agents = Math.ceil(erl / p.occupancyCap);
+            else agents = Math.ceil(findMinAgents(erl, p.targetSl, p.targetAnswerSec, ahtEff, p.occupancyCap) / eff);
+          }
+          const sched = agents > 0 ? Math.ceil(agents / Math.max(p.productivity, 0.1) / Math.max(1 - p.shrinkage, 0.1)) : 0;
+          return { h, vol, erl, agentsAvail: agents, sched };
+        });
+        const peak = Math.max(...hours.map(x => x.sched), 0);
+        if (peak > periodPeakRequired) { periodPeakRequired = peak; worst = { date: d.date, hours }; }
+        return { date: d.date, contacts: d.contacts[fn], requiredPeak: peak };
+      });
+
+      const av = available[fn] ?? { agents: 0, internProductivity: 0.7 };
+      const gap = Math.max(0, periodPeakRequired - av.agents);
+      const internsToHire = gap > 0 ? Math.ceil(gap / av.internProductivity) : 0;
+
+      // Reverse Erlang — projected SL at the WORST hour of the worst day:
+      // scheduled bodies → on-duty available = bodies × (1−shrinkage) × productivity,
+      // apportioned to the hour by its share of the peak requirement.
+      const slAt = (bodies: number) => {
+        if (!worst) return 1;
+        let minSL = 1;
+        for (const x of worst.hours) {
+          if (x.erl <= 0 || x.sched <= 0) continue;
+          const bodiesAtHour = Math.min(x.sched, bodies * (x.sched / periodPeakRequired));
+          const availAtHour = Math.floor(bodiesAtHour * (1 - p.shrinkage) * p.productivity * eff);
+          const sl = p.model === 'throughput'
+            ? (availAtHour >= Math.ceil(x.erl / p.occupancyCap) ? 1 : availAtHour / Math.max(Math.ceil(x.erl / p.occupancyCap), 1))
+            : serviceLevel(availAtHour, x.erl, p.targetAnswerSec, ahtEff);
+          if (sl < minSL) minSL = sl;
+        }
+        return minSL;
+      };
+      perFunction.push({
+        functionKey: fn, model: p.model, ahtEffSec: Math.round(ahtEff),
+        targetSl: p.targetSl,
+        requiredPeak: periodPeakRequired,
+        availableAgents: av.agents,
+        gapAgents: gap,
+        internProductivity: av.internProductivity,
+        internsToHire,
+        projectedSlNow: +slAt(av.agents).toFixed(3),
+        projectedSlAfterHire: +slAt(av.agents + internsToHire * av.internProductivity).toFixed(3),
+        worstDay: worst?.date ?? null,
+        days,
+      });
+    }
+
+    const inputs = { daily, available, fnCols };
+    const results = { perFunction, computedAt: new Date().toISOString() };
+    const [row] = await this.ds.query(
+      `INSERT INTO forecast_events (tenant_id, name, date_from, date_to, inputs, results, file_name, created_by)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8) RETURNING id`,
+      [tenantId, eventName || fileName || 'Event forecast', daily[0].date, daily[daily.length - 1].date,
+       JSON.stringify(inputs), JSON.stringify(results), fileName ?? null, userId],
+    );
+    return { id: row.id, name: eventName || fileName, from: daily[0].date, to: daily[daily.length - 1].date, perFunction };
+  }
+
+  async listEventForecasts(tenantId: string) {
+    return this.ds.query(
+      `SELECT id, name, date_from::text AS "from", date_to::text AS "to", file_name, created_at, results
+       FROM forecast_events WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [tenantId],
+    );
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+   *  LEARNING STORE — roll Sprinklr snapshots up into hourly measured workload
+   *  (avg inProgress = Erlangs, measured — no estimation error) and blend the
+   *  learned curves into the forecast. aht/acw/hold learn the same way once the
+   *  bridge captures handle stats. AI-workforce W1: runs itself hourly.
+   * ═══════════════════════════════════════════════════════════════════════════ */
+
+  /** Aggregate integration_snapshots → staffing_observations for a window (default: last 48h). */
+  async rollupObservations(tenantId: string, hoursBack = 48) {
+    const rows = await this.ds.query(
+      `SELECT date_trunc('hour', captured_at) AS h, captured_at, queues_json
+       FROM integration_snapshots
+       WHERE tenant_id = $1 AND source = 'sprinklr'
+         AND captured_at >= NOW() - ($2 || ' hours')::interval
+       ORDER BY captured_at`,
+      [tenantId, String(hoursBack)],
+    );
+    type Acc = { erl: number[]; wait: number[] };
+    const agg = new Map<string, Acc>(); // `${hourISO}|${channel}`
+    for (const r of rows) {
+      const queues: any[] = Array.isArray(r.queues_json) ? r.queues_json : JSON.parse(r.queues_json || '[]');
+      const perCh: Record<string, { p: number; w: number }> = {};
+      for (const q of queues) {
+        const ch = q.channel || 'unknown';
+        perCh[ch] = perCh[ch] || { p: 0, w: 0 };
+        perCh[ch].p += q.inProgress ?? 0;
+        perCh[ch].w += q.waiting ?? 0;
+      }
+      for (const [ch, v] of Object.entries(perCh)) {
+        const key = `${new Date(r.h).toISOString()}|${ch}`;
+        const a = agg.get(key) ?? { erl: [], wait: [] };
+        a.erl.push(v.p); a.wait.push(v.w);
+        agg.set(key, a);
+      }
+    }
+    const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+    let upserts = 0;
+    for (const [key, a] of agg) {
+      const [hour, channel] = key.split('|');
+      await this.ds.query(
+        `INSERT INTO staffing_observations (tenant_id, obs_hour, channel, erlangs, waiting_avg, samples)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (tenant_id, obs_hour, channel, source) DO UPDATE
+           SET erlangs = EXCLUDED.erlangs, waiting_avg = EXCLUDED.waiting_avg,
+               samples = EXCLUDED.samples, computed_at = NOW()`,
+        [tenantId, hour, channel, avg(a.erl).toFixed(3), avg(a.wait).toFixed(3), a.erl.length],
+      );
+      upserts++;
+    }
+    return { ok: true, hoursBack, snapshotRows: rows.length, hourChannelCells: upserts };
+  }
+
+  /** Learned P90 measured Erlangs per channel × weekday × hour (≥2 same-weekday samples). */
+  async learnedCurves(tenantId: string): Promise<Record<string, Record<number, Record<number, number>>>> {
+    const rows = await this.ds.query(
+      `SELECT channel,
+              EXTRACT(DOW  FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS dow,
+              EXTRACT(HOUR FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS hr,
+              PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY erlangs + waiting_avg) AS p90,
+              COUNT(*)::int AS n
+       FROM staffing_observations WHERE tenant_id = $1
+       GROUP BY channel, dow, hr HAVING COUNT(*) >= 2`,
+      [tenantId],
+    );
+    const out: Record<string, Record<number, Record<number, number>>> = {};
+    for (const r of rows) ((out[r.channel] = out[r.channel] || {})[+r.dow] = out[r.channel][+r.dow] || {})[+r.hr] = +r.p90;
+    return out;
   }
 }

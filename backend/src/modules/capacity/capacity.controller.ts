@@ -1,4 +1,10 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, UnauthorizedException } from '@nestjs/common';
+import {
+  Controller, Get, Post, Patch, Param, Body, Query, UseGuards, UnauthorizedException,
+  UseInterceptors, UploadedFile, BadRequestException, Res,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import { Response } from 'express';
 import { CapacityService, VoiceInputs, ChatInputs, EmailInputs } from './capacity.service';
 import { StaffingService } from './staffing.service';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
@@ -143,6 +149,42 @@ export class CapacityController {
       ordersScale: ordersScale ? +ordersScale : undefined,
       functionKeys: functions ? functions.split(',').map(s => s.trim()).filter(Boolean) : undefined,
     });
+  }
+
+  /* ── Event / period forecast (Excel in, hiring verdict out) ─────────────── */
+
+  /** Download the fill-in template (Instructions + Daily_Forecast + Available_Agents). */
+  @Get('staffing/event-template')
+  async eventTemplate(@CurrentUser() user: any, @Res() res: Response) {
+    const buf = await this.staffing.eventTemplate(this.tid(user));
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="WFM_Event_Forecast_Template.xlsx"');
+    res.send(buf);
+  }
+
+  /** Upload the filled template → per-function required peak, gap, interns to hire, SL now/after. */
+  @Post('staffing/event-forecast')
+  @RequirePermissions('hc.edit')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }))
+  async uploadEventForecast(
+    @CurrentUser() user: any,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() body?: { name?: string },
+  ) {
+    if (!file?.buffer) throw new BadRequestException('Attach the filled template as "file"');
+    return this.staffing.uploadEventForecast(this.tid(user), user.id ?? null, file.originalname, file.buffer, body?.name);
+  }
+
+  @Get('staffing/event-forecasts')
+  listEventForecasts(@CurrentUser() user: any) {
+    return this.staffing.listEventForecasts(this.tid(user));
+  }
+
+  /** Manually trigger the learning-store rollup (the observer also runs hourly). */
+  @Post('staffing/observations/rollup')
+  @RequirePermissions('hc.edit')
+  rollupObservations(@CurrentUser() user: any, @Query('hoursBack') hoursBack?: string) {
+    return this.staffing.rollupObservations(this.tid(user), hoursBack ? Math.min(+hoursBack, 24 * 14) : 48);
   }
 
   /** Saved scenarios */

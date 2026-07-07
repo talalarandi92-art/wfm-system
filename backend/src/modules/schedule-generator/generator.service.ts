@@ -62,6 +62,8 @@ export class GeneratorService {
     // productivity; rotation & humane rules apply INSIDE that envelope.)
     // FALLBACK: Sprinklr live-plan history (P90 per weekday) when no forecast data.
     let forecastByDate: Map<string, number[]> | null = null;
+    // date → canonFn → 48-slot required curve — the per-function allocation inside ONE generate
+    let fnCurveByDate: Map<string, Map<string, number[]>> | null = null;
     let forecastBasis = '';
     try {
       // scope the requirement to the same functions the pool is scoped to
@@ -77,6 +79,14 @@ export class GeneratorService {
       const total = req.days.reduce((s: number, d: any) => s + d.totalCurve48.reduce((a: number, b: number) => a + b, 0), 0);
       if (total > 0) {
         forecastByDate = new Map(req.days.map((d: any) => [d.date, d.totalCurve48]));
+        fnCurveByDate = new Map(req.days.map((d: any) => [
+          d.date,
+          new Map(d.functions.map((f: any) => {
+            const curve = new Array(48).fill(0);
+            for (const x of f.hours) { curve[x.hour * 2] = x.requiredScheduledHc; curve[x.hour * 2 + 1] = x.requiredScheduledHc; }
+            return [f.functionKey, curve];
+          })),
+        ]));
         forecastBasis = req.basis;
       }
     } catch (e) { /* no staffing params / no volume history → fall back below */ }
@@ -148,30 +158,93 @@ export class GeneratorService {
       }
     }
 
-    const mixByDate = new Map<string, Record<string, number>>();
     const demandDays: any[] = [];
-    // Bodies available per day ≈ pool minus the OFF allowance
-    const maxStaffPerDay = Math.max(1, pool.length - Math.ceil(pool.length * options.offDaysPerWeek / 7));
+    let roster: ReturnType<typeof assignRoster>;
+    // Per-day per-function coverage detail (populated in per-function mode)
+    const perFunctionByDate = new Map<string, any[]>();
+    const noCurveFns: string[] = [];
 
-    for (const date of dates) {
-      // forecast-erlang curve first; live-plan history only as fallback
-      let base: number[];
-      if (forecastByDate?.get(date)) base = forecastByDate.get(date)!;
-      else {
-        const samples = byWeekday.get(new Date(date).getDay());
-        base = samples?.length ? curveFor(samples) : fallback;
+    if (fnCurveByDate) {
+      // ── PER-FUNCTION allocation (Director 2026-07-07): each function gets its
+      //    OWN hourly curve, its OWN shift mix, and its OWN pool — inside one
+      //    generate. Rules (gender/rest/fairness/rotation) run per function, so
+      //    coverage can never silently borrow bodies across functions.
+      const assignments: any[] = [], unfilled: any[] = [], warnings: string[] = [];
+      const fnDayParts = new Map<string, { fn: string; day: any }[]>(); // date → parts
+
+      for (const grp of fns) {
+        const hasCurve = dates.some(d => {
+          const c = fnCurveByDate!.get(d)?.get(grp.name);
+          return !!c && c.some(v => v > 0);
+        });
+        if (!hasCurve) {
+          if (grp.employees.length) noCurveFns.push(`${grp.name} (${grp.employees.length})`);
+          continue;
+        }
+        const poolF = grp.employees;
+        const maxStaffF = Math.max(1, poolF.length - Math.ceil(poolF.length * options.offDaysPerWeek / 7));
+        const mixF = new Map<string, Record<string, number>>();
+        for (const date of dates) {
+          const curve = fnCurveByDate!.get(date)?.get(grp.name) ?? new Array(48).fill(0);
+          const required = curve.map(v => Math.ceil(v * demandScale));
+          const day = computeShiftMix(date, required, maxStaffF);
+          mixF.set(date, day.mix);
+          (fnDayParts.get(date) ?? fnDayParts.set(date, []).get(date)!).push({ fn: grp.name, day });
+        }
+        const rosterF = assignRoster(dates, mixF, poolF, ytdDist, lastShifts, consecDays, {
+          minRestHours: options.minRestHours,
+          offDaysPerWeek: options.offDaysPerWeek,
+          onLeave,
+        });
+        assignments.push(...rosterF.assignments);
+        unfilled.push(...rosterF.unfilled.map(u => ({ ...u, functionName: grp.name })));
+        warnings.push(...rosterF.warnings.map(w => `[${grp.name}] ${w}`));
       }
-      const required = base.map(v => Math.ceil(v * demandScale));
-      const day = computeShiftMix(date, required, maxStaffPerDay);
-      mixByDate.set(date, day.mix);
-      demandDays.push(day);
-    }
+      if (noCurveFns.length) {
+        warnings.push(
+          `No forecast basis (not demand-staffed in staffing_params) — schedule manually or via the ladder: ${noCurveFns.join(', ')} · ` +
+          `بدون أساس توقع — جدولة يدوية أو عبر الروتيشن التدريجي: ${noCurveFns.join(', ')}`);
+      }
+      roster = { assignments, unfilled, warnings };
 
-    const roster = assignRoster(dates, mixByDate, pool, ytdDist, lastShifts, consecDays, {
-      minRestHours: options.minRestHours,
-      offDaysPerWeek: options.offDaysPerWeek,
-      onLeave,
-    });
+      // Aggregate per-date totals (for the day summary) + keep per-function detail
+      for (const date of dates) {
+        const parts = fnDayParts.get(date) ?? [];
+        const requiredCurve = new Array(48).fill(0), staffedCurve = new Array(48).fill(0);
+        const mix: Record<string, number> = {}; const residualGaps: any[] = [];
+        for (const p of parts) {
+          p.day.requiredCurve.forEach((v: number, i: number) => { requiredCurve[i] += v; });
+          p.day.staffedCurve.forEach((v: number, i: number) => { staffedCurve[i] += v; });
+          for (const [c, n] of Object.entries(p.day.mix)) mix[c] = (mix[c] ?? 0) + (n as number);
+          residualGaps.push(...p.day.residualGaps.map((g: any) => ({ ...g, functionName: p.fn })));
+        }
+        demandDays.push({ date, mix, requiredCurve, staffedCurve, residualGaps });
+        perFunctionByDate.set(date, parts.map(p => ({
+          functionName: p.fn,
+          requiredPeak: Math.max(...p.day.requiredCurve, 0),
+          staffedPeak: Math.max(...p.day.staffedCurve, 0),
+          mix: p.day.mix,
+          residualGaps: p.day.residualGaps.length,
+        })));
+      }
+    } else {
+      // ── Fallback: single total curve over the whole pool (live-plan history) ──
+      const mixByDate = new Map<string, Record<string, number>>();
+      const maxStaffPerDay = Math.max(1, pool.length - Math.ceil(pool.length * options.offDaysPerWeek / 7));
+      for (const date of dates) {
+        const samples = byWeekday.get(new Date(date).getDay());
+        const base = samples?.length ? curveFor(samples) : fallback;
+        const required = base.map(v => Math.ceil(v * demandScale));
+        const day = computeShiftMix(date, required, maxStaffPerDay);
+        mixByDate.set(date, day.mix);
+        demandDays.push(day);
+      }
+      roster = assignRoster(dates, mixByDate, pool, ytdDist, lastShifts, consecDays, {
+        minRestHours: options.minRestHours,
+        offDaysPerWeek: options.offDaysPerWeek,
+        onLeave,
+      });
+    }
 
     // ── 4. Shape the output: grid + per-day coverage + honest gaps ───────────
     const byEmp = new Map<string, Record<string, string>>();
@@ -222,6 +295,8 @@ export class GeneratorService {
         riskStatus,
         requiredCurve: d.requiredCurve, staffedCurve: d.staffedCurve,
         residualGaps: d.residualGaps,
+        // per-function coverage detail (per-function allocation mode)
+        perFunction: perFunctionByDate.get(d.date) ?? null,
       };
     });
 
@@ -236,7 +311,7 @@ export class GeneratorService {
       },
       demand: {
         basis: forecastByDate
-          ? `STAFFING ENGINE — ${forecastBasis}`
+          ? `STAFFING ENGINE (per-function allocation) — ${forecastBasis}`
           : byWeekday.size >= 5
             ? `P90 per weekday over ${allCurves.length} measured days (live-plan fallback — staffing engine had no volume data)`
             : `sparse history (${allCurves.length} measured day(s)) — same curve applied to all weekdays; accuracy improves as data accumulates`,

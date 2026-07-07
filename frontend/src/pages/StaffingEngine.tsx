@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Loader2, Sigma, SlidersHorizontal, RefreshCw, ChevronDown, ChevronUp, Info, Save,
+  CalendarRange, Download, Upload, UserPlus,
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
@@ -43,6 +44,124 @@ const NUM_FIELDS: { key: keyof Params; ar: string; en: string; step: number; pct
   { key: 'productivity',    ar: 'إنتاجية',        en: 'Productivity',  step: 0.05, pct: true },
   { key: 'concurrency',     ar: 'تزامن',          en: 'Concurrency',   step: 1 },
 ];
+
+interface EventFnVerdict {
+  functionKey: string; error?: string; requiredPeak: number; availableAgents: number;
+  gapAgents: number; internsToHire: number; projectedSlNow: number; projectedSlAfterHire: number;
+  worstDay: string | null; targetSl: number;
+}
+
+function EventForecastSection({ dark, ar, surface, border, tPri, tSec }: {
+  dark: boolean; ar: boolean; surface: string; border: string; tPri: string; tSec: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ name: string; from: string; to: string; perFunction: EventFnVerdict[] } | null>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) apiClient.get('/capacity/staffing/event-forecasts').then(r => setHistory(r.data)).catch(() => {});
+  }, [open, result]);
+
+  const download = async () => {
+    const r = await apiClient.get('/capacity/staffing/event-template', { responseType: 'blob' });
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'WFM_Event_Forecast_Template.xlsx'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const upload = async (f: File) => {
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      fd.append('name', f.name.replace(/\.xlsx?$/i, ''));
+      const r = await apiClient.post('/capacity/staffing/event-forecast', fd);
+      setResult(r.data);
+    } catch { /* surfaced by empty result */ }
+    setBusy(false);
+  };
+
+  return (
+    <div className="rounded-2xl" style={{ background: surface, border: `1px solid ${border}` }}>
+      <button onClick={() => setOpen(s => !s)} className="w-full flex items-center gap-2 p-3">
+        <CalendarRange size={14} style={{ color: '#34d399' }} />
+        <span className="font-bold text-xs" style={{ color: tPri }}>
+          {ar ? 'فوركاست فترة / إيفنت — نزّل القالب، عبّيه، ارفعه: كم إنترن لازم توظف + الـSL المتوقع' : 'Event / period forecast — download, fill, upload: interns to hire + projected SL'}
+        </span>
+        <span className="ms-auto">{open ? <ChevronUp size={14} color={tSec} /> : <ChevronDown size={14} color={tSec} />}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={download} className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg"
+              style={{ background: dark ? 'rgba(52,211,153,0.12)' : 'rgba(16,185,129,0.08)', color: '#34d399' }}>
+              <Download size={12} /> {ar ? 'تنزيل القالب' : 'Download template'}
+            </button>
+            <button onClick={() => fileRef.current?.click()} disabled={busy}
+              className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg"
+              style={{ background: '#6366f1', color: '#fff' }}>
+              {busy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+              {ar ? 'رفع الملف المعبّى' : 'Upload filled file'}
+            </button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); e.currentTarget.value = ''; }} />
+            <span className="text-[9px]" style={{ color: tSec }}>
+              {ar ? 'شيت Daily_Forecast: الطلبات + كونتاكتس كل فنكشن يوم بيوم · شيت Available_Agents: المتاحين + إنتاجية الإنترن'
+                  : 'Daily_Forecast: orders + contacts per function per day · Available_Agents: current agents + intern productivity'}
+            </span>
+          </div>
+
+          {result && (
+            <div style={{ overflowX: 'auto' }}>
+              <div className="text-[10px] font-black mb-1.5" style={{ color: tPri }}>
+                {result.name} — {result.from} → {result.to}
+              </div>
+              <table className="w-full text-[10px]" style={{ borderCollapse: 'collapse', minWidth: 760 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${border}` }}>
+                    {[ar ? 'الفنكشن' : 'Function', ar ? 'المطلوب (ذروة)' : 'Required (peak)', ar ? 'المتاح' : 'Available',
+                      ar ? 'الفجوة' : 'Gap', ar ? '⬅ إنترنز للتوظيف' : '⬅ Interns to hire',
+                      ar ? 'SL الآن' : 'SL now', ar ? 'SL بعد التوظيف' : 'SL after', ar ? 'أسوأ يوم' : 'Worst day'].map((h, i) => (
+                      <th key={i} className="px-2 py-1.5 font-bold text-center" style={{ color: tSec }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.perFunction.filter(f => !f.error).map(f => (
+                    <tr key={f.functionKey} style={{ borderBottom: `1px solid ${border}` }}>
+                      <td className="px-2 py-1.5 font-bold" style={{ color: tPri }}>{f.functionKey}</td>
+                      <td className="px-2 py-1.5 text-center font-bold tabular-nums" style={{ color: '#f59e0b' }}>{f.requiredPeak}</td>
+                      <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>{f.availableAgents}</td>
+                      <td className="px-2 py-1.5 text-center font-bold tabular-nums" style={{ color: f.gapAgents > 0 ? '#f87171' : '#4ade80' }}>{f.gapAgents}</td>
+                      <td className="px-2 py-1.5 text-center font-black tabular-nums" style={{ color: f.internsToHire > 0 ? '#f87171' : '#4ade80' }}>
+                        {f.internsToHire > 0 ? <span className="inline-flex items-center gap-1"><UserPlus size={11} />{f.internsToHire}</span> : '✓'}
+                      </td>
+                      <td className="px-2 py-1.5 text-center font-bold tabular-nums"
+                        style={{ color: f.projectedSlNow >= f.targetSl ? '#4ade80' : '#f87171' }}>{Math.round(f.projectedSlNow * 100)}%</td>
+                      <td className="px-2 py-1.5 text-center font-bold tabular-nums"
+                        style={{ color: f.projectedSlAfterHire >= f.targetSl ? '#4ade80' : '#f59e0b' }}>{Math.round(f.projectedSlAfterHire * 100)}%</td>
+                      <td className="px-2 py-1.5 text-center" style={{ color: tSec }}>{f.worstDay ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!result && history.length > 0 && (
+            <div className="text-[9px]" style={{ color: tSec }}>
+              {ar ? 'رفعات سابقة: ' : 'Previous uploads: '}
+              {history.slice(0, 5).map((h: any) => `${h.name} (${h.from}→${h.to})`).join(' · ')}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const heat = (v: number, max: number, dark: boolean) => {
   if (v <= 0) return dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)';
@@ -288,6 +407,9 @@ export default function StaffingEnginePage() {
           </div>
         )}
       </div>
+
+      {/* ── Event / period forecast: Excel in → hiring verdict out ─────────── */}
+      <EventForecastSection dark={dark} ar={ar} surface={surface} border={border} tPri={tPri} tSec={tSec} />
 
       {/* ── Math drill-down ────────────────────────────────────────────────── */}
       {drill && (
