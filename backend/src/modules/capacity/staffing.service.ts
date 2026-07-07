@@ -604,7 +604,7 @@ export class StaffingService implements OnModuleInit {
    * period vs the CURRENT active team per function (live roster). Same math as
    * the event flow; the Excel flow is for events with YOUR OWN volumes/params.
    */
-  async hiringNow(tenantId: string, from: string, to: string, internProductivity = 0.7) {
+  async hiringNow(tenantId: string, from: string, to: string, internProductivity = 0.7, otPct = 0) {
     const [req, pools] = await Promise.all([
       this.hourlyRequirement(tenantId, from, to),
       this.ds.query(
@@ -635,8 +635,11 @@ export class StaffingService implements OnModuleInit {
       }
     }
     // Bodies/day a team of T can field at 2 OFF/week — the generator's own ceiling.
-    const fieldable = (T: number) => Math.max(0, T - Math.ceil(T * 2 / 7));
-    let totalInterns = 0;
+    // With an OT allowance, each agent works otPct more hours → the team fields
+    // otPct more body-days (extra/extended shifts) before anyone new is hired.
+    const NET_H = 8;   // net working hours per shift (9h gross − 1h break)
+    const fieldable = (T: number, ot = 0) => Math.max(0, T - Math.ceil(T * 2 / 7)) * (1 + ot);
+    let totalInterns = 0, totalInternsWithOt = 0, totalOtHoursWeekly = 0, totalSurplus = 0;
     const perFunction = [...fns.entries()].map(([fn, v]) => {
       const available = poolBy[fn] ?? 0;
       const gap = Math.max(0, v.requiredPeak - available);
@@ -646,27 +649,57 @@ export class StaffingService implements OnModuleInit {
       // bodies/day close the schedulable shortfall (Director-approved 2026-07-08:
       // the hire answer is the BINDING constraint — a 9h shift cannot span a 12h
       // window, so requiredPeak alone under-hires small back-office teams).
-      let coverageTeamGap = 0;
-      while (coverageGapBodies > 0 && fieldable(available + coverageTeamGap) < v.bodiesWorstDay && coverageTeamGap < 200) coverageTeamGap++;
+      const teamGapFor = (ot: number) => {
+        let t = 0;
+        while (fieldable(available + t, ot) < v.bodiesWorstDay && t < 200) t++;
+        return t;
+      };
+      const coverageTeamGap = coverageGapBodies > 0 ? teamGapFor(0) : 0;
       const teamGap = Math.max(gap, coverageTeamGap);
       const interns = teamGap > 0 ? Math.ceil(teamGap / internProductivity) : 0;
       totalInterns += interns;
+      // ── OT scenario: same math with the team's capacity scaled by (1+otPct) ──
+      const coverageTeamGapOt = otPct > 0 && Math.max(0, v.bodiesWorstDay - fieldable(available, otPct)) > 0 ? teamGapFor(otPct) : (otPct > 0 ? 0 : coverageTeamGap);
+      const teamGapOt = Math.max(gap, otPct > 0 ? coverageTeamGapOt : coverageTeamGap);
+      const internsWithOt = teamGapOt > 0 ? Math.ceil(teamGapOt / internProductivity) : 0;
+      totalInternsWithOt += internsWithOt;
+      // OT hours the scenario actually consumes: only the deficit OT covers, capped
+      // by the team's OT budget at otPct — per week (×7 days, NET hours/body-day).
+      const otBudgetBodies = fieldable(available) * otPct;                  // bodies/day OT can add
+      const otUsedBodies = Math.min(coverageGapBodies, otBudgetBodies);     // deficit actually absorbed
+      const otHoursWeekly = +(otUsedBodies * NET_H * 7).toFixed(0);
+      const otBudgetHoursWeekly = +(otBudgetBodies * NET_H * 7).toFixed(0);
+      totalOtHoursWeekly += otHoursWeekly;
+      // ── OVERSTAFF: surplus bodies/day beyond the schedulable need ──
+      const surplusBodies = coverageGapBodies > 0 ? 0 : Math.max(0, Math.floor(fieldable(available) - v.bodiesWorstDay));
+      totalSurplus += surplusBodies;
       return {
         functionKey: fn, requiredPeak: v.requiredPeak, currentTeam: available, gap,
         coverageTeamGap,                               // extra HEADCOUNT to close the schedulable shortfall
         bindingConstraint: coverageTeamGap > gap ? 'coverage' : (gap > 0 ? 'peak' : 'none'),
         internsToHire: interns, worstDay: v.worstDay,
         scheduleBodiesWorstDay: v.bodiesWorstDay,      // bodies/day for FULL curve coverage
-        fieldablePerDay,                               // bodies/day the team can schedule (2 OFF/wk)
-        coverageGapBodies,                             // >0 → the generator WILL show residual gaps
+        fieldablePerDay: +fieldablePerDay.toFixed(1),  // bodies/day the team can schedule (2 OFF/wk)
+        coverageGapBodies: +coverageGapBodies.toFixed(1),
         coverageWorstDay: v.bodiesWorstDate,
+        // OT scenario + overstaff
+        internsWithOt,                                 // hires still needed AFTER the OT allowance
+        otHoursWeekly,                                 // OT hours/week the team would actually work
+        otBudgetHoursWeekly,                           // ceiling at otPct (team × fieldable × NET_H × 7)
+        surplusBodies,                                 // bodies/day OVER the need → overstaffed
       };
     }).sort((a, b) => b.internsToHire - a.internsToHire || b.gap - a.gap);
     return {
-      from, to, internProductivity, totalInternsToHire: totalInterns,
+      from, to, internProductivity, otPct,
+      totalInternsToHire: totalInterns,
+      totalInternsWithOt,
+      totalOtHoursWeekly,
+      totalSurplusBodies: totalSurplus,
       basis: 'interns = ceil(max(peak gap, coverage team-gap) / internProductivity) — the BINDING constraint: ' +
              'peak gap = requiredPeak (period max, incl. shrinkage/productivity/windows) vs current team; ' +
-             'coverage team-gap = extra headcount whose fieldable bodies/day (team − 2-OFF/week) cover the full hourly curve with 9h shifts.',
+             'coverage team-gap = extra headcount whose fieldable bodies/day (team − 2-OFF/week) cover the full hourly curve with 9h shifts. ' +
+             'OT scenario scales team capacity by (1+otPct); otHoursWeekly = deficit bodies OT absorbs × 8h net × 7d (capped by the otPct budget). ' +
+             'surplusBodies = fieldable bodies/day beyond the schedulable need (overstaff).',
       perFunction,
     };
   }

@@ -350,12 +350,15 @@ export default function StaffingEnginePage() {
   };
 
   // ALWAYS-VISIBLE hiring verdict (Director: "وين أشوف كم واحد لازم أوظف؟")
+  // + the OT scenario lever (2026-07-08): at otPct allowance, hires drop and the
+  // team works otHoursWeekly of overtime instead; surplusBodies flags overstaff.
   const [hiring, setHiring] = useState<any>(null);
+  const [otPct, setOtPct] = useState(0);
   useEffect(() => {
     const f = from, t = to >= from ? to : from;
-    apiClient.get('/capacity/staffing/hiring-now', { params: { from: f, to: t } })
+    apiClient.get('/capacity/staffing/hiring-now', { params: { from: f, to: t, otPct } })
       .then(r => setHiring(r.data)).catch(() => setHiring(null));
-  }, [from, to, req]);
+  }, [from, to, req, otPct]);
 
   const day = useMemo(() => req?.days?.find(d => d.date === viewDate) ?? req?.days?.[0], [req, viewDate]);
   const staffedFns = useMemo(() => (day?.functions ?? []).filter(f => f.dayContacts > 0 || f.dayTotalRequired > 0), [day]);
@@ -463,15 +466,42 @@ export default function StaffingEnginePage() {
               {hiring.from} → {hiring.to} · {ar ? 'إنترن = 0.70 وكيل' : 'intern = 0.70 agent'}
             </span>
           </div>
+          {/* OT scenario lever + its verdicts */}
+          <div className="flex flex-wrap items-center gap-3 mb-2 rounded-lg px-2.5 py-1.5"
+            style={{ background: dark ? 'rgba(245,158,11,0.07)' : 'rgba(245,158,11,0.05)' }}>
+            <span className="text-[10px] font-bold" style={{ color: '#f59e0b' }}>
+              {ar ? `سيناريو الأوفرتايم: ${Math.round(otPct * 100)}%` : `Overtime scenario: ${Math.round(otPct * 100)}%`}
+            </span>
+            <input type="range" min={0} max={0.3} step={0.05} value={otPct}
+              onChange={e => setOtPct(+e.target.value)} className="w-36 accent-amber-500" />
+            {otPct > 0 && (
+              <>
+                <span className="text-[10px] font-black tabular-nums" style={{ color: tPri }}>
+                  {ar ? `مع الـOT: وظّف ${hiring.totalInternsWithOt ?? '—'}` : `with OT: hire ${hiring.totalInternsWithOt ?? '—'}`}
+                  <span className="font-normal" style={{ color: tSec }}> ({ar ? 'بدل' : 'vs'} {hiring.totalInternsToHire})</span>
+                </span>
+                <span className="text-[10px] font-black tabular-nums" style={{ color: '#f59e0b' }}>
+                  ⏱ {hiring.totalOtHoursWeekly ?? 0} {ar ? 'ساعة OT/أسبوع' : 'OT h/week'}
+                </span>
+              </>
+            )}
+            {(hiring.totalSurplusBodies ?? 0) > 0 && (
+              <span className="text-[10px] font-black tabular-nums ms-auto" style={{ color: '#38bdf8' }}>
+                {ar ? `فائض: ${hiring.totalSurplusBodies} جسم/يوم` : `overstaff: ${hiring.totalSurplusBodies} bodies/day`}
+              </span>
+            )}
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table className="w-full text-[10px]" style={{ borderCollapse: 'collapse', minWidth: 560 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${border}` }}>
-                  {[ar ? 'الفنكشن' : 'Function', ar ? 'المطلوب (ذروة الفترة)' : 'Required (period peak)',
-                    ar ? 'فريقك الحالي' : 'Current team', ar ? 'الفجوة' : 'Gap',
+                  {[ar ? 'الفنكشن' : 'Function',
+                    ar ? 'يحتاج (أجسام/يوم)' : 'Needs (bodies/day)',
+                    ar ? 'يقدر ينزّل / الفريق' : 'Can field / team',
                     ar ? '⬅ توظف' : '⬅ Hire',
-                    ar ? 'أجساد/يوم للتغطية' : 'Bodies/day to cover', ar ? 'يقدر يجدول/يوم' : 'Fieldable/day',
-                    ar ? 'فجوة الجدولة' : 'Coverage gap', ar ? 'أثقل يوم' : 'Worst day'].map((h, i) => (
+                    ...(otPct > 0 ? [ar ? `مع OT ${Math.round(otPct * 100)}%` : `w/ OT ${Math.round(otPct * 100)}%`, ar ? 'ساعات OT/أسبوع' : 'OT h/wk'] : []),
+                    ar ? 'فائض' : 'Surplus',
+                    ar ? 'أثقل يوم' : 'Worst day'].map((h, i) => (
                     <th key={i} className="px-2 py-1 font-bold" style={{ color: tSec, textAlign: i === 0 ? 'start' : 'center' }}>{h}</th>
                   ))}
                 </tr>
@@ -479,20 +509,29 @@ export default function StaffingEnginePage() {
               <tbody>
                 {hiring.perFunction.map((f: any) => (
                   <tr key={f.functionKey} style={{ borderBottom: `1px solid ${border}` }}>
-                    <td className="px-2 py-1.5 font-bold" style={{ color: tPri }}>{f.functionKey}</td>
-                    <td className="px-2 py-1.5 text-center font-bold tabular-nums" style={{ color: '#f59e0b' }}>{f.requiredPeak}</td>
-                    <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>{f.currentTeam}</td>
-                    <td className="px-2 py-1.5 text-center font-bold tabular-nums" style={{ color: f.gap > 0 ? '#f87171' : '#4ade80' }}>{f.gap}</td>
+                    <td className="px-2 py-1.5 font-bold" style={{ color: tPri }}
+                      title={`${ar ? 'ذروة الساعة' : 'hour peak'} ${f.requiredPeak} · ${ar ? 'القيد الملزم' : 'binding'}: ${f.bindingConstraint ?? '—'}`}>
+                      {f.functionKey}</td>
+                    {/* Schedulable view (D-077): 9h shifts over the full hourly curve vs pool − 2 OFF/wk */}
+                    <td className="px-2 py-1.5 text-center font-bold tabular-nums" style={{ color: '#f59e0b' }}>{f.scheduleBodiesWorstDay ?? '—'}</td>
+                    <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>
+                      {f.fieldablePerDay ?? '—'} <span style={{ color: tSec }}>/ {f.currentTeam}</span>
+                    </td>
                     <td className="px-2 py-1.5 text-center font-black tabular-nums" style={{ color: f.internsToHire > 0 ? '#f87171' : '#4ade80' }}>
                       {f.internsToHire > 0 ? `+${f.internsToHire}` : '✓'}
                     </td>
-                    {/* Schedulable view (D-077): 9h shifts over the full hourly curve vs pool − 2 OFF/wk */}
-                    <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>{f.scheduleBodiesWorstDay ?? '—'}</td>
-                    <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>{f.fieldablePerDay ?? '—'}</td>
+                    {otPct > 0 && (
+                      <>
+                        <td className="px-2 py-1.5 text-center font-black tabular-nums" style={{ color: (f.internsWithOt ?? 0) > 0 ? '#fb923c' : '#4ade80' }}>
+                          {(f.internsWithOt ?? 0) > 0 ? `+${f.internsWithOt}` : '✓'}
+                        </td>
+                        <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: '#f59e0b' }}>{f.otHoursWeekly || '—'}</td>
+                      </>
+                    )}
                     <td className="px-2 py-1.5 text-center font-bold tabular-nums"
-                      title={ar ? 'فجوة > 0 = المولّد سيُظهر عجزاً بساعات الحواف حتى لو الذروة تبدو مغطاة' : '> 0 → the generator WILL show edge-hour residual gaps even if the peak looks covered'}
-                      style={{ color: (f.coverageGapBodies ?? 0) > 0 ? '#fbbf24' : '#4ade80' }}>
-                      {(f.coverageGapBodies ?? 0) > 0 ? `−${f.coverageGapBodies}` : '✓'}
+                      title={ar ? 'أجسام/يوم زيادة عن الحاجة' : 'bodies/day beyond the need'}
+                      style={{ color: (f.surplusBodies ?? 0) > 0 ? '#38bdf8' : tSec }}>
+                      {(f.surplusBodies ?? 0) > 0 ? `+${f.surplusBodies}` : '—'}
                     </td>
                     <td className="px-2 py-1.5 text-center" style={{ color: tSec }}>{f.worstDay ?? '—'}</td>
                   </tr>
@@ -501,8 +540,8 @@ export default function StaffingEnginePage() {
             </table>
           </div>
           <div className="text-[8.5px] mt-1.5" style={{ color: tSec }}>
-            {ar ? 'ذروة متطلبات الفترة (شامل الشرينكج/الإنتاجية/نوافذ التشغيل) مقابل الفريق النشط — هذه أرضية التوظيف. «أجساد/يوم للتغطية» = كم شخص يلزم جدولته بورديات 9 ساعات ليغطي منحنى الساعات كاملاً؛ «يقدر يجدول/يوم» = الفريق ناقص OFF أسبوعين؛ فجوة الجدولة الصفراء = المولّد سيعرض عجز حواف صادق. قرار التوظيف ما زال على الذروة؛ ولإيفنت بأرقامك أنت استخدم قالب الإكسل تحت.'
-                : 'Period peak requirement (incl. shrinkage/productivity/operating windows) vs the active team — the hiring floor. "Bodies/day to cover" = people needed on 9h shifts to cover the FULL hourly curve; "Fieldable/day" = team minus 2 OFF/week; an amber coverage gap → the generator will show honest edge-hour residuals. The hire verdict stays keyed to the peak; for events with YOUR numbers use the Excel template below.'}
+            {ar ? '«يحتاج» = أجسام/يوم بورديات 9 ساعات لتغطية منحنى الساعات كاملاً (القيد الملزم — شامل الشرينكج/الإنتاجية/النوافذ)؛ «يقدر ينزّل» = الفريق ناقص 2 OFF/أسبوع. التوظيف = القيد الأشد ÷ 0.70. سيناريو الـOT يرفع قدرة الفريق (1+OT%) — يقلل التوظيف ويوريك ساعات الـOT الأسبوعية المستهلكة فعلاً. الفائض الأزرق = أجسام/يوم فوق الحاجة. ولإيفنت بأرقامك أنت استخدم قالب الإكسل تحت.'
+                : '"Needs" = bodies/day on 9h shifts covering the FULL hourly curve (the binding constraint — incl. shrinkage/productivity/windows); "Can field" = team minus 2 OFF/week. Hire = binding gap ÷ 0.70. The OT scenario scales team capacity by (1+OT%) — fewer hires, and shows the weekly OT hours actually consumed. Blue surplus = bodies/day beyond the need. For events with YOUR numbers use the Excel template below.'}
           </div>
         </div>
       )}
