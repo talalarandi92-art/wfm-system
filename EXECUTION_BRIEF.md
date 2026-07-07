@@ -102,15 +102,15 @@ The memory index is `.claude` project memory (`MEMORY.md`) — consult it when a
 | 3 | June half-rebuilt; authority file overwritten by a 3-day slice | `recon-new-roster.js:27` SRCDIR | restore full-month file + one full recon-refresh (Phase 0) |
 | 4 | `editCell` roster_days UPDATE lacks worked-day guard → manual edit corrupts real punch/login rows | `schedule.service.ts:826-830` | one-line: `AND punch_in_min IS NULL AND sys_login_min IS NULL` |
 | 5 | Forecast staffing permanently null (AHT source 100% NULL) | `forecasting.service.ts:69-76` | ingest AHT → `agent_daily_stats.aht_seconds` + fallback |
-| 6 | Two parallel permission systems; richer 2-level path is dead code | `permission-request.service` vs `RequestsService.approve` | unify — pick one owner |
+| 6 | ~~Two parallel permission systems~~ **FIXED 2026-07-08** (commit 3bb3e9f) — ONE owner: create stays in permission-requests (quota checks), approve/reject/cancel routes retired (had 0 consumers); unified `RequestsService.approve` owns the lifecycle | — | done |
 | 7 | No idempotency guard on approve (leave/permission/OT can double-stamp) | `RequestsService.approve:659` | add applied guard |
 | 8 | `headcount_intervals` never INSERTed → 4 read sites get zeros | `sprinklr.service.ts:615`, `break-scheduler.service.ts:179` | populate (CTE/job) or retire |
-| 9 | OT/Break approvals have no side-effect (approve = cosmetic) | `RequestsService.approve:669` | wire roster_days OT / break_slot write |
+| 9 | ~~OT/Break approvals cosmetic~~ **FIXED 2026-07-08** (commit 05f747a) — approved break projects onto `break_slots` (RTA sees it); OT is an authorization consumed live by week-forecast, paid minutes stay evidence-based in the engine (BR-OT-004) | — | done |
 | 10 | Intern-fold inconsistent (permission HC-impact + RTA use raw `role_function`) | `requests.service.ts:1654`, `rta.controller.ts:52-64` | wrap in `canon_fn()` |
-| 11 | Skill-expiry alerts 0% firing (`expires_at` never derived) | `employee_skills` (0/709 rows) | derive from `skills.expiry_months` at assign + backfill |
+| 11 | ~~Skill-expiry alerts 0% firing~~ **FIXED 2026-07-08** (commit 526a237, migration 078) — default 12m cycle + backfill (706/709 filled); both assign paths derive `expires_at` in the INSERT | — | done |
 | 12 | User account lifecycle unaudited (violates CLAUDE.md §31) | `users.service.ts` | add `audit_logs` writes (~1hr, reuse `auth.service.ts:26-58`) |
 | 13 | Hardcoded recon paths (session-UUID `63e84c5a`, `Desktop/new roster/`) | `recon-new-roster.js:26-27` | parameterize via env |
-| 14 | Weekly-quota `toISOString()` +03 off-by-one | `permission-request.service.ts` | use `ymdLocal` helper |
+| 14 | ~~Weekly-quota +03 off-by-one~~ **FIXED 2026-07-08** (commit dbc5145) — ALL-UTC Saturday-week math (getUTCDay + epoch arithmetic) in both quota sites; controller today-defaults use Kuwait-now | — | done |
 | 15 | ~~Scorecard analyze/trends run on 1 month (13-month history in separate table)~~ **FIXED 2026-07-07** — `/scorecard/analyze` repointed to `scorecard_monthly` (13 months, person-folded); verified 82/82 vs May 2026 SCORED workbook | `scorecard_entries` vs `scorecard_monthly` | ~~repoint to `scorecard_monthly`~~ done |
 
 ### 3.4 Dead / removable (retire during Phase 1 cleanup)
