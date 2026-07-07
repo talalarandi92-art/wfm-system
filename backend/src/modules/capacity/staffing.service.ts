@@ -81,6 +81,8 @@ export interface StaffingParams {
   concurrency: number;
   marginalEff: number;
   isStaffed: boolean;
+  openHour: number;    // operating window start (0..24)
+  closeHour: number;   // operating window end — volume outside rolls INTO the window (deferred work)
 }
 
 export interface HourRequirement {
@@ -92,6 +94,7 @@ export interface HourRequirement {
   occupancyAtN: number;
   afterProductivity: number;
   requiredScheduledHc: number; // after shrinkage — the generator target
+  learned?: boolean;           // the LEARNED floor (measured P90) exceeded the estimate here
 }
 
 @Injectable()
@@ -129,7 +132,7 @@ export class StaffingService implements OnModuleInit {
     const rows = await this.ds.query(
       `SELECT function_key, channel_mix, model, cpo_pct, aht_sec, acw_sec, hold_sec,
               target_sl, target_answer_sec, occupancy_cap, shrinkage, productivity,
-              concurrency, marginal_eff, is_staffed
+              concurrency, marginal_eff, is_staffed, open_hour, close_hour
        FROM staffing_params WHERE tenant_id = $1 ORDER BY function_key`,
       [tenantId],
     );
@@ -144,6 +147,7 @@ export class StaffingService implements OnModuleInit {
       occupancyCap: +r.occupancy_cap, shrinkage: +r.shrinkage,
       productivity: +r.productivity, concurrency: +r.concurrency,
       marginalEff: +r.marginal_eff, isStaffed: !!r.is_staffed,
+      openHour: +(r.open_hour ?? 0), closeHour: +(r.close_hour ?? 24),
     }));
   }
 
@@ -154,6 +158,7 @@ export class StaffingService implements OnModuleInit {
       targetAnswerSec: 'target_answer_sec', occupancyCap: 'occupancy_cap',
       shrinkage: 'shrinkage', productivity: 'productivity', concurrency: 'concurrency',
       marginalEff: 'marginal_eff', isStaffed: 'is_staffed',
+      openHour: 'open_hour', closeHour: 'close_hour',
     };
     const sets: string[] = []; const vals: any[] = [tenantId, functionKey];
     for (const [k, col] of Object.entries(map)) {
@@ -252,6 +257,21 @@ export class StaffingService implements OnModuleInit {
     const result = dates.map(date => {
       const dow = new Date(date + 'T00:00:00Z').getUTCDay();
       const functions = scoped.map(p => {
+        // OPERATING WINDOW (deferred-work model): volume arriving OUTSIDE the window
+        // rolls INTO it — an email at 02:00 is handled next morning, not staffed at night.
+        // Immediate channels keep 0..24 windows and staff to arrival.
+        const inWindow = (h: number) => h >= p.openHour && h < p.closeHour;
+        const windowed = p.openHour > 0 || p.closeHour < 24;
+        let outOfWindowVol = 0, inWindowShare = 0;
+        if (windowed) {
+          for (let h = 0; h < 24; h++) {
+            for (const [ch, share] of Object.entries(p.channelMix)) {
+              const dailyVol = (facts.dailyBy[ch]?.[dow] ?? 0) * (share as number) * ordersScale;
+              const v = dailyVol * ((facts.profBy[ch]?.[h * 2] ?? 0) + (facts.profBy[ch]?.[h * 2 + 1] ?? 0));
+              if (inWindow(h)) inWindowShare += v; else outOfWindowVol += v;
+            }
+          }
+        }
         const hours: HourRequirement[] = [];
         for (let h = 0; h < 24; h++) {
           // 1. volume: Σ over the channel mix — daily baseline × intraday share × orders scenario
@@ -263,6 +283,14 @@ export class StaffingService implements OnModuleInit {
             volume += v;
             const talk = p.ahtSec ?? facts.ahtBy[ch] ?? 300;
             ahtWeighted += v * (talk + p.holdSec + p.acwSec);
+          }
+          if (windowed) {
+            if (!inWindow(h)) { volume = 0; ahtWeighted = 0; }
+            else if (inWindowShare > 0 && outOfWindowVol > 0) {
+              // redistribute the overnight arrivals proportionally across the window
+              const boost = 1 + outOfWindowVol / inWindowShare;
+              ahtWeighted *= boost; volume *= boost;
+            }
           }
           // share-weighted AHT fallback: when the learned floor supplies workload on an
           // hour with zero forecast volume, Erlang still needs a real AHT (0 would spin
@@ -279,11 +307,14 @@ export class StaffingService implements OnModuleInit {
           // load (Erlangs, incl. waiting) for this weekday×hour, never staff below it —
           // measurement beats estimation (volume×AHT) when they disagree upward.
           let learnedErl = 0;
-          for (const [ch, share] of Object.entries(p.channelMix)) {
-            const v = learned[ch]?.[dow]?.[h];
-            if (v != null) learnedErl += v * (share as number);
+          if (!windowed || inWindow(h)) {   // deferred functions never staff outside their window
+            for (const [ch, share] of Object.entries(p.channelMix)) {
+              const v = learned[ch]?.[dow]?.[h];
+              if (v != null) learnedErl += v * (share as number);
+            }
           }
           const estimated = (volume * ahtEff) / 3600;
+          const learnedApplied = learnedErl * ordersScale > estimated + 0.05;
           const erlangs = Math.max(estimated, learnedErl * ordersScale);
           let agents = 0, serverCapacity = 0;   // capacity = agents × effective servers/agent
           if (erlangs > 0) {
@@ -311,6 +342,7 @@ export class StaffingService implements OnModuleInit {
             occupancyAtN: serverCapacity > 0 ? +Math.min(erlangs / serverCapacity, 1).toFixed(3) : 0,
             afterProductivity: +afterProd.toFixed(1),
             requiredScheduledHc: scheduled,
+            ...(learnedApplied ? { learned: true } : {}),
           });
         }
         return {
@@ -362,21 +394,23 @@ export class StaffingService implements OnModuleInit {
     const wb = XLSX.utils.book_new();
 
     const instructions = [
-      ['WFM — Event / Period Forecast Template'],
+      ['WFM — Event / Period Forecast Template  (v2)'],
       [''],
-      ['1. Daily_Forecast sheet: one row per DAY of the event. Fill Orders (expected orders that day)'],
-      ['   and the expected CONTACTS per function (calls/chats/emails offered that day).'],
-      ['   Add or remove date rows as needed — the range is taken from the rows you fill.'],
-      ['2. Available_Agents sheet: how many agents you actually HAVE per function for the period,'],
-      ['   and the intern productivity factor (0.70 = an intern delivers 70% of an agent).'],
-      ['3. Save and upload the file in Capacity → Staffing Engine → Event Forecast.'],
+      ['1. Daily_Forecast (REQUIRED): one row per DAY. Orders (expected orders) + expected CONTACTS'],
+      ['   per function that day. Add/remove date rows freely — the range = the rows you fill.'],
+      ['2. Available_Agents (REQUIRED): agents you actually HAVE per function + intern productivity'],
+      ['   (0.70 = an intern delivers 70% of an agent).'],
+      ['3. Function_Overrides (OPTIONAL): your OWN expected AHT / ACW / Hold / SL target / shrinkage /'],
+      ['   productivity per function for THIS event. Leave a cell BLANK to keep the system value'],
+      ['   (AHT blank = measured 28-day actuals). Percent columns are entered as % (80 = 80%).'],
+      ['4. Hourly_Profile (OPTIONAL): how the day\'s volume spreads over the 24 hours per function'],
+      ['   (relative weights — they are normalized; blank row = the system\'s measured profile).'],
+      ['5. Save and upload in Capacity → Staffing Engine → Event Forecast.'],
       [''],
-      ['The engine computes, per function: hourly required HC (your intraday profile × Erlang-C at'],
-      ['the SL target and occupancy cap, + ACW/Hold, ÷ productivity, ÷ (1−shrinkage)), the gap vs'],
-      ['your available agents, INTERNS TO HIRE to close it, and the projected SL before/after.'],
-      [''],
-      ['كيفية الاستخدام: عبّي شيت Daily_Forecast يوم بيوم (الطلبات المتوقعة + الكونتاكتس المتوقعة لكل'],
-      ['فنكشن)، وشيت Available_Agents (عدد الوكلاء المتاحين لكل فنكشن + إنتاجية الإنترن)، واحفظ وارفع.'],
+      ['كيفية الاستخدام: Daily_Forecast يوم بيوم (طلبات + كونتاكتس كل فنكشن) و Available_Agents (المتاحين'],
+      ['+ إنتاجية الإنترن) إلزاميان. Function_Overrides اختياري — AHT/ACW/Hold/SL/شرينكج/إنتاجية متوقعة'],
+      ['لهالإيفنت (الفاضي = قيمة النظام). Hourly_Profile اختياري — توزيع حجم اليوم على الساعات لكل فنكشن'],
+      ['(أوزان نسبية تتطبّع تلقائيًا؛ الصف الفاضي = بروفايل النظام المقاس). احفظ وارفع.'],
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(instructions), 'Instructions');
 
@@ -390,6 +424,16 @@ export class StaffingService implements OnModuleInit {
     const avHeader = ['Function', 'AvailableAgents', 'InternProductivity'];
     const avRows = params.map(p => [p.functionKey, 10, 0.7]);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([avHeader, ...avRows]), 'Available_Agents');
+
+    // OPTIONAL overrides — blank cell = keep the system value for that function
+    const ovHeader = ['Function', 'AHT_sec', 'ACW_sec', 'Hold_sec', 'TargetSL_pct', 'AnswerSec', 'Shrinkage_pct', 'Productivity_pct'];
+    const ovRows = params.map(p => [p.functionKey, null, null, null, null, null, null, null]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ovHeader, ...ovRows]), 'Function_Overrides');
+
+    // OPTIONAL intraday profile — relative weights per hour (normalized on upload)
+    const hpHeader = ['Function', ...Array.from({ length: 24 }, (_, h) => `H${String(h).padStart(2, '0')}`)];
+    const hpRows = params.map(p => [p.functionKey, ...new Array(24).fill(null)]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([hpHeader, ...hpRows]), 'Hourly_Profile');
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   }
@@ -424,24 +468,63 @@ export class StaffingService implements OnModuleInit {
       available[fn] = { agents: +(r[1] ?? 0) || 0, internProductivity: Math.min(Math.max(+(r[2] ?? 0.7) || 0.7, 0.2), 1) };
     }
 
-    const [params, facts] = await Promise.all([this.getParams(tenantId), this.channelFacts(tenantId, daily[0].date)]);
-    const byKey = new Map(params.map(p => [p.functionKey, p]));
+    // OPTIONAL sheets: per-function overrides (the Director's OWN expected AHT/ACW/Hold/SL/
+    // shrinkage/productivity for THIS event) + a manual hourly profile. Blank = system value.
+    const overrides: Record<string, Partial<{ ahtSec: number; acwSec: number; holdSec: number; targetSl: number; targetAnswerSec: number; shrinkage: number; productivity: number }>> = {};
+    if (wb.Sheets['Function_Overrides']) {
+      const ov: any[][] = XLSX.utils.sheet_to_json(wb.Sheets['Function_Overrides'], { header: 1, defval: null, blankrows: false });
+      const num = (v: any) => (v == null || v === '' ? null : (isNaN(+v) ? null : +v));
+      for (const r of ov.slice(1)) {
+        const fn = String(r[0] ?? '').trim(); if (!fn) continue;
+        const o: any = {};
+        const aht = num(r[1]); if (aht != null) o.ahtSec = aht;
+        const acw = num(r[2]); if (acw != null) o.acwSec = acw;
+        const hold = num(r[3]); if (hold != null) o.holdSec = hold;
+        const sl = num(r[4]); if (sl != null) o.targetSl = sl > 1 ? sl / 100 : sl;
+        const ans = num(r[5]); if (ans != null) o.targetAnswerSec = ans;
+        const shr = num(r[6]); if (shr != null) o.shrinkage = shr > 1 ? shr / 100 : shr;
+        const prod = num(r[7]); if (prod != null) o.productivity = prod > 1 ? prod / 100 : prod;
+        if (Object.keys(o).length) overrides[fn] = o;
+      }
+    }
+    const manualProfile: Record<string, number[]> = {}; // fn → 24 normalized weights
+    if (wb.Sheets['Hourly_Profile']) {
+      const hp: any[][] = XLSX.utils.sheet_to_json(wb.Sheets['Hourly_Profile'], { header: 1, defval: null, blankrows: false });
+      for (const r of hp.slice(1)) {
+        const fn = String(r[0] ?? '').trim(); if (!fn) continue;
+        const weights = Array.from({ length: 24 }, (_, h) => Math.max(0, +(r[1 + h] ?? 0) || 0));
+        const sum = weights.reduce((a, b) => a + b, 0);
+        if (sum > 0) manualProfile[fn] = weights.map(w => w / sum);
+      }
+    }
+
+    const [paramsRaw, facts] = await Promise.all([this.getParams(tenantId), this.channelFacts(tenantId, daily[0].date)]);
+    const byKey = new Map(paramsRaw.map(p => [p.functionKey, p]));
 
     const perFunction: any[] = [];
     for (const fn of fnCols) {
-      const p = byKey.get(fn);
-      if (!p) { perFunction.push({ functionKey: fn, error: 'unknown function (not in staffing_params)' }); continue; }
-      // blended intraday profile + measured AHT across the function's channel mix
+      const base = byKey.get(fn);
+      if (!base) { perFunction.push({ functionKey: fn, error: 'unknown function (not in staffing_params)' }); continue; }
+      const p = { ...base, ...(overrides[fn] ?? {}) };
+      // intraday profile: the manual sheet wins; else blend the measured channel profiles
       const mixEntries = Object.entries(p.channelMix);
       const mixTotal = mixEntries.reduce((s, [, v]) => s + (v as number), 0) || 1;
-      const prof = new Array(48).fill(0);
+      let prof: number[]; let profSum: number;
+      if (manualProfile[fn]) {
+        prof = manualProfile[fn].flatMap(w => [w / 2, w / 2]);   // 24 → 48 half-hours
+        profSum = 1;
+      } else {
+        prof = new Array(48).fill(0);
+        for (const [ch, share] of mixEntries) {
+          const w = (share as number) / mixTotal;
+          (facts.profBy[ch] ?? new Array(48).fill(1 / 48)).forEach((v, i) => { prof[i] += v * w; });
+        }
+        profSum = prof.reduce((a, b) => a + b, 0) || 1;
+      }
       let talk = 0;
       for (const [ch, share] of mixEntries) {
-        const w = (share as number) / mixTotal;
-        (facts.profBy[ch] ?? new Array(48).fill(1 / 48)).forEach((v, i) => { prof[i] += v * w; });
-        talk += (p.ahtSec ?? facts.ahtBy[ch] ?? 300) * w;
+        talk += ((p.ahtSec ?? facts.ahtBy[ch] ?? 300) as number) * ((share as number) / mixTotal);
       }
-      const profSum = prof.reduce((a, b) => a + b, 0) || 1;
       const ahtEff = talk + p.holdSec + p.acwSec;
       const eff = p.model === 'concurrency' ? effectiveServersPerAgent(p.concurrency, p.marginalEff) : 1;
 
@@ -488,6 +571,8 @@ export class StaffingService implements OnModuleInit {
       perFunction.push({
         functionKey: fn, model: p.model, ahtEffSec: Math.round(ahtEff),
         targetSl: p.targetSl,
+        overridesApplied: overrides[fn] ?? null,
+        manualHourlyProfile: !!manualProfile[fn],
         requiredPeak: periodPeakRequired,
         availableAgents: av.agents,
         gapAgents: gap,
@@ -569,6 +654,34 @@ export class StaffingService implements OnModuleInit {
       upserts++;
     }
     return { ok: true, hoursBack, snapshotRows: rows.length, hourChannelCells: upserts };
+  }
+
+  /** Learning-store visibility for the UI: coverage + a 7×24 P90 heat per channel. */
+  async learnedSummary(tenantId: string) {
+    const [meta] = await this.ds.query(
+      `SELECT COUNT(*)::int cells, COUNT(DISTINCT channel)::int channels,
+              MIN(obs_hour)::text first_obs, MAX(obs_hour)::text last_obs,
+              SUM(samples)::int total_samples
+       FROM staffing_observations WHERE tenant_id = $1`, [tenantId]);
+    const rows = await this.ds.query(
+      `SELECT channel,
+              EXTRACT(DOW  FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS dow,
+              EXTRACT(HOUR FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS hr,
+              PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY erlangs + waiting_avg) AS p90,
+              COUNT(*)::int n
+       FROM staffing_observations WHERE tenant_id = $1
+       GROUP BY channel, dow, hr ORDER BY channel, dow, hr`, [tenantId]);
+    const channels: Record<string, { grid: (number | null)[][]; cells: number }> = {};
+    for (const r of rows) {
+      const c = (channels[r.channel] = channels[r.channel] || { grid: Array.from({ length: 7 }, () => new Array(24).fill(null)), cells: 0 });
+      c.grid[+r.dow][+r.hr] = +(+r.p90).toFixed(2);
+      c.cells++;
+    }
+    return {
+      ...meta,
+      note: 'P90 measured concurrent load (Erlangs incl. waiting) per weekday×hour — the engine never staffs below these where present. aht/acw/hold learn the same way once the bridge captures handle stats.',
+      channels,
+    };
   }
 
   /** Learned P90 measured Erlangs per channel × weekday × hour (≥2 same-weekday samples). */

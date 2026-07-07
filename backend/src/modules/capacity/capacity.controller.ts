@@ -180,6 +180,12 @@ export class CapacityController {
     return this.staffing.listEventForecasts(this.tid(user));
   }
 
+  /** What the learning store has learned so far (coverage + per-channel 7×24 P90 heat). */
+  @Get('staffing/learned')
+  learnedSummary(@CurrentUser() user: any) {
+    return this.staffing.learnedSummary(this.tid(user));
+  }
+
   /** Manually trigger the learning-store rollup (the observer also runs hourly). */
   @Post('staffing/observations/rollup')
   @RequirePermissions('hc.edit')

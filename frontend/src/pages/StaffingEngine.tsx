@@ -163,6 +163,106 @@ function EventForecastSection({ dark, ar, surface, border, tPri, tSec }: {
   );
 }
 
+function LearnedSection({ dark, ar, surface, border, tPri, tSec }: {
+  dark: boolean; ar: boolean; surface: string; border: string; tPri: string; tSec: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<any>(null);
+  const [ch, setCh] = useState<string>('');
+  const [busy, setBusy] = useState(false);
+
+  const loadLearned = useCallback(async () => {
+    const r = await apiClient.get('/capacity/staffing/learned').catch(() => null);
+    if (r) { setData(r.data); const keys = Object.keys(r.data.channels ?? {}); setCh(c => keys.includes(c) ? c : (keys[0] ?? '')); }
+  }, []);
+  useEffect(() => { if (open) loadLearned(); }, [open, loadLearned]);
+
+  const rollNow = async () => {
+    setBusy(true);
+    await apiClient.post('/capacity/staffing/observations/rollup?hoursBack=336').catch(() => {});
+    await loadLearned();
+    setBusy(false);
+  };
+
+  const grid: (number | null)[][] | null = data?.channels?.[ch]?.grid ?? null;
+  const maxV = grid ? Math.max(1, ...grid.flat().map(v => v ?? 0)) : 1;
+  const DOWS = ar ? ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'] : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  return (
+    <div className="rounded-2xl" style={{ background: surface, border: `1px solid ${border}` }}>
+      <button onClick={() => setOpen(s => !s)} className="w-full flex items-center gap-2 p-3">
+        <span style={{ color: '#34d399', fontSize: 13 }}>⚡</span>
+        <span className="font-bold text-xs" style={{ color: tPri }}>
+          {ar ? 'التعلم الآلي — الحمل المقاس من سبرينكلر (المحرك لا يوظف أبدًا أقل منه)' : 'Machine learning — measured Sprinklr load (the engine never staffs below it)'}
+        </span>
+        {data && <span className="text-[9px]" style={{ color: tSec }}>
+          {data.cells} {ar ? 'خلية متعلمة' : 'learned cells'} · {data.total_samples} {ar ? 'عينة' : 'samples'}
+        </span>}
+        <span className="ms-auto">{open ? <ChevronUp size={14} color={tSec} /> : <ChevronDown size={14} color={tSec} />}</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {Object.keys(data?.channels ?? {}).map(c => (
+              <button key={c} onClick={() => setCh(c)}
+                className="text-[10px] font-bold px-2.5 py-1 rounded-lg"
+                style={{ background: c === ch ? '#34d399' : (dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)'), color: c === ch ? '#052e22' : tSec }}>
+                {c} <span style={{ opacity: 0.75 }}>({data.channels[c].cells})</span>
+              </button>
+            ))}
+            <button onClick={rollNow} disabled={busy}
+              className="ms-auto flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-lg"
+              style={{ background: dark ? 'rgba(52,211,153,0.12)' : 'rgba(16,185,129,0.08)', color: '#34d399' }}>
+              {busy ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              {ar ? 'تعلّم الآن (آخر 14 يوم)' : 'Learn now (last 14 days)'}
+            </button>
+          </div>
+          {!grid ? (
+            <div className="text-[10px] py-3" style={{ color: tSec }}>
+              {ar ? 'لا توجد ملاحظات بعد — خلّي جسر سبرينكلر شغال؛ الراصد يتعلم كل ساعة تلقائيًا.' : 'No observations yet — keep the Sprinklr bridge running; the observer learns hourly.'}
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ borderCollapse: 'separate', borderSpacing: 2 }}>
+                <thead>
+                  <tr>
+                    <th className="text-[8px] font-bold px-1" style={{ color: tSec }}></th>
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <th key={h} className="text-[8px] font-bold" style={{ color: tSec, minWidth: 24 }}>{String(h).padStart(2, '0')}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {grid.map((row, dow) => (
+                    <tr key={dow}>
+                      <td className="text-[8px] font-bold px-1 whitespace-nowrap" style={{ color: tSec }}>{DOWS[dow]}</td>
+                      {row.map((v, h) => (
+                        <td key={h} className="text-center text-[8px] font-bold rounded tabular-nums"
+                          title={v != null ? `${DOWS[dow]} ${String(h).padStart(2, '0')}:00 — P90 ${v} Erlang` : (ar ? 'لم يُقس بعد' : 'not measured yet')}
+                          style={{
+                            height: 20, minWidth: 24,
+                            background: v == null ? (dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)') : `rgba(52,211,153,${0.12 + 0.7 * (v / maxV)})`,
+                            color: v != null && v / maxV > 0.5 ? '#052e22' : tSec,
+                          }}>
+                          {v != null ? Math.round(v) : ''}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="text-[9px] mt-1" style={{ color: tSec }}>
+                {ar ? 'P90 للحمل المتزامن المقاس (Erlang شامل الانتظار) لكل يوم×ساعة — الخلايا الخضراء بالهيت-ماب فوق ⚡ = ساعة رفعتها الأرضية المتعلمة. AHT/ACW/Hold بيتعلموا بنفس الطريقة أول ما الجسر يلقط إحصائيات المعالجة.'
+                    : 'P90 measured concurrent load (Erlangs incl. waiting) per weekday×hour — ⚡-ringed heatmap cells above were raised by the learned floor. AHT/ACW/Hold learn the same way once the bridge captures handle stats.'}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const heat = (v: number, max: number, dark: boolean) => {
   if (v <= 0) return dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)';
   const t = Math.min(v / Math.max(max, 1), 1);
@@ -174,7 +274,9 @@ export default function StaffingEnginePage() {
   const ar = lang === 'ar';
   const [params, setParams] = useState<Params[]>([]);
   const [req, setReq] = useState<ReqResp | null>(null);
-  const [date, setDate] = useState(() => new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+  const [from, setFrom] = useState(() => new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+  const [to, setTo] = useState(() => new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10));
+  const [viewDate, setViewDate] = useState<string | null>(null);   // which day of the range is displayed
   const [ordersScale, setOrdersScale] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showParams, setShowParams] = useState(false);
@@ -185,14 +287,16 @@ export default function StaffingEnginePage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      const f = from, t = to >= from ? to : from;
       const [p, r] = await Promise.all([
         apiClient.get('/capacity/staffing/params'),
-        apiClient.get('/capacity/staffing/requirement', { params: { from: date, to: date, ordersScale } }),
+        apiClient.get('/capacity/staffing/requirement', { params: { from: f, to: t, ordersScale } }),
       ]);
       setParams(p.data); setReq(r.data);
+      setViewDate(v => (v && r.data.days.some((d: any) => d.date === v)) ? v : r.data.days[0]?.date ?? null);
     } catch { /* keep last */ }
     setLoading(false);
-  }, [date, ordersScale]);
+  }, [from, to, ordersScale]);
   useEffect(() => { load(); }, [load]);
 
   const saveDirty = async () => {
@@ -212,7 +316,7 @@ export default function StaffingEnginePage() {
     setDirty(d => ({ ...d, [fn]: { ...(d[fn] ?? {}), [key]: val } }));
   };
 
-  const day = req?.days?.[0];
+  const day = useMemo(() => req?.days?.find(d => d.date === viewDate) ?? req?.days?.[0], [req, viewDate]);
   const staffedFns = useMemo(() => (day?.functions ?? []).filter(f => f.dayContacts > 0 || f.dayTotalRequired > 0), [day]);
   const maxCell = useMemo(() => Math.max(1, ...staffedFns.flatMap(f => f.hours.map(h => h.requiredScheduledHc))), [staffedFns]);
 
@@ -237,8 +341,13 @@ export default function StaffingEnginePage() {
                 : 'volume × effective AHT (talk+hold+ACW) → Erlang-C @ SL & occupancy cap → ÷ productivity → ÷ (1−shrinkage) = scheduled requirement — exactly what the generator consumes'}
             </div>
           </div>
-          <div className="ms-auto flex items-center gap-3">
-            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+          <div className="ms-auto flex items-center gap-2">
+            <span className="text-[9px] font-bold" style={{ color: tSec }}>{ar ? 'من' : 'From'}</span>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+              className="text-xs rounded-lg px-2 py-1.5"
+              style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)', color: tPri, border: `1px solid ${border}` }} />
+            <span className="text-[9px] font-bold" style={{ color: tSec }}>{ar ? 'إلى' : 'To'}</span>
+            <input type="date" value={to} onChange={e => setTo(e.target.value)}
               className="text-xs rounded-lg px-2 py-1.5"
               style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)', color: tPri, border: `1px solid ${border}` }} />
             <button onClick={load} className="p-1.5 rounded-lg" title={ar ? 'تحديث' : 'Refresh'}
@@ -247,6 +356,25 @@ export default function StaffingEnginePage() {
             </button>
           </div>
         </div>
+
+        {/* day switcher across the range */}
+        {(req?.days?.length ?? 0) > 1 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {req!.days.map(d => (
+              <button key={d.date} onClick={() => setViewDate(d.date)}
+                className="text-[9px] font-bold px-2 py-1 rounded-lg tabular-nums"
+                style={{
+                  background: d.date === day?.date ? '#6366f1' : (dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)'),
+                  color: d.date === day?.date ? '#fff' : tSec,
+                }}>
+                {d.date.slice(5)} · {ar
+                  ? ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'][(d as any).dow ?? new Date(d.date).getDay()]
+                  : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][(d as any).dow ?? new Date(d.date).getDay()]}
+                <span className="ms-1" style={{ opacity: 0.7 }}>({Math.max(...d.totalCurve48)})</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* orders scenario slider + measured AHT chips */}
         <div className="mt-3 flex flex-wrap items-center gap-4">
@@ -348,7 +476,7 @@ export default function StaffingEnginePage() {
       <div className="rounded-2xl p-4" style={{ background: surface, border: `1px solid ${border}` }}>
         <div className="flex items-center gap-2 mb-3">
           <span className="font-black text-xs" style={{ color: tPri }}>
-            {ar ? `المطلوب جدولته لكل فنكشن × ساعة — ${date}` : `Required scheduled HC per function × hour — ${date}`}
+            {ar ? `المطلوب جدولته لكل فنكشن × ساعة — ${day?.date ?? ''}` : `Required scheduled HC per function × hour — ${day?.date ?? ''}`}
           </span>
           <span className="text-[9px] ms-auto flex items-center gap-1" style={{ color: tSec }}>
             <Info size={10} /> {ar ? 'اضغط أي خلية لتفاصيل الحساب الكاملة' : 'click any cell for the full math'}
@@ -383,8 +511,12 @@ export default function StaffingEnginePage() {
                       <td key={h.hour}
                         onClick={() => setDrill({ fn: f.functionKey, h })}
                         className="text-center text-[10px] font-bold rounded cursor-pointer tabular-nums"
-                        title={`${String(h.hour).padStart(2, '0')}:00 — vol ${h.volume} · ${h.requiredScheduledHc} HC`}
-                        style={{ background: heat(h.requiredScheduledHc, maxCell, dark), color: h.requiredScheduledHc > maxCell * 0.55 ? '#fff' : tPri, height: 26 }}>
+                        title={`${String(h.hour).padStart(2, '0')}:00 — vol ${h.volume} · ${h.requiredScheduledHc} HC${(h as any).learned ? (ar ? ' · ⚡ أرضية متعلمة (حمل مقاس)' : ' · ⚡ learned floor (measured load)') : ''}`}
+                        style={{
+                          background: heat(h.requiredScheduledHc, maxCell, dark),
+                          color: h.requiredScheduledHc > maxCell * 0.55 ? '#fff' : tPri, height: 26,
+                          boxShadow: (h as any).learned ? 'inset 0 0 0 1.5px #34d399' : undefined,
+                        }}>
                         {h.requiredScheduledHc || ''}
                       </td>
                     ))}
@@ -410,6 +542,9 @@ export default function StaffingEnginePage() {
 
       {/* ── Event / period forecast: Excel in → hiring verdict out ─────────── */}
       <EventForecastSection dark={dark} ar={ar} surface={surface} border={border} tPri={tPri} tSec={tSec} />
+
+      {/* ── What the machine has LEARNED (Sprinklr measured workload) ──────── */}
+      <LearnedSection dark={dark} ar={ar} surface={surface} border={border} tPri={tPri} tSec={tSec} />
 
       {/* ── Math drill-down ────────────────────────────────────────────────── */}
       {drill && (
