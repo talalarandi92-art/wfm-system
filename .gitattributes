@@ -1,0 +1,9 @@
+# Windows batch launchers MUST use CRLF line endings — cmd.exe mis-parses LF-only
+# .cmd/.bat files (each line loses its first characters). Force CRLF forever so an
+# editor that writes LF (or a cross-platform checkout) can never break the shortcut.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Treat the icon as binary (no line-ending munging).
+*.ico binary

@@ -107,6 +107,29 @@ async function bootstrap() {
     },
   }));
 
+  // ── Serve the built SPA (single-origin — no Vite dev server needed) ────────
+  // The frontend calls the API with the RELATIVE base '/api/v1', so serving it
+  // from THIS same origin means one process, one port, no proxy. Static assets
+  // come from frontend/dist; every non-API GET falls back to index.html so
+  // client-side routes (deep links + refresh) work. All middleware here is
+  // registered BEFORE app.listen(), so it runs ahead of the Nest router — the
+  // fallback passes /api, /uploads and /socket.io straight through untouched.
+  const frontendDist =
+    config.get<string>('FRONTEND_DIST') ||
+    path.join(process.cwd(), '..', 'frontend', 'dist');
+  if (fs.existsSync(path.join(frontendDist, 'index.html'))) {
+    app.use(express.static(frontendDist, { index: false, maxAge: '1h' }));
+    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      const p = req.path;
+      if (p.startsWith('/api') || p.startsWith('/uploads') || p.startsWith('/socket.io')) return next();
+      res.sendFile(path.join(frontendDist, 'index.html'));
+    });
+    console.log(`Serving SPA from ${frontendDist}`);
+  } else {
+    console.warn(`SPA build not found at ${frontendDist} — run "npm run build" in frontend/ to enable single-origin serving.`);
+  }
+
   // Chat WebSocket — Redis adapter (falls back to in-memory if Redis is down)
   const redisIoAdapter = new RedisIoAdapter(app);
   await redisIoAdapter.connectToRedis();
