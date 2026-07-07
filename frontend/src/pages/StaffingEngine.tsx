@@ -349,6 +349,14 @@ export default function StaffingEnginePage() {
     setDirty(d => ({ ...d, [fn]: { ...(d[fn] ?? {}), [key]: val } }));
   };
 
+  // ALWAYS-VISIBLE hiring verdict (Director: "وين أشوف كم واحد لازم أوظف؟")
+  const [hiring, setHiring] = useState<any>(null);
+  useEffect(() => {
+    const f = from, t = to >= from ? to : from;
+    apiClient.get('/capacity/staffing/hiring-now', { params: { from: f, to: t } })
+      .then(r => setHiring(r.data)).catch(() => setHiring(null));
+  }, [from, to, req]);
+
   const day = useMemo(() => req?.days?.find(d => d.date === viewDate) ?? req?.days?.[0], [req, viewDate]);
   const staffedFns = useMemo(() => (day?.functions ?? []).filter(f => f.dayContacts > 0 || f.dayTotalRequired > 0), [day]);
   const maxCell = useMemo(() => Math.max(1, ...staffedFns.flatMap(f => f.hours.map(h => h.requiredScheduledHc))), [staffedFns]);
@@ -433,6 +441,61 @@ export default function StaffingEnginePage() {
           </div>
         </div>
       </div>
+
+      {/* ── HIRING VERDICT — always visible: how many to hire for this range ── */}
+      {hiring && (
+        <div className="rounded-2xl p-4" style={{
+          background: surface,
+          border: `2px solid ${hiring.totalInternsToHire > 0 ? 'rgba(248,113,113,0.45)' : 'rgba(74,222,128,0.35)'}`,
+        }}>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <UserPlus size={16} style={{ color: hiring.totalInternsToHire > 0 ? '#f87171' : '#4ade80' }} />
+            <span className="font-black text-sm" style={{ color: tPri }}>
+              {ar
+                ? (hiring.totalInternsToHire > 0
+                    ? `قرار التوظيف: لازم توظف ${hiring.totalInternsToHire} إنترن لهالفترة`
+                    : 'قرار التوظيف: فريقك الحالي كافي لهالفترة — لا توظيف مطلوب ✓')
+                : (hiring.totalInternsToHire > 0
+                    ? `Hiring verdict: hire ${hiring.totalInternsToHire} interns for this range`
+                    : 'Hiring verdict: current team sufficient — no hiring needed ✓')}
+            </span>
+            <span className="text-[9px] ms-auto" style={{ color: tSec }}>
+              {hiring.from} → {hiring.to} · {ar ? 'إنترن = 0.70 وكيل' : 'intern = 0.70 agent'}
+            </span>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="w-full text-[10px]" style={{ borderCollapse: 'collapse', minWidth: 560 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${border}` }}>
+                  {[ar ? 'الفنكشن' : 'Function', ar ? 'المطلوب (ذروة الفترة)' : 'Required (period peak)',
+                    ar ? 'فريقك الحالي' : 'Current team', ar ? 'الفجوة' : 'Gap',
+                    ar ? '⬅ توظف' : '⬅ Hire', ar ? 'أثقل يوم' : 'Worst day'].map((h, i) => (
+                    <th key={i} className="px-2 py-1 font-bold" style={{ color: tSec, textAlign: i === 0 ? 'start' : 'center' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {hiring.perFunction.map((f: any) => (
+                  <tr key={f.functionKey} style={{ borderBottom: `1px solid ${border}` }}>
+                    <td className="px-2 py-1.5 font-bold" style={{ color: tPri }}>{f.functionKey}</td>
+                    <td className="px-2 py-1.5 text-center font-bold tabular-nums" style={{ color: '#f59e0b' }}>{f.requiredPeak}</td>
+                    <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>{f.currentTeam}</td>
+                    <td className="px-2 py-1.5 text-center font-bold tabular-nums" style={{ color: f.gap > 0 ? '#f87171' : '#4ade80' }}>{f.gap}</td>
+                    <td className="px-2 py-1.5 text-center font-black tabular-nums" style={{ color: f.internsToHire > 0 ? '#f87171' : '#4ade80' }}>
+                      {f.internsToHire > 0 ? `+${f.internsToHire}` : '✓'}
+                    </td>
+                    <td className="px-2 py-1.5 text-center" style={{ color: tSec }}>{f.worstDay ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-[8.5px] mt-1.5" style={{ color: tSec }}>
+            {ar ? 'ذروة متطلبات الفترة (شامل الشرينكج/الإنتاجية/نوافذ التشغيل) مقابل الفريق النشط — هذه أرضية التوظيف؛ ولإيفنت بأرقامك أنت استخدم قالب الإكسل تحت.'
+                : 'Period peak requirement (incl. shrinkage/productivity/operating windows) vs the active team — the hiring floor; for events with YOUR numbers use the Excel template below.'}
+          </div>
+        </div>
+      )}
 
       {/* ── Parameters (collapsible editor) ────────────────────────────────── */}
       <div className="rounded-2xl" style={{ background: surface, border: `1px solid ${border}` }}>
