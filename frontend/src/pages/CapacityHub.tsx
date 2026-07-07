@@ -1,13 +1,15 @@
 import { useSearchParams } from 'react-router-dom';
-import { BarChart3, Activity, BarChart4 } from 'lucide-react';
+import { BarChart3, Activity, BarChart4, Sigma } from 'lucide-react';
 import HubTabs from '@/components/HubTabs';
 import CapacityPage from '@/pages/Capacity';
 import HourlyCoveragePage from '@/pages/HourlyCoverage';
 import IntervalHeadcountPage from '@/pages/IntervalHeadcount';
+import StaffingEnginePage from '@/pages/StaffingEngine';
 
-type HubTab = 'planning' | 'coverage' | 'intervals';
+type HubTab = 'staffing' | 'planning' | 'coverage' | 'intervals';
 
 const TABS: { key: HubTab; icon: typeof BarChart3; ar: string; en: string }[] = [
+  { key: 'staffing',  icon: Sigma,     ar: 'محرك التوظيف',      en: 'Staffing Engine' },
   { key: 'planning',  icon: BarChart3, ar: 'تخطيط الطاقة',      en: 'Capacity Planning' },
   { key: 'coverage',  icon: Activity,  ar: 'التغطية بالساعة',   en: 'Hourly Coverage' },
   { key: 'intervals', icon: BarChart4, ar: 'هيدكاونت بالفترات', en: 'Interval Headcount' },
@@ -22,12 +24,13 @@ const TABS: { key: HubTab; icon: typeof BarChart3; ar: string; en: string }[] = 
 export default function CapacityHub() {
   const [params, setParams] = useSearchParams();
   const raw = params.get('tab');
-  const tab: HubTab = TABS.some(t => t.key === raw) ? (raw as HubTab) : 'planning';
+  const tab: HubTab = TABS.some(t => t.key === raw) ? (raw as HubTab) : 'staffing';
 
   return (
     <div className="page-enter">
       <HubTabs tabs={TABS} active={tab} onChange={k => setParams({ tab: k }, { replace: true })} />
 
+      {tab === 'staffing'  && <StaffingEnginePage />}
       {tab === 'planning'  && <CapacityPage />}
       {tab === 'coverage'  && <HourlyCoveragePage />}
       {tab === 'intervals' && <IntervalHeadcountPage />}
