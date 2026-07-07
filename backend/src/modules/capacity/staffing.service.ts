@@ -596,6 +596,47 @@ export class StaffingService implements OnModuleInit {
     return { id: row.id, name: eventName || fileName, from: daily[0].date, to: daily[daily.length - 1].date, perFunction };
   }
 
+  /**
+   * INSTANT hiring verdict — no Excel needed: the forecast requirement for the
+   * period vs the CURRENT active team per function (live roster). Same math as
+   * the event flow; the Excel flow is for events with YOUR OWN volumes/params.
+   */
+  async hiringNow(tenantId: string, from: string, to: string, internProductivity = 0.7) {
+    const [req, pools] = await Promise.all([
+      this.hourlyRequirement(tenantId, from, to),
+      this.ds.query(
+        `SELECT canon_fn(f.name) AS fn, COUNT(*)::int AS agents
+         FROM employees e JOIN functions f ON e.function_id = f.id
+         WHERE e.tenant_id = $1 AND e.status = 'active'
+         GROUP BY canon_fn(f.name)`, [tenantId]),
+    ]);
+    const poolBy: Record<string, number> = {};
+    for (const r of pools) poolBy[r.fn] = +r.agents;
+
+    const fns = new Map<string, { requiredPeak: number; worstDay: string | null }>();
+    for (const d of req.days) {
+      for (const f of d.functions) {
+        const peak = Math.max(...f.hours.map((h: any) => h.requiredScheduledHc), 0);
+        const cur = fns.get(f.functionKey) ?? { requiredPeak: 0, worstDay: null };
+        if (peak > cur.requiredPeak) fns.set(f.functionKey, { requiredPeak: peak, worstDay: d.date });
+        else fns.set(f.functionKey, cur);
+      }
+    }
+    let totalInterns = 0;
+    const perFunction = [...fns.entries()].map(([fn, v]) => {
+      const available = poolBy[fn] ?? 0;
+      const gap = Math.max(0, v.requiredPeak - available);
+      const interns = gap > 0 ? Math.ceil(gap / internProductivity) : 0;
+      totalInterns += interns;
+      return { functionKey: fn, requiredPeak: v.requiredPeak, currentTeam: available, gap, internsToHire: interns, worstDay: v.worstDay };
+    }).sort((a, b) => b.internsToHire - a.internsToHire || b.gap - a.gap);
+    return {
+      from, to, internProductivity, totalInternsToHire: totalInterns,
+      basis: 'forecast requiredPeak (period max, incl. shrinkage/productivity/windows) vs CURRENT active team per function; interns = ceil(gap / internProductivity)',
+      perFunction,
+    };
+  }
+
   async listEventForecasts(tenantId: string) {
     return this.ds.query(
       `SELECT id, name, date_from::text AS "from", date_to::text AS "to", file_name, created_at, results

@@ -180,6 +180,20 @@ export class CapacityController {
     return this.staffing.listEventForecasts(this.tid(user));
   }
 
+  /** Instant "how many to hire" — forecast requirement vs the CURRENT team (no Excel). */
+  @Get('staffing/hiring-now')
+  hiringNow(
+    @CurrentUser() user: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('internProductivity') ip?: string,
+  ) {
+    const d0 = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const d6 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    return this.staffing.hiringNow(this.tid(user), from || d0, to || d6,
+      ip ? Math.min(Math.max(+ip, 0.2), 1) : 0.7);
+  }
+
   /** What the learning store has learned so far (coverage + per-channel 7×24 P90 heat). */
   @Get('staffing/learned')
   learnedSummary(@CurrentUser() user: any) {

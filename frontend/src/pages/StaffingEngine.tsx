@@ -58,10 +58,14 @@ function EventForecastSection({ dark, ar, surface, border, tPri, tSec }: {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ name: string; from: string; to: string; perFunction: EventFnVerdict[] } | null>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [hiringNow, setHiringNow] = useState<any>(null);   // instant verdict vs the CURRENT team
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) apiClient.get('/capacity/staffing/event-forecasts').then(r => setHistory(r.data)).catch(() => {});
+    if (open) {
+      apiClient.get('/capacity/staffing/event-forecasts').then(r => setHistory(r.data)).catch(() => {});
+      apiClient.get('/capacity/staffing/hiring-now').then(r => setHiringNow(r.data)).catch(() => {});
+    }
   }, [open, result]);
 
   const download = async () => {
@@ -95,6 +99,35 @@ function EventForecastSection({ dark, ar, surface, border, tPri, tSec }: {
       </button>
       {open && (
         <div className="px-4 pb-4 space-y-3">
+          {/* INSTANT verdict — forecast vs the CURRENT team, no upload needed */}
+          {hiringNow && (
+            <div className="rounded-xl p-3" style={{ background: dark ? 'rgba(99,102,241,0.08)' : 'rgba(99,102,241,0.05)', border: `1px dashed ${border}` }}>
+              <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                <UserPlus size={13} style={{ color: hiringNow.totalInternsToHire > 0 ? '#f87171' : '#4ade80' }} />
+                <span className="text-[11px] font-black" style={{ color: tPri }}>
+                  {ar
+                    ? `فورًا وبلا رفع — حسب فريقك الحالي (${hiringNow.from} → ${hiringNow.to}): ${hiringNow.totalInternsToHire > 0 ? `لازم توظف ${hiringNow.totalInternsToHire} إنترن` : 'الفريق الحالي كافي ✓'}`
+                    : `Instant — vs your CURRENT team (${hiringNow.from} → ${hiringNow.to}): ${hiringNow.totalInternsToHire > 0 ? `hire ${hiringNow.totalInternsToHire} interns` : 'current team sufficient ✓'}`}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {hiringNow.perFunction.map((f: any) => (
+                  <span key={f.functionKey} className="text-[9px] font-bold px-2 py-0.5 rounded-full tabular-nums"
+                    title={`${ar ? 'المطلوب (ذروة)' : 'Required peak'} ${f.requiredPeak} · ${ar ? 'الفريق' : 'team'} ${f.currentTeam}${f.worstDay ? ` · ${ar ? 'أثقل يوم' : 'worst'} ${f.worstDay}` : ''}`}
+                    style={{
+                      background: f.internsToHire > 0 ? (dark ? 'rgba(248,113,113,0.14)' : 'rgba(239,68,68,0.08)') : (dark ? 'rgba(74,222,128,0.10)' : 'rgba(34,197,94,0.07)'),
+                      color: f.internsToHire > 0 ? '#f87171' : '#4ade80',
+                    }}>
+                    {f.functionKey}: {f.internsToHire > 0 ? `+${f.internsToHire}` : '✓'} <span style={{ opacity: 0.65 }}>({f.requiredPeak}/{f.currentTeam})</span>
+                  </span>
+                ))}
+              </div>
+              <div className="text-[8.5px] mt-1" style={{ color: tSec }}>
+                {ar ? 'ذروة متطلبات الفترة (شامل الشرينكج والإنتاجية والنوافذ) مقابل عدد الفريق النشط لكل فنكشن · إنترن = 0.70 وكيل. لإيفنت بأرقامك أنت، استخدم القالب تحت.'
+                    : 'Period peak requirement (incl. shrinkage/productivity/windows) vs active team per function · intern = 0.70 agent. For an event with YOUR numbers, use the template below.'}
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={download} className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg"
               style={{ background: dark ? 'rgba(52,211,153,0.12)' : 'rgba(16,185,129,0.08)', color: '#34d399' }}>
