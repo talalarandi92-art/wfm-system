@@ -66,7 +66,8 @@ export class PermissionRequestController {
     @Query('employeeId') employeeId: string,
     @Query('date') date?: string,
   ) {
-    const targetDate = date ?? new Date().toISOString().slice(0, 10);
+    // Kuwait "today" (+03) — bare toISOString() returns YESTERDAY before 03:00 local (bug #14)
+    const targetDate = date ?? new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
     return this.svc.getWeeklyUsage(this.tid(user), employeeId, targetDate);
   }
 
@@ -77,7 +78,7 @@ export class PermissionRequestController {
     @CurrentUser() user: any,
     @Query('date') date?: string,
   ) {
-    const targetDate = date ?? new Date().toISOString().slice(0, 10);
+    const targetDate = date ?? new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
     return this.svc.getHcDashboard(this.tid(user), targetDate);
   }
 

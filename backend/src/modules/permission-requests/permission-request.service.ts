@@ -256,15 +256,15 @@ export class PermissionRequestService implements OnModuleInit {
     }
 
     // ── Weekly quota check (max 3 permissions per WFM week: Sat–Fri) ──────
-    // Determine the Sat–Fri week containing permissionDate
-    const permDate = new Date(dto.permissionDate);
-    const dayOfWeek = permDate.getDay(); // 0=Sun, 6=Sat
+    // ALL-UTC date math (EXECUTION_BRIEF bug #14): the old mix of UTC parse +
+    // local getDay/setDate shifted the Saturday week boundary by a day on a
+    // +03 host. Pinning every step to UTC is deterministic on any server.
+    const permDate = new Date(String(dto.permissionDate).slice(0, 10) + 'T00:00:00Z');
+    const dayOfWeek = permDate.getUTCDay(); // 0=Sun, 6=Sat
     // Days since last Saturday (Sat=0 in WFM week)
     const daysSinceSat = (dayOfWeek + 1) % 7; // Sat→0, Sun→1, … Fri→6
-    const weekSat = new Date(permDate);
-    weekSat.setDate(permDate.getDate() - daysSinceSat);
-    const weekFri = new Date(weekSat);
-    weekFri.setDate(weekSat.getDate() + 6);
+    const weekSat = new Date(permDate.getTime() - daysSinceSat * 86400000);
+    const weekFri = new Date(weekSat.getTime() + 6 * 86400000);
     const weekSatStr = weekSat.toISOString().slice(0, 10);
     const weekFriStr = weekFri.toISOString().slice(0, 10);
 
@@ -800,13 +800,12 @@ export class PermissionRequestService implements OnModuleInit {
     max: number;
     requests: { id: string; permissionDate: string; startTime: string; endTime: string; durationMinutes: number; permissionType: string | null; status: string }[];
   }> {
-    const permDate = new Date(date);
-    const dayOfWeek = permDate.getDay();
+    // ALL-UTC week math (bug #14) — same fix as the quota check above.
+    const permDate = new Date(String(date).slice(0, 10) + 'T00:00:00Z');
+    const dayOfWeek = permDate.getUTCDay();
     const daysSinceSat = (dayOfWeek + 1) % 7;
-    const weekSat = new Date(permDate);
-    weekSat.setDate(permDate.getDate() - daysSinceSat);
-    const weekFri = new Date(weekSat);
-    weekFri.setDate(weekSat.getDate() + 6);
+    const weekSat = new Date(permDate.getTime() - daysSinceSat * 86400000);
+    const weekFri = new Date(weekSat.getTime() + 6 * 86400000);
     const weekSatStr = weekSat.toISOString().slice(0, 10);
     const weekFriStr = weekFri.toISOString().slice(0, 10);
 
