@@ -287,10 +287,14 @@ export class GeneratorService {
       const requiredPeak = Math.max(...d.requiredCurve);
       const staffedPeak  = Math.max(...d.staffedCurve);
       // Risk verdict per day: gaps in the daytime window are what matters
-      // (pre-07:00 gaps are coverable only by prior-day MD tails — known limitation)
+      // (pre-07:00 gaps are coverable only by prior-day MD tails — known limitation).
+      // GRADED (2026-07-08): a lone −1 body for a half-hour edge is a WARNING for the
+      // day-of team (remedies/OT), not a critical day — critical = a deep hole (deficit
+      // ≥2 anywhere) or a wide one (>6 daytime half-hour slots short).
       const daytimeGaps = d.residualGaps.filter((g: any) => +g.interval.slice(0, 2) >= 7);
-      const riskStatus = daytimeGaps.length > 0 ? 'critical'
-        : staffedPeak < requiredPeak * 0.95 ? 'warning' : 'safe';
+      const deepGap = daytimeGaps.some((g: any) => g.deficit >= 2);
+      const riskStatus = (deepGap || daytimeGaps.length > 6) ? 'critical'
+        : daytimeGaps.length > 0 || staffedPeak < requiredPeak * 0.95 ? 'warning' : 'safe';
       return {
         date: d.date, mix: d.mix,
         requiredPeak, staffedPeak,

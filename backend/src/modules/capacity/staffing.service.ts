@@ -634,19 +634,27 @@ export class StaffingService implements OnModuleInit {
         fns.set(f.functionKey, cur);
       }
     }
+    // Bodies/day a team of T can field at 2 OFF/week — the generator's own ceiling.
+    const fieldable = (T: number) => Math.max(0, T - Math.ceil(T * 2 / 7));
     let totalInterns = 0;
     const perFunction = [...fns.entries()].map(([fn, v]) => {
       const available = poolBy[fn] ?? 0;
       const gap = Math.max(0, v.requiredPeak - available);
-      const interns = gap > 0 ? Math.ceil(gap / internProductivity) : 0;
-      totalInterns += interns;
-      // What the roster can actually field per day at 2 OFF/week — the same ceiling
-      // the generator uses (pool − ceil(pool × 2/7)). Transparency only: the hire
-      // headline stays keyed to requiredPeak (changing it needs the Director's go).
-      const fieldablePerDay = Math.max(0, available - Math.ceil(available * 2 / 7));
+      const fieldablePerDay = fieldable(available);
       const coverageGapBodies = Math.max(0, v.bodiesWorstDay - fieldablePerDay);
+      // Coverage gap in TEAM terms: the smallest extra headcount whose fieldable
+      // bodies/day close the schedulable shortfall (Director-approved 2026-07-08:
+      // the hire answer is the BINDING constraint — a 9h shift cannot span a 12h
+      // window, so requiredPeak alone under-hires small back-office teams).
+      let coverageTeamGap = 0;
+      while (coverageGapBodies > 0 && fieldable(available + coverageTeamGap) < v.bodiesWorstDay && coverageTeamGap < 200) coverageTeamGap++;
+      const teamGap = Math.max(gap, coverageTeamGap);
+      const interns = teamGap > 0 ? Math.ceil(teamGap / internProductivity) : 0;
+      totalInterns += interns;
       return {
         functionKey: fn, requiredPeak: v.requiredPeak, currentTeam: available, gap,
+        coverageTeamGap,                               // extra HEADCOUNT to close the schedulable shortfall
+        bindingConstraint: coverageTeamGap > gap ? 'coverage' : (gap > 0 ? 'peak' : 'none'),
         internsToHire: interns, worstDay: v.worstDay,
         scheduleBodiesWorstDay: v.bodiesWorstDay,      // bodies/day for FULL curve coverage
         fieldablePerDay,                               // bodies/day the team can schedule (2 OFF/wk)
@@ -656,8 +664,9 @@ export class StaffingService implements OnModuleInit {
     }).sort((a, b) => b.internsToHire - a.internsToHire || b.gap - a.gap);
     return {
       from, to, internProductivity, totalInternsToHire: totalInterns,
-      basis: 'forecast requiredPeak (period max, incl. shrinkage/productivity/windows) vs CURRENT active team per function; interns = ceil(gap / internProductivity). ' +
-             'scheduleBodiesWorstDay/fieldablePerDay = the schedulable view (9h shifts over the full hourly curve vs pool minus 2-OFF/week) — when coverageGapBodies > 0 the generator will show honest residual gaps even if requiredPeak looks covered.',
+      basis: 'interns = ceil(max(peak gap, coverage team-gap) / internProductivity) — the BINDING constraint: ' +
+             'peak gap = requiredPeak (period max, incl. shrinkage/productivity/windows) vs current team; ' +
+             'coverage team-gap = extra headcount whose fieldable bodies/day (team − 2-OFF/week) cover the full hourly curve with 9h shifts.',
       perFunction,
     };
   }
