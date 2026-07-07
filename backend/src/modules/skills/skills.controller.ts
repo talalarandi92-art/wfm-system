@@ -149,11 +149,17 @@ export class SkillsController {
     @Body() body: { skillId: string; proficiency?: string; expiresAt?: string },
   ) {
     const tid = user.tenantId;
+    // expires_at derives from skills.expiry_months when not given (bug #11) —
+    // certification starts today; an explicit expiresAt from the caller wins.
     await this.ds.query(
-      `INSERT INTO employee_skills (tenant_id, employee_id, skill_id, proficiency, status, expires_at)
-       VALUES ($1,$2,$3,$4,'active',$5)
+      `INSERT INTO employee_skills (tenant_id, employee_id, skill_id, proficiency, status, certified_at, expires_at)
+       VALUES ($1,$2,$3,$4,'active', CURRENT_DATE,
+               COALESCE($5::date, (SELECT (CURRENT_DATE + (expiry_months || ' months')::interval)::date
+                                   FROM skills WHERE id = $3 AND expiry_months IS NOT NULL)))
        ON CONFLICT (employee_id, skill_id)
-       DO UPDATE SET proficiency=$4, status='active', expires_at=$5, updated_at=NOW()`,
+       DO UPDATE SET proficiency=$4, status='active',
+                     expires_at = COALESCE($5::date, EXCLUDED.expires_at, employee_skills.expires_at),
+                     updated_at=NOW()`,
       [tid, empId, body.skillId, body.proficiency ?? 'intermediate', body.expiresAt ?? null],
     );
     return { success: true };
@@ -194,10 +200,14 @@ export class SkillsController {
       if (!skillId) { if (code) unmatchedSkills.add(row.skillCode); continue; }
       const prof = PROF.has(String(row.proficiency)) ? row.proficiency : 'intermediate';
       await this.ds.query(
-        `INSERT INTO employee_skills (tenant_id, employee_id, skill_id, proficiency, status, expires_at)
-         VALUES ($1,$2,$3,$4,'active',$5)
+        `INSERT INTO employee_skills (tenant_id, employee_id, skill_id, proficiency, status, certified_at, expires_at)
+         VALUES ($1,$2,$3,$4,'active', CURRENT_DATE,
+                 COALESCE($5::date, (SELECT (CURRENT_DATE + (expiry_months || ' months')::interval)::date
+                                     FROM skills WHERE id = $3 AND expiry_months IS NOT NULL)))
          ON CONFLICT (employee_id, skill_id)
-         DO UPDATE SET proficiency=$4, status='active', expires_at=$5, updated_at=NOW()`,
+         DO UPDATE SET proficiency=$4, status='active',
+                       expires_at = COALESCE($5::date, EXCLUDED.expires_at, employee_skills.expires_at),
+                       updated_at=NOW()`,
         [tid, empId, skillId, prof, row.expiresAt || null],
       ).catch(() => {});
       applied++; touched.add(empId);
