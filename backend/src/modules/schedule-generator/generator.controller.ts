@@ -81,6 +81,23 @@ export class GeneratorController {
   }
 
   /**
+   * POST /schedule-generator/generate-demand/save — regenerate + save the
+   * demand-driven result as a draft schedule_version (D-077). The existing
+   * versions/:id/publish path then applies it to agents unchanged.
+   */
+  @Post('generate-demand/save')
+  @RequirePermissions('schedule.create')
+  async saveDemand(
+    @Request() req: any,
+    @Body() body: { weekStart: string; options?: any; label?: string },
+  ) {
+    const result = await this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
+    const versionId = await this.svc.saveDemandDraft(req.user.tenantId, result, req.user.userId, body.label);
+    await this.svc.logFemaleOverride(req.user.tenantId, req.user.userId ?? null, body.options);
+    return { ...result, versionId };
+  }
+
+  /**
    * GET /schedule-generator/shift-rate?weekStart=YYYY-MM-DD
    * Rotation % per employee BEFORE approved swaps (fairness basis) vs AFTER.
    */

@@ -143,6 +143,14 @@ Users: WFM Analyst/Supervisor; agents consume the published result.
   tiebreak). Defaults unchanged (lowest-demand OFF, rotation off). Classic `/generate` kept for comparison
   until the UI repoints (retirement = P1 tail). `hiring-now` exposes the schedulable view
   (`scheduleBodiesWorstDay`/`fieldablePerDay`/`coverageGapBodies`).
+  **End-to-end UI (same date):** `ScheduleGenerator.tsx` now has an engine-mode switch with
+  **Demand ★ as the default** (classic kept for comparison) — demand options (OFF placement /
+  band rotation), per-day coverage-vs-demand table (00–07 footnote), honest warnings/unfilled,
+  per-function proposed grid, and Save-as-Draft via the new
+  `POST /schedule-generator/generate-demand/save` (writes a normal draft `schedule_version` +
+  entries; existing `versions/:id/publish` applies it to agents unchanged — live round-trip
+  verified: 728 entries/104×7, then deleted). The Staffing Engine hiring card shows the
+  schedulable-view columns (bodies/day · fieldable/day · coverage gap).
 - **Demand-driven chain** (RULES §10, memory `demand_scheduling_chain`) — all on `roster_days`, endpoints under
   `attendance-recon/roster-v2/*`, UI `ScheduleDemand.tsx` (`/analytics?tab=generate`):
   1. `GET roster-v2/generate` — demand[24] from the real coverage pattern; shift defs via MODE() of real

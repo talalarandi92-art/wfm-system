@@ -58,6 +58,14 @@ function addDays(iso: string, n: number) {
 }
 const currentSat = () => weekStartSat();
 
+// Demand-grid code colors (canonical shift families — same hues as the legend)
+const DEMAND_CODE_COLORS: Record<string, string> = {
+  M: '#0ea5e9', B: '#38bdf8', C: '#f59e0b', N: '#8b5cf6',
+  E: '#f97316', EE: '#a78bfa', MD: '#6366f1', MN: '#818cf8',
+  OFF: '#64748b', L: '#10b981',
+};
+const demandCodeColor = (code: string) => DEMAND_CODE_COLORS[code] ?? '#94a3b8';
+
 // ─── Shift Cell ───────────────────────────────────────────────────────────────
 function GenShiftCell({ day }: { day: DayAssignment }) {
   const hasViolation = day.violations.length > 0;
@@ -362,6 +370,12 @@ export default function ScheduleGeneratorPage() {
   const [femaleLateFns, setFemaleLateFns] = useState<string[]>([]);  // per-function female-N exception
   const [options, setOptions]   = useState({ minRestHours: 10, offDaysPerWeek: 1, allowFemaleN: false });
   const [showOptions, setShowOptions]   = useState(false);
+  // Engine mode (D-077): demand-driven is THE generator; classic kept for comparison
+  const [engine, setEngine] = useState<'demand' | 'classic'>('demand');
+  const [demandOpts, setDemandOpts] = useState<{ offStrategy: 'lowest-demand' | 'weekend-fair'; rotationFairness: boolean }>({
+    offStrategy: 'lowest-demand', rotationFairness: false,
+  });
+  const [demandResult, setDemandResult] = useState<any | null>(null);
   const [result, setResult]     = useState<GeneratorResult | null>(null);
   const [loading, setLoading]   = useState(false);
   const [saving, setSaving]     = useState(false);
@@ -403,50 +417,79 @@ export default function ScheduleGeneratorPage() {
     setSelectedFns(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  const weekEnd = addDays(selectedWeek, weeks * 7 - 1);
+  const effWeeks = engine === 'demand' ? 1 : weeks;   // demand engine plans one Sat→Fri week
+  const weekEnd = addDays(selectedWeek, effWeeks * 7 - 1);
+
+  // Body for the demand-driven engine (functionIds live INSIDE options there)
+  const demandBody = useCallback(() => ({
+    weekStart: selectedWeek,
+    options: {
+      minRestHours: options.minRestHours,
+      offDaysPerWeek: options.offDaysPerWeek,
+      offStrategy: demandOpts.offStrategy,
+      rotationFairness: demandOpts.rotationFairness,
+      ...(selectedFns.length > 0 ? { functionIds: selectedFns } : {}),
+    },
+  }), [selectedWeek, options, demandOpts, selectedFns]);
 
   const handleGenerate = useCallback(async () => {
     if (!selectedWeek) return;
     // Reset ALL save/publish state — a new result invalidates any previously-saved draft
-    setLoading(true); setError(''); setResult(null); setSaveMsg(''); setSaveOk(false);
+    setLoading(true); setError(''); setResult(null); setDemandResult(null); setSaveMsg(''); setSaveOk(false);
     setSavedVersionId(null); setPublishMsg(''); setPublishOk(false);
     try {
-      const body: any = {
-        weekStart: selectedWeek,
-        options: { ...options, weeks, femaleLateFunctionIds: femaleLateFns },
-      };
-      if (selectedFns.length > 0) body.functionIds = selectedFns;
-      const res = await apiClient.post('/schedule-generator/generate', body);
-      setResult(res.data);
+      if (engine === 'demand') {
+        const res = await apiClient.post('/schedule-generator/generate-demand', demandBody());
+        setDemandResult(res.data);
+      } else {
+        const body: any = {
+          weekStart: selectedWeek,
+          options: { ...options, weeks, femaleLateFunctionIds: femaleLateFns },
+        };
+        if (selectedFns.length > 0) body.functionIds = selectedFns;
+        const res = await apiClient.post('/schedule-generator/generate', body);
+        setResult(res.data);
+      }
     } catch (e: any) {
       const arErr = useUiStore.getState().lang === 'ar';
       setError(e?.response?.data?.message ?? (arErr ? 'حدث خطأ أثناء التوليد' : 'An error occurred during generation'));
     } finally {
       setLoading(false);
     }
-  }, [selectedWeek, selectedFns, options, weeks]);
+  }, [selectedWeek, selectedFns, options, weeks, engine, demandBody, femaleLateFns]);
 
   const handleSave = async () => {
     if (!selectedWeek) return;
     setSaving(true); setSaveMsg(''); setSaveOk(false);
     const arNow = useUiStore.getState().lang === 'ar';
     try {
-      const body: any = {
-        weekStart: selectedWeek,
-        options: { ...options, weeks, femaleLateFunctionIds: femaleLateFns },
-        label: arNow
-          ? `مسودة — ${fmtRangeAr(selectedWeek, weekEnd)}`
-          : `Draft — ${fmtRange(selectedWeek, weekEnd, false)}`,
-      };
-      if (selectedFns.length > 0) body.functionIds = selectedFns;
-      const res = await apiClient.post('/schedule-generator/save', body);
+      let res: any;
+      if (engine === 'demand') {
+        res = await apiClient.post('/schedule-generator/generate-demand/save', {
+          ...demandBody(),
+          label: arNow
+            ? `مسودة (حسب الطلب) — ${fmtRangeAr(selectedWeek, weekEnd)}`
+            : `Demand draft — ${fmtRange(selectedWeek, weekEnd, false)}`,
+        });
+        setDemandResult(res.data);
+      } else {
+        const body: any = {
+          weekStart: selectedWeek,
+          options: { ...options, weeks, femaleLateFunctionIds: femaleLateFns },
+          label: arNow
+            ? `مسودة — ${fmtRangeAr(selectedWeek, weekEnd)}`
+            : `Draft — ${fmtRange(selectedWeek, weekEnd, false)}`,
+        };
+        if (selectedFns.length > 0) body.functionIds = selectedFns;
+        res = await apiClient.post('/schedule-generator/save', body);
+      }
       setSaveOk(true);
       setSavedVersionId(res.data?.versionId ?? null);
       setPublishMsg(''); setPublishOk(false);
       setSaveMsg(arNow
         ? `تم الحفظ كمسودة — ${res.data?.versionId?.substring(0, 8)}…`
         : `Saved as draft — ${res.data?.versionId?.substring(0, 8)}…`);
-      if (result) setResult({ ...result, versionId: res.data?.versionId });
+      if (engine === 'classic' && result) setResult({ ...result, versionId: res.data?.versionId });
     } catch (e: any) {
       setSaveOk(false);
       setSaveMsg(arNow
@@ -487,6 +530,76 @@ export default function ScheduleGeneratorPage() {
     }
   };
 
+  // Shared Save/Publish/Regenerate action row (classic + demand results)
+  const actionBar = (
+    <div className="flex items-center gap-3 flex-wrap">
+      <button onClick={handleSave} disabled={saving}
+        className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
+        style={{ background: 'linear-gradient(135deg,#059669,#10b981)', boxShadow: '0 4px 20px rgba(16,185,129,0.25)' }}>
+        {saving ? <RefreshCw size={15} className="animate-spin" /> : <CloudUpload size={15} />}
+        {saving ? (ar ? 'جاري الحفظ…' : 'Saving…') : (ar ? 'حفظ كمسودة' : 'Save as Draft')}
+      </button>
+
+      <button onClick={handlePublish} disabled={publishing || !savedVersionId || weekBlocked}
+        title={weekBlocked
+          ? (ar ? 'الأسبوع منشور/مقفل بالفعل' : 'Week already published/locked')
+          : !savedVersionId ? (ar ? 'احفظ المسودة أولاً' : 'Save as draft first') : undefined}
+        className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{ background: 'linear-gradient(135deg,#4f46e5,#6366f1)', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
+        {publishing ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
+        {publishing ? (ar ? 'جاري النشر…' : 'Publishing…') : (ar ? 'نشر وإرسال للموظفين' : 'Publish to agents')}
+      </button>
+
+      {!savedVersionId && !weekBlocked && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+          <Info size={13} className="flex-shrink-0" />
+          {ar ? 'النتيجة غير محفوظة — احفظ كمسودة أولاً لتفعيل النشر' : 'Out of sync — save as draft again to enable publish'}
+        </span>
+      )}
+      {weekBlocked && (
+        <span className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-300">
+          <Lock size={13} className="flex-shrink-0" />
+          {ar
+            ? <>هذا الأسبوع {weekStatus?.status === 'locked' ? 'مقفل' : 'منشور'} بالفعل — <Link to="/schedule?tab=schedule" className="underline">افتح الجدول</Link></>
+            : <>This week is already {weekStatus?.status === 'locked' ? 'locked' : 'published'} — <Link to="/schedule?tab=schedule" className="underline">open Schedule</Link></>}
+        </span>
+      )}
+
+      <button onClick={handleGenerate} disabled={loading}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all
+                   text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-white disabled:opacity-40"
+        style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)' }}>
+        <RefreshCw size={14} />
+        {ar ? 'إعادة التوليد' : 'Regenerate'}
+      </button>
+
+      <button onClick={() => { setResult(null); setDemandResult(null); }}
+        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm text-slate-500 dark:text-slate-400
+                   hover:text-slate-900 dark:hover:text-white transition-colors"
+        style={{ background: 'var(--chip-bg)', border: '1px solid var(--border)' }}>
+        <XCircle size={14} />
+        {ar ? 'مسح النتيجة' : 'Clear Result'}
+      </button>
+
+      {saveMsg && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${
+          saveOk ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}
+          style={{ background: saveOk ? 'rgba(52,211,153,0.08)' : 'rgba(239,68,68,0.08)' }}>
+          {saveOk ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+          {saveMsg}
+        </div>
+      )}
+      {publishMsg && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${
+          publishOk ? 'text-indigo-700 dark:text-indigo-300' : 'text-red-700 dark:text-red-400'}`}
+          style={{ background: publishOk ? 'rgba(99,102,241,0.1)' : 'rgba(239,68,68,0.08)' }}>
+          {publishOk ? <Send size={14} /> : <XCircle size={14} />}
+          {publishMsg}
+        </div>
+      )}
+    </div>
+  );
+
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-[1600px] mx-auto space-y-4" dir={ar ? 'rtl' : 'ltr'}>
@@ -513,10 +626,29 @@ export default function ScheduleGeneratorPage() {
       {/* ── Controls ──────────────────────────────────────────────────────── */}
       <div className="rounded-2xl p-5 space-y-4 card dark:bg-white/[0.03]">
 
-        {/* Row 1: Period + Navigator + Generate */}
+        {/* Row 1: Engine + Period + Navigator + Generate */}
         <div className="flex flex-wrap items-center gap-3">
 
-          {/* Period selector */}
+          {/* Engine mode (D-077: demand-driven is THE generator) */}
+          <div className="flex items-center gap-1 bg-slate-900/5 dark:bg-black/20 rounded-xl p-1">
+            {([
+              ['demand',  ar ? 'حسب الطلب ★' : 'Demand ★',   ar ? 'المولّد المعتمد — من توقع الفوركاست/Erlang لكل فنكشن' : 'THE generator — forecast/Erlang demand per function'],
+              ['classic', ar ? 'كلاسيكي'     : 'Classic',     ar ? 'محرك المقارنة (روتيشن أسبوعي بلا منحنى طلب)'          : 'Comparison engine (weekly rotation, no demand curve)'],
+            ] as [typeof engine, string, string][]).map(([m, lbl, tip]) => (
+              <button key={m} title={tip}
+                onClick={() => { setEngine(m); setResult(null); setDemandResult(null); setSavedVersionId(null); setSaveMsg(''); setPublishMsg(''); setError(''); }}
+                className={`text-xs px-3 py-1.5 rounded-lg font-bold transition-all border ${
+                  engine === m
+                    ? 'bg-emerald-500/15 dark:bg-emerald-500/25 border-emerald-500/50 text-emerald-600 dark:text-emerald-300'
+                    : 'border-transparent text-slate-500 dark:text-slate-600'
+                }`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {/* Period selector (classic only — the demand engine plans one Sat→Fri week) */}
+          {engine === 'classic' && (
           <div className="flex items-center gap-1 bg-slate-900/5 dark:bg-black/20 rounded-xl p-1">
             {([1,2,3,4] as const).map(w => (
               <button key={w} onClick={() => setWeeks(w)}
@@ -529,6 +661,7 @@ export default function ScheduleGeneratorPage() {
               </button>
             ))}
           </div>
+          )}
 
           {/* Navigator */}
           <div className="flex items-center gap-2">
@@ -536,7 +669,7 @@ export default function ScheduleGeneratorPage() {
               onClick={() => {
                 const idx = availableWeeks.indexOf(selectedWeek);
                 if (idx < availableWeeks.length - 1) setSelectedWeek(availableWeeks[idx + 1]);
-                else setSelectedWeek(addDays(selectedWeek, -weeks * 7));
+                else setSelectedWeek(addDays(selectedWeek, -effWeeks * 7));
               }}
               className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 dark:text-slate-400
                          hover:text-slate-900 dark:hover:text-white bg-slate-900/5 dark:bg-white/5 transition-colors">
@@ -550,7 +683,7 @@ export default function ScheduleGeneratorPage() {
               onClick={() => {
                 const idx = availableWeeks.indexOf(selectedWeek);
                 if (idx > 0) setSelectedWeek(availableWeeks[idx - 1]);
-                else setSelectedWeek(addDays(selectedWeek, weeks * 7));
+                else setSelectedWeek(addDays(selectedWeek, effWeeks * 7));
               }}
               className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 dark:text-slate-400
                          hover:text-slate-900 dark:hover:text-white bg-slate-900/5 dark:bg-white/5 transition-colors">
@@ -672,7 +805,44 @@ export default function ScheduleGeneratorPage() {
               </div>
             </div>
 
-            {/* Duration summary */}
+            {/* Demand-engine merge options (D-077) */}
+            {engine === 'demand' && (
+            <div>
+              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2 block">
+                {ar ? 'توزيع الـ OFF الأسبوعي' : 'Weekly OFF placement'}
+              </label>
+              <div className="flex gap-2">
+                {([
+                  ['lowest-demand', ar ? 'أقل طلب' : 'Lowest demand', ar ? 'الـ OFF بأيام أقل احتياج — أقصى تغطية' : 'OFFs on the lowest-demand days — max coverage'],
+                  ['weekend-fair',  ar ? 'ويكند عادل' : 'Weekend-fair', ar ? 'OFF ويكند (خميس/جمعة) + OFF منتصف الأسبوع بعدالة سنوية' : 'One Thu/Fri OFF + one mid-week OFF, YTD-fair'],
+                ] as ['lowest-demand' | 'weekend-fair', string, string][]).map(([v, lbl, tip]) => (
+                  <button key={v} title={tip} onClick={() => setDemandOpts(o => ({ ...o, offStrategy: v }))}
+                    className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                      demandOpts.offStrategy === v
+                        ? 'bg-indigo-500/15 dark:bg-indigo-500/20 border-indigo-500/40 text-indigo-600 dark:text-indigo-300'
+                        : 'bg-slate-900/[0.04] dark:bg-white/[0.04] border-slate-900/10 dark:border-white/10 text-slate-500'
+                    }`}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setDemandOpts(o => ({ ...o, rotationFairness: !o.rotationFairness }))}
+                className="mt-2 w-full py-1.5 rounded-xl text-xs font-bold transition-all border"
+                style={{
+                  background: demandOpts.rotationFairness ? 'rgba(16,185,129,0.12)' : 'var(--chip-bg)',
+                  border: `1px solid ${demandOpts.rotationFairness ? 'rgba(16,185,129,0.35)' : 'var(--border)'}`,
+                  color: demandOpts.rotationFairness ? '#10b981' : 'var(--text-secondary)',
+                }}>
+                {demandOpts.rotationFairness ? '✓ ' : ''}{ar ? 'روتيشن أسبوعي بالباند (ليلي→ظهر→صباح→منتصف)' : 'Weekly band rotation (night→afternoon→morning→midnight)'}
+              </button>
+              <p className="text-[9px] text-slate-500 mt-1">
+                {ar ? 'الافتراضي: أقل طلب بدون روتيشن الباند — سلوك المولّد المعتمد الحالي' : 'Defaults = current approved behavior (lowest-demand, band rotation off)'}
+              </p>
+            </div>
+            )}
+
+            {/* Duration summary (classic only — demand is weekly) */}
+            {engine === 'classic' && (
             <div>
               <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2 block">
                 {ar ? 'مدة التوليد' : 'Duration'}
@@ -686,8 +856,11 @@ export default function ScheduleGeneratorPage() {
               </div>
               <p className="text-[9px] text-slate-600 mt-1">{ar ? 'يُغيَّر من الأزرار أعلاه' : 'Changed from buttons above'}</p>
             </div>
+            )}
 
-            {/* Female late-shift exception — per function */}
+            {/* Female late-shift exception — per function (classic engine option; the
+                demand engine already treats female-N as a flagged last resort) */}
+            {engine === 'classic' && (
             <div>
               <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2 block">
                 {ar ? 'استثناء: إناث يشتغلوا N — اختر الأقسام' : 'Exception: females may work N — pick functions'}
@@ -719,6 +892,7 @@ export default function ScheduleGeneratorPage() {
                   : 'Females end by 20:00 (C) by default. Picked functions: their females may work N (to 22:00). Midnight always blocked.'}
               </p>
             </div>
+            )}
           </div>
         )}
       </div>
@@ -731,6 +905,210 @@ export default function ScheduleGeneratorPage() {
           {error}
         </div>
       )}
+
+      {/* ── Demand-driven Results (THE generator — D-077) ─────────────────── */}
+      {engine === 'demand' && demandResult && (() => {
+        const dr = demandResult;
+        const dDates: string[] = Array.from({ length: 7 }, (_, i) => addDays(dr.weekStart, i));
+        const fmtDay = (iso: string) => ar ? fmtDateAr(iso) : fmtDateEn(iso);
+        const riskCfg: Record<string, { label: string; color: string; bg: string }> = {
+          safe:     { label: ar ? 'آمن'   : 'Safe',     color: '#4ade80', bg: 'rgba(34,197,94,0.12)' },
+          warning:  { label: ar ? 'تحذير' : 'Warning',  color: '#fbbf24', bg: 'rgba(251,191,36,0.12)' },
+          critical: { label: ar ? 'حرج'   : 'Critical', color: '#f87171', bg: 'rgba(239,68,68,0.12)' },
+        };
+        const gridByFn = new Map<string, any[]>();
+        for (const row of dr.grid ?? []) {
+          if (!Object.keys(row.days ?? {}).length) continue;   // no-demand-basis functions (scheduled elsewhere)
+          (gridByFn.get(row.functionName) ?? gridByFn.set(row.functionName, []).get(row.functionName)!).push(row);
+        }
+        return (
+        <div className="space-y-4">
+
+          {/* Summary tiles */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {[
+              { la: 'الموظفون',      le: 'Employees',      v: dr.summary.employees,            c: '#818cf8' },
+              { la: 'ورديات مخططة', le: 'Shifts planned', v: dr.summary.totalShiftsPlanned,   c: '#34d399' },
+              { la: 'أيام OFF',      le: 'OFF days',       v: dr.summary.totalOffDays,          c: '#94a3b8' },
+              { la: 'شواغر',         le: 'Unfilled',       v: dr.summary.unfilledSlots,         c: dr.summary.unfilledSlots ? '#f87171' : '#64748b' },
+              { la: 'فترات عجز',     le: 'Gap intervals',  v: dr.summary.residualGapIntervals,  c: dr.summary.residualGapIntervals ? '#fbbf24' : '#64748b' },
+              { la: 'أيام حرجة',     le: 'Critical days',  v: dr.summary.criticalDays,          c: dr.summary.criticalDays ? '#f87171' : '#4ade80' },
+            ].map(t => (
+              <div key={t.le} className="rounded-2xl p-4" style={{ background: `${t.c}12`, border: `1px solid ${t.c}30` }}>
+                <p className="text-2xl font-extrabold" style={{ color: t.c }}>{t.v}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{ar ? t.la : t.le}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Demand basis + applied options */}
+          <div className="rounded-2xl p-4 flex items-center gap-2 flex-wrap" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold"
+              style={dr.demand.source === 'forecast-erlang'
+                ? { background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.3)' }
+                : { background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}>
+              {dr.demand.source === 'forecast-erlang' ? (ar ? '⚡ فوركاست + Erlang لكل فنكشن' : '⚡ Forecast + Erlang per function') : (ar ? 'تاريخ الحمل المُقاس (بديل)' : 'Measured-load history (fallback)')}
+            </span>
+            <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: 'var(--chip-bg)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
+              OFF: {dr.summary.offStrategy === 'weekend-fair' ? (ar ? 'ويكند عادل' : 'weekend-fair') : (ar ? 'أقل طلب' : 'lowest-demand')}
+            </span>
+            {dr.summary.rotationFairness && (
+              <span className="px-2.5 py-1 rounded-lg text-[11px] font-semibold" style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981' }}>
+                {ar ? '✓ روتيشن الباند' : '✓ Band rotation'}
+              </span>
+            )}
+            <span className="text-[10px]" style={{ color: 'var(--text-3)' }}>{dr.demand.basis}</span>
+          </div>
+
+          {/* Per-day coverage verdicts */}
+          <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Calendar size={13} className="text-indigo-400" />
+              {ar ? 'التغطية مقابل الطلب — يوم بيوم' : 'Coverage vs demand — day by day'}
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs" style={{ minWidth: 640 }}>
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>
+                    <th className="text-start px-2 py-1.5">{ar ? 'اليوم' : 'Day'}</th>
+                    <th className="text-center px-2 py-1.5">{ar ? 'الحالة' : 'Risk'}</th>
+                    <th className="text-center px-2 py-1.5">{ar ? 'مطلوب (ذروة)' : 'Required peak'}</th>
+                    <th className="text-center px-2 py-1.5">{ar ? 'مجدول (ذروة)' : 'Staffed peak'}</th>
+                    <th className="text-start px-2 py-1.5">{ar ? 'المزيج' : 'Mix'}</th>
+                    <th className="text-start px-2 py-1.5">{ar ? 'فجوات (فنكشن)' : 'Gaps (function)'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dr.demand.days.map((d: any) => {
+                    const rc = riskCfg[d.riskStatus] ?? riskCfg.warning;
+                    const gapsByFn = new Map<string, number>();
+                    for (const g of d.residualGaps ?? []) {
+                      if (+String(g.interval).slice(0, 2) < 7) continue;   // 00–07 covered by prior-day MD tails (display accounting)
+                      const k = g.functionName ?? '—';
+                      gapsByFn.set(k, Math.max(gapsByFn.get(k) ?? 0, g.deficit));
+                    }
+                    return (
+                      <tr key={d.date} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td className="px-2 py-2 font-bold" style={{ color: 'var(--text-1)' }}>{fmtDay(d.date)}</td>
+                        <td className="px-2 py-2 text-center">
+                          <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold" style={{ background: rc.bg, color: rc.color }}>{rc.label}</span>
+                        </td>
+                        <td className="px-2 py-2 text-center font-bold tabular-nums" style={{ color: 'var(--text-2)' }}>{d.requiredPeak}</td>
+                        <td className="px-2 py-2 text-center font-bold tabular-nums" style={{ color: d.staffedPeak >= d.requiredPeak ? '#4ade80' : '#fbbf24' }}>{d.staffedPeak}</td>
+                        <td className="px-2 py-2">
+                          <div className="flex gap-1 flex-wrap">
+                            {Object.entries(d.mix ?? {}).map(([c, n]) => (
+                              <span key={c} className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                style={{ background: `${demandCodeColor(c)}18`, color: demandCodeColor(c), border: `1px solid ${demandCodeColor(c)}35` }}>
+                                {c}×{n as number}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-2 py-2">
+                          {gapsByFn.size === 0
+                            ? <span className="text-[10px]" style={{ color: '#4ade80' }}>{ar ? '✓ لا فجوات نهارية' : '✓ no daytime gaps'}</span>
+                            : <div className="flex gap-1 flex-wrap">
+                                {[...gapsByFn.entries()].map(([fn, n]) => (
+                                  <span key={fn} className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                    style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.25)' }}>
+                                    {fn} −{n}
+                                  </span>
+                                ))}
+                              </div>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[9px] mt-2" style={{ color: 'var(--text-3)' }}>
+              {ar
+                ? 'فجوات 00:00–07:00 لا تُعرض هنا — يغطيها ذيل ورديات منتصف الليل (MD/MN) من اليوم السابق.'
+                : '00:00–07:00 gaps are excluded here — prior-day midnight (MD/MN) tails cover them.'}
+            </p>
+          </div>
+
+          {/* Warnings + unfilled (honest gaps) */}
+          {(dr.warnings?.length > 0 || dr.unfilled?.length > 0) && (
+            <div className="rounded-2xl p-4 space-y-2" style={{ background: 'var(--surface)', border: '1px solid rgba(251,191,36,0.3)' }}>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <AlertTriangle size={13} className="text-amber-400" />
+                {ar ? `تنبيهات (${dr.warnings?.length ?? 0}) وشواغر (${dr.unfilled?.length ?? 0})` : `Warnings (${dr.warnings?.length ?? 0}) & unfilled (${dr.unfilled?.length ?? 0})`}
+              </h3>
+              {(dr.unfilled ?? []).slice(0, 8).map((u: any, i: number) => (
+                <p key={`u${i}`} className="text-[11px]" style={{ color: '#f87171' }}>• {u.date} · {u.functionName ?? ''} {u.code}: {u.reason}</p>
+              ))}
+              {(dr.warnings ?? []).slice(0, 8).map((w: string, i: number) => (
+                <p key={`w${i}`} className="text-[11px]" style={{ color: 'var(--text-2)' }}>• {w}</p>
+              ))}
+              {((dr.warnings?.length ?? 0) > 8 || (dr.unfilled?.length ?? 0) > 8) && (
+                <p className="text-[10px]" style={{ color: 'var(--text-3)' }}>
+                  {ar ? `+ ${Math.max(0, (dr.warnings?.length ?? 0) - 8) + Math.max(0, (dr.unfilled?.length ?? 0) - 8)} أخرى…` : `+ ${Math.max(0, (dr.warnings?.length ?? 0) - 8) + Math.max(0, (dr.unfilled?.length ?? 0) - 8)} more…`}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Proposed grid, grouped by function */}
+          <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Users size={13} className="text-indigo-400" />
+              {ar ? 'الجدول المقترح' : 'Proposed Schedule'}
+              <span className="font-normal text-slate-500">{dr.summary.employees} {ar ? 'موظف' : 'employees'}</span>
+            </h3>
+            <div className="space-y-4">
+              {[...gridByFn.entries()].map(([fnName, rows]) => (
+                <div key={fnName}>
+                  <p className="text-[11px] font-bold mb-1" style={{ color: 'var(--text-2)' }}>{fnName} <span className="opacity-60">({rows.length})</span></p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs" style={{ minWidth: 620 }}>
+                      <thead>
+                        <tr className="text-[9px] uppercase" style={{ color: 'var(--text-3)' }}>
+                          <th className="text-start px-2 py-1">{ar ? 'الموظف' : 'Employee'}</th>
+                          {dDates.map(dt => <th key={dt} className="text-center px-1 py-1">{fmtDay(dt)}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r: any) => (
+                          <tr key={r.employeeId} style={{ borderTop: '1px solid var(--border)' }}>
+                            <td className="px-2 py-1 whitespace-nowrap">
+                              <span className="font-semibold" style={{ color: 'var(--text-1)' }}>{r.name}</span>
+                              {r.gender === 'female' && <span className="ms-1 text-[9px]" style={{ color: '#f472b6' }}>♀</span>}
+                            </td>
+                            {dDates.map(dt => {
+                              const code = r.days?.[dt];
+                              return (
+                                <td key={dt} className="px-1 py-1 text-center">
+                                  {code
+                                    ? <span className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-[10px] font-bold"
+                                        style={code === 'OFF'
+                                          ? { background: 'rgba(71,85,105,0.15)', color: '#64748b', border: '1px solid rgba(71,85,105,0.2)' }
+                                          : { background: `${demandCodeColor(code)}20`, color: demandCodeColor(code), border: `1px solid ${demandCodeColor(code)}40` }}>
+                                        {code}
+                                      </span>
+                                    : <span className="text-[9px]" style={{ color: 'var(--text-3)' }}>—</span>}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Save / Publish */}
+          <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            {actionBar}
+          </div>
+        </div>
+        );
+      })()}
 
       {/* ── Results ───────────────────────────────────────────────────────── */}
       {result && (
@@ -849,72 +1227,7 @@ export default function ScheduleGeneratorPage() {
 
           {/* Save/Re-generate */}
           <div className="rounded-2xl p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center gap-3 flex-wrap">
-              <button onClick={handleSave} disabled={saving}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40"
-                style={{ background: 'linear-gradient(135deg,#059669,#10b981)', boxShadow: '0 4px 20px rgba(16,185,129,0.25)' }}>
-                {saving ? <RefreshCw size={15} className="animate-spin" /> : <CloudUpload size={15} />}
-                {saving ? (ar ? 'جاري الحفظ…' : 'Saving…') : (ar ? 'حفظ كمسودة' : 'Save as Draft')}
-              </button>
-
-              <button onClick={handlePublish} disabled={publishing || !savedVersionId || weekBlocked}
-                title={weekBlocked
-                  ? (ar ? 'الأسبوع منشور/مقفل بالفعل' : 'Week already published/locked')
-                  : !savedVersionId ? (ar ? 'احفظ المسودة أولاً' : 'Save as draft first') : undefined}
-                className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ background: 'linear-gradient(135deg,#4f46e5,#6366f1)', boxShadow: '0 4px 20px rgba(99,102,241,0.3)' }}>
-                {publishing ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
-                {publishing ? (ar ? 'جاري النشر…' : 'Publishing…') : (ar ? 'نشر وإرسال للموظفين' : 'Publish to agents')}
-              </button>
-
-              {!savedVersionId && !weekBlocked && (
-                <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
-                  <Info size={13} className="flex-shrink-0" />
-                  {ar ? 'النتيجة غير محفوظة — احفظ كمسودة أولاً لتفعيل النشر' : 'Out of sync — save as draft again to enable publish'}
-                </span>
-              )}
-              {weekBlocked && (
-                <span className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-300">
-                  <Lock size={13} className="flex-shrink-0" />
-                  {ar
-                    ? <>هذا الأسبوع {weekStatus?.status === 'locked' ? 'مقفل' : 'منشور'} بالفعل — <Link to="/schedule?tab=schedule" className="underline">افتح الجدول</Link></>
-                    : <>This week is already {weekStatus?.status === 'locked' ? 'locked' : 'published'} — <Link to="/schedule?tab=schedule" className="underline">open Schedule</Link></>}
-                </span>
-              )}
-
-              <button onClick={handleGenerate} disabled={loading}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all
-                           text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-white disabled:opacity-40"
-                style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)' }}>
-                <RefreshCw size={14} />
-                {ar ? 'إعادة التوليد' : 'Regenerate'}
-              </button>
-
-              <button onClick={() => setResult(null)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm text-slate-500 dark:text-slate-400
-                           hover:text-slate-900 dark:hover:text-white transition-colors"
-                style={{ background: 'var(--chip-bg)', border: '1px solid var(--border)' }}>
-                <XCircle size={14} />
-                {ar ? 'مسح النتيجة' : 'Clear Result'}
-              </button>
-
-              {saveMsg && (
-                <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${
-                  saveOk ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}
-                  style={{ background: saveOk ? 'rgba(52,211,153,0.08)' : 'rgba(239,68,68,0.08)' }}>
-                  {saveOk ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                  {saveMsg}
-                </div>
-              )}
-              {publishMsg && (
-                <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${
-                  publishOk ? 'text-indigo-700 dark:text-indigo-300' : 'text-red-700 dark:text-red-400'}`}
-                  style={{ background: publishOk ? 'rgba(99,102,241,0.1)' : 'rgba(239,68,68,0.08)' }}>
-                  {publishOk ? <Send size={14} /> : <XCircle size={14} />}
-                  {publishMsg}
-                </div>
-              )}
-            </div>
+            {actionBar}
 
             {result.summary.totalErrors > 0 && (
               <div className="mt-3 flex items-start gap-2 p-3 rounded-xl text-xs text-amber-700 dark:text-amber-300"
@@ -930,7 +1243,7 @@ export default function ScheduleGeneratorPage() {
       )}
 
       {/* ── Empty State ───────────────────────────────────────────────────── */}
-      {!result && !loading && (
+      {!result && !demandResult && !loading && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
             style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)' }}>
