@@ -5,9 +5,9 @@
  *   • the weekly OFF allowance is never exceeded
  *   • unfillable demand is reported honestly (never hidden)
  */
-import { assignRoster, DemandAssignment } from './demand.engine';
+import { assignRoster, computeShiftMix, DemandAssignment } from './demand.engine';
 import { buildWeekDates } from './generator.engine';
-import { EmployeeInfo, ShiftDef, ShiftDistribution } from './generator.types';
+import { EmployeeInfo, ShiftDef, ShiftDistribution, SHIFTS } from './generator.types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -186,5 +186,103 @@ describe('assignRoster (demand engine, synthetic pool)', () => {
     expect(rows.filter((r) => r.code === 'L')).toHaveLength(2);
     // (OFF-allowance ceiling not asserted here — see the it.failing OFF-leak
     //  spec above: the engine currently over-grants OFFs.)
+  });
+});
+
+// ─── computeShiftMix: edge-patch pass (window open/close coverage) ───────────
+// The greedy alone favors mid-day shifts (B/C) and strands the window edges —
+// 08:00 is coverable ONLY by M, 18–20 only by C/N/EE. The patch pass must fix
+// coverable edges and never inflate the body count.
+
+describe('computeShiftMix (edge-patch pass)', () => {
+  // required = 2 concurrent across an 08:00–20:00 operating window
+  const windowCurve = Array.from({ length: 48 }, (_, i) => (i >= 16 && i < 40 ? 2 : 0));
+
+  it('fully covers a 2-flat 08–20 window with 4 bodies (2×M + 2×C shape)', () => {
+    const day = computeShiftMix('2026-07-11', windowCurve, 4);
+    expect(day.residualGaps).toHaveLength(0);
+    expect(Object.values(day.mix).reduce((a, b) => a + b, 0)).toBe(4);
+    // 08:00–09:00 is only reachable by M — the patch must have placed two of them
+    expect(day.mix['M']).toBe(2);
+  });
+
+  it('never places redundant bodies when uncapped (4 suffice, greedy alone used 5)', () => {
+    const day = computeShiftMix('2026-07-11', windowCurve, Number.MAX_SAFE_INTEGER);
+    expect(day.residualGaps).toHaveLength(0);
+    expect(Object.values(day.mix).reduce((a, b) => a + b, 0)).toBe(4);
+  });
+
+  it('with an infeasible ceiling the residual is honest and minimal-total', () => {
+    const day = computeShiftMix('2026-07-11', windowCurve, 2);
+    // 2 bodies × 9h = 36 covered slot-units vs 48 required → 12 must remain
+    const totalDeficit = day.requiredCurve
+      .reduce((s, r, i) => s + Math.max(0, r - day.staffedCurve[i]), 0);
+    expect(Object.values(day.mix).reduce((a, b) => a + b, 0)).toBe(2);
+    expect(totalDeficit).toBe(12);
+  });
+
+  it('worst-interval deficit is patched down when total allows (−2@08:00 → −1)', () => {
+    // required: 4 at 08–09 (window open), 2 across 09–20; ceiling 5.
+    // Greedy alone: B,B,C,M,M → −2 at 08:00. Patched: −1 worst, smaller total.
+    const curve = Array.from({ length: 48 }, (_, i) =>
+      (i >= 16 && i < 18 ? 4 : i >= 18 && i < 40 ? 2 : 0));
+    const day = computeShiftMix('2026-07-11', curve, 5);
+    const worst = Math.max(...day.requiredCurve.map((r, i) => r - day.staffedCurve[i]));
+    expect(worst).toBeLessThanOrEqual(1);
+  });
+});
+
+// ─── Behavioral-merge options (Director-approved 2026-07-08) ─────────────────
+
+describe('assignRoster — weekend-fair OFF structure + rotation-band fairness', () => {
+  const males = ['w1', 'w2', 'w3', 'w4', 'w5', 'w6'].map((id) => emp(id, 'male', 'Customer Care'));
+  const emptyDist = new Map<string, ShiftDistribution>();
+  const emptyLast = new Map<string, ShiftDef>();
+  const noPrior = new Map<string, number>();
+  const mixByDate = mixFor(DATES, { M: 2, C: 2, N: 1 });
+
+  it('weekend-fair: exactly 2 OFF each — one on Thu/Fri, one mid-week, never adjacent-only weekend pair', () => {
+    const result = assignRoster(DATES, mixByDate, males, emptyDist, emptyLast, noPrior, {
+      ...OPTS, offStrategy: 'weekend-fair',
+    });
+    const weekend = new Set([DATES[5], DATES[6]]);   // Thu, Fri (Sat-start week)
+    for (const [, rows] of byEmployee(result.assignments)) {
+      const offs = rows.filter((r) => r.code === 'OFF').map((r) => r.date);
+      expect(offs).toHaveLength(2);
+      expect(offs.filter((d) => weekend.has(d))).toHaveLength(1);
+      expect(offs.filter((d) => !weekend.has(d))).toHaveLength(1);
+    }
+  });
+
+  it('rotation-band: the band-matching employee wins the shift among equally-fair peers', () => {
+    const oneDay = [DATES[0]];
+    // z-late worked night last week → target band 'afternoon' (C). a-early worked
+    // afternoon → target 'morning'. Without the flag the id tiebreak gives C to
+    // a-early; with it, rotation sends z-late to C and a-early to M.
+    const pool = [emp('a-early', 'male', 'Customer Care'), emp('z-late', 'male', 'Customer Care')];
+    const last = new Map<string, ShiftDef>([['z-late', SHIFTS.N], ['a-early', SHIFTS.C]]);
+    const mix = mixFor(oneDay, { C: 1, M: 1 });
+
+    const plain = assignRoster(oneDay, mix, pool, emptyDist, last, noPrior, OPTS);
+    expect(plain.assignments.find((a) => a.code === 'C')!.employeeId).toBe('a-early');
+
+    const rotated = assignRoster(oneDay, mix, pool, emptyDist, last, noPrior, {
+      ...OPTS, rotationFairness: true,
+    });
+    expect(rotated.assignments.find((a) => a.code === 'C')!.employeeId).toBe('z-late');
+    expect(rotated.assignments.find((a) => a.code === 'M')!.employeeId).toBe('a-early');
+  });
+
+  it('rotation-band never routes a female toward a blocked band (stays morning/afternoon)', () => {
+    const pool = [emp('f-x', 'female', 'Customer Care'), emp('m-x', 'male', 'Customer Care')];
+    // Her last category was afternoon → mixed cycle says 'morning' next; a male
+    // coming off midnight targets 'night'. She must never receive E/EE/MD/MN.
+    const last = new Map<string, ShiftDef>([['f-x', SHIFTS.C], ['m-x', SHIFTS.MD]]);
+    const result = assignRoster(DATES, mixFor(DATES, { M: 1, E: 1 }), pool, emptyDist, last, noPrior, {
+      ...OPTS, rotationFairness: true,
+    });
+    for (const a of result.assignments.filter((x) => x.employeeId === 'f-x')) {
+      expect(['E', 'EE', 'MD', 'MN']).not.toContain(a.code);
+    }
   });
 });

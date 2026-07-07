@@ -195,6 +195,8 @@ export class GeneratorService {
           minRestHours: options.minRestHours,
           offDaysPerWeek: options.offDaysPerWeek,
           onLeave,
+          offStrategy: options.offStrategy,
+          rotationFairness: options.rotationFairness,
         });
         assignments.push(...rosterF.assignments);
         unfilled.push(...rosterF.unfilled.map(u => ({ ...u, functionName: grp.name })));
@@ -243,6 +245,8 @@ export class GeneratorService {
         minRestHours: options.minRestHours,
         offDaysPerWeek: options.offDaysPerWeek,
         onLeave,
+        offStrategy: options.offStrategy,
+        rotationFairness: options.rotationFairness,
       });
     }
 
@@ -333,6 +337,9 @@ export class GeneratorService {
         criticalDays: days.filter(d => d.riskStatus === 'critical').length,
         safeDays:     days.filter(d => d.riskStatus === 'safe').length,
         fairnessBasis: 'pre-swap (approved swaps reversed before counting — swaps cannot game rotation)',
+        // Behavioral-merge options actually applied to this run (Director 2026-07-08)
+        offStrategy: options.offStrategy ?? 'lowest-demand',
+        rotationFairness: !!options.rotationFairness,
       },
     };
   }
@@ -1101,6 +1108,90 @@ export class GeneratorService {
       );
     }
 
+    return versionId;
+  }
+
+  /**
+   * Save a DEMAND-DRIVEN result as a draft schedule_version (behavioral merge
+   * D-077 — completes generate-demand → save → publish end-to-end). Same
+   * lifecycle as the classic saveDraft: the existing versions/:id/publish path
+   * applies it to agents unchanged. fairness_score stays NULL (the demand
+   * result reports coverage risk, not a fairness index — never fake a number).
+   */
+  async saveDemandDraft(
+    tenantId: string,
+    demand: Awaited<ReturnType<GeneratorService['generateDemandDriven']>>,
+    generatedByUserId: string,
+    label?: string,
+  ): Promise<string> {
+    const existing = await this.ds.query(
+      `SELECT version_number FROM schedule_versions
+       WHERE tenant_id = $1 AND period_start = $2 AND status = 'draft'
+       ORDER BY version_number DESC LIMIT 1`,
+      [tenantId, demand.weekStart],
+    );
+    const versionNumber = existing.length > 0 ? existing[0].version_number + 1 : 1;
+
+    const [version] = await this.ds.query(
+      `INSERT INTO schedule_versions
+         (id, tenant_id, period_type, period_start, period_end, status,
+          version_number, label, notes, generated_at, generated_by,
+          coverage_gaps, fairness_score, total_employees, total_working_entries, created_by)
+       VALUES
+         (gen_random_uuid(), $1, 'weekly', $2, $3, 'draft',
+          $4, $5, $6, NOW(), $7,
+          $8, NULL, $9, $10, $7)
+       RETURNING id`,
+      [
+        tenantId, demand.weekStart, demand.weekEnd, versionNumber,
+        label ?? `Demand draft v${versionNumber} — Week of ${demand.weekStart}`,
+        `Demand-driven: ${demand.summary.unfilledSlots} unfilled, ${demand.summary.residualGapIntervals} residual gap intervals, ` +
+          `${demand.summary.criticalDays} critical day(s) [offStrategy=${(demand.summary as any).offStrategy}, rotationFairness=${(demand.summary as any).rotationFairness}]`,
+        generatedByUserId,
+        JSON.stringify(demand.unfilled ?? []),
+        demand.summary.employees,
+        demand.summary.totalShiftsPlanned,
+      ],
+    );
+    const versionId: string = version.id;
+
+    // Grid rows → schedule_entries (same shape/marker mapping as the classic path)
+    const entries: any[] = [];
+    for (const row of demand.grid) {
+      for (const [entryDate, code] of Object.entries(row.days ?? {})) {
+        entries.push({
+          versionId, tenantId,
+          employeeId: row.employeeId,
+          entryDate,
+          shiftCodeDisplay: code,
+          attendanceMarker: code === 'OFF' ? 'off' : 'present',
+          validationFlags: null,
+        });
+      }
+    }
+    for (let i = 0; i < entries.length; i += 100) {
+      const batch = entries.slice(i, i + 100);
+      const values = batch
+        .map((_, j) => {
+          const base = j * 7;
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7})`;
+        })
+        .join(', ');
+      const params: any[] = [];
+      batch.forEach((e) => {
+        params.push(e.versionId, e.tenantId, e.employeeId, e.entryDate,
+          e.shiftCodeDisplay, e.attendanceMarker, e.validationFlags);
+      });
+      await this.ds.query(
+        `INSERT INTO schedule_entries
+           (id, schedule_version_id, tenant_id, employee_id, entry_date,
+            shift_code_display, attendance_marker, validation_flags, created_at, updated_at)
+         SELECT gen_random_uuid(), vals.vid::uuid, vals.tid::uuid, vals.eid::uuid, vals.dt::date,
+                vals.scd, vals.am::attendance_marker_enum, vals.vf::jsonb, NOW(), NOW()
+         FROM (VALUES ${values}) AS vals(vid, tid, eid, dt, scd, am, vf)`,
+        params,
+      );
+    }
     return versionId;
   }
 

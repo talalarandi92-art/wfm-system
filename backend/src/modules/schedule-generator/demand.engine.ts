@@ -1,6 +1,10 @@
 /**
- * DEMAND-DRIVEN SCHEDULE ENGINE — the two-phase approach used by enterprise
- * WFM (NICE IEX, Verint, Calabrio):
+ * DEMAND-DRIVEN SCHEDULE ENGINE — THE generator (behavioral merge approved by
+ * the Director 2026-07-08): the classic engine's weekend-fair OFF structure and
+ * rotation-band fairness are grafted in as options (offStrategy /
+ * rotationFairness); the demand basis, per-function allocation and honest gaps
+ * stay primary. Two-phase approach used by enterprise WFM (NICE IEX, Verint,
+ * Calabrio):
  *
  *   Phase 1 — SHIFT-MIX OPTIMIZATION (greedy weighted set-cover):
  *     Given a required-HC curve (48 × 30-min intervals) and the shift catalog,
@@ -18,7 +22,7 @@
  */
 
 import { ShiftDef, SHIFTS, EmployeeInfo, ShiftDistribution, allowedShiftCodes } from './generator.types';
-import { calcRestHours } from './generator.engine';
+import { calcRestHours, assignOffDays, ROTATION_NEXT } from './generator.engine';
 
 /* ── Interval helpers ─────────────────────────────────────────────────────── */
 
@@ -72,29 +76,85 @@ export function computeShiftMix(
   const mix: Record<string, number> = {};
   let placed = 0;
 
+  const apply = (code: string, dir: 1 | -1) => {
+    for (const i of shiftSlots(SHIFT_BY_CODE[code]).today) {
+      deficit[i] -= dir;
+      staffed[i] += dir;
+    }
+    mix[code] = (mix[code] ?? 0) + dir;
+    if (mix[code] <= 0) delete mix[code];
+    placed += dir;
+  };
+  const totalDeficit = (d: number[]) => d.reduce((s, x) => s + Math.max(0, x), 0);
+  const maxDeficit = (d: number[]) => Math.max(0, ...d);
+
   // Greedy: repeatedly add the one shift that erases the most remaining deficit.
   // Tie-break toward shifts covering the single worst interval.
-  while (placed < maxStaffPerDay) {
-    let best: { code: string; reduction: number; coversPeak: boolean } | null = null;
-    const peakIdx = deficit.indexOf(Math.max(...deficit));
-    for (const code of WORKING_CODES) {
-      const slots = shiftSlots(SHIFT_BY_CODE[code]).today;
-      const reduction = slots.reduce((s, i) => s + Math.max(0, Math.min(1, deficit[i])), 0);
-      if (reduction <= 0) continue;
-      const coversPeak = slots.includes(peakIdx);
-      if (!best
-          || reduction > best.reduction + 1e-9
-          || (Math.abs(reduction - best.reduction) < 1e-9 && coversPeak && !best.coversPeak)) {
-        best = { code, reduction, coversPeak };
+  const greedyFill = () => {
+    while (placed < maxStaffPerDay) {
+      let best: { code: string; reduction: number; coversPeak: boolean } | null = null;
+      const peakIdx = deficit.indexOf(Math.max(...deficit));
+      for (const code of WORKING_CODES) {
+        const slots = shiftSlots(SHIFT_BY_CODE[code]).today;
+        const reduction = slots.reduce((s, i) => s + Math.max(0, Math.min(1, deficit[i])), 0);
+        if (reduction <= 0) continue;
+        const coversPeak = slots.includes(peakIdx);
+        if (!best
+            || reduction > best.reduction + 1e-9
+            || (Math.abs(reduction - best.reduction) < 1e-9 && coversPeak && !best.coversPeak)) {
+          best = { code, reduction, coversPeak };
+        }
+      }
+      if (!best) break; // nothing reduces deficit anymore
+      apply(best.code, 1);
+    }
+  };
+
+  greedyFill();
+
+  // ── Edge-patch pass. The greedy favors mid-day-heavy shifts (B/C cover the most
+  // deficit slots), which can (a) strand window-open/close edges — 08:00 is coverable
+  // ONLY by M, 18–20 only by C/N/EE — and (b) place redundant shifts (5 bodies where
+  // 4 cover). Local improvement fixes both without touching feasible plans:
+  //   1. drop any shift whose every covered slot is already in surplus,
+  //   2. 1-for-1 swaps that strictly reduce the total residual deficit
+  //      (tie-break: reduce the single worst interval — the −2-at-08:00 case),
+  //   3. re-run the greedy with the freed ceiling.
+  // Every step strictly improves (total, worst) or reduces bodies → terminates.
+  for (let guard = 0; guard < 16; guard++) {
+    let changed = false;
+    for (const code of Object.keys(mix)) {
+      while ((mix[code] ?? 0) > 0
+             && shiftSlots(SHIFT_BY_CODE[code]).today.every(i => deficit[i] < 0)) {
+        apply(code, -1);
+        changed = true;
       }
     }
-    if (!best) break; // nothing reduces deficit anymore
-    mix[best.code] = (mix[best.code] ?? 0) + 1;
-    for (const i of shiftSlots(SHIFT_BY_CODE[best.code]).today) {
-      deficit[i] -= 1;
-      staffed[i] += 1;
+    for (let swaps = 0; swaps < 64; swaps++) {
+      const t0 = totalDeficit(deficit), m0 = maxDeficit(deficit);
+      if (t0 <= 0) break;
+      let best: { from: string; to: string; t: number; m: number } | null = null;
+      for (const from of Object.keys(mix)) {
+        for (const to of WORKING_CODES) {
+          if (to === from) continue;
+          const d2 = [...deficit];
+          for (const i of shiftSlots(SHIFT_BY_CODE[from]).today) d2[i] += 1;
+          for (const i of shiftSlots(SHIFT_BY_CODE[to]).today) d2[i] -= 1;
+          const t = totalDeficit(d2), m = maxDeficit(d2);
+          const improves = t < t0 || (t === t0 && m < m0);
+          if (improves && (!best || t < best.t || (t === best.t && m < best.m))) {
+            best = { from, to, t, m };
+          }
+        }
+      }
+      if (!best) break;
+      apply(best.from, -1);
+      apply(best.to, 1);
+      changed = true;
     }
-    placed++;
+    const before = placed;
+    greedyFill();
+    if (!changed && placed === before) break;
   }
 
   const residualGaps = deficit
@@ -138,6 +198,22 @@ export function assignRoster(
     minRestHours: number; offDaysPerWeek: number; maxConsecutive?: number;
     /** empId → dates with APPROVED leave — assigned 'L', excluded from staffing */
     onLeave?: Map<string, Set<string>>;
+    /**
+     * OFF placement (behavioral merge, Director-approved 2026-07-08):
+     *   'lowest-demand' (default) — OFFs land on the days whose mix asks for the
+     *     fewest bodies, staggered by a 35%/day cap (max coverage strategy).
+     *   'weekend-fair' — the classic engine's structure: ONE weekend OFF (Thu/Fri)
+     *     + one mid-week OFF, weekend slot rationed by YTD weekend-OFF fairness.
+     */
+    offStrategy?: 'lowest-demand' | 'weekend-fair';
+    /**
+     * Classic rotation-band fairness (behavioral merge): each employee gets a weekly
+     * target band from last week's category (night→afternoon→morning→midnight→night;
+     * females rotate morning↔afternoon only) and, among equally-fair candidates,
+     * band-matching employees are preferred — weekly consistency without ever
+     * overriding gender/rest/function rules or the least-share fairness order.
+     */
+    rotationFairness?: boolean;
   },
 ): DemandRosterResult {
   const MAX_CONSEC = opts.maxConsecutive ?? 6;
@@ -162,31 +238,50 @@ export function assignRoster(
   const offUsed = new Map<string, number>(employees.map(e => [e.id, 0]));
   const offToday = new Map<string, Set<string>>(); // date → employee ids OFF
 
-  // ── OFF planning: place OFFs on the days with the LOWEST demand,
-  //    forcing them for anyone hitting the consecutive-days ceiling.
-  const demandOfDay = dates.map(d => {
-    const m = mixByDate.get(d) ?? {};
-    return { date: d, demand: Object.values(m).reduce((a, b) => a + b, 0) };
-  });
-  const lowDemandOrder = [...demandOfDay].sort((a, b) => a.demand - b.demand).map(x => x.date);
-
+  // ── OFF planning — two Director-tested strategies (behavioral merge):
+  //    default 'lowest-demand' places OFFs where the mix asks for the fewest bodies;
+  //    'weekend-fair' grafts the classic structure (one weekend + one mid-week OFF,
+  //    weekend slot rationed by YTD weekend-OFF fairness) via the SAME assignOffDays
+  //    the classic engine uses. Streak repair below applies to both.
   for (const date of dates) offToday.set(date, new Set());
-  for (const emp of employees) {
-    // 1) Place the weekly allowance on the LOWEST-demand days (35%/day cap staggers the pool).
-    let need = opts.offDaysPerWeek;
-    const mine = new Set<string>();
-    for (const date of lowDemandOrder) {
-      if (need <= 0) break;
-      const set = offToday.get(date)!;
-      if (set.has(emp.id)) continue;
-      if (set.size >= Math.floor(employees.length * 0.35)) continue;
-      set.add(emp.id); mine.add(date); need--;
+  const plannedOff = new Map<string, Set<string>>();
+
+  if (opts.offStrategy === 'weekend-fair') {
+    const offMap = assignOffDays(employees, dates, opts.offDaysPerWeek, priorConsecutive, ytdDist, dates[0]);
+    for (const emp of employees) {
+      const mine = new Set<string>(offMap.get(emp.id) ?? []);
+      plannedOff.set(emp.id, mine);
+      for (const d of mine) offToday.get(d)!.add(emp.id);
     }
-    // 2) Streak repair WITH the planned OFFs credited (the old pre-pass counted every
-    //    date as working, so on a 7-day week EVERY employee got a forced OFF on day 7
-    //    and the whole pool went dark). If a streak would exceed MAX_CONSEC, MOVE one
-    //    of this employee's LATER planned OFFs to the breaking date (total stays =
-    //    allowance); only when none exists is an extra forced-rest OFF legal.
+  } else {
+    const demandOfDay = dates.map(d => {
+      const m = mixByDate.get(d) ?? {};
+      return { date: d, demand: Object.values(m).reduce((a, b) => a + b, 0) };
+    });
+    const lowDemandOrder = [...demandOfDay].sort((a, b) => a.demand - b.demand).map(x => x.date);
+
+    for (const emp of employees) {
+      // Place the weekly allowance on the LOWEST-demand days (35%/day cap staggers the pool).
+      let need = opts.offDaysPerWeek;
+      const mine = new Set<string>();
+      for (const date of lowDemandOrder) {
+        if (need <= 0) break;
+        const set = offToday.get(date)!;
+        if (set.has(emp.id)) continue;
+        if (set.size >= Math.floor(employees.length * 0.35)) continue;
+        set.add(emp.id); mine.add(date); need--;
+      }
+      plannedOff.set(emp.id, mine);
+    }
+  }
+
+  for (const emp of employees) {
+    // Streak repair WITH the planned OFFs credited (the old pre-pass counted every
+    // date as working, so on a 7-day week EVERY employee got a forced OFF on day 7
+    // and the whole pool went dark). If a streak would exceed MAX_CONSEC, MOVE one
+    // of this employee's LATER planned OFFs to the breaking date (total stays =
+    // allowance); only when none exists is an extra forced-rest OFF legal.
+    const mine = plannedOff.get(emp.id)!;
     let c = consec.get(emp.id) ?? 0;
     for (const date of dates) {
       if (mine.has(date)) { c = 0; continue; }
@@ -198,6 +293,27 @@ export function assignRoster(
         c = 0;
       }
     }
+  }
+
+  // ── Rotation-band targets (classic graft, opts.rotationFairness) ──
+  const targetBand = new Map<string, string>();
+  if (opts.rotationFairness) {
+    employees.forEach((e, idx) => {
+      const last = lastShiftBeforeWeek.get(e.id);
+      let band = last && last.code !== 'OFF'
+        ? (ROTATION_NEXT[last.category] ?? 'morning')
+        : ['morning', 'afternoon', 'night', 'midnight'][idx % 4];   // no history → spread by position
+      if (e.gender === 'female') {
+        // Same female rotation guard as the classic engine: rotate only through the
+        // bands she may actually work (morning↔afternoon) — never a blocked band.
+        const bands = ['morning', 'afternoon'];
+        if (!bands.includes(band)) {
+          const prev = last?.category && bands.includes(last.category) ? last.category : 'afternoon';
+          band = bands[(bands.indexOf(prev) + 1) % bands.length];
+        }
+      }
+      targetBand.set(e.id, band);
+    });
   }
 
   // ── Day-by-day assignment, hardest shifts first (midnights → cross-midnight evenings → …)
@@ -270,7 +386,14 @@ export function assignRoster(
         // Fairness: least share of this CATEGORY (YTD + this week); then rotate the SPECIFIC CODE
         // (so day-locked employees cycle M→B→C instead of freezing); then least total load; then a
         // deterministic id tiebreak (never fall back to array order — that is what froze the women).
+        // With rotationFairness: the weekly band target leads — employees whose band matches this
+        // shift's category are preferred (weekly consistency), fairness ordering inside each group.
         pool.sort((a, b) => {
+          if (targetBand.size) {
+            const ba = targetBand.get(a.id) === shift.category ? 0 : 1;
+            const bb = targetBand.get(b.id) === shift.category ? 0 : 1;
+            if (ba !== bb) return ba - bb;
+          }
           const wa = weekCount.get(a.id)![cat] + share(ytdDist.get(a.id), cat);
           const wb = weekCount.get(b.id)![cat] + share(ytdDist.get(b.id), cat);
           if (Math.abs(wa - wb) > 1e-9) return wa - wb;
@@ -302,7 +425,11 @@ export function assignRoster(
     for (const e of employees) {
       if (assignedToday.has(e.id)) continue;
       const mustRest = (consec.get(e.id) ?? 0) >= MAX_CONSEC;   // forced-rest OFF stays legal
-      if ((offUsed.get(e.id) ?? 0) >= opts.offDaysPerWeek && !mustRest) {
+      // weekend-fair keeps the planned OFF STRUCTURE fixed (classic-engine parity):
+      // surplus people WORK on non-planned days (labeled overstaffing) instead of
+      // taking early surplus OFFs that would cannibalize the Thu/Fri weekend slot.
+      const structuredOff = opts.offStrategy === 'weekend-fair';
+      if (((offUsed.get(e.id) ?? 0) >= opts.offDaysPerWeek || structuredOff) && !mustRest) {
         // Next-best working shift: eligible + fairest category share
         const allowed = allowedShiftCodes(e.functionName);
         const candidates = WORKING_CODES.filter(code => {
@@ -325,6 +452,21 @@ export function assignRoster(
           prevShift.set(e.id, SHIFT_BY_CODE[code]);
           warnings.push(`${date}: ${e.name} — فائض تغطية: أُسند ${code} لأن رصيد الـ OFF الأسبوعي مكتمل [overstaffing]`);
           continue;
+        }
+      }
+      // Weekend-fair structure guard: a surplus OFF today must REPLACE a future
+      // planned OFF (mid-week first) instead of silently burning the allowance —
+      // otherwise the register step later releases the planned Thu/Fri slot and
+      // the weekend-fairness the strategy exists for is destroyed.
+      if (opts.offStrategy === 'weekend-fair') {
+        const future = dates.filter(d => d > date && offToday.get(d)!.has(e.id));
+        let over = (offUsed.get(e.id) ?? 0) + 1 + future.length - opts.offDaysPerWeek;
+        const weekend = new Set([dates[5], dates[6]]);
+        const dropOrder = [...future.filter(d => !weekend.has(d)), ...future.filter(d => weekend.has(d))];
+        for (const drop of dropOrder) {
+          if (over <= 0) break;
+          offToday.get(drop)!.delete(e.id);
+          over--;
         }
       }
       assignments.push({ employeeId: e.id, date, code: 'OFF' });

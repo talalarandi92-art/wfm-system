@@ -133,6 +133,24 @@ Users: WFM Analyst/Supervisor; agents consume the published result.
   **Soft-lock auto-engages on roster upload** = admin-edit-with-audit (memory `schedule_analysis_and_lock`).
 - **Fairness/rotation generator** (`/schedule-generator`, `generateWeeklySchedule`): female & function shift
   policies, rest/OFF rules, shift-rate before/after. ("Save as Draft" 500 fixed — memory `generator_save_fix`.)
+- **THE generator = `POST /schedule-generator/generate-demand`** (behavioral merge D-077, 2026-07-08):
+  staffing-engine forecast→Erlang demand basis, per-function allocation, honest gaps; `computeShiftMix`
+  now runs an **edge-patch pass** after the greedy (drops redundant bodies, swaps mid-day shifts toward
+  stranded window edges — fixed the −2@08:00/18–20 residuals, L-013). Classic structures as options:
+  `options.offStrategy:'weekend-fair'` (one Thu/Fri OFF + one mid-week OFF via the classic `assignOffDays`,
+  YTD weekend-OFF fairness; surplus works as labeled overstaffing) and `options.rotationFairness:true`
+  (weekly band cycle night→afternoon→morning→midnight, females morning↔afternoon, leading fairness
+  tiebreak). Defaults unchanged (lowest-demand OFF, rotation off). Classic `/generate` kept for comparison
+  until the UI repoints (retirement = P1 tail). `hiring-now` exposes the schedulable view
+  (`scheduleBodiesWorstDay`/`fieldablePerDay`/`coverageGapBodies`).
+  **End-to-end UI (same date):** `ScheduleGenerator.tsx` now has an engine-mode switch with
+  **Demand ★ as the default** (classic kept for comparison) — demand options (OFF placement /
+  band rotation), per-day coverage-vs-demand table (00–07 footnote), honest warnings/unfilled,
+  per-function proposed grid, and Save-as-Draft via the new
+  `POST /schedule-generator/generate-demand/save` (writes a normal draft `schedule_version` +
+  entries; existing `versions/:id/publish` applies it to agents unchanged — live round-trip
+  verified: 728 entries/104×7, then deleted). The Staffing Engine hiring card shows the
+  schedulable-view columns (bodies/day · fieldable/day · coverage gap).
 - **Demand-driven chain** (RULES §10, memory `demand_scheduling_chain`) — all on `roster_days`, endpoints under
   `attendance-recon/roster-v2/*`, UI `ScheduleDemand.tsx` (`/analytics?tab=generate`):
   1. `GET roster-v2/generate` — demand[24] from the real coverage pattern; shift defs via MODE() of real

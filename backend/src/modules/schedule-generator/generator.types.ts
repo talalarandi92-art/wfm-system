@@ -229,6 +229,15 @@ export interface GeneratorOptions {
   // shift for THIS run (chosen at generate time). Beyond the permanent
   // per-function `femaleAllowLate` config (e.g. OMT).
   femaleLateFunctionIds?: string[];
+  // ── Behavioral merge (Director-approved 2026-07-08): the demand-driven engine is
+  //    THE generator; the classic engine's structures are available as options. ──
+  // OFF placement: 'lowest-demand' (default — max coverage) or 'weekend-fair'
+  // (classic structure: one weekend Thu/Fri OFF + one mid-week OFF, weekend slot
+  // rationed by YTD weekend-OFF fairness).
+  offStrategy?: 'lowest-demand' | 'weekend-fair';
+  // Classic weekly rotation-band preference (night→afternoon→morning→midnight;
+  // females morning↔afternoon only) as the leading fairness tiebreak.
+  rotationFairness?: boolean;
 }
 
 // ─── Generator Result ─────────────────────────────────────────────────────────

@@ -469,7 +469,9 @@ export default function StaffingEnginePage() {
                 <tr style={{ borderBottom: `1px solid ${border}` }}>
                   {[ar ? 'الفنكشن' : 'Function', ar ? 'المطلوب (ذروة الفترة)' : 'Required (period peak)',
                     ar ? 'فريقك الحالي' : 'Current team', ar ? 'الفجوة' : 'Gap',
-                    ar ? '⬅ توظف' : '⬅ Hire', ar ? 'أثقل يوم' : 'Worst day'].map((h, i) => (
+                    ar ? '⬅ توظف' : '⬅ Hire',
+                    ar ? 'أجساد/يوم للتغطية' : 'Bodies/day to cover', ar ? 'يقدر يجدول/يوم' : 'Fieldable/day',
+                    ar ? 'فجوة الجدولة' : 'Coverage gap', ar ? 'أثقل يوم' : 'Worst day'].map((h, i) => (
                     <th key={i} className="px-2 py-1 font-bold" style={{ color: tSec, textAlign: i === 0 ? 'start' : 'center' }}>{h}</th>
                   ))}
                 </tr>
@@ -484,6 +486,14 @@ export default function StaffingEnginePage() {
                     <td className="px-2 py-1.5 text-center font-black tabular-nums" style={{ color: f.internsToHire > 0 ? '#f87171' : '#4ade80' }}>
                       {f.internsToHire > 0 ? `+${f.internsToHire}` : '✓'}
                     </td>
+                    {/* Schedulable view (D-077): 9h shifts over the full hourly curve vs pool − 2 OFF/wk */}
+                    <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>{f.scheduleBodiesWorstDay ?? '—'}</td>
+                    <td className="px-2 py-1.5 text-center tabular-nums" style={{ color: tPri }}>{f.fieldablePerDay ?? '—'}</td>
+                    <td className="px-2 py-1.5 text-center font-bold tabular-nums"
+                      title={ar ? 'فجوة > 0 = المولّد سيُظهر عجزاً بساعات الحواف حتى لو الذروة تبدو مغطاة' : '> 0 → the generator WILL show edge-hour residual gaps even if the peak looks covered'}
+                      style={{ color: (f.coverageGapBodies ?? 0) > 0 ? '#fbbf24' : '#4ade80' }}>
+                      {(f.coverageGapBodies ?? 0) > 0 ? `−${f.coverageGapBodies}` : '✓'}
+                    </td>
                     <td className="px-2 py-1.5 text-center" style={{ color: tSec }}>{f.worstDay ?? '—'}</td>
                   </tr>
                 ))}
@@ -491,8 +501,8 @@ export default function StaffingEnginePage() {
             </table>
           </div>
           <div className="text-[8.5px] mt-1.5" style={{ color: tSec }}>
-            {ar ? 'ذروة متطلبات الفترة (شامل الشرينكج/الإنتاجية/نوافذ التشغيل) مقابل الفريق النشط — هذه أرضية التوظيف؛ ولإيفنت بأرقامك أنت استخدم قالب الإكسل تحت.'
-                : 'Period peak requirement (incl. shrinkage/productivity/operating windows) vs the active team — the hiring floor; for events with YOUR numbers use the Excel template below.'}
+            {ar ? 'ذروة متطلبات الفترة (شامل الشرينكج/الإنتاجية/نوافذ التشغيل) مقابل الفريق النشط — هذه أرضية التوظيف. «أجساد/يوم للتغطية» = كم شخص يلزم جدولته بورديات 9 ساعات ليغطي منحنى الساعات كاملاً؛ «يقدر يجدول/يوم» = الفريق ناقص OFF أسبوعين؛ فجوة الجدولة الصفراء = المولّد سيعرض عجز حواف صادق. قرار التوظيف ما زال على الذروة؛ ولإيفنت بأرقامك أنت استخدم قالب الإكسل تحت.'
+                : 'Period peak requirement (incl. shrinkage/productivity/operating windows) vs the active team — the hiring floor. "Bodies/day to cover" = people needed on 9h shifts to cover the FULL hourly curve; "Fieldable/day" = team minus 2 OFF/week; an amber coverage gap → the generator will show honest edge-hour residuals. The hire verdict stays keyed to the peak; for events with YOUR numbers use the Excel template below.'}
           </div>
         </div>
       )}

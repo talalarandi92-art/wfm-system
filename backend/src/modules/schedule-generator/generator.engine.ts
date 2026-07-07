@@ -313,7 +313,7 @@ function spreadCapacity(
  * one OFF mid-week + one at the weekend naturally keeps runs short, and a run of
  * 5–7 days now and then is acceptable (it must never inflate the OFF count).
  */
-function assignOffDays(
+export function assignOffDays(
   employees: EmployeeInfo[],
   dates: string[],
   offDaysPerWeek: number,

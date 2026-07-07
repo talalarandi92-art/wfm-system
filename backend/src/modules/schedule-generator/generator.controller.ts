@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Query, Body, UseGuards, Request } from '@nestjs/common';
 import {
   IsString, IsOptional, IsArray, IsBoolean, IsNumber,
-  IsObject, ValidateNested, Min, Max,
+  IsObject, ValidateNested, Min, Max, IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
@@ -17,6 +17,9 @@ class GeneratorOptionsDto {
   @IsOptional() @IsNumber() @Min(1) @Max(4)   weeks?: number;
   @IsOptional() @IsArray()                    functionIds?: string[];
   @IsOptional() @IsArray()                    femaleLateFunctionIds?: string[];
+  // Behavioral merge (Director 2026-07-08): classic structures as options
+  @IsOptional() @IsIn(['lowest-demand', 'weekend-fair']) offStrategy?: 'lowest-demand' | 'weekend-fair';
+  @IsOptional() @IsBoolean()                  rotationFairness?: boolean;
 }
 
 class GenerateDto {
@@ -61,10 +64,12 @@ export class GeneratorController {
   }
 
   /**
-   * POST /schedule-generator/generate-demand
-   * Demand-driven generation: shift mix optimized against the measured
-   * required-HC curve (capacity live-plan), then roster assignment under
-   * gender/rest/consecutive/fairness rules. Gaps reported honestly.
+   * POST /schedule-generator/generate-demand — THE generator (behavioral merge,
+   * Director-approved 2026-07-08): staffing-engine forecast→Erlang demand basis,
+   * per-function allocation, honest gaps; classic engine's weekend-fair OFF
+   * structure + rotation-band fairness available via options.offStrategy /
+   * options.rotationFairness. The classic /generate remains for comparison and
+   * is slated for retirement once the UI is fully repointed.
    */
   @Post('generate-demand')
   @RequirePermissions('schedule.generate')
@@ -73,6 +78,23 @@ export class GeneratorController {
     @Body() body: { weekStart: string; options?: any },
   ) {
     return this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
+  }
+
+  /**
+   * POST /schedule-generator/generate-demand/save — regenerate + save the
+   * demand-driven result as a draft schedule_version (D-077). The existing
+   * versions/:id/publish path then applies it to agents unchanged.
+   */
+  @Post('generate-demand/save')
+  @RequirePermissions('schedule.create')
+  async saveDemand(
+    @Request() req: any,
+    @Body() body: { weekStart: string; options?: any; label?: string },
+  ) {
+    const result = await this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
+    const versionId = await this.svc.saveDemandDraft(req.user.tenantId, result, req.user.userId, body.label);
+    await this.svc.logFemaleOverride(req.user.tenantId, req.user.userId ?? null, body.options);
+    return { ...result, versionId };
   }
 
   /**
