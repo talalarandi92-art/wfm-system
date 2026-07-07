@@ -687,7 +687,16 @@ export class RequestsService {
         await this.applyLeaveToSchedule(tenantId, requestId, req.type_code, approverId);
       } else if (req.type_code === 'permission') {
         await this.applyPermissionToRoster(tenantId, requestId);
+      } else if (req.type_code === 'break') {
+        // bug #9: an approved break must land on the day's break PLAN (break_slots)
+        // so RTA's break timeline/tracker sees it — approval was cosmetic before.
+        await this.applyBreakToPlan(tenantId, requestId, approverId);
       }
+      // NOTE overtime (bug #9, resolved by design): an approved OT request is an
+      // AUTHORIZATION consumed live by week-forecast coverage (status='approved' CTE);
+      // the PAID minutes stay evidence-based in the recon engine (BR-OT-004) — never
+      // patched into roster_days here. Engine-side auto-clear of the >2h review flag
+      // for pre-approved OT rides the §14 perms{}-from-DB wiring.
     } catch (e) {
       // apply failed → release the claim so the request stays actionable (old contract)
       await this.ds.query(
@@ -936,6 +945,46 @@ export class RequestsService {
 
   /** Stamp an APPROVED permission onto the canonical roster row for that date so
    *  tardiness/conformance reads (permission_type IS NOT NULL) fold it in. */
+  /** bug #9: project an approved break request onto the day's break plan (break_slots),
+   *  so the RTA break tracker/timeline shows it. Skips silently when the request has no
+   *  plannable window or the day's plan would conflict — the approval itself still stands. */
+  private async applyBreakToPlan(tenantId: string, requestId: string, approverId: string | null) {
+    const [rb] = await this.ds.query(
+      `SELECT r.employee_id, rb.break_date::text AS break_date, rb.start_time, rb.end_time,
+              rb.duration_minutes, rb.break_type
+       FROM requests r JOIN request_breaks rb ON rb.request_id = r.id
+       WHERE r.id = $1 AND r.tenant_id = $2`,
+      [requestId, tenantId],
+    );
+    if (!rb?.break_date || !rb.start_time) return;   // nothing plannable
+
+    // break type by requested name; else nearest active type by duration; else skip.
+    const [bt] = await this.ds.query(
+      `SELECT id FROM break_types
+       WHERE tenant_id = $1 AND is_active
+       ORDER BY (LOWER(name) = LOWER($2)) DESC,
+                ABS(duration_minutes - COALESCE($3::int, duration_minutes)) ASC
+       LIMIT 1`,
+      [tenantId, String(rb.break_type ?? ''), rb.duration_minutes ?? null],
+    );
+    if (!bt) return;
+
+    const [slot] = await this.ds.query(
+      `SELECT COALESCE(MAX(slot_number), 0) + 1 AS n FROM break_slots
+       WHERE tenant_id = $1 AND employee_id = $2 AND schedule_date = $3::date`,
+      [tenantId, rb.employee_id, rb.break_date],
+    );
+    await this.ds.query(
+      `INSERT INTO break_slots
+         (tenant_id, employee_id, schedule_date, break_type_id, slot_number,
+          planned_start, planned_end, generated_by, status, created_by_id, notes)
+       VALUES ($1,$2,$3::date,$4,$5,$6::time,$7::time,'manual','scheduled',$8,$9)
+       ON CONFLICT (tenant_id, employee_id, schedule_date, slot_number) DO NOTHING`,
+      [tenantId, rb.employee_id, rb.break_date, bt.id, +slot.n,
+       rb.start_time, rb.end_time ?? rb.start_time, approverId, `approved break request ${requestId}`],
+    );
+  }
+
   private async applyPermissionToRoster(tenantId: string, requestId: string) {
     const rows = await this.ds.query(
       `SELECT rp.permission_date::text AS pdate, rp.start_time::text AS st, rp.end_time::text AS et,
