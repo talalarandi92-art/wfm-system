@@ -599,34 +599,66 @@ export class ScorecardController {
   /* ════════════════════════════════════════════════════════════════════════
      PERFORMANCE ANALYZE — cumulative across ALL months: trend, KPI gaps,
      coaching-need (+ why), intern keep/let-go. Frontline ranked; interns review-only.
+     Cross-month series = canonical scorecard_monthly (Net Points per employee×month,
+     imported from the real SCORED workbooks). scorecard_entries holds ONE month and
+     only supplies the per-KPI breakdown + attendance of its batch.
   ════════════════════════════════════════════════════════════════════════ */
   @Get('analyze')
-  @ApiOperation({ summary: 'Cumulative performance analysis across all uploaded months' })
+  @ApiOperation({ summary: 'Cumulative performance analysis across all scored months (scorecard_monthly)' })
   async analyze(@CurrentUser() user: any, @Query('function') fn?: string) {
     const tid = user.tenantId;
-    const batches = await this.ds.query(
-      `SELECT id, period_year, period_month, period_name FROM scorecard_batches
-       WHERE tenant_id=$1 AND status='active' ORDER BY period_year, period_month`, [tid]);
-    if (!batches.length) return { months: [], employees: [], interns: [], insights: {} };
-    const batchIds = batches.map((b: any) => b.id);
-    const order: Record<string, number> = {}; batches.forEach((b: any, i: number) => (order[b.id] = i));
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'];
+    const monthsAxis = await this.ds.query(
+      `SELECT year, month FROM scorecard_monthly WHERE tenant_id=$1
+       GROUP BY year, month ORDER BY year, month`, [tid]);
+    if (!monthsAxis.length) return { months: [], employees: [], interns: [], insights: {} };
+    const order: Record<string, number> = {};
+    monthsAxis.forEach((m: any, i: number) => (order[`${m.year}-${m.month}`] = i));
 
-    const aParams: any[] = [tid, batchIds];
+    const aParams: any[] = [tid];
     let aFn = '', aScope = '';
-    if (fn) { aParams.push(fn); aFn = `AND function_name = $${aParams.length}`; }
+    if (fn) { aParams.push(fn); aFn = `AND sm.function_name = $${aParams.length}`; }
     const scope = await this.resolveScope(user);
-    if (!scope.all) { aParams.push(scope.empNos); aScope = `AND employee_no = ANY($${aParams.length}::text[])`; }
+    if (!scope.all) {
+      // alias-aware scope: an agent's old intern id maps to the same person_no
+      const persons = (await this.ds.query(
+        `SELECT DISTINCT person_no FROM employee_identity
+         WHERE tenant_id=$1 AND employee_no = ANY($2::text[])`, [tid, scope.empNos]))
+        .map((p: any) => p.person_no);
+      aParams.push(scope.empNos, persons);
+      aScope = `AND (sm.employee_no = ANY($${aParams.length - 1}::text[]) OR i.person_no = ANY($${aParams.length}::text[]))`;
+    }
     const rows = await this.ds.query(
-      `SELECT batch_id, user_id_login, employee_name, employee_no, function_name, team_leader,
-              net_points, quality_score, aht_score, fcr_score, prr_points, productivity_score,
-              ctr_score, quiz_score, mistakes_score, response_time_score,
-              working_days_pct
-       FROM scorecard_entries
-       WHERE tenant_id=$1 AND batch_id = ANY($2) AND week_label='Final'
-       ${aFn} ${aScope}`,
+      `SELECT sm.year, sm.month, sm.employee_no, COALESCE(i.person_no, sm.employee_no) AS person_no,
+              sm.name AS employee_name, sm.function_name, sm.team_manager AS team_leader,
+              sm.avg_net_points
+       FROM scorecard_monthly sm
+       LEFT JOIN employee_identity i ON i.tenant_id = sm.tenant_id AND i.employee_no = sm.employee_no
+       WHERE sm.tenant_id=$1 ${aFn} ${aScope}
+       ORDER BY sm.year, sm.month`,
       aParams);
 
+    // per-KPI breakdown + attendance live only in the latest uploaded batch (one month)
+    const [kpiBatch] = await this.ds.query(
+      `SELECT id, period_year, period_month, period_name FROM scorecard_batches
+       WHERE tenant_id=$1 AND status='active'
+       ORDER BY period_year DESC, period_month DESC LIMIT 1`, [tid]);
+    const kpiByPerson = new Map<string, any>();
+    if (kpiBatch) {
+      const kRows = await this.ds.query(
+        `SELECT COALESCE(i.person_no, se.employee_no) AS person_no, se.user_id_login,
+                se.quality_score, se.aht_score, se.fcr_score, se.prr_points, se.productivity_score,
+                se.ctr_score, se.quiz_score, se.mistakes_score, se.response_time_score,
+                se.working_days_pct
+         FROM scorecard_entries se
+         LEFT JOIN employee_identity i ON i.tenant_id = se.tenant_id AND i.employee_no = se.employee_no
+         WHERE se.tenant_id=$1 AND se.batch_id=$2 AND se.week_label='Final'`, [tid, kpiBatch.id]);
+      for (const r of kRows) kpiByPerson.set(r.person_no, r);
+    }
+
     const toN = (v: any) => (v === null || v === undefined ? null : parseInt(v, 10));
+    const round1 = (v: number) => Math.round(v * 10) / 10;
     const KPI: [string, string][] = [['Quality', 'quality_score'], ['AHT', 'aht_score'], ['FCR', 'fcr_score'],
       ['PRR', 'prr_points'], ['Productivity', 'productivity_score'], ['CTR', 'ctr_score'],
       ['Quiz', 'quiz_score'], ['Common Mistakes', 'mistakes_score'], ['Response Time', 'response_time_score']];
@@ -646,38 +678,50 @@ export class ScorecardController {
     };
     const coachingFor = (weak: string[]) => weak.map(k => ({ kpi: k, ...(ADVICE[k] || { issue: `${k} below bar`, action: 'Review with TL', target: 'meet the bar' }) }));
 
+    // group by person (intern id + full-time id fold into one series)
     const emps: Record<string, any> = {};
     for (const r of rows) {
-      const e = (emps[r.user_id_login] = emps[r.user_id_login] || { loginId: r.user_id_login, name: r.employee_name, empNo: r.employee_no, func: r.function_name, tl: r.team_leader, series: [] });
-      e.series.push({ idx: order[r.batch_id], net: toN(r.net_points), row: r });
+      const e = (emps[r.person_no] = emps[r.person_no] || { personNo: r.person_no, empNo: r.employee_no, name: r.employee_name, func: r.function_name, tl: r.team_leader, byMonth: new Map<number, number[]>() });
+      // latest month row wins for identity/function labels (rows are month-ordered)
+      e.empNo = r.employee_no; e.name = r.employee_name || e.name;
+      e.func = r.function_name || e.func; e.tl = r.team_leader || e.tl;
+      const idx = order[`${r.year}-${r.month}`];
+      const net = r.avg_net_points == null ? null : Number(r.avg_net_points);
+      if (net != null) { const arr = e.byMonth.get(idx) || []; arr.push(net); e.byMonth.set(idx, arr); }
     }
 
     const employees = Object.values(emps).map((e: any) => {
-      e.series.sort((a: any, b: any) => a.idx - b.idx);
-      const nets = e.series.map((s: any) => s.net).filter((n: any) => n != null);
-      const latest = e.series[e.series.length - 1];
-      const trend = nets.length >= 2 ? nets[nets.length - 1] - nets[0] : 0;
-      const weak = latest ? KPI.filter(([, c]) => (toN(latest.row[c]) ?? 0) < 0).map(([n]) => n) : [];
-      const avgNet = nets.length ? Math.round(nets.reduce((a: number, b: number) => a + b, 0) / nets.length) : null;
-      const latestNet = latest ? toN(latest.row.net_points) : null;
+      // one net per month; two raw ids in the same month (id change) → mean
+      const series = [...e.byMonth.entries()]
+        .map(([idx, arr]: [number, number[]]) => ({ idx, net: round1(arr.reduce((a, b) => a + b, 0) / arr.length) }))
+        .sort((a, b) => a.idx - b.idx);
+      const nets = series.map(s => s.net);
+      const trend = nets.length >= 2 ? round1(nets[nets.length - 1] - nets[0]) : 0;
+      const avgNet = nets.length ? Math.round(nets.reduce((a, b) => a + b, 0) / nets.length) : null;
+      const latestNet = nets.length ? Math.round(nets[nets.length - 1]) : null;
+      const kpi = kpiByPerson.get(e.personNo);
+      const weak = kpi ? KPI.filter(([, c]) => (toN(kpi[c]) ?? 0) < 0).map(([n]) => n) : [];
       const needsCoaching = weak.length > 0 || (latestNet ?? 0) <= 0;
       return {
-        loginId: e.loginId, name: e.name, empNo: e.empNo, func: e.func, tl: e.tl, intern: isIntern(e.func),
-        months: e.series.map((s: any) => s.net), latestNet, avgNet, trend,
+        loginId: kpi?.user_id_login ?? e.empNo, name: e.name, empNo: e.empNo, func: e.func, tl: e.tl, intern: isIntern(e.func),
+        months: nets, latestNet, avgNet, trend,
         direction: trend > 0 ? 'improving' : trend < 0 ? 'declining' : 'flat',
         weakKpis: weak, needsCoaching, coaching: needsCoaching ? coachingFor(weak) : [],
-        attendance: latest && latest.row.working_days_pct != null ? Number(latest.row.working_days_pct) : null,
+        attendance: kpi && kpi.working_days_pct != null ? Number(kpi.working_days_pct) : null,
       };
     });
 
     const interns = employees.filter((e: any) => e.intern).map((e: any) => {
-      const att = e.attendance || 0, net = e.latestNet || 0;
-      const recommendation = att >= 0.85 && net >= 80 ? 'Keep' : att < 0.7 || net < 50 ? 'Let go' : 'Review';
-      const why = recommendation === 'Keep' ? `attendance ${Math.round(att * 100)}% + score ${net}`
+      const att = e.attendance, net = e.latestNet || 0;
+      // no attendance evidence (not in the latest KPI batch) → never recommend Let go on score alone
+      const recommendation = att == null ? (net >= 80 ? 'Keep' : 'Review')
+        : att >= 0.85 && net >= 80 ? 'Keep' : att < 0.7 || net < 50 ? 'Let go' : 'Review';
+      const why = att == null ? `score ${net} (no attendance data in latest KPI batch)`
+        : recommendation === 'Keep' ? `attendance ${Math.round(att * 100)}% + score ${net}`
         : recommendation === 'Let go' ? `low ${att < 0.7 ? 'attendance ' + Math.round(att * 100) + '%' : ''}${att < 0.7 && net < 50 ? ' & ' : ''}${net < 50 ? 'score ' + net : ''}`
         : `attendance ${Math.round(att * 100)}%, score ${net}`;
       return { ...e, recommendation, why };
-    }).sort((a: any, b: any) => (b.attendance + b.latestNet / 130) - (a.attendance + a.latestNet / 130));
+    }).sort((a: any, b: any) => ((b.attendance ?? 0) + (b.latestNet ?? 0) / 130) - ((a.attendance ?? 0) + (a.latestNet ?? 0) / 130));
 
     const frontline = employees.filter((e: any) => !e.intern);
     const insights = {
@@ -688,8 +732,12 @@ export class ScorecardController {
       topImprovers: [...frontline].sort((a, b) => b.trend - a.trend).slice(0, 5).map((e: any) => ({ name: e.name, func: e.func, trend: e.trend })),
       topDecliners: [...frontline].sort((a, b) => a.trend - b.trend).slice(0, 5).map((e: any) => ({ name: e.name, func: e.func, trend: e.trend })),
       internLetGo: interns.filter((i: any) => i.recommendation === 'Let go').length,
+      kpiSource: kpiBatch ? { periodName: kpiBatch.period_name, year: kpiBatch.period_year, month: kpiBatch.period_month } : null,
     };
-    return { months: batches.map((b: any) => ({ id: b.id, name: b.period_name, year: b.period_year, month: b.period_month })), employees, interns, insights };
+    return {
+      months: monthsAxis.map((m: any) => ({ id: `${m.year}-${String(m.month).padStart(2, '0')}`, name: `${MONTH_NAMES[m.month - 1]} ${m.year}`, year: m.year, month: m.month })),
+      employees, interns, insights,
+    };
   }
 
   /** Download rankings as Excel */

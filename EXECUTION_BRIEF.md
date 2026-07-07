@@ -111,7 +111,7 @@ The memory index is `.claude` project memory (`MEMORY.md`) — consult it when a
 | 12 | User account lifecycle unaudited (violates CLAUDE.md §31) | `users.service.ts` | add `audit_logs` writes (~1hr, reuse `auth.service.ts:26-58`) |
 | 13 | Hardcoded recon paths (session-UUID `63e84c5a`, `Desktop/new roster/`) | `recon-new-roster.js:26-27` | parameterize via env |
 | 14 | Weekly-quota `toISOString()` +03 off-by-one | `permission-request.service.ts` | use `ymdLocal` helper |
-| 15 | Scorecard analyze/trends run on 1 month (13-month history in separate table) | `scorecard_entries` vs `scorecard_monthly` | repoint to `scorecard_monthly` |
+| 15 | ~~Scorecard analyze/trends run on 1 month (13-month history in separate table)~~ **FIXED 2026-07-07** — `/scorecard/analyze` repointed to `scorecard_monthly` (13 months, person-folded); verified 82/82 vs May 2026 SCORED workbook | `scorecard_entries` vs `scorecard_monthly` | ~~repoint to `scorecard_monthly`~~ done |
 
 ### 3.4 Dead / removable (retire during Phase 1 cleanup)
 

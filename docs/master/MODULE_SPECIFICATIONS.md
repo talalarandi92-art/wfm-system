@@ -556,6 +556,14 @@ compliance.
 - **Data shape (critical)**: `scorecard_entries` = ONE month only (weekly W1..W4 + Final, no year/month cols);
   `scorecard_monthly` = many months but **Net Points only**; `survey_fcr_monthly.employee_id` is a **uuid** —
   join via employees. Over-time comparison = Net Points only until more months ingest (REPORTS doc).
+- **`GET /scorecard/analyze` (Performance tab) — repointed 2026-07-07 (EXECUTION_BRIEF bug #15):** the
+  cross-month series now reads canonical `scorecard_monthly` (13 months, `avg_net_points`, person-folded via
+  `employee_identity` like TL-360/People-360) instead of `scorecard_entries` (which held only the single
+  uploaded batch → trend was always flat). Per-KPI weak-spots/coaching + attendance still come from the
+  latest batch's Final entries (labelled `insights.kpiSource`); interns with **no attendance evidence are
+  never auto-"Let go"** on score alone. Verified May 2026: 82/82 agents match the SCORED workbook avg-net.
+  `batches/:id/trends` (batch-vs-batch, same-definition Final-vs-Final) and Scorecard Guard (weekly KPI
+  grain) legitimately stay on `scorecard_entries`.
 - Surfaces: `scorecard` board (per-agent weekly drill, unit-aware actuals: AHT=min, RT=day-fraction×1440,
   pct=fraction×100), `agent-scores` leaderboard, `agent-360`, `team-360`, `trends`, `agent-progress`
   (13 monthly metrics + deltas), `agent-period-compare` (length-independent rates only, sick/OT neutral
