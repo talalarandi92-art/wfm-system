@@ -16,6 +16,7 @@ import { MATERNITY_7H, TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metric
 import { RosterTtlCacheInterceptor, rosterCacheInvalidate } from '@common/ttl-cache.interceptor';
 import { ReconService } from './recon.service';
 import { RosterIngestionService } from './roster-ingestion.service';
+import { RosterSharedService, SHIFT_CAT } from './roster-shared.service';
 
 // Source files live server-side (Ameyo export alone is ~72MB). Configure via env;
 // falls back to the analyst's working folder for local verification.
@@ -37,6 +38,7 @@ export class ReconController {
   constructor(
     private readonly svc: ReconService,
     private readonly ingestion: RosterIngestionService,
+    private readonly shared: RosterSharedService,
     @InjectDataSource() private readonly ds: DataSource,
   ) {}
 
@@ -233,7 +235,7 @@ export class ReconController {
           AND replace(lower(i.clean_name),' ','') = replace(lower(r.team_manager),' ','')
         WHERE r.tenant_id=$1 AND r.team_manager IS NOT NULL AND r.team_manager<>''
         GROUP BY r.team_manager, i.person_no, i.is_active ORDER BY reports DESC`, [t]);
-    const { tlStatus } = await this.tlResolver(t);
+    const { tlStatus } = await this.shared.tlResolver(t);
     const teamLeaders = tlRows.map((r:any)=>{ const s = tlStatus(r.name, r.matched_active);
       return { name: r.name, reports: r.reports, firstSeen: r.first_seen, lastSeen: r.last_seen, ...s }; }).filter((x:any)=>!x.hidden);
     const teamManagers = teamLeaders.filter((x:any)=>x.verified).map((x:any)=>x.name);
@@ -2037,7 +2039,7 @@ export class ReconController {
     // approved/soft-locked weeks are IMMUTABLE to unpublish — no override, because this deletes
     // rows wholesale; the only way to change the approved range is re-uploading the schedule
     // (same soft-lock as assertScheduleEditable, but with the supervisor bypass removed).
-    const lock = await this.getScheduleLock(t);
+    const lock = await this.shared.getScheduleLock(t);
     const we = new Date(`${body.weekStart}T00:00:00Z`); we.setUTCDate(we.getUTCDate() + 6);
     const weekEnd = we.toISOString().slice(0, 10);
     if (lock && body.weekStart <= lock.to && weekEnd >= lock.from) {
@@ -2148,7 +2150,7 @@ export class ReconController {
            AND replace(lower(i.clean_name),' ','')=replace(lower(r.team_manager),' ','')
         WHERE r.tenant_id=$1 AND r.team_manager IS NOT NULL AND r.team_manager<>''
         GROUP BY r.team_manager ORDER BY reports DESC`, [t]);
-    const { tlStatus } = await this.tlResolver(t);
+    const { tlStatus } = await this.shared.tlResolver(t);
     const teamLeaders = tlRows.map((r: any) => ({ name: r.name, reports: r.reports, first_seen: r.first_seen, last_seen: r.last_seen, ...tlStatus(r.name, r.matched) })).filter((x: any) => !x.hidden);
     return { headline, duplicates, inactiveIds, orphans, pollution, roleHours, teamLeaders };
   }
@@ -2383,7 +2385,7 @@ export class ReconController {
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions
         FROM roster_days WHERE ${W}`, p);
     const tardinessBands = await this.ds.query(`SELECT COALESCE(late_category,'On time') band, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh') GROUP BY 1`, p);
-    const sr = await this.ds.query(`SELECT ${this.SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh','sick','absent') GROUP BY 1`, p);
+    const sr = await this.ds.query(`SELECT ${SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh','sick','absent') GROUP BY 1`, p);
     const shiftRate: Record<string, number> = { Morning: 0, Night: 0, Evening: 0, Midnight: 0, Other: 0 };
     for (const r of sr) shiftRate[r.cat] = r.n;
     const byMonth = await this.ds.query(`
@@ -3127,25 +3129,9 @@ export class ReconController {
     return 0;
   }
 
-  /* ── Approved-schedule SOFT LOCK ───────────────────────────────────────────
-   *  The uploaded schedule is the authoritative baseline. Inside its date range,
-   *  manual cell edits are blocked for everyone EXCEPT a supervisor with the
-   *  `schedule.publish` permission (who may edit, fully audited). The only normal
-   *  way to change it is re-uploading the schedule. Range auto-set on upload;
-   *  stored in tenant_settings (no migration). Future dates stay editable. */
-  private async getScheduleLock(t: string): Promise<{ from: string; to: string; lockedAt?: string; lockedBy?: string } | null> {
-    const [r] = await this.ds.query(`SELECT setting_value FROM tenant_settings WHERE tenant_id=$1 AND setting_key='schedule_lock'`, [t]);
-    const v = r?.setting_value; return v ? (typeof v === 'string' ? JSON.parse(v) : v) : null;
-  }
-  private async setScheduleLock(t: string, val: any) {
-    await this.ds.query(
-      `INSERT INTO tenant_settings (tenant_id, setting_key, setting_value, setting_group, updated_at)
-         VALUES ($1,'schedule_lock',$2::jsonb,'schedule', now())
-       ON CONFLICT (tenant_id, setting_key) DO UPDATE SET setting_value=$2::jsonb, updated_at=now()`,
-      [t, JSON.stringify(val)]);
-  }
+  /* Approved-schedule SOFT LOCK helpers moved to RosterSharedService (roster-shared.service.ts). */
   private async assertScheduleEditable(req: any, date: string) {
-    const lock = await this.getScheduleLock(req.user.tenantId);
+    const lock = await this.shared.getScheduleLock(req.user.tenantId);
     const locked = lock && date >= lock.from && date <= lock.to;
     const canOverride = (req.user.permissionCodes || []).includes('schedule.publish');
     if (locked && !canOverride) {
@@ -3159,7 +3145,7 @@ export class ReconController {
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Approved-schedule soft-lock status (locked range + override capability)' })
   async scheduleLockStatus(@Req() req: any) {
-    const lock = await this.getScheduleLock(req.user.tenantId);
+    const lock = await this.shared.getScheduleLock(req.user.tenantId);
     return { lock, canOverride: (req.user.permissionCodes || []).includes('schedule.publish') };
   }
 
@@ -3172,7 +3158,7 @@ export class ReconController {
     if (b?.clear) { await this.ds.query(`DELETE FROM tenant_settings WHERE tenant_id=$1 AND setting_key='schedule_lock'`, [t]); return { lock: null }; }
     if (!b?.from || !b?.to) throw new BadRequestException('from and to are required');
     const val = { from: b.from, to: b.to, lockedAt: new Date().toISOString(), lockedBy: req.user.id || req.user.sub || 'manual' };
-    await this.setScheduleLock(t, val); return { lock: val };
+    await this.shared.setScheduleLock(t, val); return { lock: val };
   }
 
   /* ── OT & EXCEPTIONS analytics — the "stories" in the data: overtime (incl.
@@ -3346,7 +3332,7 @@ export class ReconController {
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
              COUNT(DISTINCT person_no)::int people, COUNT(DISTINCT work_date)::int days
         FROM roster_days WHERE ${w}`, p);
-    const cats = await this.ds.query(`SELECT ${this.SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days WHERE ${w} AND presence IN ('office','wfh') GROUP BY 1`, p);
+    const cats = await this.ds.query(`SELECT ${SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days WHERE ${w} AND presence IN ('office','wfh') GROUP BY 1`, p);
     const shiftRate: Record<string, number> = { Morning: 0, Night: 0, Evening: 0, Midnight: 0, Other: 0 };
     for (const c of cats) shiftRate[c.cat] = c.n;
     const byFn = await this.ds.query(`
@@ -3498,13 +3484,7 @@ export class ReconController {
   }
 
   // ── Schedule Change Log: manual shift edit / swap with before/after impact ──────
-  /** SQL classifier: a shift code → broad category (for shift-rate distribution). */
-  private readonly SHIFT_CAT = `CASE
-      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^(MD|MN)' THEN 'Midnight'
-      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^(EE|E)' THEN 'Evening'
-      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^N' THEN 'Night'
-      WHEN upper(coalesce(original_shift_code, shift_code)) ~ '^(M|B|C|AM)' THEN 'Morning'
-      ELSE 'Other' END`;
+  /* SHIFT_CAT SQL classifier moved to roster-shared.service.ts (exported const). */
   private catOf(code: string): string {
     const c = (code || '').toUpperCase();
     if (/^(MD|MN)/.test(c)) return 'Midnight';
@@ -3539,7 +3519,7 @@ export class ReconController {
   /** Person's YTD shift-rate distribution (category → count) up to a date. */
   private async shiftRate(t: string, personNo: string, toDate: string): Promise<Record<string, number>> {
     const rows = await this.ds.query(
-      `SELECT ${this.SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days
+      `SELECT ${SHIFT_CAT} cat, COUNT(*)::int n FROM roster_days
          WHERE tenant_id=$1 AND person_no=$2 AND work_date<=$3 GROUP BY 1`, [t, personNo, toDate]);
     const out: Record<string, number> = { Morning: 0, Night: 0, Evening: 0, Midnight: 0, Other: 0 };
     for (const r of rows) out[r.cat] = r.n; return out;
@@ -3711,31 +3691,7 @@ export class ReconController {
     return { ok: true, reverted: true };
   }
 
-  /** Team-leader resolution driven by the editable `team_leader_status` table.
-   *  status: active | director | left ; hidden ⇒ suppressed everywhere. Falls back
-   *  to matching an active Team-Leader employee (spelling-tolerant) for unlisted labels. */
-  private async tlResolver(t: string) {
-    const norm = (s: string) => (s || '').toLowerCase().replace(/\s+/g, '');
-    const TL_ALIAS: Record<string, string> = { 'fatmehassan': 'fatma hasan' };
-    const statusRows = await this.ds.query(`SELECT name, status, hidden, note FROM team_leader_status WHERE tenant_id=$1`, [t]);
-    const byName = new Map<string, any>(statusRows.map((r: any) => [norm(r.name), r]));
-    const hidden = new Set<string>(statusRows.filter((r: any) => r.hidden).map((r: any) => norm(r.name)));
-    const tlActive = new Set((await this.ds.query(
-      `SELECT clean_name FROM employee_identity WHERE tenant_id=$1 AND is_canonical AND role_category='Team Leader' AND is_active`, [t]
-    )).map((r: any) => norm(r.clean_name)));
-    const tlStatus = (name: string, matchedActive?: boolean) => {
-      const n = norm(name); const st = byName.get(n);
-      if (st) {
-        if (st.hidden) return { verified: false, status: 'left', hidden: true, note: st.note || 'removed' };
-        if (st.status === 'director') return { verified: true, status: 'director', hidden: false, note: st.note || 'director / management (present)' };
-        if (st.status === 'left') return { verified: false, status: 'left', hidden: false, note: st.note || 'left' };
-        return { verified: true, status: 'current', hidden: false, note: null };
-      }
-      const active = !!matchedActive || tlActive.has(n) || tlActive.has(norm(TL_ALIAS[n] || ''));
-      return { verified: active, status: active ? 'current' : 'unverified', hidden: false, note: active ? null : 'team label not matched to an active Team-Leader employee — verify if this person left' };
-    };
-    return { tlActive, tlStatus, hidden, norm };
-  }
+  /* tlResolver moved to RosterSharedService (roster-shared.service.ts). */
 
   /** Executive Summary export — ONE management-ready Excel combining the headline
    *  KPIs, prioritized insights, the score leaderboard, monthly trends and a
@@ -3972,7 +3928,7 @@ export class ReconController {
     if (saved.some((s) => s.type === 'schedule')) {
       const [rng] = await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [req.user.tenantId]);
       if (rng?.a && rng?.b) { lock = { from: rng.a, to: rng.b, lockedAt: new Date().toISOString(), lockedBy: req.user.id || req.user.sub || 'upload' };
-        await this.setScheduleLock(req.user.tenantId, lock); }
+        await this.shared.setScheduleLock(req.user.tenantId, lock); }
     }
     return { saved, ingested: result.rows, ms: result.ms, scheduleLock: lock };
   }
