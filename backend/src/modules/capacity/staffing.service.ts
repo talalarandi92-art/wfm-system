@@ -2,6 +2,9 @@ import { Injectable, BadRequestException, OnModuleInit, Logger } from '@nestjs/c
 import { DataSource } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { AgentRunner } from '@common/agent-runner';
+// Pure shift-mix optimizer (no DI) — used by hiring-now to translate the hourly
+// requirement into BODIES/day (9h shifts can't span a 12h window; peak alone hides that).
+import { computeShiftMix } from '../schedule-generator/demand.engine';
 
 /* ═════════════════════════════════════════════════════════════════════════════
  *  STAFFING REQUIREMENT ENGINE — forecast → Erlang → hourly required HC
@@ -613,13 +616,22 @@ export class StaffingService implements OnModuleInit {
     const poolBy: Record<string, number> = {};
     for (const r of pools) poolBy[r.fn] = +r.agents;
 
-    const fns = new Map<string, { requiredPeak: number; worstDay: string | null }>();
+    const fns = new Map<string, { requiredPeak: number; worstDay: string | null; bodiesWorstDay: number; bodiesWorstDate: string | null }>();
     for (const d of req.days) {
       for (const f of d.functions) {
         const peak = Math.max(...f.hours.map((h: any) => h.requiredScheduledHc), 0);
-        const cur = fns.get(f.functionKey) ?? { requiredPeak: 0, worstDay: null };
-        if (peak > cur.requiredPeak) fns.set(f.functionKey, { requiredPeak: peak, worstDay: d.date });
-        else fns.set(f.functionKey, cur);
+        // Schedulable view: how many BODIES a day like this needs when covered with
+        // real 9h shifts (uncapped shift-mix over the hourly curve). A 12h operating
+        // window at requirement 2 needs 4 bodies (2×M + 2×C) even though the peak
+        // says 2 — this is exactly why the generator shows edge gaps the peak hides.
+        const curve = new Array(48).fill(0);
+        for (const x of f.hours) { curve[x.hour * 2] = x.requiredScheduledHc; curve[x.hour * 2 + 1] = x.requiredScheduledHc; }
+        const bodies = Object.values(computeShiftMix(d.date, curve, Number.MAX_SAFE_INTEGER).mix)
+          .reduce((a, b) => a + b, 0);
+        const cur = fns.get(f.functionKey) ?? { requiredPeak: 0, worstDay: null, bodiesWorstDay: 0, bodiesWorstDate: null };
+        if (peak > cur.requiredPeak) { cur.requiredPeak = peak; cur.worstDay = d.date; }
+        if (bodies > cur.bodiesWorstDay) { cur.bodiesWorstDay = bodies; cur.bodiesWorstDate = d.date; }
+        fns.set(f.functionKey, cur);
       }
     }
     let totalInterns = 0;
@@ -628,11 +640,24 @@ export class StaffingService implements OnModuleInit {
       const gap = Math.max(0, v.requiredPeak - available);
       const interns = gap > 0 ? Math.ceil(gap / internProductivity) : 0;
       totalInterns += interns;
-      return { functionKey: fn, requiredPeak: v.requiredPeak, currentTeam: available, gap, internsToHire: interns, worstDay: v.worstDay };
+      // What the roster can actually field per day at 2 OFF/week — the same ceiling
+      // the generator uses (pool − ceil(pool × 2/7)). Transparency only: the hire
+      // headline stays keyed to requiredPeak (changing it needs the Director's go).
+      const fieldablePerDay = Math.max(0, available - Math.ceil(available * 2 / 7));
+      const coverageGapBodies = Math.max(0, v.bodiesWorstDay - fieldablePerDay);
+      return {
+        functionKey: fn, requiredPeak: v.requiredPeak, currentTeam: available, gap,
+        internsToHire: interns, worstDay: v.worstDay,
+        scheduleBodiesWorstDay: v.bodiesWorstDay,      // bodies/day for FULL curve coverage
+        fieldablePerDay,                               // bodies/day the team can schedule (2 OFF/wk)
+        coverageGapBodies,                             // >0 → the generator WILL show residual gaps
+        coverageWorstDay: v.bodiesWorstDate,
+      };
     }).sort((a, b) => b.internsToHire - a.internsToHire || b.gap - a.gap);
     return {
       from, to, internProductivity, totalInternsToHire: totalInterns,
-      basis: 'forecast requiredPeak (period max, incl. shrinkage/productivity/windows) vs CURRENT active team per function; interns = ceil(gap / internProductivity)',
+      basis: 'forecast requiredPeak (period max, incl. shrinkage/productivity/windows) vs CURRENT active team per function; interns = ceil(gap / internProductivity). ' +
+             'scheduleBodiesWorstDay/fieldablePerDay = the schedulable view (9h shifts over the full hourly curve vs pool minus 2-OFF/week) — when coverageGapBodies > 0 the generator will show honest residual gaps even if requiredPeak looks covered.',
       perFunction,
     };
   }

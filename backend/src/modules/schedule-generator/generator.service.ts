@@ -195,6 +195,8 @@ export class GeneratorService {
           minRestHours: options.minRestHours,
           offDaysPerWeek: options.offDaysPerWeek,
           onLeave,
+          offStrategy: options.offStrategy,
+          rotationFairness: options.rotationFairness,
         });
         assignments.push(...rosterF.assignments);
         unfilled.push(...rosterF.unfilled.map(u => ({ ...u, functionName: grp.name })));
@@ -243,6 +245,8 @@ export class GeneratorService {
         minRestHours: options.minRestHours,
         offDaysPerWeek: options.offDaysPerWeek,
         onLeave,
+        offStrategy: options.offStrategy,
+        rotationFairness: options.rotationFairness,
       });
     }
 
@@ -333,6 +337,9 @@ export class GeneratorService {
         criticalDays: days.filter(d => d.riskStatus === 'critical').length,
         safeDays:     days.filter(d => d.riskStatus === 'safe').length,
         fairnessBasis: 'pre-swap (approved swaps reversed before counting — swaps cannot game rotation)',
+        // Behavioral-merge options actually applied to this run (Director 2026-07-08)
+        offStrategy: options.offStrategy ?? 'lowest-demand',
+        rotationFairness: !!options.rotationFairness,
       },
     };
   }
