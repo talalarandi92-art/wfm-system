@@ -428,9 +428,18 @@ export class StaffingService implements OnModuleInit {
     const avRows = params.map(p => [p.functionKey, 10, 0.7]);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([avHeader, ...avRows]), 'Available_Agents');
 
+    // OPTIONAL: orders-only forecast (the Director's SS'26 method) — fill Orders per day
+    // and CPO_pct per function; contacts are DERIVED (orders × CPO%). If Daily_Forecast
+    // has explicit contacts for a function, those win.
+    const eoRows = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(d0.getTime() + i * 86400000).toISOString().slice(0, 10);
+      return [d, 20000];
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Date', 'Orders'], ...eoRows]), 'Event_Orders');
+
     // OPTIONAL overrides — blank cell = keep the system value for that function
-    const ovHeader = ['Function', 'AHT_sec', 'ACW_sec', 'Hold_sec', 'TargetSL_pct', 'AnswerSec', 'Shrinkage_pct', 'Productivity_pct'];
-    const ovRows = params.map(p => [p.functionKey, null, null, null, null, null, null, null]);
+    const ovHeader = ['Function', 'CPO_pct', 'AHT_sec', 'ACW_sec', 'Hold_sec', 'TargetSL_pct', 'AnswerSec', 'Shrinkage_pct', 'Productivity_pct', 'OT_pct'];
+    const ovRows = params.map(p => [p.functionKey, p.cpoPct, null, null, null, null, null, null, null, null]);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ovHeader, ...ovRows]), 'Function_Overrides');
 
     // OPTIONAL intraday profile — relative weights per hour (normalized on upload)
@@ -446,23 +455,48 @@ export class StaffingService implements OnModuleInit {
     const wb = XLSX.read(buf, { type: 'buffer' });
     const fcWs = wb.Sheets['Daily_Forecast'];
     const avWs = wb.Sheets['Available_Agents'];
-    if (!fcWs || !avWs) throw new BadRequestException('Workbook must contain Daily_Forecast and Available_Agents sheets (use the downloaded template)');
+    const eoWs = wb.Sheets['Event_Orders'];
+    if (!avWs || (!fcWs && !eoWs)) {
+      throw new BadRequestException('Workbook must contain Available_Agents plus Daily_Forecast and/or Event_Orders (use the downloaded template)');
+    }
 
-    const fcRows: any[][] = XLSX.utils.sheet_to_json(fcWs, { header: 1, defval: null, blankrows: false });
     const avRows: any[][] = XLSX.utils.sheet_to_json(avWs, { header: 1, defval: null, blankrows: false });
-    const header = (fcRows[0] ?? []).map((h: any) => String(h ?? '').trim());
-    const fnCols = header.slice(2).filter(Boolean);
-    if (header[0] !== 'Date' || !fnCols.length) throw new BadRequestException('Daily_Forecast header must be: Date | Orders | <function columns>');
-
     const toISO = (v: any): string | null => {
       if (typeof v === 'number') return new Date(Math.round((Math.floor(v) - 25569) * 86400000)).toISOString().slice(0, 10);
       const s = String(v ?? '').trim();
       return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
     };
-    const daily = fcRows.slice(1)
-      .map(r => ({ date: toISO(r[0]), orders: +(r[1] ?? 0) || 0, contacts: Object.fromEntries(fnCols.map((f, i) => [f, +(r[2 + i] ?? 0) || 0])) }))
-      .filter(r => !!r.date) as { date: string; orders: number; contacts: Record<string, number> }[];
-    if (!daily.length) throw new BadRequestException('No dated rows found in Daily_Forecast');
+
+    // Daily_Forecast (explicit contacts per function) — optional when Event_Orders is used
+    let fnCols: string[] = [];
+    let daily: { date: string; orders: number; contacts: Record<string, number> }[] = [];
+    if (fcWs) {
+      const fcRows: any[][] = XLSX.utils.sheet_to_json(fcWs, { header: 1, defval: null, blankrows: false });
+      const header = (fcRows[0] ?? []).map((h: any) => String(h ?? '').trim());
+      fnCols = header.slice(2).filter(Boolean);
+      if (header[0] !== 'Date') throw new BadRequestException('Daily_Forecast header must be: Date | Orders | <function columns>');
+      daily = fcRows.slice(1)
+        .map(r => ({ date: toISO(r[0]), orders: +(r[1] ?? 0) || 0, contacts: Object.fromEntries(fnCols.map((f, i) => [f, +(r[2 + i] ?? 0) || 0])) }))
+        .filter(r => !!r.date) as typeof daily;
+    }
+
+    // Event_Orders (the Director's SS'26 method): Date | Orders — contacts DERIVED per
+    // function as orders × CPO% (Function_Overrides CPO_pct, else staffing_params.cpo_pct).
+    // Merges with Daily_Forecast by date; explicit contacts (>0) always win over derived.
+    const ordersByDate = new Map<string, number>();
+    if (eoWs) {
+      const eoRows: any[][] = XLSX.utils.sheet_to_json(eoWs, { header: 1, defval: null, blankrows: false });
+      for (const r of eoRows.slice(1)) {
+        const d = toISO(r[0]); const o = +(r[1] ?? 0) || 0;
+        if (d && o > 0) ordersByDate.set(d, o);
+      }
+      for (const [d, o] of ordersByDate) {
+        const row = daily.find(x => x.date === d);
+        if (row) row.orders = row.orders || o;
+        else daily.push({ date: d, orders: o, contacts: {} });
+      }
+    }
+    if (!daily.length) throw new BadRequestException('No dated rows found (Daily_Forecast/Event_Orders)');
     daily.sort((a, b) => a.date.localeCompare(b.date));
 
     const available: Record<string, { agents: number; internProductivity: number }> = {};
@@ -473,20 +507,26 @@ export class StaffingService implements OnModuleInit {
 
     // OPTIONAL sheets: per-function overrides (the Director's OWN expected AHT/ACW/Hold/SL/
     // shrinkage/productivity for THIS event) + a manual hourly profile. Blank = system value.
-    const overrides: Record<string, Partial<{ ahtSec: number; acwSec: number; holdSec: number; targetSl: number; targetAnswerSec: number; shrinkage: number; productivity: number }>> = {};
+    // v3 columns: Function | CPO_pct | AHT_sec | ACW_sec | Hold_sec | TargetSL_pct | AnswerSec | Shrinkage_pct | Productivity_pct | OT_pct
+    const overrides: Record<string, Partial<{ cpoPct: number; ahtSec: number; acwSec: number; holdSec: number; targetSl: number; targetAnswerSec: number; shrinkage: number; productivity: number; otPct: number }>> = {};
     if (wb.Sheets['Function_Overrides']) {
       const ov: any[][] = XLSX.utils.sheet_to_json(wb.Sheets['Function_Overrides'], { header: 1, defval: null, blankrows: false });
+      const hdr = (ov[0] ?? []).map((h: any) => String(h ?? '').trim().toLowerCase());
+      const col = (name: string) => hdr.indexOf(name.toLowerCase());
       const num = (v: any) => (v == null || v === '' ? null : (isNaN(+v) ? null : +v));
+      const pick = (r: any[], name: string) => { const i = col(name); return i >= 0 ? num(r[i]) : null; };
       for (const r of ov.slice(1)) {
         const fn = String(r[0] ?? '').trim(); if (!fn) continue;
         const o: any = {};
-        const aht = num(r[1]); if (aht != null) o.ahtSec = aht;
-        const acw = num(r[2]); if (acw != null) o.acwSec = acw;
-        const hold = num(r[3]); if (hold != null) o.holdSec = hold;
-        const sl = num(r[4]); if (sl != null) o.targetSl = sl > 1 ? sl / 100 : sl;
-        const ans = num(r[5]); if (ans != null) o.targetAnswerSec = ans;
-        const shr = num(r[6]); if (shr != null) o.shrinkage = shr > 1 ? shr / 100 : shr;
-        const prod = num(r[7]); if (prod != null) o.productivity = prod > 1 ? prod / 100 : prod;
+        const cpo = pick(r, 'CPO_pct'); if (cpo != null) o.cpoPct = cpo > 1 ? cpo : cpo * 100;   // stored as %
+        const aht = pick(r, 'AHT_sec'); if (aht != null) o.ahtSec = aht;
+        const acw = pick(r, 'ACW_sec'); if (acw != null) o.acwSec = acw;
+        const hold = pick(r, 'Hold_sec'); if (hold != null) o.holdSec = hold;
+        const sl = pick(r, 'TargetSL_pct'); if (sl != null) o.targetSl = sl > 1 ? sl / 100 : sl;
+        const ans = pick(r, 'AnswerSec'); if (ans != null) o.targetAnswerSec = ans;
+        const shr = pick(r, 'Shrinkage_pct'); if (shr != null) o.shrinkage = shr > 1 ? shr / 100 : shr;
+        const prod = pick(r, 'Productivity_pct'); if (prod != null) o.productivity = prod > 1 ? prod / 100 : prod;
+        const ot = pick(r, 'OT_pct'); if (ot != null) o.otPct = ot > 1 ? ot / 100 : ot;
         if (Object.keys(o).length) overrides[fn] = o;
       }
     }
@@ -504,11 +544,25 @@ export class StaffingService implements OnModuleInit {
     const [paramsRaw, facts] = await Promise.all([this.getParams(tenantId), this.channelFacts(tenantId, daily[0].date)]);
     const byKey = new Map(paramsRaw.map(p => [p.functionKey, p]));
 
+    // Effective function list: explicit contact columns ∪ (orders present → every
+    // function with a CPO% — the Director's orders-driven method).
+    const fnSet = new Set(fnCols);
+    if (ordersByDate.size > 0) {
+      for (const p of paramsRaw) {
+        const cpo = overrides[p.functionKey]?.cpoPct ?? p.cpoPct;
+        if (p.isStaffed && cpo != null && cpo > 0) fnSet.add(p.functionKey);
+      }
+    }
+
     const perFunction: any[] = [];
-    for (const fn of fnCols) {
+    for (const fn of fnSet) {
       const base = byKey.get(fn);
       if (!base) { perFunction.push({ functionKey: fn, error: 'unknown function (not in staffing_params)' }); continue; }
       const p = { ...base, ...(overrides[fn] ?? {}) };
+      const cpoFrac = ((overrides[fn]?.cpoPct ?? base.cpoPct) ?? 0) / 100;
+      // per-day contacts: explicit wins; else DERIVED = orders × CPO%
+      const contactsOf = (d: { orders: number; contacts: Record<string, number> }) =>
+        (d.contacts[fn] ?? 0) > 0 ? d.contacts[fn] : +(d.orders * cpoFrac).toFixed(1);
       // intraday profile: the manual sheet wins; else blend the measured channel profiles
       const mixEntries = Object.entries(p.channelMix);
       const mixTotal = mixEntries.reduce((s, [, v]) => s + (v as number), 0) || 1;
@@ -534,8 +588,9 @@ export class StaffingService implements OnModuleInit {
       // worst (peak-demand) day drives the hire decision; every day reported
       let periodPeakRequired = 0, worst: any = null;
       const days = daily.map(d => {
+        const dayContacts = contactsOf(d);
         const hours = Array.from({ length: 24 }, (_, h) => {
-          const vol = d.contacts[fn] * ((prof[h * 2] + prof[h * 2 + 1]) / profSum);
+          const vol = dayContacts * ((prof[h * 2] + prof[h * 2 + 1]) / profSum);
           const erl = (vol * ahtEff) / 3600;
           let agents = 0;
           if (erl > 0) {
@@ -547,7 +602,7 @@ export class StaffingService implements OnModuleInit {
         });
         const peak = Math.max(...hours.map(x => x.sched), 0);
         if (peak > periodPeakRequired) { periodPeakRequired = peak; worst = { date: d.date, hours }; }
-        return { date: d.date, contacts: d.contacts[fn], requiredPeak: peak };
+        return { date: d.date, contacts: dayContacts, requiredPeak: peak };
       });
 
       const av = available[fn] ?? { agents: 0, internProductivity: 0.7 };
@@ -571,9 +626,24 @@ export class StaffingService implements OnModuleInit {
         }
         return minSL;
       };
+      // ── The Director's flat method (SS'26 sheet) as a cross-check + his OT view:
+      //    REQ = Σcontacts × AHT_eff ÷ (days × 8h productive × 3600 × occupancy) ÷ concurrency
+      //    → with shrinkage ÷(1−s) → with OT ÷(1+ot). Variance = available − ceil(withOt).
+      const eventOtPct = overrides[fn]?.otPct ?? 0;
+      const totalContacts = days.reduce((s, d) => s + d.contacts, 0);
+      const productiveSec = daily.length * 8 * 3600;
+      const reqNoShrink = +((totalContacts * ahtEff) / (productiveSec * p.occupancyCap) / eff).toFixed(1);
+      const reqWithShrink = +(reqNoShrink / Math.max(1 - p.shrinkage, 0.1)).toFixed(1);
+      const reqWithOt = +(reqWithShrink / (1 + eventOtPct)).toFixed(1);
+      const varianceVsTeam = +(av.agents - Math.ceil(eventOtPct > 0 ? reqWithOt : reqWithShrink)).toFixed(0);
+      const otHoursWeekly = eventOtPct > 0 ? Math.round(Math.min(reqWithShrink - reqWithOt, av.agents * eventOtPct) * 8 * 7) : 0;
+
       perFunction.push({
         functionKey: fn, model: p.model, ahtEffSec: Math.round(ahtEff),
         targetSl: p.targetSl,
+        cpoPct: cpoFrac > 0 ? +(cpoFrac * 100).toFixed(2) : null,
+        contactsBasis: fnCols.includes(fn) && daily.some(d => (d.contacts[fn] ?? 0) > 0) ? 'explicit' : (cpoFrac > 0 ? 'orders × CPO%' : 'explicit'),
+        totalContacts: Math.round(totalContacts),
         overridesApplied: overrides[fn] ?? null,
         manualHourlyProfile: !!manualProfile[fn],
         requiredPeak: periodPeakRequired,
@@ -581,6 +651,8 @@ export class StaffingService implements OnModuleInit {
         gapAgents: gap,
         internProductivity: av.internProductivity,
         internsToHire,
+        // the Director's flat-hours view (cross-check + OT lever)
+        flatMethod: { reqNoShrink, reqWithShrink, reqWithOt, otPct: eventOtPct, varianceVsTeam, otHoursWeekly },
         projectedSlNow: +slAt(av.agents).toFixed(3),
         projectedSlAfterHire: +slAt(av.agents + internsToHire * av.internProductivity).toFixed(3),
         worstDay: worst?.date ?? null,
