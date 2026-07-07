@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Param, Body, Query,
+  Controller, Get, Post, Param, Body, Query,
   UseGuards, UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -7,11 +7,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { PermissionRequestService } from './permission-request.service';
-import {
-  CreatePermissionRequestDto,
-  ApproveRequestDto,
-  RejectRequestDto,
-} from './permission-request.types';
+import { CreatePermissionRequestDto } from './permission-request.types';
 
 @ApiTags('Permission Requests')
 @ApiBearerAuth()
@@ -109,39 +105,14 @@ export class PermissionRequestController {
     return this.svc.getRequestWithImpact(this.tid(user), id);
   }
 
-  @Patch(':id/approve')
-  @RequirePermissions('requests.approve_l1')
-  @ApiOperation({ summary: 'Approve a permission request' })
-  async approve(
-    @CurrentUser() user: any,
-    @Param('id') id: string,
-    @Body() dto: ApproveRequestDto,
-  ) {
-    await this.svc.approveRequest(this.tid(user), id, dto);
-    return { message: 'Approved' };
-  }
-
-  @Patch(':id/reject')
-  @RequirePermissions('requests.approve_l1')
-  @ApiOperation({ summary: 'Reject a permission request' })
-  async reject(
-    @CurrentUser() user: any,
-    @Param('id') id: string,
-    @Body() dto: RejectRequestDto,
-  ) {
-    await this.svc.rejectRequest(this.tid(user), id, dto);
-    return { message: 'Rejected' };
-  }
-
-  @Patch(':id/cancel')
-  @RequirePermissions('requests.cancel')
-  @ApiOperation({ summary: 'Cancel a permission request (by employee)' })
-  async cancel(
-    @CurrentUser() user: any,
-    @Param('id') id: string,
-  ) {
-    const employeeId = user?.employeeId ?? user?.sub;
-    await this.svc.cancelRequest(this.tid(user), id, employeeId);
-    return { message: 'Cancelled' };
-  }
+  /* ── Lifecycle mutations RETIRED (EXECUTION_BRIEF bug #6, 2026-07-08) ──────────
+   * approve/reject/cancel had ZERO consumers here and formed a PARALLEL decision
+   * path that bypassed the unified owner's idempotency claim and roster apply.
+   * ONE owner now: PATCH /requests/:id/approve|reject|cancel (RequestsService —
+   * atomic first-wins claim, applyPermissionToRoster, audit, notify).
+   * This module keeps what it uniquely owns: CREATE (weekly-quota + 6h-cycle
+   * balance checks) and the read/analytics surface (impact, weekly-usage,
+   * hc-dashboard). The 2-level L1/L2 approval logic lives on, unexposed, in
+   * permission-request.service — re-wire it through the unified owner if/when
+   * 2-level approval ships. */
 }

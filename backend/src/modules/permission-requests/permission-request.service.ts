@@ -391,7 +391,11 @@ export class PermissionRequestService implements OnModuleInit {
     return { id: requestId, campaignWarning: campaign ?? null } as any;
   }
 
-  // ── Approve / Reject ───────────────────────────────────────────────────────
+  // ── Approve / Reject — RETIRED FROM HTTP (bug #6, 2026-07-08) ──────────────
+  // The unified owner is RequestsService.approve (atomic claim + roster apply +
+  // audit). These stay ONLY as the reference implementation of 2-level L1/L2
+  // approval (different-person rule) for when that feature ships through the
+  // unified owner. Do NOT re-expose them as routes.
 
   async approveRequest(tenantId: string, requestId: string, dto: ApproveRequestDto): Promise<void> {
     const rows = await this.ds.query(
