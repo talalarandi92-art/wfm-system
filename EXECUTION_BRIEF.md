@@ -248,7 +248,9 @@ the slice-overwrite guard (date-stamped filenames).
   from the classic engine + `generator.types.ts`; the ladder is structurally female-safe — females can
   only reach the morning band). The residual divergence is OFF-placement + fairness-scoring STRATEGY
   (classic = YTD/weekend-fair, demand = lowest-demand-day + 35% cap), both Director-tested products;
-  merging them CHANGES scheduling outputs → **Needs Approval** before any behavioral merge (BR-APP-006).
+  merging them CHANGES scheduling outputs → **APPROVED by the Director 2026-07-08 ("موافق كمل")** —
+  execute the behavioral merge (demand-driven engine becomes THE generator; classic's weekend-fair
+  OFF structure + rotation-band fairness grafted in as options).
   rotation hour-buckets → `common/shift-category` ✅ done (commit 8b0d89a); parameterize
   recon paths via env; retire dead code (§3.4); user-lifecycle `audit_logs` (risk 12); guard demo-seed;
   replace `@Body() body: any` with DTOs (risk 14); `trust proxy` + user-keyed Redis throttler (risk 15).
