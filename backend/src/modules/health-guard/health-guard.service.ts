@@ -102,6 +102,7 @@ export class HealthGuardService implements OnModuleInit, OnModuleDestroy {
       () => this.femaleLateNight(tid),
       () => this.functionShiftPolicy(tid),
       () => this.restUnder10h(tid),
+      () => this.crossSpineDrift(tid),
       () => this.presentNoSchedule(tid),
       () => this.employeeNoFunction(tid),
     ]) {
@@ -286,6 +287,51 @@ export class HealthGuardService implements OnModuleInit, OnModuleDestroy {
           AND attendance_date >= CURRENT_DATE - INTERVAL '30 days'`, [tid]);
     const n = r?.n ?? 0;
     return { id: 'present_no_schedule', category: 'calculation', label: 'Present without a scheduled shift', labelAr: 'حضور بدون وردية مجدولة', status: n === 0 ? 'pass' : 'warn', count: n, detail: n ? `${n} present record(s) (last 30d) have no scheduled shift` : 'Every present record has a scheduled shift' };
+  }
+
+  /** ONE-SPINE INVARIANT (EXECUTION_BRIEF bug #1 guard): after every recon-refresh,
+   *  step-4 resync projects the canonical roster_days onto attendance_records so the
+   *  raw-spine readers (dashboard/RTA/scorecard/coverage) show the SAME OT/marker/WFH.
+   *  If ANY person-day where BOTH spines exist diverges on a synced metric, a write
+   *  hit one spine without the other — the #1 bug reappearing. Generated future weeks
+   *  ('[generated %' notes) live only on the raw spine by design → excluded. */
+  private async crossSpineDrift(tid: string): Promise<HealthCheck> {
+    const [r] = await this.ds.query(
+      `WITH proj AS (
+         SELECT e.id AS employee_id, rd.work_date,
+                (COALESCE(rd.ot_min,0)+COALESCE(rd.offday_ot_min,0)+COALESCE(rd.holiday_ot_min,0)) AS true_ot,
+                COALESCE(rd.presence='wfh',false) AS is_wfh,
+                (CASE WHEN rd.presence IN ('office','wfh') THEN 'present'
+                      WHEN rd.presence='sick' THEN 'sick' WHEN rd.presence='absent' THEN 'absent'
+                      WHEN rd.presence='leave' THEN 'leave' WHEN rd.presence='holiday' THEN 'holiday'
+                      WHEN rd.hr_code='COMP' THEN 'comp' WHEN rd.presence IN ('off','left') THEN 'off'
+                      ELSE 'unknown' END) AS marker
+         FROM roster_days rd
+         JOIN employees e ON e.tenant_id = rd.tenant_id AND e.employee_no = rd.person_no
+         WHERE rd.tenant_id = $1 AND rd.is_active)
+       SELECT
+         COUNT(*)::int matched,
+         COUNT(*) FILTER (WHERE ar.ot_minutes             IS DISTINCT FROM p.true_ot)::int ot_drift,
+         COUNT(*) FILTER (WHERE ar.attendance_marker::text IS DISTINCT FROM p.marker)::int marker_drift,
+         COUNT(*) FILTER (WHERE ar.is_wfh                  IS DISTINCT FROM p.is_wfh)::int wfh_drift
+       FROM proj p
+       JOIN attendance_records ar
+         ON ar.tenant_id = $1 AND ar.employee_id = p.employee_id AND ar.attendance_date = p.work_date
+        AND COALESCE(ar.notes,'') NOT LIKE '[generated %'`,
+      [tid],
+    );
+    const drift = (r?.ot_drift ?? 0) + (r?.marker_drift ?? 0) + (r?.wfh_drift ?? 0);
+    if (!r?.matched) return { id: 'cross_spine_drift', category: 'calculation', label: 'One-spine invariant (roster ↔ attendance)', labelAr: 'ثبات السبينة الواحدة (روستر ↔ حضور)', status: 'skip', count: 0, detail: 'No overlapping person-days to compare yet' };
+    const status: CheckStatus = drift === 0 ? 'pass' : drift <= 20 ? 'warn' : 'fail';
+    return {
+      id: 'cross_spine_drift', category: 'calculation',
+      label: 'One-spine invariant (roster ↔ attendance)', labelAr: 'ثبات السبينة الواحدة (روستر ↔ حضور)',
+      status, count: drift,
+      detail: drift === 0
+        ? `${r.matched} person-days agree on OT/marker/WFH across both spines`
+        : `${drift} person-day(s) diverge (OT ${r.ot_drift} · marker ${r.marker_drift} · WFH ${r.wfh_drift}) — run recon-refresh (step-4 resync) or investigate a single-spine write`,
+      sample: drift ? [{ ot: r.ot_drift, marker: r.marker_drift, wfh: r.wfh_drift, of: r.matched }] : [],
+    };
   }
 
   private async employeeNoFunction(tid: string): Promise<HealthCheck> {
