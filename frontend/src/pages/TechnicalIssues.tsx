@@ -211,8 +211,16 @@ export default function TechnicalIssuesPage() {
 
   const isPendingRTA = (ti: TI) => ti.status === 'pending_rta';
 
+  // Theme-aware neutral tokens (semantic status colors stay hardcoded — same meaning in every theme)
+  const T = {
+    panel:   dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+    bdr:     dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+    overlay: dark ? 'rgba(0,0,0,0.75)'       : 'rgba(15,23,42,0.45)',
+    faint:   dark ? '#475569'                : '#94a3b8',
+  };
+
   return (
-    <div className="max-w-[1200px] mx-auto space-y-4" dir={ar ? 'rtl' : 'ltr'}>
+    <div className="w-full max-w-[1200px] mx-auto space-y-4" dir={ar ? 'rtl' : 'ltr'}>
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -225,7 +233,7 @@ export default function TechnicalIssuesPage() {
             <h1 className="text-xl font-bold" style={{ color: tp(dark) }}>
               {ar ? 'المشاكل التقنية' : 'Technical Issues'}
             </h1>
-            <p className="text-xs" style={{ color:'#64748b' }}>
+            <p className="text-xs" style={{ color: tsColor(dark) }}>
               {ar ? 'الإبلاغ عن مشاكل تقنية → تحقق RTA → تحويل لعطل' : 'Report issues · RTA validation · Escalate to outage'}
             </p>
           </div>
@@ -249,14 +257,14 @@ export default function TechnicalIssuesPage() {
             { l: ar?'آخر 24 ساعة':'Last 24h',      v: stats.last24h,   c:'#fbbf24' },
           ].map(s => (
             <div key={s.l} className="rounded-2xl p-4 flex items-center gap-3"
-              style={{ background:'rgba(255,255,255,0.02)', border:`1px solid ${s.c}25` }}>
+              style={{ background: T.panel, border:`1px solid ${s.c}25` }}>
               <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
                 style={{ background:`${s.c}18`, border:`1px solid ${s.c}30` }}>
                 <AlertTriangle size={16} style={{ color:s.c }} />
               </div>
               <div>
-                <p className="text-xs" style={{ color:'#475569' }}>{s.l}</p>
-                <p className="text-xl font-bold" style={{ color:'#e2e8f0' }}>{s.v}</p>
+                <p className="text-xs" style={{ color: T.faint }}>{s.l}</p>
+                <p className="text-xl font-bold" style={{ color: tp(dark) }}>{s.v}</p>
               </div>
             </div>
           ))}
@@ -265,19 +273,19 @@ export default function TechnicalIssuesPage() {
 
       {/* Filters */}
       <div className="flex items-center gap-2 flex-wrap">
-        <Filter size={12} style={{ color:'#475569' }} />
+        <Filter size={12} style={{ color: T.faint }} />
         {['','pending_rta','validated','escalated_to_outage','resolved','rejected'].map(s => (
           <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
             className="px-3 py-1 rounded-lg text-xs transition-all"
             style={{
-              background: statusFilter===s ? 'rgba(99,102,241,0.2)'  : 'rgba(255,255,255,0.04)',
-              border:     statusFilter===s ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(255,255,255,0.06)',
-              color:      statusFilter===s ? '#818cf8' : '#64748b',
+              background: statusFilter===s ? 'rgba(99,102,241,0.2)'  : T.panel,
+              border:     statusFilter===s ? '1px solid rgba(99,102,241,0.35)' : `1px solid ${T.bdr}`,
+              color:      statusFilter===s ? '#818cf8' : tsColor(dark),
             }}>
             {!s ? (ar?'الكل':'All') : (ar ? (ST[s]?.ar ?? s) : (ST[s]?.en ?? s))}
           </button>
         ))}
-        <button onClick={() => { load(); loadStats(); }} className="ms-auto" style={{ color:'#475569' }}>
+        <button onClick={() => { load(); loadStats(); }} className="ms-auto" style={{ color: T.faint }}>
           <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
@@ -285,7 +293,7 @@ export default function TechnicalIssuesPage() {
       {/* List */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 size={24} className="animate-spin" style={{ color:'#475569' }} />
+          <Loader2 size={24} className="animate-spin" style={{ color: T.faint }} />
         </div>
       ) : items.length === 0 ? (
         <div className="text-center py-16">
@@ -300,14 +308,14 @@ export default function TechnicalIssuesPage() {
             return (
               <div key={ti.id}
                 className="rounded-2xl overflow-hidden cursor-pointer transition-all hover:scale-[1.002]"
-                style={{ background:'rgba(255,255,255,0.02)', border:`1px solid ${isPendingRTA(ti) ? sv.color+'30' : 'rgba(255,255,255,0.06)'}` }}
+                style={{ background: T.panel, border:`1px solid ${isPendingRTA(ti) ? sv.color+'30' : T.bdr}` }}
                 onClick={() => openDetail(ti.id)}>
                 <div className="flex items-center gap-3 px-4 py-3">
                   <div className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                     style={{ background:sv.color, boxShadow: isPendingRTA(ti) ? `0 0 6px ${sv.color}80` : 'none' }} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold truncate" style={{ color:'#e2e8f0' }}>{ti.title}</span>
+                      <span className="text-sm font-semibold truncate" style={{ color: tp(dark) }}>{ti.title}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background:st.bg, color:st.color }}>{ar?st.ar:st.en}</span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background:sv.bg, color:sv.color }}>{ar?sv.ar:sv.en}</span>
                       {isPendingRTA(ti) && (
@@ -329,14 +337,14 @@ export default function TechnicalIssuesPage() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 mt-0.5 flex-wrap" style={{ fontSize:11, color:'#475569' }}>
+                    <div className="flex items-center gap-3 mt-0.5 flex-wrap" style={{ fontSize:11, color: T.faint }}>
                       {ti.reporterName && <span>{ti.reporterName}</span>}
                       {ti.functionName && <span>· {ti.functionName}</span>}
                       <span><Clock size={9} className="inline me-0.5" />{fmtDt(ti.createdAt)}</span>
                       {ti.attachmentsCount > 0 && <span className="flex items-center gap-0.5"><Paperclip size={9} />{ti.attachmentsCount}</span>}
                     </div>
                   </div>
-                  <ChevronRight size={14} style={{ color:'#475569', flexShrink:0 }} />
+                  <ChevronRight size={14} style={{ color: T.faint, flexShrink:0 }} />
                 </div>
               </div>
             );
@@ -350,7 +358,7 @@ export default function TechnicalIssuesPage() {
           {Array.from({ length: Math.min(Math.ceil(total/20), 8) }, (_,i) => i+1).map(p => (
             <button key={p} onClick={() => setPage(p)}
               className="w-8 h-8 rounded-lg text-xs font-medium"
-              style={{ background:p===page?'rgba(99,102,241,0.25)':'rgba(255,255,255,0.04)', color:p===page?'#818cf8':'#64748b', border:p===page?'1px solid rgba(99,102,241,0.35)':'1px solid rgba(255,255,255,0.06)' }}>
+              style={{ background:p===page?'rgba(99,102,241,0.25)':T.panel, color:p===page?'#818cf8':tsColor(dark), border:p===page?'1px solid rgba(99,102,241,0.35)':`1px solid ${T.bdr}` }}>
               {p}
             </button>
           ))}
@@ -359,21 +367,21 @@ export default function TechnicalIssuesPage() {
 
       {/* ══ Detail Panel ══════════════════════════════════════════════════════ */}
       {(detailLoading || detail) && (
-        <div className="fixed inset-0 z-50 flex" style={{ background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)' }}
+        <div className="fixed inset-0 z-50 flex" style={{ background: T.overlay, backdropFilter:'blur(6px)' }}
           onClick={() => !detailLoading && setDetail(null)}>
           <div className="ms-auto h-full w-full max-w-xl flex flex-col overflow-hidden"
-            style={{ background:'#0b1120', borderLeft:'1px solid rgba(255,255,255,0.08)', boxShadow:'-24px 0 64px rgba(0,0,0,0.5)' }}
+            style={{ background:'var(--surface)', borderLeft:`1px solid ${T.bdr}`, boxShadow:'-24px 0 64px rgba(0,0,0,0.5)' }}
             onClick={e => e.stopPropagation()}>
 
             {detailLoading ? (
               <div className="flex items-center justify-center flex-1">
-                <Loader2 size={24} className="animate-spin" style={{ color:'#475569' }} />
+                <Loader2 size={24} className="animate-spin" style={{ color: T.faint }} />
               </div>
             ) : detail && (
               <>
                 {/* Panel header */}
                 <div className="flex items-start justify-between px-6 py-4 flex-shrink-0"
-                  style={{ borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+                  style={{ borderBottom:`1px solid ${T.bdr}` }}>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-[10px] px-2 py-0.5 rounded-full font-medium"
@@ -385,10 +393,10 @@ export default function TechnicalIssuesPage() {
                         {ar ? SEV[detail.severity]?.ar : SEV[detail.severity]?.en}
                       </span>
                     </div>
-                    <h2 className="text-base font-bold" style={{ color:'#f1f5f9' }}>{detail.title}</h2>
+                    <h2 className="text-base font-bold" style={{ color: tp(dark) }}>{detail.title}</h2>
                   </div>
                   <button onClick={() => setDetail(null)} className="ms-3 p-1.5 rounded-lg hover:bg-white/[0.06]">
-                    <X size={16} style={{ color:'#64748b' }} />
+                    <X size={16} style={{ color: tsColor(dark) }} />
                   </button>
                 </div>
 
@@ -405,28 +413,28 @@ export default function TechnicalIssuesPage() {
                       ...(detail.validatedByName ? [{ l:ar?'تحقق بواسطة':'Validated By', v: detail.validatedByName }] : []),
                     ].map(d => (
                       <div key={d.l} className="rounded-xl p-3"
-                        style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)' }}>
-                        <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{d.l}</p>
-                        <p className="text-xs font-medium" style={{ color:'#e2e8f0' }}>{d.v}</p>
+                        style={{ background: T.panel, border:`1px solid ${T.bdr}` }}>
+                        <p className="text-[10px] mb-1" style={{ color: T.faint }}>{d.l}</p>
+                        <p className="text-xs font-medium" style={{ color: tp(dark) }}>{d.v}</p>
                       </div>
                     ))}
                   </div>
 
                   {detail.description && (
-                    <div className="rounded-xl p-3" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)' }}>
-                      <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{ar?'وصف المشكلة':'Description'}</p>
-                      <p className="text-xs leading-relaxed" style={{ color:'#94a3b8' }}>{detail.description}</p>
+                    <div className="rounded-xl p-3" style={{ background: T.panel, border:`1px solid ${T.bdr}` }}>
+                      <p className="text-[10px] mb-1" style={{ color: T.faint }}>{ar?'وصف المشكلة':'Description'}</p>
+                      <p className="text-xs leading-relaxed" style={{ color: tsColor(dark) }}>{detail.description}</p>
                     </div>
                   )}
                   {detail.resolutionNotes && (
                     <div className="rounded-xl p-3" style={{ background:'rgba(52,211,153,0.05)', border:'1px solid rgba(52,211,153,0.15)' }}>
-                      <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{ar?'ملاحظات RTA':'RTA Notes'}</p>
+                      <p className="text-[10px] mb-1" style={{ color: T.faint }}>{ar?'ملاحظات RTA':'RTA Notes'}</p>
                       <p className="text-xs leading-relaxed" style={{ color:'#34d399' }}>{detail.resolutionNotes}</p>
                     </div>
                   )}
                   {detail.rejectionReason && (
                     <div className="rounded-xl p-3" style={{ background:'rgba(239,68,68,0.05)', border:'1px solid rgba(239,68,68,0.15)' }}>
-                      <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{ar?'سبب الرفض':'Rejection Reason'}</p>
+                      <p className="text-[10px] mb-1" style={{ color: T.faint }}>{ar?'سبب الرفض':'Rejection Reason'}</p>
                       <p className="text-xs leading-relaxed" style={{ color:'#f87171' }}>{detail.rejectionReason}</p>
                     </div>
                   )}
@@ -474,7 +482,7 @@ export default function TechnicalIssuesPage() {
                   {/* ── Attachments ──────────────────────────────────── */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs font-semibold flex items-center gap-1.5" style={{ color:'#94a3b8' }}>
+                      <p className="text-xs font-semibold flex items-center gap-1.5" style={{ color: tsColor(dark) }}>
                         <Paperclip size={12} /> {ar?`المرفقات (${detail.attachments.length})`:`Attachments (${detail.attachments.length})`}
                       </p>
                       <button onClick={() => addAttRef.current?.click()} disabled={uploading}
@@ -487,19 +495,19 @@ export default function TechnicalIssuesPage() {
                         accept="image/*,video/*,.pdf" onChange={handleAddAttachment} />
                     </div>
                     {detail.attachments.length === 0
-                      ? <p className="text-xs" style={{ color:'#475569' }}>{ar?'لا توجد مرفقات':'No attachments'}</p>
+                      ? <p className="text-xs" style={{ color: T.faint }}>{ar?'لا توجد مرفقات':'No attachments'}</p>
                       : (
                         <div className="grid grid-cols-3 gap-2">
                           {detail.attachments.map(a => (
                             <div key={a.id} className="relative rounded-xl overflow-hidden group"
-                              style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)', aspectRatio:'1' }}>
+                              style={{ background: T.panel, border:`1px solid ${T.bdr}`, aspectRatio:'1' }}>
                               {a.isImage
                                 ? <img src={a.url} alt={a.originalName} className="w-full h-full object-cover cursor-pointer" onClick={() => setLightbox(a)} />
                                 : a.isVideo
                                   ? <video src={a.url} className="w-full h-full object-cover cursor-pointer" onClick={() => setLightbox(a)} />
                                   : <div className="w-full h-full flex flex-col items-center justify-center">
-                                      <FileText size={22} style={{ color:'#64748b' }} />
-                                      <span className="text-[9px] mt-1 px-1 text-center truncate w-full" style={{ color:'#475569' }}>{a.originalName}</span>
+                                      <FileText size={22} style={{ color: tsColor(dark) }} />
+                                      <span className="text-[9px] mt-1 px-1 text-center truncate w-full" style={{ color: T.faint }}>{a.originalName}</span>
                                     </div>
                               }
                               <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-1.5"
@@ -533,16 +541,16 @@ export default function TechnicalIssuesPage() {
       {/* ══ Validate Modal ═══════════════════════════════════════════════════ */}
       {showValidate && detail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-          style={{ background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)' }}>
+          style={{ background: T.overlay, backdropFilter:'blur(6px)' }}>
           <div className="w-full max-w-md rounded-3xl p-6"
-            style={{ background:'#0f172a', border:'1px solid rgba(52,211,153,0.2)' }}>
+            style={{ background:'var(--surface)', border:'1px solid rgba(52,211,153,0.2)' }}>
             <div className="flex items-center gap-2 mb-4">
               <Shield size={16} style={{ color:'#34d399' }} />
-              <h3 className="font-bold" style={{ color:'#e2e8f0' }}>{ar?'تحقق RTA':'RTA Validation'}</h3>
+              <h3 className="font-bold" style={{ color: tp(dark) }}>{ar?'تحقق RTA':'RTA Validation'}</h3>
             </div>
             <div className="space-y-3">
               <div>
-                <label className="block text-[11px] mb-1.5" style={{ color:'#64748b' }}>{ar?'ملاحظات':'Notes'}</label>
+                <label className="block text-[11px] mb-1.5" style={{ color: tsColor(dark) }}>{ar?'ملاحظات':'Notes'}</label>
                 <textarea value={valNotes} onChange={e => setValNotes(e.target.value)}
                   rows={2} placeholder={ar?'ملاحظات التحقق...':'Validation notes...'} className="inp w-full text-xs" />
               </div>
@@ -556,7 +564,7 @@ export default function TechnicalIssuesPage() {
               </label>
               {valConvert && (
                 <div>
-                  <label className="block text-[11px] mb-1.5" style={{ color:'#64748b' }}>{ar?'خطورة العطل':'Outage Severity'}</label>
+                  <label className="block text-[11px] mb-1.5" style={{ color: tsColor(dark) }}>{ar?'خطورة العطل':'Outage Severity'}</label>
                   <select value={valSeverity} onChange={e => setValSeverity(e.target.value)} className="inp w-full text-xs">
                     {['critical','high','medium','low'].map(s => (
                       <option key={s} value={s}>{ar ? SEV[s].ar : SEV[s].en}</option>
@@ -566,7 +574,7 @@ export default function TechnicalIssuesPage() {
               )}
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowValidate(false)} className="px-4 py-2 rounded-xl text-sm" style={{ color:'#64748b' }}>
+              <button onClick={() => setShowValidate(false)} className="px-4 py-2 rounded-xl text-sm" style={{ color: tsColor(dark) }}>
                 {ar?'إلغاء':'Cancel'}
               </button>
               <button onClick={submitValidate} disabled={valSubmitting}
@@ -583,20 +591,20 @@ export default function TechnicalIssuesPage() {
       {/* ══ Reject Modal ══════════════════════════════════════════════════════ */}
       {showReject && detail && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-          style={{ background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)' }}>
+          style={{ background: T.overlay, backdropFilter:'blur(6px)' }}>
           <div className="w-full max-w-md rounded-3xl p-6"
-            style={{ background:'#0f172a', border:'1px solid rgba(239,68,68,0.2)' }}>
+            style={{ background:'var(--surface)', border:'1px solid rgba(239,68,68,0.2)' }}>
             <div className="flex items-center gap-2 mb-4">
               <XCircle size={16} style={{ color:'#f87171' }} />
-              <h3 className="font-bold" style={{ color:'#e2e8f0' }}>{ar?'رفض المشكلة':'Reject Issue'}</h3>
+              <h3 className="font-bold" style={{ color: tp(dark) }}>{ar?'رفض المشكلة':'Reject Issue'}</h3>
             </div>
             <div>
-              <label className="block text-[11px] mb-1.5" style={{ color:'#64748b' }}>{ar?'سبب الرفض *':'Rejection Reason *'}</label>
+              <label className="block text-[11px] mb-1.5" style={{ color: tsColor(dark) }}>{ar?'سبب الرفض *':'Rejection Reason *'}</label>
               <textarea value={rejReason} onChange={e => setRejReason(e.target.value)}
                 rows={3} placeholder={ar?'اذكر السبب...':'State the reason...'} className="inp w-full text-xs" />
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <button onClick={() => setShowReject(false)} className="px-4 py-2 rounded-xl text-sm" style={{ color:'#64748b' }}>
+              <button onClick={() => setShowReject(false)} className="px-4 py-2 rounded-xl text-sm" style={{ color: tsColor(dark) }}>
                 {ar?'إلغاء':'Cancel'}
               </button>
               <button onClick={submitReject} disabled={rejSubmitting || !rejReason.trim()}
@@ -613,18 +621,18 @@ export default function TechnicalIssuesPage() {
       {/* ══ Create Form ════════════════════════════════════════════════════════ */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)' }}
+          style={{ background: T.overlay, backdropFilter:'blur(6px)' }}
           onClick={() => setShowForm(false)}>
           <div className="w-full max-w-lg rounded-3xl p-5 overflow-y-auto max-h-[90vh]"
-            style={{ background:'#0f172a', border:'1px solid rgba(255,255,255,0.1)' }}
+            style={{ background:'var(--surface)', border:`1px solid ${T.bdr}` }}
             onClick={e => e.stopPropagation()}>
 
             {/* Header */}
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold" style={{ color:'#e2e8f0' }}>
+              <h2 className="text-base font-bold" style={{ color: tp(dark) }}>
                 {ar ? 'الإبلاغ عن مشكلة تقنية' : 'Report Technical Issue'}
               </h2>
-              <button onClick={() => setShowForm(false)}><X size={16} style={{ color:'#64748b' }} /></button>
+              <button onClick={() => setShowForm(false)}><X size={16} style={{ color: tsColor(dark) }} /></button>
             </div>
 
             <div className="space-y-2">
@@ -673,17 +681,17 @@ export default function TechnicalIssuesPage() {
                       {formFile.type.startsWith('image/') ? <Image size={14} style={{ color:'#818cf8' }} /> : <Video size={14} style={{ color:'#a78bfa' }} />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate" style={{ color:'#e2e8f0' }}>{formFile.name}</p>
-                      <p className="text-[10px]" style={{ color:'#64748b' }}>{fmtSize(formFile.size)}</p>
+                      <p className="text-xs font-medium truncate" style={{ color: tp(dark) }}>{formFile.name}</p>
+                      <p className="text-[10px]" style={{ color: tsColor(dark) }}>{fmtSize(formFile.size)}</p>
                     </div>
-                    <button onClick={() => setFormFile(null)} style={{ color:'#94a3b8' }}><X size={12} /></button>
+                    <button onClick={() => setFormFile(null)} style={{ color: tsColor(dark) }}><X size={12} /></button>
                   </div>
                 ) : (
                   <button onClick={() => formFileRef.current?.click()}
                     className="inp flex items-center gap-2 cursor-pointer"
                     style={{ justifyContent:'flex-start' }}>
-                    <Upload size={14} style={{ color:'#64748b' }} />
-                    <span style={{ color:'#64748b' }}>{ar ? 'رفع ملف...' : 'Upload file...'}</span>
+                    <Upload size={14} style={{ color: tsColor(dark) }} />
+                    <span style={{ color: tsColor(dark) }}>{ar ? 'رفع ملف...' : 'Upload file...'}</span>
                   </button>
                 )}
                 <input ref={formFileRef} type="file" className="hidden"
@@ -694,7 +702,7 @@ export default function TechnicalIssuesPage() {
               <div className="flex justify-end gap-2 pt-1">
                 <button onClick={() => setShowForm(false)}
                   className="px-4 py-2 rounded-xl text-sm font-medium transition-colors"
-                  style={{ color:'#64748b', border:'1px solid rgba(100,116,139,0.25)' }}>
+                  style={{ color: tsColor(dark), border:'1px solid rgba(100,116,139,0.25)' }}>
                   {ar ? 'إلغاء' : 'Cancel'}
                 </button>
                 <button onClick={submitTI} disabled={saving || !form.title.trim()}
@@ -761,9 +769,10 @@ function WhatsAppShare({ ti, ar }: { ti: TIDetail; ar: boolean }) {
 }
 
 function Fld({ label, children }: { label: string; children: React.ReactNode }) {
+  const { dark } = useUiStore();
   return (
     <div>
-      <label className="block text-xs mb-1 font-semibold tracking-wide" style={{ color:'#94a3b8' }}>{label}</label>
+      <label className="block text-xs mb-1 font-semibold tracking-wide" style={{ color: tsColor(dark) }}>{label}</label>
       {children}
     </div>
   );
