@@ -246,6 +246,11 @@ export function assignRoster(
   for (const date of dates) offToday.set(date, new Set());
   const plannedOff = new Map<string, Set<string>>();
 
+  // Per-day OFF ceiling = the even share of the weekly allowance across the week.
+  // Guarantees a coverage floor of (n − dayCap) working EVERY day, and since
+  // 7·dayCap ≥ 2n the pool always fits, so everyone still gets exactly the allowance.
+  const dayCap = Math.max(1, Math.ceil(employees.length * opts.offDaysPerWeek / Math.max(dates.length, 1)));
+
   if (opts.offStrategy === 'weekend-fair') {
     const offMap = assignOffDays(employees, dates, opts.offDaysPerWeek, priorConsecutive, ytdDist, dates[0]);
     for (const emp of employees) {
@@ -254,44 +259,62 @@ export function assignRoster(
       for (const d of mine) offToday.get(d)!.add(emp.id);
     }
   } else {
-    const demandOfDay = dates.map(d => {
+    // BALANCED, coverage-safe placement (fixes the per-function OFF-concentration
+    // bug, 2026-07-08 — a whole small function landing OFF on one day = zero cover).
+    // Each person's OFFs go on the LEAST-LOADED days (lower demand only as a
+    // tiebreak), capped at dayCap so no single day ever loses > dayCap people →
+    // a guaranteed coverage floor of (n − dayCap) working EVERY day. Capacity
+    // (7·dayCap ≥ 2n) always suffices, so everyone still gets exactly the allowance.
+    const demandOf = new Map(dates.map(d => {
       const m = mixByDate.get(d) ?? {};
-      return { date: d, demand: Object.values(m).reduce((a, b) => a + b, 0) };
-    });
-    const lowDemandOrder = [...demandOfDay].sort((a, b) => a.demand - b.demand).map(x => x.date);
-
+      return [d, Object.values(m).reduce((a, b) => a + b, 0)] as [string, number];
+    }));
     for (const emp of employees) {
-      // Place the weekly allowance on the LOWEST-demand days (35%/day cap staggers the pool).
       let need = opts.offDaysPerWeek;
       const mine = new Set<string>();
-      for (const date of lowDemandOrder) {
-        if (need <= 0) break;
-        const set = offToday.get(date)!;
-        if (set.has(emp.id)) continue;
-        if (set.size >= Math.floor(employees.length * 0.35)) continue;
-        set.add(emp.id); mine.add(date); need--;
+      while (need > 0) {
+        const cand = dates
+          .filter(d => !mine.has(d) && offToday.get(d)!.size < dayCap)
+          .sort((a, b) => (offToday.get(a)!.size - offToday.get(b)!.size) || (demandOf.get(a)! - demandOf.get(b)!));
+        if (!cand.length) break;                 // no capacity (rare) → left to the day loop
+        const d = cand[0];
+        offToday.get(d)!.add(emp.id); mine.add(d); need--;
       }
       plannedOff.set(emp.id, mine);
     }
   }
 
+  // ── Streak repair (COVERAGE-SAFE) — no working run > MAX_CONSEC, OFF total stays
+  //    = allowance, and the break lands on the LEAST-LOADED legal day (under dayCap
+  //    where possible) so breaking a shared streak can't dump the whole function OFF
+  //    on one breach date (the 2026-07-08 concentration bug). Re-scans to a fixpoint;
+  //    bounded by the week length.
   for (const emp of employees) {
-    // Streak repair WITH the planned OFFs credited (the old pre-pass counted every
-    // date as working, so on a 7-day week EVERY employee got a forced OFF on day 7
-    // and the whole pool went dark). If a streak would exceed MAX_CONSEC, MOVE one
-    // of this employee's LATER planned OFFs to the breaking date (total stays =
-    // allowance); only when none exists is an extra forced-rest OFF legal.
     const mine = plannedOff.get(emp.id)!;
-    let c = consec.get(emp.id) ?? 0;
-    for (const date of dates) {
-      if (mine.has(date)) { c = 0; continue; }
-      c++;
-      if (c > MAX_CONSEC) {
-        const later = dates.filter(d => mine.has(d) && d > date).pop();
-        if (later) { offToday.get(later)!.delete(emp.id); mine.delete(later); }
-        offToday.get(date)!.add(emp.id); mine.add(date);
-        c = 0;
+    for (let guard = 0; guard < dates.length; guard++) {
+      // first day where the running streak (incl. prior-week consec) exceeds MAX_CONSEC
+      let c = consec.get(emp.id) ?? 0, breachIdx = -1, streakStart = 0;
+      for (let di = 0; di < dates.length; di++) {
+        if (mine.has(dates[di])) { c = 0; streakStart = di + 1; continue; }
+        c++;
+        if (c > MAX_CONSEC) { breachIdx = di; break; }
       }
+      if (breachIdx < 0) break;                  // no violation
+      // candidate break days = working days of THIS streak; prefer under-cap then least-loaded
+      const lo = Math.max(streakStart, breachIdx - MAX_CONSEC + 1);
+      let best = -1, bestScore = Infinity;
+      for (let k = lo; k <= breachIdx; k++) {
+        if (mine.has(dates[k])) continue;
+        const load = offToday.get(dates[k])!.size;
+        const score = (load < dayCap ? 0 : 100000) + load;   // under-cap wins, then least-loaded
+        if (score < bestScore) { bestScore = score; best = k; }
+      }
+      const breakDate = best >= 0 ? dates[best] : dates[breachIdx];
+      // keep total = allowance: free a LATER planned OFF if one exists (else it's a
+      // legal extra forced-rest OFF — genuinely unavoidable, rare)
+      const later = dates.filter(d => mine.has(d) && d > breakDate).pop();
+      if (later) { offToday.get(later)!.delete(emp.id); mine.delete(later); }
+      offToday.get(breakDate)!.add(emp.id); mine.add(breakDate);
     }
   }
 
@@ -322,6 +345,10 @@ export function assignRoster(
   for (const date of dates) {
     const mix = { ...(mixByDate.get(date) ?? {}) };
     const assignedToday = new Set<string>(offToday.get(date));
+    // Coverage floor: at most dayCap people go OFF on this date for this (per-function)
+    // pool, so a low-demand day can never take the whole team dark — surplus beyond
+    // the floor WORKS (labeled overstaffing), the same guard weekend-fair already uses.
+    let offCountToday = 0;
 
     // Approved leave first — these people are NOT available, full stop
     for (const emp of employees) {
@@ -338,7 +365,15 @@ export function assignRoster(
     // day loop assigns them work instead. Forced-rest (at MAX_CONSEC) stays legal.
     for (const id of [...offToday.get(date)!]) {
       if (opts.onLeave?.get(id)?.has(date)) continue; // leave already covers the day
-      if ((offUsed.get(id) ?? 0) >= opts.offDaysPerWeek && (consec.get(id) ?? 0) < MAX_CONSEC) {
+      // Release a planned OFF (→ the day loop works this person) when EITHER the
+      // person already burned the weekly allowance OR — in the DEFAULT strategy —
+      // this date already has dayCap people OFF (coverage floor). Forced-rest
+      // (MAX_CONSEC) always stays OFF. weekend-fair is EXCLUDED from the floor: it
+      // makes surplus WORK, so a released OFF there can't be recovered (would drop
+      // the person to 1 OFF) — its structure keeps exactly-2-OFF and a tiny team
+      // thinning one weekend day is that opt-in strategy's known, accepted tradeoff.
+      const floorReleasable = offCountToday >= dayCap && opts.offStrategy !== 'weekend-fair';
+      if (((offUsed.get(id) ?? 0) >= opts.offDaysPerWeek || floorReleasable) && (consec.get(id) ?? 0) < MAX_CONSEC) {
         offToday.get(date)!.delete(id);
         assignedToday.delete(id);
         continue;
@@ -347,6 +382,7 @@ export function assignRoster(
       consec.set(id, 0);
       prevShift.set(id, SHIFTS.OFF);
       offUsed.set(id, (offUsed.get(id) ?? 0) + 1);
+      offCountToday++;
     }
 
     for (const code of HARD_ORDER) {
@@ -429,7 +465,11 @@ export function assignRoster(
       // surplus people WORK on non-planned days (labeled overstaffing) instead of
       // taking early surplus OFFs that would cannibalize the Thu/Fri weekend slot.
       const structuredOff = opts.offStrategy === 'weekend-fair';
-      if (((offUsed.get(e.id) ?? 0) >= opts.offDaysPerWeek || structuredOff) && !mustRest) {
+      // atFloor: this date already has dayCap people OFF for this pool → the rest must
+      // WORK so the function keeps its coverage floor (the 2026-07-08 concentration fix,
+      // extended to the default 'lowest-demand' strategy too).
+      const atFloor = offCountToday >= dayCap;
+      if (((offUsed.get(e.id) ?? 0) >= opts.offDaysPerWeek || structuredOff || atFloor) && !mustRest) {
         // Next-best working shift: eligible + fairest category share
         const allowed = allowedShiftCodes(e.functionName);
         const candidates = WORKING_CODES.filter(code => {
@@ -473,6 +513,7 @@ export function assignRoster(
       consec.set(e.id, 0);
       prevShift.set(e.id, SHIFTS.OFF);
       offUsed.set(e.id, (offUsed.get(e.id) ?? 0) + 1);
+      offCountToday++;
     }
   }
 

@@ -160,7 +160,7 @@ describe('assignRoster (demand engine, synthetic pool)', () => {
       emptyDist,
       emptyLast,
       noPrior,
-      OPTS,
+      { ...OPTS, offDaysPerWeek: 0 },   // 1-day probe of SHIFT assignment — no OFF allowance (2 OFF in 1 day is degenerate; the coverage-floor placement would otherwise rest this sole employee)
     );
     const rows = result.assignments.filter((a) => a.employeeId === 'om1');
     expect(rows).toHaveLength(1);
@@ -263,11 +263,14 @@ describe('assignRoster — weekend-fair OFF structure + rotation-band fairness',
     const last = new Map<string, ShiftDef>([['z-late', SHIFTS.N], ['a-early', SHIFTS.C]]);
     const mix = mixFor(oneDay, { C: 1, M: 1 });
 
-    const plain = assignRoster(oneDay, mix, pool, emptyDist, last, noPrior, OPTS);
+    // 1-day probe of ROTATION fairness on the shift assignment — no OFF allowance
+    // (2 OFF in 1 day is degenerate; the coverage-floor placement would otherwise
+    // rest one of the two and leave a shift unassigned).
+    const plain = assignRoster(oneDay, mix, pool, emptyDist, last, noPrior, { ...OPTS, offDaysPerWeek: 0 });
     expect(plain.assignments.find((a) => a.code === 'C')!.employeeId).toBe('a-early');
 
     const rotated = assignRoster(oneDay, mix, pool, emptyDist, last, noPrior, {
-      ...OPTS, rotationFairness: true,
+      ...OPTS, offDaysPerWeek: 0, rotationFairness: true,
     });
     expect(rotated.assignments.find((a) => a.code === 'C')!.employeeId).toBe('z-late');
     expect(rotated.assignments.find((a) => a.code === 'M')!.employeeId).toBe('a-early');
@@ -285,4 +288,29 @@ describe('assignRoster — weekend-fair OFF structure + rotation-band fairness',
       expect(['E', 'EE', 'MD', 'MN']).not.toContain(a.code);
     }
   });
+});
+
+// ─── Coverage floor: a whole (small) function can never go OFF on one day ────
+// Regression guard for the 2026-07-08 concentration bug (a 13-person function had
+// 11/13 OFF on a single day — zero coverage). Per-function pools run assignRoster
+// independently, so the OFF distribution MUST stay balanced with a hard per-day cap.
+describe('assignRoster — per-function OFF coverage floor', () => {
+  const emptyDist = new Map<string, ShiftDistribution>();
+  const emptyLast = new Map<string, ShiftDef>();
+  const noPrior = new Map<string, number>();
+
+  for (const n of [13, 8, 6, 3, 2]) {
+    it(`n=${n}: no day exceeds the even-share OFF cap, everyone gets exactly the allowance`, () => {
+      const pool = Array.from({ length: n }, (_, i) => emp(`e${i}`, 'male', 'Customer Care'));
+      // low, flat demand → the OLD engine dumped everyone OFF on the lowest-demand day
+      const result = assignRoster(DATES, mixFor(DATES, { M: 1, C: 1 }), pool, emptyDist, emptyLast, noPrior, OPTS);
+      const dayCap = Math.max(1, Math.ceil(n * OPTS.offDaysPerWeek / DATES.length));
+      const offPerDay = new Map<string, number>(DATES.map((d) => [d, 0]));
+      for (const a of result.assignments) if (a.code === 'OFF') offPerDay.set(a.date, offPerDay.get(a.date)! + 1);
+      for (const [, cnt] of offPerDay) expect(cnt).toBeLessThanOrEqual(dayCap);   // coverage floor holds
+      for (const [, rows] of byEmployee(result.assignments)) {
+        expect(rows.filter((r) => r.code === 'OFF')).toHaveLength(OPTS.offDaysPerWeek);   // exactly-2-off
+      }
+    });
+  }
 });
