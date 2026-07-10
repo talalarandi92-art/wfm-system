@@ -33,40 +33,11 @@ import { computeShiftMix } from '../schedule-generator/demand.engine';
  *  Every intermediate value is returned so the UI can show the exact math.
  * ════════════════════════════════════════════════════════════════════════════ */
 
-// ── the same numerically-stable Erlang core as capacity.service (kept private
-//    there) — duplicated formulas are forbidden, so re-derive from the identical
-//    published recursion and lock behavior with the staffing smoke test.
-function erlangB(agents: number, intensity: number): number {
-  const N = Math.floor(agents); const A = intensity;
-  if (N < 1) return 1; if (A <= 0) return 0;
-  let b = 1.0;
-  for (let k = 1; k <= N; k++) b = (A * b) / (k + A * b);
-  return b;
-}
-function erlangC(agents: number, intensity: number): number {
-  const N = Math.floor(agents); const A = intensity;
-  if (N < 1) return 1; if (A <= 0) return 0; if (A >= N) return 1;
-  const b = erlangB(N, A);
-  return Math.min(Math.max((N * b) / (N - A * (1 - b)), 0), 1);
-}
-function serviceLevel(agents: number, intensity: number, targetSec: number, ahtSec: number): number {
-  if (agents < 1 || ahtSec <= 0) return 0;
-  const N = Math.floor(agents); const A = intensity;
-  if (A <= 0) return 1; if (A >= N) return 0;
-  return Math.min(Math.max(1 - erlangC(N, A) * Math.exp(-((N - A) * targetSec) / ahtSec), 0), 1);
-}
-function findMinAgents(intensity: number, targetSL: number, targetSec: number, ahtSec: number, occupancyCap: number): number {
-  if (intensity <= 0) return 0;
-  let n = Math.max(Math.ceil(intensity / Math.max(occupancyCap, 0.01)), Math.floor(intensity) + 1, 1);
-  for (let i = 0; i < 2000; i++, n++) {
-    if (serviceLevel(n, intensity, targetSec, ahtSec) >= targetSL) return n;
-  }
-  return n;
-}
-function effectiveServersPerAgent(concurrency: number, marginalEff: number): number {
-  const c = Math.max(1, concurrency);
-  return 1 + (c - 1) * Math.min(Math.max(marginalEff, 0), 1);
-}
+// ── the same numerically-stable Erlang core as capacity.service — now shared
+//    for real (R2.2): capacity.service's copy was lifted VERBATIM into
+//    @common/erlang; this file's former private re-derivation was mathematically
+//    identical (same recursion, same guards), so results are bit-identical.
+import { serviceLevel, findMinAgents, effectiveServersPerAgent } from '@common/erlang';
 
 export interface StaffingParams {
   functionKey: string;

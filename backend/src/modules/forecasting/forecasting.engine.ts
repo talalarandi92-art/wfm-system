@@ -8,6 +8,10 @@
  * the engine is fully testable.
  */
 
+// Shared Erlang kernel (R2.2) — the exported erlangC/serviceLevel below keep
+// this module's historical edge behavior and delegate the main path here.
+import { erlangC as coreErlangC, serviceLevel as coreServiceLevel } from '@common/erlang';
+
 export interface VolumePoint {
   date: string;        // YYYY-MM-DD
   hour: number;        // 0..23
@@ -125,25 +129,25 @@ export function eventFactor(date: string, events: ForecastEvent[]): { multiplier
 
 /* ── Staffing: turn forecast volume into required agents (Erlang-C) ──────────── */
 
-/** Erlang-C probability of waiting for N agents at traffic intensity A (erlangs). */
+/** Erlang-C probability of waiting for N agents at traffic intensity A (erlangs).
+ *  R2.2: main path delegates to the shared kernel (@common/erlang — bit-identical
+ *  recursion); this module's historical edge-order is preserved by the guards
+ *  (here N<1 with A<=0 → 0, whereas the shared core returns 1). */
 export function erlangC(agents: number, intensity: number): number {
   const N = Math.floor(agents), A = intensity;
   if (A <= 0) return 0;
   if (N <= A) return 1; // unstable / saturated
-  // Erlang-B recursion, then convert to C
-  let b = 1;
-  for (let k = 1; k <= N; k++) b = (A * b) / (k + A * b);
-  const c = (N * b) / (N - A * (1 - b));
-  return Math.min(Math.max(c, 0), 1);
+  return coreErlangC(N, A);
 }
 
-/** Service level = P(answer within targetSec) for N agents. */
+/** Service level = P(answer within targetSec) for N agents.
+ *  R2.2: guards preserve this module's historical edge-order (A<=0 → 1 even when
+ *  ahtSec<=0, unlike the shared core); main path is the shared kernel. */
 export function serviceLevel(agents: number, intensity: number, targetSec: number, ahtSec: number): number {
   const N = Math.floor(agents), A = intensity;
   if (A <= 0) return 1;
   if (N <= A || ahtSec <= 0) return 0;
-  const pw = erlangC(N, A);
-  return Math.min(Math.max(1 - pw * Math.exp(-(N - A) * targetSec / ahtSec), 0), 1);
+  return coreServiceLevel(N, A, targetSec, ahtSec);
 }
 
 export interface StaffingParams {
