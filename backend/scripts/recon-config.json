@@ -1,6 +1,20 @@
 {
   "_note_sysMode": "System-session source mode for the engine: 'ameyo-first' (June calibration — Ameyo primary, Sprinklr fills gaps), 'sprinklr-first', or 'sprinklr-only'. D-076 (Director 2026-07-03): from the NEXT period the roster comes fully from Sprinklr — flip this to 'sprinklr-only' (or 'sprinklr-first') BEFORE the first July upload. A one-off env RECON_SYS_MODE overrides this value.",
   "sysMode": "ameyo-first",
+  "_note_fixedEmployees": "Director 2026-07-10: people NOT on the ops schedule sheet with a STANDING pattern — always this shift, WFH, OFF on the listed weekdays. Generated for every date of the rebuild horizon; evidence reconciliation still applies on top.",
+  "fixedEmployees": [
+    { "id": 13863, "name": "Amthal Alrashid", "code": "B", "wfh": true, "offDays": ["Friday", "Saturday"], "function": "OMT", "gender": "Female" },
+    { "id": 13540, "name": "Athari Almulla",  "code": "B", "wfh": true, "offDays": ["Friday", "Saturday"], "function": "OMT", "gender": "Female" }
+  ],
+  "_note_supplementalMatrices": "Director-managed people (his direct team) whose schedule lives in HIS matrix files, not the ops sheet. Matrix format: Name | ID | serial-date columns with day codes. Only the listed ids are merged (others already come from the ops sheet). Add/replace paths as new matrix files arrive, then re-run the refresh.",
+  "supplementalMatrices": [
+    { "path": "C:/Users/t.bassam/Desktop/Roster 1June to 3 July/My hr matrix.xlsx",   "ids": [10108, 9568] },
+    { "path": "C:/Users/t.bassam/Desktop/Roster 1June to 3 July/27JUN UPD ADV.xlsx", "ids": [10108, 9568] }
+  ],
+  "supplementalIdentity": {
+    "10108": { "name": "Shereen Torabi", "function": "Resolution Specialist", "gender": "Female" },
+    "9568":  { "name": "Asayel Sameah",  "function": "Team Leader",           "gender": "Female" }
+  },
   "_note": "Editable reconciliation config. Edit the holidays list whenever needed, then re-run: node scripts/recon-refresh.js. Anyone who worked a SCHEDULED shift on one of these dates gets the whole shift credited as HOLIDAY OT, the row is labelled 'Official Holiday', and an ANNUAL-LEAVE (L) day on a holiday is counted as the holiday (returns to the leave balance, not deducted). A cross-midnight shift is owned by its START day, so a holiday/OFF day never re-grabs the previous night's session.",
   "holidays": [
     { "date": "2026-01-01", "name": "New Year" },

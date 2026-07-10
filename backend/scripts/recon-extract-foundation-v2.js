@@ -56,6 +56,53 @@ const cell = (v) => { if (v == null) return null; if (typeof v === 'object') { i
     break;
   }
   const dates = [...dateSet].sort().map(d => ({ date: d, day: dayName(d) }));
+
+  // ── SUPPLEMENTAL PEOPLE (Director 2026-07-10) — people NOT on the ops schedule sheet ──────────
+  // 1) fixedEmployees (recon-config.json): standing pattern — always <code>, WFH, OFF on the listed
+  //    weekdays; generated for every horizon date. 2) supplementalMatrices: the Director's own matrix
+  //    files (Name|ID|serial-date cols) for his direct team — merged for the listed ids only.
+  try {
+    const cfg = JSON.parse(fs.readFileSync(require('path').join(__dirname, 'recon-config.json'), 'utf8'));
+    const CANON = { B: { start: 540, end: 1080 } };   // fixed-pattern shift times (B 09:00-18:00); others fall back to classifyCode
+    for (const fe of (cfg.fixedEmployees || [])) {
+      if (employees[fe.id]) continue;   // ops sheet wins if they ever appear there
+      employees[fe.id] = { id: fe.id, name: fe.name, username: null, teamCol: null, location: fe.wfh ? 'WFH' : null, function: fe.function || null, days: {} };
+      identity[fe.id] = { id: fe.id, name: fe.name, userId: null, team: null, email: null, manager: null, gender: fe.gender || null, location: fe.wfh ? 'WFH' : null };
+      for (const dd of dates) {
+        const off = (fe.offDays || []).includes(dd.day);
+        employees[fe.id].days[dd.date] = off ? 'OFF' : fe.code;
+        if (!off && CANON[fe.code]) schedule[fe.id + '|' + dd.date] = { start: CANON[fe.code].start, end: CANON[fe.code].end, start2: null, end2: null };
+      }
+      console.log('[v2] fixed-pattern employee merged: ' + fe.name + ' #' + fe.id + ' (' + fe.code + ', WFH, OFF ' + (fe.offDays || []).join('+') + ')');
+    }
+    if ((cfg.supplementalMatrices || []).length) {
+      const XLSX = require('xlsx');
+      const serTo = s => new Date(Math.round((Math.floor(s) - 25569) * 86400000)).toISOString().slice(0, 10);
+      for (const sm of cfg.supplementalMatrices) {
+        let wb2; try { wb2 = XLSX.readFile(sm.path, { cellDates: false, raw: true }); } catch (e) { console.warn('[v2] supplemental matrix unreadable: ' + sm.path + ' — ' + e.message); continue; }
+        const rows2 = XLSX.utils.sheet_to_json(wb2.Sheets[wb2.SheetNames[0]], { header: 1, defval: null, blankrows: false, raw: true });
+        const H2 = rows2[0] || [];
+        const dcols = []; H2.forEach((h, i) => { if (typeof h === 'number' && h > 40000) dcols.push({ i, d: serTo(h) }); });
+        let mergedDays = 0;
+        for (const r of rows2.slice(1)) {
+          const id = (typeof r[1] === 'number') ? r[1] : parseInt(r[1], 10);
+          if (!id || isNaN(id) || !(sm.ids || []).includes(id)) continue;
+          const sid = (cfg.supplementalIdentity || {})[String(id)] || {};
+          if (!employees[id]) {
+            employees[id] = { id, name: sid.name || String(r[0] || '').trim(), username: null, teamCol: null, location: null, function: sid.function || null, days: {} };
+            identity[id] = { id, name: sid.name || String(r[0] || '').trim(), userId: null, team: null, email: null, manager: null, gender: sid.gender || null, location: null };
+          }
+          for (const { i, d } of dcols) {
+            if (d < (process.env.RECON_FROM || '2026-06-01') || (process.env.RECON_TO && d > process.env.RECON_TO)) continue;
+            const code = r[i] == null ? null : String(r[i]).trim();
+            if (code && !employees[id].days[d]) { employees[id].days[d] = code; mergedDays++; }
+          }
+        }
+        if (mergedDays) console.log('[v2] supplemental matrix merged: ' + sm.path.split('/').pop() + ' → +' + mergedDays + ' person-days for ids ' + (sm.ids || []).join(','));
+      }
+    }
+  } catch (e) { console.warn('[v2] supplemental-people merge skipped: ' + e.message); }
+
   const out = { meta: { source: SRC, version: 2, extractedRows: scanned, employees: Object.keys(employees).length, dateRange: [dates[0] && dates[0].date, dates[dates.length - 1] && dates[dates.length - 1].date] }, dates, employees: Object.values(employees), identity, byUser, byEmail, schedule };
   fs.writeFileSync(OUT, JSON.stringify(out));
   console.log('[v2] rows=' + scanned + ' employees=' + Object.keys(employees).length + ' dates=' + dates.length + ' (' + out.meta.dateRange.join('..') + ') schedule-keys=' + Object.keys(schedule).length);
