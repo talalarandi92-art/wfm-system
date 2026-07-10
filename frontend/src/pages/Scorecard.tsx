@@ -1323,6 +1323,9 @@ export default function ScorecardPage() {
             <h1 className="text-xl font-bold" style={{ color: textPri }}>
               {ar ? 'لوحة الأداء' : 'Scorecard'}
             </h1>
+            <div className="text-[11px]" style={{ color: textMuted }}>
+              {ar ? 'السكوركارد الرسمي — نقاط صافية (من الجداول المعتمدة)' : 'Official scorecard — Net Points (scorecard_monthly + batch entries)'}
+            </div>
             {selectedBatch && (tab === 'results' || tab === 'mine') && (
               <div className="text-xs" style={{ color: textSec }}>
                 {selectedBatch.periodName}

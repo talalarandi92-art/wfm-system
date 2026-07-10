@@ -313,9 +313,10 @@ export class RosterAnalyticsController {
     return { teamLeader: tlName, from: dFrom, to: dTo, range, summary, agents, byShift, teamLeaders: tlOpts.map((r: any) => r.v) };
   }
 
-  /** Scorecard Board — the official scorecard at its TRUE grain (agent × week), not
-   *  smeared per day. By-agent = avg across the agent's weeks for every KPI; pass
-   *  ?person= for the W1–W5 weekly drill. Alias-aware via employee_identity. */
+  /** Scorecard Board — official scorecard, board VIEW over scorecard_entries at
+   *  agent × week grain (same source as the scorecard module; a VIEW, not an
+   *  independent score). By-agent = avg across the agent's weeks for every KPI;
+   *  pass ?person= for the W1–W5 weekly drill. Alias-aware via employee_identity. */
   @Get('roster-v2/scorecard')
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'Official scorecard board — per-agent (avg of weeks) + weekly W1–W5 drill, all KPIs' })

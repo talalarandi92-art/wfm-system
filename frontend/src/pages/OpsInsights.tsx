@@ -3,6 +3,7 @@ import {
   Phone, Clock, Coffee, ShoppingCart, CalendarRange,
   TrendingUp, Activity, Headphones, RotateCcw, Globe, Layers, Award,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
 
@@ -54,7 +55,7 @@ const SUBS: { key: Sub; icon: any; ar: string; en: string }[] = [
   { key: 'volume',       icon: Phone,        ar: 'حجم التواصل + CPO', en: 'Volume & CPO' },
   { key: 'productivity', icon: Headphones,   ar: 'الإنتاجية',          en: 'Productivity' },
   { key: 'shrinkage',    icon: Coffee,       ar: 'الـShrinkage',       en: 'Shrinkage' },
-  { key: 'scorecard',    icon: Award,        ar: 'السكوركارد',         en: 'Scorecard' },
+  { key: 'scorecard',    icon: Award,        ar: 'اتجاه النقاط (عرض تشغيلي)', en: 'Net Points trend (operational view)' },
   { key: 'orders',       icon: ShoppingCart, ar: 'الطلبات',            en: 'Orders' },
   { key: 'peaks',        icon: CalendarRange,ar: 'أيام الذروة',        en: 'Peak Events' },
   { key: 'overtime',     icon: Clock,        ar: 'الأوفر تايم',        en: 'Overtime' },
@@ -213,6 +214,11 @@ export default function OpsInsightsPage() {
               </Section>
             </div>
             <p className="text-[11px] text-slate-500">{d.note}</p>
+            <p className="text-[11px] text-slate-500">
+              {ar ? 'التقييم الرسمي التفصيلي في صفحة السكوركارد' : 'Per-KPI official scoring lives in the Scorecard hub'}
+              {' — '}
+              <Link to="/scorecard?tab=overview" className="underline hover:text-slate-300">{ar ? 'افتح السكوركارد' : 'open Scorecard'}</Link>
+            </p>
           </div>
         );
       })()}

@@ -54,7 +54,7 @@ export default function ScorecardBoardPage() {
         <button onClick={()=>nav('/wfm-overview')} className="p-2 rounded-xl" style={{ background:'rgba(255,255,255,0.06)' }}><ArrowLeft size={16} className="text-white"/></button>
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#f59e0b,#8b5cf6)' }}><ClipboardList size={20} className="text-white"/></div>
         <div className="flex-1 min-w-[180px]"><h1 className="text-lg font-bold text-white">{ar?'لوحة السكور كارد':'Scorecard Board'}</h1>
-          <p className="text-xs text-slate-500">{ar?'السكور كارد الرسمي على مستواه الحقيقي — لكل موظف (متوسط الأسابيع) + تفصيل أسبوعي':'the official scorecard at its true grain — per agent (avg of weeks) + weekly drill'}</p></div>
+          <p className="text-xs text-slate-500">{ar?'السكوركارد الرسمي — عرض اللوحة (وكيل × أسبوع)':'Official scorecard — board view (agent × week)'}</p></div>
         <div className="flex items-center gap-1.5"><Search size={14} className="text-slate-400"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={ar?'بحث':'Search'} className={inputCls}/></div>
         <select value={fn} onChange={e=>setFn(e.target.value)} className={inputCls}><option value="">{ar?'كل الفنكشن':'All functions'}</option>{(d?.filterOptions?.functions||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
         <select value={tl} onChange={e=>setTl(e.target.value)} className={inputCls}><option value="">{ar?'كل التيم ليدرز':'All TLs'}</option>{(d?.filterOptions?.teamLeaders||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
