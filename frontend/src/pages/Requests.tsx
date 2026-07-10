@@ -12,7 +12,7 @@ import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
 import { apiClient } from '@/api/client';
 import type { LinkedEmployee } from '@/types/auth.types';
-import { useInjectDsStyles } from '@/components/ds';
+import { ts as tsColor, useInjectDsStyles } from '@/components/ds';
 import EmptyState from '@/components/EmptyState';
 import { fmtDate, fmtDateShort, fmtTime, fmtDuration, fixEncoding, fmtLocalDate } from '@/utils/format';
 
@@ -353,7 +353,7 @@ function HcImpactPanel({ requestId, dark, ar = true }: { requestId: string; dark
                     {fmtDateShort(d.date)}
                   </div>
                   <div className="text-center font-semibold text-slate-700 dark:text-slate-300">{d.scheduledHc}</div>
-                  <div className="text-center font-bold" style={{ color: delta > 0 ? '#f87171' : '#94a3b8' }}>
+                  <div className="text-center font-bold" style={{ color: delta > 0 ? '#f87171' : tsColor(dark) }}>
                     {d.afterApproval}
                     {delta > 0 && <span className="text-[9px] ms-1 opacity-80">(-{delta})</span>}
                   </div>
@@ -438,7 +438,7 @@ function HcImpactPanel({ requestId, dark, ar = true }: { requestId: string; dark
                       )}
                     </div>
                     <div className="text-center font-semibold text-slate-700 dark:text-slate-300">{h.scheduled}</div>
-                    <div className="text-center font-bold" style={{ color: delta > 0 ? rs.color : '#94a3b8' }}>
+                    <div className="text-center font-bold" style={{ color: delta > 0 ? rs.color : tsColor(dark) }}>
                       {h.afterApproval}
                       {delta > 0 && <span className="text-[9px] ms-1 opacity-80">(-{delta})</span>}
                     </div>
@@ -1141,7 +1141,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
     outline: 'none',
     width: '100%',
   };
-  const labelStyle: React.CSSProperties = { fontSize: 12, color: '#94a3b8', marginBottom: 4, display: 'block' };
+  const labelStyle: React.CSSProperties = { fontSize: 12, color: tsColor(dark), marginBottom: 4, display: 'block' };
 
   return (
     <div className="space-y-5">
@@ -1330,7 +1330,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                   <span className="text-xs font-bold" style={{ color: leaveBal.remaining <= 0 ? '#ef4444' : '#38bdf8' }}>
                     {ar ? 'الرصيد المتبقّي' : 'Balance remaining'}: {leaveBal.remaining} / {leaveBal.entitlement} {ar ? 'يوم' : 'd'}
                   </span>
-                  <span className="text-[11px]" style={{ color: '#94a3b8' }}>
+                  <span className="text-[11px]" style={{ color: tsColor(dark) }}>
                     {ar ? 'مأخوذ' : 'taken'} {leaveBal.taken} · {ar ? 'معلّق' : 'pending'} {leaveBal.pending}
                   </span>
                 </div>
@@ -1361,7 +1361,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                   <label className="flex items-center gap-2 cursor-pointer rounded-xl px-3 py-2.5 transition-colors"
                     style={{ background: attachFile ? 'rgba(168,85,247,0.1)' : 'rgba(168,85,247,0.06)', border: `1px dashed ${attachFile ? 'rgba(168,85,247,0.5)' : 'rgba(168,85,247,0.3)'}` }}>
                     {attachFile ? <Paperclip size={14} style={{ color: '#a855f7' }} /> : <Upload size={14} style={{ color: '#a855f7' }} />}
-                    <span className="text-xs flex-1 truncate" style={{ color: attachFile ? '#c4b5fd' : '#94a3b8' }}>
+                    <span className="text-xs flex-1 truncate" style={{ color: attachFile ? '#c4b5fd' : tsColor(dark) }}>
                       {attachFile ? attachFile.name : (ar ? 'اضغط لاختيار صورة أو PDF' : 'Tap to choose an image or PDF')}
                     </span>
                     {attachFile && (
@@ -1534,7 +1534,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                       <span className="text-xs font-bold" style={{ color: r.c }}>
                         {ar ? 'أثر الهيدكاونت' : 'HC impact'} — {ar ? r.ar : r.en}
                       </span>
-                      <span className="text-[10px]" style={{ color: '#94a3b8' }}>
+                      <span className="text-[10px]" style={{ color: tsColor(dark) }}>
                         {ar ? 'قبل الموافقة' : 'pre-approval'}
                       </span>
                     </div>
@@ -1546,7 +1546,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                             <div key={fn.functionId} className="flex items-center justify-between text-xs">
                               <span className="text-slate-600 dark:text-slate-300">{fn.functionName}</span>
                               <span className="flex items-center gap-2">
-                                <span className="tnum" style={{ color: '#94a3b8' }}>
+                                <span className="tnum" style={{ color: tsColor(dark) }}>
                                   {ar ? 'مجدول' : 'sched'} {fn.peakScheduledHc}
                                 </span>
                                 <span className="tnum font-semibold" style={{ color: fc.c }}>
@@ -1558,7 +1558,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                         })}
                       </div>
                     ) : (
-                      <div className="text-xs" style={{ color: '#94a3b8' }}>
+                      <div className="text-xs" style={{ color: tsColor(dark) }}>
                         {ar ? 'لا يوجد موظفون مجدولون متأثرون' : 'No scheduled staff affected'}
                       </div>
                     )}
@@ -1647,10 +1647,10 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                     </div>
                     {/* Big total */}
                     <div className="px-4 py-3 flex items-center justify-between" style={{ background: dark ? 'rgba(249,115,22,0.04)' : 'rgba(249,115,22,0.03)' }}>
-                      <span className="text-xs" style={{ color:'#64748b' }}>{ar ? 'الإجمالي' : 'Total'}</span>
+                      <span className="text-xs" style={{ color:tsColor(dark) }}>{ar ? 'الإجمالي' : 'Total'}</span>
                       <div className="flex items-baseline gap-1">
-                        {otH > 0 && <><span className="text-2xl font-black" style={{ color:'#fb923c' }}>{otH}</span><span className="text-xs font-bold" style={{ color:'#94a3b8' }}>{ar ? 'س' : 'h'}</span></>}
-                        {otM > 0 && <><span className="text-2xl font-black" style={{ color:'#fb923c' }}>{otM}</span><span className="text-xs font-bold" style={{ color:'#94a3b8' }}>{ar ? 'د' : 'm'}</span></>}
+                        {otH > 0 && <><span className="text-2xl font-black" style={{ color:'#fb923c' }}>{otH}</span><span className="text-xs font-bold" style={{ color:tsColor(dark) }}>{ar ? 'س' : 'h'}</span></>}
+                        {otM > 0 && <><span className="text-2xl font-black" style={{ color:'#fb923c' }}>{otM}</span><span className="text-xs font-bold" style={{ color:tsColor(dark) }}>{ar ? 'د' : 'm'}</span></>}
                       </div>
                     </div>
                     {/* Comparison rows */}
@@ -1658,7 +1658,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                       <div className="px-4 pb-3 pt-1 space-y-2" style={{ borderTop:`1px solid rgba(249,115,22,0.12)`, background: dark ? 'rgba(249,115,22,0.04)' : 'rgba(249,115,22,0.03)' }}>
                         {sysMins !== null && (
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px]" style={{ color:'#64748b' }}>{ar ? 'السيستم' : 'System'}</span>
+                            <span className="text-[11px]" style={{ color:tsColor(dark) }}>{ar ? 'السيستم' : 'System'}</span>
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-semibold" style={{ color:'#38bdf8' }}>{ar ? fmtAr(sysMins) : fmt(sysMins)}</span>
                               {(() => {
@@ -1673,7 +1673,7 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                         )}
                         {punchMins !== null && (
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px]" style={{ color:'#64748b' }}>{ar ? 'البصمة' : 'Punch'}</span>
+                            <span className="text-[11px]" style={{ color:tsColor(dark) }}>{ar ? 'البصمة' : 'Punch'}</span>
                             <span className="text-xs font-semibold" style={{ color:'#a78bfa' }}>{ar ? fmtAr(punchMins) : fmt(punchMins)}</span>
                           </div>
                         )}
@@ -1817,7 +1817,7 @@ function MyRequests({ dark, showToast }: { dark: boolean; showToast: (msg: strin
             style={{
               background: selectedEmp ? 'rgba(99,102,241,0.1)' : (dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'),
               border: `1px solid ${selectedEmp ? 'rgba(99,102,241,0.3)' : borderColor}`,
-              color: selectedEmp ? '#a5b4fc' : '#94a3b8',
+              color: selectedEmp ? '#a5b4fc' : tsColor(dark),
             }}
           >
             <Users size={14} />
@@ -2110,7 +2110,7 @@ export default function RequestsPage() {
           {TABS.map(t => (
             <button key={t.key} onClick={() => setActiveTab(t.key)}
               className="relative flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-t-lg"
-              style={{ color: activeTab === t.key ? '#818cf8' : '#94a3b8' }}>
+              style={{ color: activeTab === t.key ? '#818cf8' : tsColor(dark) }}>
               {ar ? t.labelAr : t.labelEn}
               {t.count !== null && t.count > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold"

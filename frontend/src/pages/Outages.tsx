@@ -84,6 +84,13 @@ const ST: Record<string, { ar: string; en: string; color: string; bg: string }> 
   resolved:    { ar: 'محلول',        en: 'Resolved',     color: '#34d399', bg: 'rgba(52,211,153,0.12)'  },
   closed:      { ar: 'مغلق',         en: 'Closed',       color: '#64748b', bg: 'rgba(100,116,139,0.12)' },
 };
+// Theme-aware neutral tokens (recipe of dd234d7) — semantic status colors stay fixed
+const tok = (dark: boolean) => ({
+  panel:   dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  bdr:     dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+  overlay: dark ? 'rgba(0,0,0,0.75)'       : 'rgba(15,23,42,0.45)',
+  faint:   dark ? '#475569'                : '#94a3b8',
+});
 // fmtDt and fmtDur now use shared utilities — ar is passed from the component
 const fmtDt  = (dt: string, ar?: boolean) => fmtDateTime(dt, ar);
 const fmtDur = (min: number | null, ar?: boolean) => fmtDuration(min, ar);
@@ -120,17 +127,19 @@ function MetricCard({ label, value, sub, color, icon: Icon, pulse }: {
   label: string; value: string | number; sub?: string;
   color: string; icon: any; pulse?: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   return (
     <div className="rounded-2xl p-4 flex items-start gap-3"
-      style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${color}25` }}>
+      style={{ background: T.panel, border: `1px solid ${color}25` }}>
       <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
         style={{ background: `${color}18`, border: `1px solid ${color}30` }}>
         <Icon size={16} style={{ color }} className={pulse ? 'animate-pulse' : ''} />
       </div>
       <div>
-        <p className="text-xs" style={{ color: '#475569' }}>{label}</p>
-        <p className="text-xl font-bold mt-0.5" style={{ color: '#e2e8f0' }}>{value}</p>
-        {sub && <p className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>{sub}</p>}
+        <p className="text-xs" style={{ color: T.faint }}>{label}</p>
+        <p className="text-xl font-bold mt-0.5" style={{ color: tp(dark) }}>{value}</p>
+        {sub && <p className="text-[10px] mt-0.5" style={{ color: tsColor(dark) }}>{sub}</p>}
       </div>
     </div>
   );
@@ -141,6 +150,7 @@ export default function OutagesPage() {
   const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
   useInjectDsStyles();
+  const T = tok(dark);
 
   const [tab, setTab]                   = useState<'dashboard'|'active'|'all'|'report'>('dashboard');
   const [outages, setOutages]           = useState<Outage[]>([]);
@@ -356,7 +366,7 @@ export default function OutagesPage() {
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium transition-all relative"
               style={{
                 background: active ? 'rgba(99,102,241,0.2)' : 'transparent',
-                color: active ? '#818cf8' : '#64748b',
+                color: active ? '#818cf8' : tsColor(dark),
                 border: active ? '1px solid rgba(99,102,241,0.3)' : '1px solid transparent',
               }}>
               <Icon size={13} />
@@ -375,7 +385,7 @@ export default function OutagesPage() {
         <div className="space-y-4">
           {dashLoading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 size={24} className="animate-spin" style={{ color: '#475569' }} />
+              <Loader2 size={24} className="animate-spin" style={{ color: T.faint }} />
             </div>
           ) : dashboard ? (
             <>
@@ -414,7 +424,7 @@ export default function OutagesPage() {
                       {ar ? `${dashboard.activeOutages.length} عطل نشط` : `${dashboard.activeOutages.length} Active Outages`}
                     </span>
                   </div>
-                  <div className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+                  <div className="divide-y" style={{ borderColor: T.bdr }}>
                     {dashboard.activeOutages.map(o => {
                       const sv = SEV[o.severity] ?? SEV.medium;
                       const st = ST[o.status] ?? ST.reported;
@@ -424,18 +434,18 @@ export default function OutagesPage() {
                           <div className="w-2 h-2 rounded-full flex-shrink-0"
                             style={{ background: sv.color, boxShadow: `0 0 6px ${sv.color}80` }} />
                           <div className="flex-1 min-w-0">
-                            <span className="text-sm font-medium truncate block" style={{ color: '#e2e8f0' }}>{o.title}</span>
-                            <div className="flex items-center gap-2 text-[11px] mt-0.5" style={{ color: '#475569' }}>
+                            <span className="text-sm font-medium truncate block" style={{ color: tp(dark) }}>{o.title}</span>
+                            <div className="flex items-center gap-2 text-[11px] mt-0.5" style={{ color: T.faint }}>
                               <span>{ar ? (o.typeNameAr ?? o.typeName) : (o.typeName ?? o.typeNameAr)}</span>
                               {o.handlerName && <><span>·</span><span className="flex items-center gap-1"><User size={9} />{o.handlerName}</span></>}
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
                             <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: st.bg, color: st.color }}>{ar ? st.ar : st.en}</span>
-                            <span className="text-[10px] font-mono" style={{ color: '#64748b' }}>{fmtDur(o.elapsedMinutes)}</span>
+                            <span className="text-[10px] font-mono" style={{ color: tsColor(dark) }}>{fmtDur(o.elapsedMinutes)}</span>
                             {o.slaBreached
                               ? <span className="text-[10px] font-semibold" style={{ color: '#f87171' }}>SLA!</span>
-                              : o.slaDueAt && <span className="text-[10px]" style={{ color: new Date(o.slaDueAt).getTime() - Date.now() < 900000 ? '#fb923c' : '#64748b' }}>
+                              : o.slaDueAt && <span className="text-[10px]" style={{ color: new Date(o.slaDueAt).getTime() - Date.now() < 900000 ? '#fb923c' : tsColor(dark) }}>
                                   <AlarmClock size={9} className="inline me-0.5" />
                                   {fmtDur(Math.round((new Date(o.slaDueAt).getTime() - Date.now()) / 60000))}
                                 </span>
@@ -452,24 +462,24 @@ export default function OutagesPage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 {/* By Type */}
                 <div className="rounded-2xl p-4 space-y-2"
-                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <p className="text-xs font-semibold mb-3" style={{ color: '#94a3b8' }}>{ar ? 'بحسب النوع' : 'By Type'}</p>
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+                  <p className="text-xs font-semibold mb-3" style={{ color: tsColor(dark) }}>{ar ? 'بحسب النوع' : 'By Type'}</p>
                   {dashboard.byType.map(t => (
                     <div key={t.name} className="flex items-center justify-between">
-                      <span className="text-xs truncate" style={{ color: '#cbd5e1' }}>{ar ? (t.nameAr ?? t.name) : t.name}</span>
+                      <span className="text-xs truncate" style={{ color: tp(dark) }}>{ar ? (t.nameAr ?? t.name) : t.name}</span>
                       <div className="flex items-center gap-2">
                         {t.active > 0 && <span className="text-[10px] px-1.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>{t.active}</span>}
-                        <span className="text-xs font-semibold" style={{ color: '#e2e8f0' }}>{t.total}</span>
+                        <span className="text-xs font-semibold" style={{ color: tp(dark) }}>{t.total}</span>
                       </div>
                     </div>
                   ))}
-                  {dashboard.byType.length === 0 && <p className="text-xs" style={{ color: '#475569' }}>—</p>}
+                  {dashboard.byType.length === 0 && <p className="text-xs" style={{ color: T.faint }}>—</p>}
                 </div>
 
                 {/* By Severity */}
                 <div className="rounded-2xl p-4"
-                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <p className="text-xs font-semibold mb-3" style={{ color: '#94a3b8' }}>{ar ? 'بحسب الخطورة' : 'By Severity'}</p>
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+                  <p className="text-xs font-semibold mb-3" style={{ color: tsColor(dark) }}>{ar ? 'بحسب الخطورة' : 'By Severity'}</p>
                   <div className="space-y-3">
                     {['critical','high','medium','low'].map(sv => {
                       const s = dashboard.bySeverity.find(x => x.severity === sv);
@@ -479,9 +489,9 @@ export default function OutagesPage() {
                         <div key={sv}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-[11px] font-medium" style={{ color: meta.color }}>{ar ? meta.ar : meta.en}</span>
-                            <span className="text-[11px]" style={{ color: '#64748b' }}>{s?.total ?? 0} ({pct}%)</span>
+                            <span className="text-[11px]" style={{ color: tsColor(dark) }}>{s?.total ?? 0} ({pct}%)</span>
                           </div>
-                          <div className="h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                          <div className="h-1.5 rounded-full" style={{ background: T.panel }}>
                             <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, background: meta.color }} />
                           </div>
                         </div>
@@ -492,20 +502,20 @@ export default function OutagesPage() {
 
                 {/* Top RTA Handlers */}
                 <div className="rounded-2xl p-4"
-                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <p className="text-xs font-semibold mb-3" style={{ color: '#94a3b8' }}>{ar ? 'أعلى مستجيبين RTA' : 'Top RTA Handlers'}</p>
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+                  <p className="text-xs font-semibold mb-3" style={{ color: tsColor(dark) }}>{ar ? 'أعلى مستجيبين RTA' : 'Top RTA Handlers'}</p>
                   {dashboard.topHandlers.length === 0
-                    ? <p className="text-xs" style={{ color: '#475569' }}>—</p>
+                    ? <p className="text-xs" style={{ color: T.faint }}>—</p>
                     : dashboard.topHandlers.map((h, i) => (
                       <div key={i} className="flex items-center justify-between py-1.5 border-b last:border-0"
-                        style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+                        style={{ borderColor: T.bdr }}>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] w-4 text-center font-bold" style={{ color: '#475569' }}>#{i+1}</span>
-                          <span className="text-xs" style={{ color: '#cbd5e1' }}>{h.name}</span>
+                          <span className="text-[10px] w-4 text-center font-bold" style={{ color: T.faint }}>#{i+1}</span>
+                          <span className="text-xs" style={{ color: tp(dark) }}>{h.name}</span>
                         </div>
                         <div className="text-[11px] text-end">
                           <span className="font-semibold" style={{ color: '#818cf8' }}>{h.handled}</span>
-                          {h.avgDurationMin && <span className="ms-1.5" style={{ color: '#475569' }}>avg {fmtDur(h.avgDurationMin)}</span>}
+                          {h.avgDurationMin && <span className="ms-1.5" style={{ color: T.faint }}>avg {fmtDur(h.avgDurationMin)}</span>}
                         </div>
                       </div>
                     ))
@@ -514,7 +524,7 @@ export default function OutagesPage() {
               </div>
             </>
           ) : (
-            <div className="text-center py-12 text-sm" style={{ color: '#475569' }}>
+            <div className="text-center py-12 text-sm" style={{ color: T.faint }}>
               {ar ? 'لا توجد بيانات' : 'No data available'}
             </div>
           )}
@@ -527,31 +537,31 @@ export default function OutagesPage() {
           {/* Filters */}
           {tab === 'all' && (
             <div className="flex items-center gap-2 flex-wrap">
-              <Filter size={12} style={{ color: '#475569' }} />
+              <Filter size={12} style={{ color: T.faint }} />
               {['','reported','validated','in_progress','resolved','closed'].map(s => (
                 <button key={s} onClick={() => { setStatus(s); setPage(1); }}
                   className="px-3 py-1 rounded-lg text-xs transition-all"
                   style={{
-                    background: statusFilter === s ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)',
-                    border: statusFilter === s ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(255,255,255,0.06)',
-                    color: statusFilter === s ? '#818cf8' : '#64748b',
+                    background: statusFilter === s ? 'rgba(99,102,241,0.2)' : T.panel,
+                    border: statusFilter === s ? '1px solid rgba(99,102,241,0.35)' : `1px solid ${T.bdr}`,
+                    color: statusFilter === s ? '#818cf8' : tsColor(dark),
                   }}>
                   {!s ? (ar ? 'الكل' : 'All') : (ar ? (ST[s]?.ar ?? s) : (ST[s]?.en ?? s))}
                 </button>
               ))}
-              <div style={{ width:1, height:14, background:'rgba(255,255,255,0.08)' }} />
+              <div style={{ width:1, height:14, background:T.bdr }} />
               {['','critical','high','medium','low'].map(sv => (
                 <button key={sv} onClick={() => { setSev(sv); setPage(1); }}
                   className="px-3 py-1 rounded-lg text-xs transition-all"
                   style={{
-                    background: sevFilter === sv ? `${SEV[sv]?.color ?? '#818cf8'}22` : 'rgba(255,255,255,0.04)',
-                    border: sevFilter === sv ? `1px solid ${SEV[sv]?.color ?? '#818cf8'}45` : '1px solid rgba(255,255,255,0.06)',
-                    color: sevFilter === sv ? (SEV[sv]?.color ?? '#818cf8') : '#64748b',
+                    background: sevFilter === sv ? `${SEV[sv]?.color ?? '#818cf8'}22` : T.panel,
+                    border: sevFilter === sv ? `1px solid ${SEV[sv]?.color ?? '#818cf8'}45` : `1px solid ${T.bdr}`,
+                    color: sevFilter === sv ? (SEV[sv]?.color ?? '#818cf8') : tsColor(dark),
                   }}>
                   {!sv ? (ar ? 'الكل' : 'All') : (ar ? SEV[sv].ar : SEV[sv].en)}
                 </button>
               ))}
-              <button onClick={load} className="ms-auto" style={{ color: '#475569' }}>
+              <button onClick={load} className="ms-auto" style={{ color: T.faint }}>
                 <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -560,7 +570,7 @@ export default function OutagesPage() {
           {/* List */}
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 size={24} className="animate-spin" style={{ color: '#475569' }} />
+              <Loader2 size={24} className="animate-spin" style={{ color: T.faint }} />
             </div>
           ) : error ? (
             <div className="text-center py-12 text-sm" style={{ color: '#f87171' }}>
@@ -582,19 +592,19 @@ export default function OutagesPage() {
                 const isActive = !['resolved','closed'].includes(o.status);
                 return (
                   <div key={o.id} className="rounded-2xl overflow-hidden cursor-pointer transition-all hover:scale-[1.002]"
-                    style={{ background:'rgba(255,255,255,0.02)', border:`1px solid ${isActive ? sv.color+'30' : 'rgba(255,255,255,0.06)'}` }}
+                    style={{ background:T.panel, border:`1px solid ${isActive ? sv.color+'30' : T.bdr}` }}
                     onClick={() => openDetail(o.id)}>
                     <div className="flex items-center gap-3 px-4 py-3">
                       <div className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                         style={{ background: sv.color, boxShadow: isActive ? `0 0 7px ${sv.color}80` : 'none' }} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold" style={{ color: '#e2e8f0' }}>{o.title}</span>
+                          <span className="text-sm font-semibold" style={{ color: tp(dark) }}>{o.title}</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: st.bg, color: st.color }}>{ar ? st.ar : st.en}</span>
                           <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: sv.bg, color: sv.color }}>{ar ? sv.ar : sv.en}</span>
                           <SlaTag slaDueAt={o.slaDueAt} slaBreached={o.slaBreached} slaRemainingMin={o.slaRemainingMin} ar={ar} />
                         </div>
-                        <div className="flex items-center gap-3 mt-0.5 flex-wrap" style={{ fontSize: 11, color: '#475569' }}>
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap" style={{ fontSize: 11, color: T.faint }}>
                           {(o.typeName || o.typeNameAr) && <span>{ar ? (o.typeNameAr ?? o.typeName) : (o.typeName ?? o.typeNameAr)}</span>}
                           {o.handlerName && <span className="flex items-center gap-1"><User size={9} />{o.handlerName}</span>}
                           <span>{fmtDt(o.startedAt)}</span>
@@ -603,7 +613,7 @@ export default function OutagesPage() {
                           {o.attachmentsCount > 0 && <span className="flex items-center gap-1"><Paperclip size={9} />{o.attachmentsCount}</span>}
                         </div>
                       </div>
-                      <ChevronRight size={14} style={{ color: '#475569', flexShrink: 0 }} />
+                      <ChevronRight size={14} style={{ color: T.faint, flexShrink: 0 }} />
                     </div>
                   </div>
                 );
@@ -617,7 +627,7 @@ export default function OutagesPage() {
               {Array.from({ length: Math.min(Math.ceil(total / 20), 10) }, (_, i) => i + 1).map(p => (
                 <button key={p} onClick={() => setPage(p)}
                   className="w-8 h-8 rounded-lg text-xs font-medium"
-                  style={{ background: p === page ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)', color: p === page ? '#818cf8' : '#64748b', border: p === page ? '1px solid rgba(99,102,241,0.35)' : '1px solid rgba(255,255,255,0.06)' }}>
+                  style={{ background: p === page ? 'rgba(99,102,241,0.25)' : T.panel, color: p === page ? '#818cf8' : tsColor(dark), border: p === page ? '1px solid rgba(99,102,241,0.35)' : `1px solid ${T.bdr}` }}>
                   {p}
                 </button>
               ))}
@@ -634,15 +644,15 @@ export default function OutagesPage() {
       {/* ══════════════ DETAIL PANEL ══════════════════════════════════════ */}
       {(detailLoading || detail) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)' }}
+          style={{ background: T.overlay, backdropFilter: 'blur(10px)' }}
           onClick={() => !detailLoading && setDetail(null)}>
           <div className="w-full flex flex-col overflow-hidden"
-            style={{ maxWidth: 1100, maxHeight: '92vh', background: '#0f172a', borderRadius: 24, border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 40px 100px rgba(0,0,0,0.7)' }}
+            style={{ maxWidth: 1100, maxHeight: '92vh', background: 'var(--surface)', borderRadius: 24, border: `1px solid ${T.bdr}`, boxShadow: '0 40px 100px rgba(0,0,0,0.7)' }}
             onClick={e => e.stopPropagation()}>
 
             {detailLoading ? (
               <div className="flex items-center justify-center flex-1">
-                <Loader2 size={28} className="animate-spin" style={{ color: '#334155' }} />
+                <Loader2 size={28} className="animate-spin" style={{ color: T.faint }} />
               </div>
             ) : detail && (() => {
               const sv = SEV[detail.severity] ?? SEV.high;
@@ -655,7 +665,7 @@ export default function OutagesPage() {
 
                   {/* ── Header ── */}
                   <div className="flex-shrink-0 px-6 pt-5 pb-4"
-                    style={{ background:`linear-gradient(180deg,${sv.color}10 0%,transparent 100%)`, borderBottom:'1px solid rgba(255,255,255,0.06)' }}>
+                    style={{ background:`linear-gradient(180deg,${sv.color}10 0%,transparent 100%)`, borderBottom:`1px solid ${T.bdr}` }}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         {/* Badges row */}
@@ -671,31 +681,31 @@ export default function OutagesPage() {
                           </span>
                           {(detail.typeName || detail.typeNameAr) && (
                             <span className="text-[10px] px-2.5 py-0.5 rounded-full"
-                              style={{ background:'rgba(255,255,255,0.05)', color:'#64748b', border:'1px solid rgba(255,255,255,0.08)' }}>
+                              style={{ background:T.panel, color:tsColor(dark), border:`1px solid ${T.bdr}` }}>
                               {ar ? (detail.typeNameAr ?? detail.typeName) : (detail.typeName ?? detail.typeNameAr)}
                             </span>
                           )}
                           <SlaTag slaDueAt={detail.slaDueAt} slaBreached={detail.slaBreached} slaRemainingMin={detail.slaRemainingMin} ar={ar} />
                         </div>
-                        <h2 className="text-lg font-bold leading-tight" style={{ color: '#f1f5f9' }}>{detail.title}</h2>
+                        <h2 className="text-lg font-bold leading-tight" style={{ color: tp(dark) }}>{detail.title}</h2>
                       </div>
                       <button onClick={() => setDetail(null)}
                         className="p-2 rounded-xl transition-colors flex-shrink-0 mt-0.5"
-                        style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)' }}>
-                        <X size={15} style={{ color: '#475569' }} />
+                        style={{ background:T.panel, border:`1px solid ${T.bdr}` }}>
+                        <X size={15} style={{ color: T.faint }} />
                       </button>
                     </div>
 
                     {/* Quick stat strip */}
-                    <div className="flex items-center gap-4 mt-3 pt-3" style={{ borderTop:'1px solid rgba(255,255,255,0.05)' }}>
+                    <div className="flex items-center gap-4 mt-3 pt-3" style={{ borderTop:`1px solid ${T.bdr}` }}>
                       {[
-                        { label:ar?'بدأ':'Started', val:fmtDt(detail.startedAt), c:'#64748b' },
-                        { label:ar?'المدة':'Duration', val:fmtDur(detail.durationMinutes), c:detail.durationMinutes && detail.durationMinutes>60?'#fb923c':'#64748b' },
-                        { label:ar?'SLA':'SLA', val:detail.slaTargetMinutes?`${detail.slaTargetMinutes}m`:'—', c:'#64748b' },
+                        { label:ar?'بدأ':'Started', val:fmtDt(detail.startedAt), c:tsColor(dark) },
+                        { label:ar?'المدة':'Duration', val:fmtDur(detail.durationMinutes), c:detail.durationMinutes && detail.durationMinutes>60?'#fb923c':tsColor(dark) },
+                        { label:ar?'SLA':'SLA', val:detail.slaTargetMinutes?`${detail.slaTargetMinutes}m`:'—', c:tsColor(dark) },
                         { label:ar?'المعالج':'Handler', val:detail.handlerName ?? (ar?'غير محدد':'—'), c:'#818cf8' },
                       ].map(s => (
                         <div key={s.label} className="flex flex-col gap-0.5">
-                          <span className="text-[9px] uppercase tracking-wider" style={{ color:'#64748b' }}>{s.label}</span>
+                          <span className="text-[9px] uppercase tracking-wider" style={{ color:tsColor(dark) }}>{s.label}</span>
                           <span className="text-xs font-semibold" style={{ color:s.c }}>{s.val}</span>
                         </div>
                       ))}
@@ -706,17 +716,17 @@ export default function OutagesPage() {
                   <div className="flex flex-1 overflow-hidden">
 
                     {/* ════ LEFT COLUMN — content ════ */}
-                    <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4" style={{ scrollbarWidth:'thin', borderRight:'1px solid rgba(255,255,255,0.05)', minWidth:0 }}>
+                    <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4" style={{ scrollbarWidth:'thin', borderRight:`1px solid ${T.bdr}`, minWidth:0 }}>
 
                       {/* Info blocks */}
                       {detail.description && (
-                        <div className="rounded-2xl overflow-hidden" style={{ border:'1px solid rgba(255,255,255,0.07)' }}>
-                          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                        <div className="rounded-2xl overflow-hidden" style={{ border:`1px solid ${T.bdr}` }}>
+                          <div className="px-4 py-2.5 flex items-center gap-2" style={{ background:T.panel, borderBottom:`1px solid ${T.bdr}` }}>
                             <FileText size={11} style={{ color:'#60a5fa' }} />
                             <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:'#60a5fa' }}>{ar?'الوصف':'Description'}</span>
                           </div>
                           <div className="px-4 py-3">
-                            <p className="text-sm leading-relaxed" style={{ color:'#94a3b8' }}>{detail.description}</p>
+                            <p className="text-sm leading-relaxed" style={{ color:tsColor(dark) }}>{detail.description}</p>
                           </div>
                         </div>
                       )}
@@ -728,7 +738,7 @@ export default function OutagesPage() {
                             <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:'#fb923c' }}>{ar?'أثر العطل':'Impact'}</span>
                           </div>
                           <div className="px-4 py-3">
-                            <p className="text-sm leading-relaxed" style={{ color:'#cbd5e1' }}>{detail.impactDescription}</p>
+                            <p className="text-sm leading-relaxed" style={{ color:tp(dark) }}>{detail.impactDescription}</p>
                           </div>
                         </div>
                       )}
@@ -740,7 +750,7 @@ export default function OutagesPage() {
                             <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:'#fbbf24' }}>{ar?'السبب الجذري':'Root Cause'}</span>
                           </div>
                           <div className="px-4 py-3">
-                            <p className="text-sm leading-relaxed" style={{ color:'#cbd5e1' }}>{detail.rootCause}</p>
+                            <p className="text-sm leading-relaxed" style={{ color:tp(dark) }}>{detail.rootCause}</p>
                           </div>
                         </div>
                       )}
@@ -758,8 +768,8 @@ export default function OutagesPage() {
                       )}
 
                       {/* Notes */}
-                      <div className="rounded-2xl overflow-hidden" style={{ border:'1px solid rgba(255,255,255,0.07)' }}>
-                        <div className="px-4 py-2.5 flex items-center justify-between" style={{ background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                      <div className="rounded-2xl overflow-hidden" style={{ border:`1px solid ${T.bdr}` }}>
+                        <div className="px-4 py-2.5 flex items-center justify-between" style={{ background:T.panel, borderBottom:`1px solid ${T.bdr}` }}>
                           <div className="flex items-center gap-2">
                             <MessageSquare size={11} style={{ color:'#818cf8' }} />
                             <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:'#818cf8' }}>
@@ -767,9 +777,9 @@ export default function OutagesPage() {
                             </span>
                           </div>
                         </div>
-                        <div className="divide-y" style={{ borderColor:'rgba(255,255,255,0.04)' }}>
+                        <div className="divide-y" style={{ borderColor:T.bdr }}>
                           {detail.notes.length === 0 && (
-                            <p className="text-xs py-4 text-center" style={{ color:'#334155' }}>
+                            <p className="text-xs py-4 text-center" style={{ color:T.faint }}>
                               {ar?'لا توجد ملاحظات بعد':'No notes yet'}
                             </p>
                           )}
@@ -783,27 +793,27 @@ export default function OutagesPage() {
                                     · {n.isInternal ? (ar?'داخلي':'Internal') : (ar?'عام':'Public')}
                                   </span>
                                 </span>
-                                <span className="text-[10px]" style={{ color:'#334155' }}>{fmtDt(n.createdAt)}</span>
+                                <span className="text-[10px]" style={{ color:T.faint }}>{fmtDt(n.createdAt)}</span>
                               </div>
                               <div className="px-4 py-2.5">
-                                <p className="text-xs leading-relaxed" style={{ color:'#94a3b8' }}>{n.content}</p>
+                                <p className="text-xs leading-relaxed" style={{ color:tsColor(dark) }}>{n.content}</p>
                               </div>
                             </div>
                           ))}
                         </div>
                         {/* Add note inline */}
-                        <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ borderTop:`1px solid ${T.bdr}` }}>
                           <textarea
                             value={noteText}
                             onChange={e => setNoteText(e.target.value)}
                             rows={2} placeholder={ar?'اكتب ملاحظة...':'Write a note...'}
                             className="w-full text-xs px-4 py-3 outline-none resize-none bg-transparent"
-                            style={{ color:'#e2e8f0' }} />
+                            style={{ color:tp(dark) }} />
                           <div className="flex items-center justify-between px-4 py-2"
-                            style={{ borderTop:'1px solid rgba(255,255,255,0.04)', background:'rgba(255,255,255,0.02)' }}>
+                            style={{ borderTop:`1px solid ${T.bdr}`, background:T.panel }}>
                             <label className="flex items-center gap-1.5 cursor-pointer">
                               <input type="checkbox" checked={noteInternal} onChange={e => setNoteInt(e.target.checked)} className="w-3 h-3 accent-indigo-500" />
-                              <span className="text-[10px]" style={{ color:'#475569' }}>{ar?'داخلي':'Internal'}</span>
+                              <span className="text-[10px]" style={{ color:T.faint }}>{ar?'داخلي':'Internal'}</span>
                             </label>
                             <button onClick={submitNote} disabled={noteSubmitting || !noteText.trim()}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-30"
@@ -828,24 +838,24 @@ export default function OutagesPage() {
                       </button>
 
                       {/* Details card */}
-                      <div className="rounded-2xl overflow-hidden" style={{ border:'1px solid rgba(255,255,255,0.07)' }}>
-                        <div className="px-4 py-2.5" style={{ background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
-                          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:'#475569' }}>{ar?'التفاصيل':'Details'}</span>
+                      <div className="rounded-2xl overflow-hidden" style={{ border:`1px solid ${T.bdr}` }}>
+                        <div className="px-4 py-2.5" style={{ background:T.panel, borderBottom:`1px solid ${T.bdr}` }}>
+                          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:T.faint }}>{ar?'التفاصيل':'Details'}</span>
                         </div>
-                        <div className="divide-y" style={{ borderColor:'rgba(255,255,255,0.04)' }}>
+                        <div className="divide-y" style={{ borderColor:T.bdr }}>
                           {[
-                            { l:ar?'النوع':'Type',             v:ar?(detail.typeNameAr??detail.typeName):(detail.typeName??detail.typeNameAr) ?? '—', c:'#94a3b8' },
+                            { l:ar?'النوع':'Type',             v:ar?(detail.typeNameAr??detail.typeName):(detail.typeName??detail.typeNameAr) ?? '—', c:tsColor(dark) },
                             { l:ar?'الخطورة':'Severity',        v:ar?(SEV[detail.severity]?.ar):(SEV[detail.severity]?.en), c:sv.color },
                             { l:ar?'الحالة':'Status',           v:ar?st.ar:st.en, c:st.color },
-                            { l:ar?'بدأ':'Started',             v:fmtDt(detail.startedAt), c:'#64748b' },
-                            { l:ar?'انتهى':'Ended',              v:detail.endedAt ? fmtDt(detail.endedAt) : '—', c:'#64748b' },
-                            { l:ar?'المدة':'Duration',           v:fmtDur(detail.durationMinutes), c:detail.durationMinutes && detail.durationMinutes > 60 ? '#fb923c' : '#64748b' },
-                            { l:ar?'هدف SLA':'SLA Target',      v:detail.slaTargetMinutes ? `${detail.slaTargetMinutes}m` : '—', c:'#64748b' },
-                            { l:ar?'مُبلَّغ بواسطة':'Reported By', v:detail.reportedByName ?? '—', c:'#94a3b8' },
+                            { l:ar?'بدأ':'Started',             v:fmtDt(detail.startedAt), c:tsColor(dark) },
+                            { l:ar?'انتهى':'Ended',              v:detail.endedAt ? fmtDt(detail.endedAt) : '—', c:tsColor(dark) },
+                            { l:ar?'المدة':'Duration',           v:fmtDur(detail.durationMinutes), c:detail.durationMinutes && detail.durationMinutes > 60 ? '#fb923c' : tsColor(dark) },
+                            { l:ar?'هدف SLA':'SLA Target',      v:detail.slaTargetMinutes ? `${detail.slaTargetMinutes}m` : '—', c:tsColor(dark) },
+                            { l:ar?'مُبلَّغ بواسطة':'Reported By', v:detail.reportedByName ?? '—', c:tsColor(dark) },
                             { l:ar?'المعالج':'Handler (RTA)',    v:detail.handlerName ?? (ar?'غير محدد':'—'), c:'#818cf8' },
                           ].map(d => (
                             <div key={d.l} className="flex items-center justify-between px-4 py-2.5">
-                              <span className="text-[11px]" style={{ color:'#475569' }}>{d.l}</span>
+                              <span className="text-[11px]" style={{ color:T.faint }}>{d.l}</span>
                               <span className="text-[11px] font-semibold" style={{ color:d.c }}>{d.v}</span>
                             </div>
                           ))}
@@ -854,9 +864,9 @@ export default function OutagesPage() {
 
                       {/* Status actions */}
                       {!['resolved','closed'].includes(detail.status) && (
-                        <div className="rounded-2xl overflow-hidden" style={{ border:'1px solid rgba(255,255,255,0.07)' }}>
-                          <div className="px-4 py-2.5" style={{ background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
-                            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:'#475569' }}>{ar?'تحديث الحالة':'Update Status'}</span>
+                        <div className="rounded-2xl overflow-hidden" style={{ border:`1px solid ${T.bdr}` }}>
+                          <div className="px-4 py-2.5" style={{ background:T.panel, borderBottom:`1px solid ${T.bdr}` }}>
+                            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:T.faint }}>{ar?'تحديث الحالة':'Update Status'}</span>
                           </div>
                           <div className="p-3 space-y-2">
                             {detail.status === 'reported' && (
@@ -881,7 +891,7 @@ export default function OutagesPage() {
                                 onChange={e => setResolveText(e.target.value)}
                                 placeholder={ar?'وصف الحل...':'Resolution note...'}
                                 className="w-full text-xs px-3 py-2.5 bg-transparent outline-none"
-                                style={{ color:'#e2e8f0', borderBottom:'1px solid rgba(52,211,153,0.12)' }} />
+                                style={{ color:tp(dark), borderBottom:'1px solid rgba(52,211,153,0.12)' }} />
                               <button
                                 disabled={updatingId === detail.id || !resolveText.trim()}
                                 onClick={() => {
@@ -899,8 +909,8 @@ export default function OutagesPage() {
                       )}
 
                       {/* Attachments */}
-                      <div className="rounded-2xl overflow-hidden" style={{ border:'1px solid rgba(255,255,255,0.07)' }}>
-                        <div className="px-4 py-2.5 flex items-center justify-between" style={{ background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                      <div className="rounded-2xl overflow-hidden" style={{ border:`1px solid ${T.bdr}` }}>
+                        <div className="px-4 py-2.5 flex items-center justify-between" style={{ background:T.panel, borderBottom:`1px solid ${T.bdr}` }}>
                           <div className="flex items-center gap-2">
                             <Paperclip size={11} style={{ color:'#fbbf24' }} />
                             <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color:'#fbbf24' }}>
@@ -916,27 +926,27 @@ export default function OutagesPage() {
                           <input ref={fileRef} type="file" className="hidden" accept="image/*,video/*,.pdf" onChange={handleFileChange} />
                         </div>
                         {detail.attachments.length === 0 ? (
-                          <p className="text-xs py-5 text-center" style={{ color:'#334155' }}>
+                          <p className="text-xs py-5 text-center" style={{ color:T.faint }}>
                             {ar?'لا توجد مرفقات':'No attachments yet'}
                           </p>
                         ) : (
                           <div className="grid grid-cols-3 gap-2 p-3">
                             {detail.attachments.map(a => (
                               <div key={a.id} className="relative rounded-xl overflow-hidden group"
-                                style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)', aspectRatio:'1' }}>
+                                style={{ background:T.panel, border:`1px solid ${T.bdr}`, aspectRatio:'1' }}>
                                 {a.isImage ? (
                                   <img src={a.url} alt={a.originalName} className="w-full h-full object-cover cursor-pointer" onClick={() => setLightbox(a)} />
                                 ) : a.isVideo ? (
                                   <video src={a.url} className="w-full h-full object-cover cursor-pointer" onClick={() => setLightbox(a)} />
                                 ) : (
                                   <div className="w-full h-full flex flex-col items-center justify-center gap-1 p-2">
-                                    <FileText size={18} style={{ color:'#64748b' }} />
-                                    <span className="text-[9px] text-center leading-tight truncate w-full" style={{ color:'#475569' }}>{a.originalName}</span>
+                                    <FileText size={18} style={{ color:tsColor(dark) }} />
+                                    <span className="text-[9px] text-center leading-tight truncate w-full" style={{ color:T.faint }}>{a.originalName}</span>
                                   </div>
                                 )}
                                 <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-1.5"
                                   style={{ background:'linear-gradient(to top,rgba(0,0,0,0.7),transparent)' }}>
-                                  <span className="text-[9px]" style={{ color:'#cbd5e1' }}>{fmtSize(a.fileSize)}</span>
+                                  <span className="text-[9px]" style={{ color:tp(dark) }}>{fmtSize(a.fileSize)}</span>
                                   <div className="flex gap-1">
                                     <a href={a.url} download={a.originalName} className="p-1 rounded-lg" style={{ background:'rgba(255,255,255,0.15)' }} onClick={e => e.stopPropagation()}>
                                       <Download size={9} style={{ color:'#fff' }} />
@@ -982,20 +992,20 @@ export default function OutagesPage() {
       {/* ── Create Form Modal ────────────────────────────────────────────── */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(8px)' }}
+          style={{ background: T.overlay, backdropFilter: 'blur(8px)' }}
           onClick={() => { setShowForm(false); setFormError(''); }}>
           <div className="w-full max-w-lg rounded-3xl p-6 overflow-y-auto max-h-[90vh]"
-            style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 32px 80px rgba(0,0,0,0.7)' }}
+            style={{ background: 'var(--surface)', border: `1px solid ${T.bdr}`, boxShadow: '0 32px 80px rgba(0,0,0,0.7)' }}
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-bold" style={{ color: '#e2e8f0' }}>
+              <h2 className="text-base font-bold" style={{ color: tp(dark) }}>
                 {ar ? 'إبلاغ عن عطل جديد' : 'Report New Outage'}
               </h2>
               <button
                 onClick={() => { setShowForm(false); setFormError(''); }}
                 className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors hover:bg-white/10"
-                style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
-                <X size={15} style={{ color: '#94a3b8' }} />
+                style={{ border: `1px solid ${T.bdr}` }}>
+                <X size={15} style={{ color: tsColor(dark) }} />
               </button>
             </div>
             <div className="space-y-3">
@@ -1043,9 +1053,9 @@ export default function OutagesPage() {
                     <button key={fn.id} type="button" onClick={() => toggleFunc(fn.id)}
                       className="px-2.5 py-1 rounded-lg text-xs transition-all"
                       style={{
-                        background: form.impactedFunctionIds.includes(fn.id) ? 'rgba(251,191,36,0.2)' : 'rgba(255,255,255,0.05)',
-                        border: form.impactedFunctionIds.includes(fn.id) ? '1px solid rgba(251,191,36,0.4)' : '1px solid rgba(255,255,255,0.08)',
-                        color: form.impactedFunctionIds.includes(fn.id) ? '#fbbf24' : '#64748b',
+                        background: form.impactedFunctionIds.includes(fn.id) ? 'rgba(251,191,36,0.2)' : T.panel,
+                        border: form.impactedFunctionIds.includes(fn.id) ? '1px solid rgba(251,191,36,0.4)' : `1px solid ${T.bdr}`,
+                        color: form.impactedFunctionIds.includes(fn.id) ? '#fbbf24' : tsColor(dark),
                       }}>
                       {fn.name}
                     </button>
@@ -1058,7 +1068,7 @@ export default function OutagesPage() {
                 </div>
               )}
               <div className="flex justify-end gap-2 pt-2">
-                <button onClick={() => { setShowForm(false); setFormError(''); }} className="px-4 py-2 rounded-xl text-sm" style={{ color: '#64748b' }}>
+                <button onClick={() => { setShowForm(false); setFormError(''); }} className="px-4 py-2 rounded-xl text-sm" style={{ color: tsColor(dark) }}>
                   {ar?'إلغاء':'Cancel'}
                 </button>
                 <button onClick={submit} disabled={saving || !form.title || !form.outageTypeId || !form.startedAt}
@@ -1078,10 +1088,12 @@ export default function OutagesPage() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function InfoBlock({ label, text, color }: { label: string; text: string; color?: string }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   return (
-    <div className="rounded-xl p-3" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.05)' }}>
-      <p className="text-[10px] mb-1" style={{ color: '#475569' }}>{label}</p>
-      <p className="text-xs leading-relaxed" style={{ color: color ?? '#94a3b8' }}>{text}</p>
+    <div className="rounded-xl p-3" style={{ background:T.panel, border:`1px solid ${T.bdr}` }}>
+      <p className="text-[10px] mb-1" style={{ color: T.faint }}>{label}</p>
+      <p className="text-xs leading-relaxed" style={{ color: color ?? tsColor(dark) }}>{text}</p>
     </div>
   );
 }
@@ -1117,6 +1129,8 @@ function ResolveInlinePanel({ outageId: _, ar, loading, onResolve }: {
 
 // ─── Report Tab ───────────────────────────────────────────────────────────────
 function ReportTab({ ar, types }: { ar: boolean; types: OutageType[] }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [from, setFrom]         = useState('');
   const [to, setTo]             = useState('');
   const [status, setStatus]     = useState('');
@@ -1148,17 +1162,17 @@ function ReportTab({ ar, types }: { ar: boolean; types: OutageType[] }) {
     <div className="space-y-4">
       {/* Filters */}
       <div className="rounded-2xl p-4 flex flex-wrap items-end gap-3"
-        style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.06)' }}>
+        style={{ background:T.panel, border:`1px solid ${T.bdr}` }}>
         <div>
-          <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{ar?'من':'From'}</p>
+          <p className="text-[10px] mb-1" style={{ color:T.faint }}>{ar?'من':'From'}</p>
           <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="inp text-xs" />
         </div>
         <div>
-          <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{ar?'إلى':'To'}</p>
+          <p className="text-[10px] mb-1" style={{ color:T.faint }}>{ar?'إلى':'To'}</p>
           <input type="date" value={to} onChange={e => setTo(e.target.value)} className="inp text-xs" />
         </div>
         <div>
-          <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{ar?'الحالة':'Status'}</p>
+          <p className="text-[10px] mb-1" style={{ color:T.faint }}>{ar?'الحالة':'Status'}</p>
           <select value={status} onChange={e => setStatus(e.target.value)} className="inp text-xs">
             <option value="">{ar?'الكل':'All'}</option>
             {['reported','validated','in_progress','resolved','closed'].map(s => (
@@ -1167,7 +1181,7 @@ function ReportTab({ ar, types }: { ar: boolean; types: OutageType[] }) {
           </select>
         </div>
         <div>
-          <p className="text-[10px] mb-1" style={{ color:'#475569' }}>{ar?'الخطورة':'Severity'}</p>
+          <p className="text-[10px] mb-1" style={{ color:T.faint }}>{ar?'الخطورة':'Severity'}</p>
           <select value={severity} onChange={e => setSev(e.target.value)} className="inp text-xs">
             <option value="">{ar?'الكل':'All'}</option>
             {['critical','high','medium','low'].map(s => (
@@ -1186,7 +1200,7 @@ function ReportTab({ ar, types }: { ar: boolean; types: OutageType[] }) {
       {/* Summary row */}
       {rows.length > 0 && (
         <div className="flex items-center gap-4 flex-wrap text-xs px-1">
-          <span style={{ color:'#94a3b8' }}>{ar?`${total} سجل`:`${total} records`}</span>
+          <span style={{ color:tsColor(dark) }}>{ar?`${total} سجل`:`${total} records`}</span>
           <span style={{ color:'#f87171' }}>{ar?`${slaBreachedCount} تجاوز SLA`:`${slaBreachedCount} SLA breached`}</span>
           <span style={{ color:'#fbbf24' }}>{ar?`متوسط المدة: ${fmtDur(Math.round(avgDuration))}`:`Avg duration: ${fmtDur(Math.round(avgDuration))}`}</span>
         </div>
@@ -1195,20 +1209,20 @@ function ReportTab({ ar, types }: { ar: boolean; types: OutageType[] }) {
       {/* Table */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 size={22} className="animate-spin" style={{ color:'#475569' }} />
+          <Loader2 size={22} className="animate-spin" style={{ color:T.faint }} />
         </div>
       ) : rows.length === 0 ? (
-        <div className="text-center py-12 text-sm" style={{ color:'#475569' }}>
+        <div className="text-center py-12 text-sm" style={{ color:T.faint }}>
           {ar?'لا توجد نتائج':'No results'}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl" style={{ border:'1px solid rgba(255,255,255,0.06)' }}>
+        <div className="overflow-x-auto rounded-2xl" style={{ border:`1px solid ${T.bdr}` }}>
           <table className="w-full text-xs">
             <thead>
-              <tr style={{ background:'rgba(255,255,255,0.03)', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+              <tr style={{ background:T.panel, borderBottom:`1px solid ${T.bdr}` }}>
                 {[ar?'العنوان':'Title', ar?'النوع':'Type', ar?'الخطورة':'Sev', ar?'الحالة':'Status',
                   ar?'المعالج':'Handler', ar?'البداية':'Started', ar?'المدة':'Duration', 'SLA'].map(h => (
-                  <th key={h} className="px-3 py-2.5 text-start font-medium" style={{ color:'#475569', whiteSpace:'nowrap' }}>{h}</th>
+                  <th key={h} className="px-3 py-2.5 text-start font-medium" style={{ color:T.faint, whiteSpace:'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1218,24 +1232,24 @@ function ReportTab({ ar, types }: { ar: boolean; types: OutageType[] }) {
                 const st = ST[r.status]   ?? ST.reported;
                 return (
                   <tr key={r.id} className="border-b hover:bg-white/[0.02]"
-                    style={{ borderColor:'rgba(255,255,255,0.04)' }}>
-                    <td className="px-3 py-2.5 max-w-[200px] truncate" style={{ color:'#e2e8f0' }}>{r.title}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap" style={{ color:'#94a3b8' }}>{ar?(r.typeNameAr??r.typeName):(r.typeName??r.typeNameAr) ?? '—'}</td>
+                    style={{ borderColor:T.bdr }}>
+                    <td className="px-3 py-2.5 max-w-[200px] truncate" style={{ color:tp(dark) }}>{r.title}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap" style={{ color:tsColor(dark) }}>{ar?(r.typeNameAr??r.typeName):(r.typeName??r.typeNameAr) ?? '—'}</td>
                     <td className="px-3 py-2.5">
                       <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background:sv.bg, color:sv.color }}>{ar?sv.ar:sv.en}</span>
                     </td>
                     <td className="px-3 py-2.5">
                       <span className="px-1.5 py-0.5 rounded text-[10px]" style={{ background:st.bg, color:st.color }}>{ar?st.ar:st.en}</span>
                     </td>
-                    <td className="px-3 py-2.5 whitespace-nowrap" style={{ color:'#94a3b8' }}>{r.handlerName ?? '—'}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap" style={{ color:'#64748b' }}>{fmtDt(r.startedAt)}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap font-mono" style={{ color:'#94a3b8' }}>{fmtDur(r.durationMinutes)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap" style={{ color:tsColor(dark) }}>{r.handlerName ?? '—'}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap" style={{ color:tsColor(dark) }}>{fmtDt(r.startedAt)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap font-mono" style={{ color:tsColor(dark) }}>{fmtDur(r.durationMinutes)}</td>
                     <td className="px-3 py-2.5">
                       {r.slaBreached
                         ? <span className="text-[10px] font-semibold" style={{ color:'#f87171' }}>{ar?'تجاوز':'Breached'}</span>
                         : r.slaDueAt
                           ? <span className="text-[10px]" style={{ color:'#34d399' }}>{ar?'ضمن الهدف':'On Time'}</span>
-                          : <span style={{ color:'#475569' }}>—</span>
+                          : <span style={{ color:T.faint }}>—</span>
                       }
                     </td>
                   </tr>
@@ -1251,9 +1265,10 @@ function ReportTab({ ar, types }: { ar: boolean; types: OutageType[] }) {
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 function Fld({ label, children }: { label: string; children: React.ReactNode }) {
+  const { dark } = useUiStore();
   return (
     <div>
-      <label className="block text-[11px] mb-1.5 font-medium" style={{ color: '#64748b' }}>{label}</label>
+      <label className="block text-[11px] mb-1.5 font-medium" style={{ color: tsColor(dark) }}>{label}</label>
       {children}
     </div>
   );
@@ -1261,6 +1276,8 @@ function Fld({ label, children }: { label: string; children: React.ReactNode }) 
 
 // ─── Share Modal ─────────────────────────────────────────────────────────────
 function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean; onClose: () => void }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [copied, setCopied] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
 
@@ -1270,7 +1287,7 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
   const fmtDur = (m: number) => fmtDuration(m, ar);
   const fmtDt  = (iso: string) => fmtDateTime(iso, ar);
 
-  const sevMeta = SEV[outage.severity] ?? { color:'#94a3b8', bg:'rgba(148,163,184,0.1)' };
+  const sevMeta = SEV[outage.severity] ?? { color:tsColor(dark), bg:'rgba(148,163,184,0.1)' };
   const images  = (outage.attachments ?? []).filter(a => a.isImage);
   const videos  = (outage.attachments ?? []).filter(a => a.isVideo);
 
@@ -1340,10 +1357,10 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-      style={{ background:'rgba(0,0,0,0.96)', backdropFilter:'blur(16px)' }}
+      style={{ background:T.overlay, backdropFilter:'blur(16px)' }}
       onClick={onClose}>
       <div className="w-full rounded-3xl flex flex-col relative"
-        style={{ maxWidth: 520, background:'#080f1a', border:'1px solid rgba(255,255,255,0.1)', maxHeight:'92vh', boxShadow:'0 48px 96px rgba(0,0,0,0.8)', overflow:'hidden' }}
+        style={{ maxWidth: 520, background:'var(--surface)', border:`1px solid ${T.bdr}`, maxHeight:'92vh', boxShadow:'0 48px 96px rgba(0,0,0,0.8)', overflow:'hidden' }}
         onClick={e => e.stopPropagation()}>
 
         {/* ── Gradient header ─────────────────────────────────────────────── */}
@@ -1361,11 +1378,11 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
                 <p className="text-[9px] font-bold tracking-widest uppercase mb-0.5" style={{ color:sevMeta.color }}>
                   {ar?'تقرير عطل':'Outage Report'}
                 </p>
-                <h2 className="text-sm font-bold leading-tight" style={{ color:'#f1f5f9' }}>{outage.title}</h2>
+                <h2 className="text-sm font-bold leading-tight" style={{ color:tp(dark) }}>{outage.title}</h2>
               </div>
             </div>
             <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-white/[0.06] flex-shrink-0 transition-colors mt-0.5">
-              <X size={14} style={{ color:'#475569' }} />
+              <X size={14} style={{ color:T.faint }} />
             </button>
           </div>
           {/* badges */}
@@ -1375,12 +1392,12 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
               {ar ? SEV_AR[outage.severity] : SEV[outage.severity]?.en ?? outage.severity}
             </span>
             <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full"
-              style={{ background:ST[outage.status]?.bg ?? 'rgba(100,116,139,0.12)', color:ST[outage.status]?.color ?? '#94a3b8', border:`1px solid ${ST[outage.status]?.color ?? '#64748b'}33` }}>
+              style={{ background:ST[outage.status]?.bg ?? 'rgba(100,116,139,0.12)', color:ST[outage.status]?.color ?? tsColor(dark), border:`1px solid ${ST[outage.status]?.color ?? tsColor(dark)}33` }}>
               {ar ? ST_AR[outage.status] : ST[outage.status]?.en ?? outage.status}
             </span>
             {outage.typeNameAr && (
               <span className="text-[10px] px-2.5 py-0.5 rounded-full"
-                style={{ background:'rgba(255,255,255,0.04)', color:'#64748b', border:'1px solid rgba(255,255,255,0.08)' }}>
+                style={{ background:T.panel, color:tsColor(dark), border:`1px solid ${T.bdr}` }}>
                 {ar ? outage.typeNameAr : outage.typeName}
               </span>
             )}
@@ -1398,10 +1415,10 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
 
           {/* ── Preview card ───────────────────────────────────────────────── */}
           <div className="mx-4 mt-4 rounded-2xl overflow-hidden"
-            style={{ border:'1px solid rgba(255,255,255,0.07)', background:'rgba(255,255,255,0.015)' }}>
+            style={{ border:`1px solid ${T.bdr}`, background:T.panel }}>
 
             <div className="px-4 py-2 flex items-center gap-2"
-              style={{ background:'rgba(255,255,255,0.025)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+              style={{ background:T.panel, borderBottom:`1px solid ${T.bdr}` }}>
               <Eye size={10} style={{ color:'#60a5fa' }} />
               <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color:'#60a5fa' }}>
                 {ar?'معاينة ما سيُرسل':'Preview — what will be sent'}
@@ -1409,17 +1426,17 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
             </div>
 
             {/* Metrics 2×2 */}
-            <div className="grid grid-cols-2 gap-px" style={{ background:'rgba(255,255,255,0.04)' }}>
+            <div className="grid grid-cols-2 gap-px" style={{ background:T.panel }}>
               {[
-                { icon:Clock,      label:ar?'بدأ':'Started',   val:fmtDt(outage.startedAt),                                                     c:'#94a3b8' },
-                { icon:AlarmClock, label:ar?'المدة':'Duration', val:outage.durationMinutes ? fmtDur(outage.durationMinutes) : (ar?'مستمر':'Ongoing'), c:outage.durationMinutes && outage.durationMinutes>60?'#f87171':'#94a3b8' },
+                { icon:Clock,      label:ar?'بدأ':'Started',   val:fmtDt(outage.startedAt),                                                     c:tsColor(dark) },
+                { icon:AlarmClock, label:ar?'المدة':'Duration', val:outage.durationMinutes ? fmtDur(outage.durationMinutes) : (ar?'مستمر':'Ongoing'), c:outage.durationMinutes && outage.durationMinutes>60?'#f87171':tsColor(dark) },
                 { icon:User,       label:ar?'المعالج':'Handler', val:outage.handlerName ?? '—',                                                   c:'#818cf8' },
                 { icon:BarChart2,  label:'SLA',                  val:outage.slaBreached?(ar?'تجاوز':'Breached'):(ar?'ضمن الهدف':'On Target'),     c:outage.slaBreached?'#f87171':'#34d399' },
               ].map(({ icon:Icon, label, val, c }) => (
-                <div key={label} className="px-4 py-3" style={{ background:'rgba(8,15,26,0.95)' }}>
+                <div key={label} className="px-4 py-3" style={{ background:'var(--surface)' }}>
                   <div className="flex items-center gap-1.5 mb-1">
-                    <Icon size={9} style={{ color:'#475569' }} />
-                    <span className="text-[9px] uppercase tracking-wider" style={{ color:'#475569' }}>{label}</span>
+                    <Icon size={9} style={{ color:T.faint }} />
+                    <span className="text-[9px] uppercase tracking-wider" style={{ color:T.faint }}>{label}</span>
                   </div>
                   <span className="text-xs font-semibold" style={{ color:c }}>{val}</span>
                 </div>
@@ -1428,8 +1445,8 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
 
             {/* Impacted functions */}
             {outage.impactedFunctions?.length > 0 && (
-              <div className="px-4 py-3" style={{ borderTop:'1px solid rgba(255,255,255,0.05)' }}>
-                <p className="text-[9px] uppercase tracking-wider mb-2" style={{ color:'#64748b' }}>
+              <div className="px-4 py-3" style={{ borderTop:`1px solid ${T.bdr}` }}>
+                <p className="text-[9px] uppercase tracking-wider mb-2" style={{ color:tsColor(dark) }}>
                   {ar?'الأقسام المتأثرة':'Impacted Functions'}
                 </p>
                 <div className="flex flex-wrap gap-1.5">
@@ -1445,17 +1462,17 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
 
             {/* Description */}
             {outage.description && (
-              <div className="px-4 py-3" style={{ borderTop:'1px solid rgba(255,255,255,0.05)' }}>
-                <p className="text-[9px] uppercase tracking-wider mb-1.5" style={{ color:'#64748b' }}>{ar?'الوصف':'Description'}</p>
-                <p className="text-xs leading-relaxed" style={{ color:'#64748b' }}>{outage.description}</p>
+              <div className="px-4 py-3" style={{ borderTop:`1px solid ${T.bdr}` }}>
+                <p className="text-[9px] uppercase tracking-wider mb-1.5" style={{ color:tsColor(dark) }}>{ar?'الوصف':'Description'}</p>
+                <p className="text-xs leading-relaxed" style={{ color:tsColor(dark) }}>{outage.description}</p>
               </div>
             )}
 
             {/* Root cause */}
             {outage.rootCause && (
-              <div className="px-4 py-3" style={{ borderTop:'1px solid rgba(255,255,255,0.05)' }}>
-                <p className="text-[9px] uppercase tracking-wider mb-1.5" style={{ color:'#64748b' }}>{ar?'السبب الجذري':'Root Cause'}</p>
-                <p className="text-xs leading-relaxed" style={{ color:'#94a3b8' }}>{outage.rootCause}</p>
+              <div className="px-4 py-3" style={{ borderTop:`1px solid ${T.bdr}` }}>
+                <p className="text-[9px] uppercase tracking-wider mb-1.5" style={{ color:tsColor(dark) }}>{ar?'السبب الجذري':'Root Cause'}</p>
+                <p className="text-xs leading-relaxed" style={{ color:tsColor(dark) }}>{outage.rootCause}</p>
               </div>
             )}
 
@@ -1471,8 +1488,8 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
 
             {/* Media thumbnails */}
             {(images.length > 0 || videos.length > 0) && (
-              <div className="px-4 py-3" style={{ borderTop:'1px solid rgba(255,255,255,0.05)' }}>
-                <p className="text-[9px] uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color:'#64748b' }}>
+              <div className="px-4 py-3" style={{ borderTop:`1px solid ${T.bdr}` }}>
+                <p className="text-[9px] uppercase tracking-wider mb-2 flex items-center gap-1.5" style={{ color:tsColor(dark) }}>
                   <Paperclip size={9} />
                   {ar?`مرفقات (${images.length+videos.length})`:`Attachments (${images.length+videos.length})`}
                 </p>
@@ -1481,7 +1498,7 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
                     <div key={a.id} className="relative flex-shrink-0 group cursor-pointer">
                       <img src={a.url} alt={a.originalName}
                         className="w-20 h-14 rounded-xl object-cover"
-                        style={{ border:'1px solid rgba(255,255,255,0.07)' }} />
+                        style={{ border:`1px solid ${T.bdr}` }} />
                       <div className="absolute inset-0 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                         style={{ background:'rgba(0,0,0,0.45)' }}>
                         <Image size={13} style={{ color:'#fff' }} />
@@ -1492,7 +1509,7 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
                     <div key={a.id} className="flex-shrink-0 w-20 h-14 rounded-xl flex flex-col items-center justify-center gap-1"
                       style={{ background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.18)' }}>
                       <Video size={16} style={{ color:'#818cf8' }} />
-                      <span className="text-[8px] px-1 text-center leading-tight truncate w-full text-center" style={{ color:'#475569' }}>
+                      <span className="text-[8px] px-1 text-center leading-tight truncate w-full text-center" style={{ color:T.faint }}>
                         {a.originalName.slice(0,14)}
                       </span>
                     </div>
@@ -1502,14 +1519,14 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
             )}
 
             {/* Watermark footer */}
-            <div className="px-4 py-2 flex items-center" style={{ borderTop:'1px solid rgba(255,255,255,0.03)', background:'rgba(0,0,0,0.25)' }}>
-              <span className="text-[9px]" style={{ color:'#475569' }}>📌 WFM Platform — Boutiqaat Contact Center</span>
+            <div className="px-4 py-2 flex items-center" style={{ borderTop:`1px solid ${T.bdr}`, background:T.panel }}>
+              <span className="text-[9px]" style={{ color:T.faint }}>📌 WFM Platform — Boutiqaat Contact Center</span>
             </div>
           </div>
 
           {/* ── Share actions ──────────────────────────────────────────────── */}
           <div className="px-4 pt-4 pb-5 space-y-2">
-            <p className="text-[9px] uppercase tracking-widest mb-3" style={{ color:'#64748b' }}>
+            <p className="text-[9px] uppercase tracking-widest mb-3" style={{ color:tsColor(dark) }}>
               {ar?'خيارات الإرسال':'Send via'}
             </p>
 
@@ -1526,7 +1543,7 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
                 </div>
                 <div className="text-center">
                   <p className="text-xs font-bold" style={{ color:'#4ade80' }}>WhatsApp</p>
-                  <p className="text-[10px] mt-0.5" style={{ color:'#64748b' }}>{ar?'فتح وإرسال':'Open & send'}</p>
+                  <p className="text-[10px] mt-0.5" style={{ color:tsColor(dark) }}>{ar?'فتح وإرسال':'Open & send'}</p>
                 </div>
               </a>
 
@@ -1539,7 +1556,7 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
                 </div>
                 <div className="text-center">
                   <p className="text-xs font-bold" style={{ color:'#60a5fa' }}>{ar?'إيميل':'Email'}</p>
-                  <p className="text-[10px] mt-0.5" style={{ color:'#64748b' }}>{ar?'فتح تطبيق البريد':'Open mail app'}</p>
+                  <p className="text-[10px] mt-0.5" style={{ color:tsColor(dark) }}>{ar?'فتح تطبيق البريد':'Open mail app'}</p>
                 </div>
               </a>
             </div>
@@ -1558,26 +1575,26 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
                 <p className="text-sm font-bold" style={{ color:'#fbbf24' }}>
                   {ar?'تقرير احترافي جاهز للطباعة':'Professional Print-Ready Report'}
                 </p>
-                <p className="text-[10px] mt-0.5" style={{ color:'#64748b' }}>
+                <p className="text-[10px] mt-0.5" style={{ color:tsColor(dark) }}>
                   {ar?'يشمل الصور والتسلسل الزمني الكامل':'Includes images, timeline & full details'}
                 </p>
               </div>
-              <ChevronRight size={14} style={{ color:'#64748b', flexShrink:0 }} />
+              <ChevronRight size={14} style={{ color:tsColor(dark), flexShrink:0 }} />
             </button>
 
             {/* Copy */}
             <button onClick={copyText}
               className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all text-start hover:scale-[1.01] active:scale-[0.99]"
-              style={{ background:copied?'rgba(52,211,153,0.07)':'rgba(255,255,255,0.025)', border:copied?'1px solid rgba(52,211,153,0.22)':'1px solid rgba(255,255,255,0.06)' }}>
+              style={{ background:copied?'rgba(52,211,153,0.07)':T.panel, border:copied?'1px solid rgba(52,211,153,0.22)':`1px solid ${T.bdr}` }}>
               <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
-                style={{ background:copied?'rgba(52,211,153,0.1)':'rgba(255,255,255,0.04)', border:copied?'1px solid rgba(52,211,153,0.2)':'1px solid rgba(255,255,255,0.06)' }}>
-                {copied ? <CheckCircle2 size={20} style={{ color:'#34d399' }}/> : <FileText size={20} style={{ color:'#64748b' }}/>}
+                style={{ background:copied?'rgba(52,211,153,0.1)':T.panel, border:copied?'1px solid rgba(52,211,153,0.2)':`1px solid ${T.bdr}` }}>
+                {copied ? <CheckCircle2 size={20} style={{ color:'#34d399' }}/> : <FileText size={20} style={{ color:tsColor(dark) }}/>}
               </div>
               <div className="flex-1">
-                <p className="text-sm font-bold" style={{ color:copied?'#34d399':'#475569' }}>
+                <p className="text-sm font-bold" style={{ color:copied?'#34d399':T.faint }}>
                   {copied?(ar?'✓ تم النسخ!':'✓ Copied!'):(ar?'نسخ الملخص':'Copy Summary Text')}
                 </p>
-                <p className="text-[10px] mt-0.5" style={{ color:'#64748b' }}>
+                <p className="text-[10px] mt-0.5" style={{ color:tsColor(dark) }}>
                   {ar?'جاهز للصق في أي مكان':'Ready to paste anywhere'}
                 </p>
               </div>
@@ -1586,7 +1603,7 @@ function ShareModal({ outage, ar, onClose }: { outage: OutageDetail; ar: boolean
         </div>
         {/* Bottom fade — scroll indicator */}
         <div className="absolute bottom-0 inset-x-0 h-10 pointer-events-none rounded-b-3xl"
-          style={{ background:'linear-gradient(to top, #080f1a, transparent)' }} />
+          style={{ background:'linear-gradient(to top, var(--surface), transparent)' }} />
       </div>
     </div>
   );

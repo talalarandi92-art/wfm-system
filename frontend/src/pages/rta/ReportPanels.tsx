@@ -5,10 +5,20 @@ import {
   RefreshCw, Loader2, TrendingUp, BarChart3, Activity, Shield, AlertTriangle, CheckCircle2,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
+import { useUiStore } from '@/store/ui.store';
+import { tp, ts as tsColor } from '@/components/ds';
 import {
   DailyReport, ContactForecast, AdherenceReport, IntradayData, ViolationsReport,
   fmtMin, fmtTime,
 } from './types';
+
+// Theme-aware neutral tokens (recipe of dd234d7) — semantic status colors stay fixed
+const tok = (dark: boolean) => ({
+  panel:   dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  bdr:     dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+  overlay: dark ? 'rgba(0,0,0,0.75)'       : 'rgba(15,23,42,0.45)',
+  faint:   dark ? '#475569'                : '#94a3b8',
+});
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  DAILY REPORT + FORECAST PANEL                                              */
@@ -36,6 +46,8 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
   onRange: (from: string, to: string) => void;
   onRefresh: () => void; refreshing: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const rows = report?.rows ?? [];
   const dates = useMemo(() => [...new Set(rows.map(r => String(r.stat_date).slice(0, 10)))], [rows]);
   const maxFc = Math.max(1, ...(forecast?.forecast.map(f => f.predictedContacts) ?? [1]),
@@ -45,16 +57,16 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
     <div className="flex flex-col gap-3">
       {/* Controls */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] font-semibold" style={{ color: '#94a3b8' }}>
+        <span className="text-[11px] font-semibold" style={{ color: tsColor(dark) }}>
           {ar ? 'الفترة' : 'Range'}
         </span>
         <input type="date" value={from} onChange={e => onRange(e.target.value, to)}
           className="rounded-lg text-[11px] px-2 py-1 outline-none"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
-        <span style={{ color: '#475569' }}>→</span>
+          style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark), colorScheme: dark ? 'dark' : 'light' }} />
+        <span style={{ color: T.faint }}>→</span>
         <input type="date" value={to} onChange={e => onRange(from, e.target.value)}
           className="rounded-lg text-[11px] px-2 py-1 outline-none"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
+          style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark), colorScheme: dark ? 'dark' : 'light' }} />
         <button onClick={onRefresh} disabled={refreshing}
           className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-semibold"
           style={{ background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', opacity: refreshing ? .6 : 1 }}>
@@ -71,9 +83,9 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
       </div>
 
       {/* Forecast strip */}
-      <div className="rounded-2xl p-3.5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="rounded-2xl p-3.5" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: '#e2e8f0' }}>
+          <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: tp(dark) }}>
             <TrendingUp size={13} style={{ color: '#34d399' }} />
             {ar ? 'توقع حجم الكونتاكتات (7 أيام)' : 'Contact Volume Forecast (7 days)'}
           </span>
@@ -88,16 +100,16 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
           </span>
         </div>
         {forecast?.note && (
-          <p className="text-[10px] mb-2" style={{ color: '#64748b' }}>
+          <p className="text-[10px] mb-2" style={{ color: tsColor(dark) }}>
             {ar ? 'يحتاج 7 أيام على الأقل من البيانات — التوقع يتحسن تلقائياً مع تراكم البيانات اليومية.' : forecast.note}
           </p>
         )}
         <div className="flex items-end gap-1.5" style={{ height: 70 }}>
           {(forecast?.history ?? []).slice(-7).map(h => (
             <div key={h.date} className="flex-1 flex flex-col items-center gap-0.5" title={`${h.date}: ${h.contacts}`}>
-              <span className="text-[8px] tabular-nums" style={{ color: '#64748b' }}>{h.contacts || ''}</span>
+              <span className="text-[8px] tabular-nums" style={{ color: tsColor(dark) }}>{h.contacts || ''}</span>
               <div className="w-full rounded-t" style={{ height: Math.max(3, (h.contacts / maxFc) * 48), background: 'rgba(99,102,241,0.45)' }} />
-              <span className="text-[8px]" style={{ color: '#475569' }}>{h.date.slice(5)}</span>
+              <span className="text-[8px]" style={{ color: T.faint }}>{h.date.slice(5)}</span>
             </div>
           ))}
           {(forecast?.forecast ?? []).map(f => (
@@ -107,16 +119,16 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
                 height: Math.max(3, (f.predictedContacts / maxFc) * 48),
                 background: 'rgba(52,211,153,0.3)', border: '1px dashed rgba(52,211,153,0.5)',
               }} />
-              <span className="text-[8px]" style={{ color: '#475569' }}>{f.date.slice(5)}</span>
+              <span className="text-[8px]" style={{ color: T.faint }}>{f.date.slice(5)}</span>
             </div>
           ))}
         </div>
         <div className="flex items-center gap-3 mt-1.5">
-          <span className="text-[9px] flex items-center gap-1" style={{ color: '#64748b' }}>
+          <span className="text-[9px] flex items-center gap-1" style={{ color: tsColor(dark) }}>
             <span className="w-2 h-2 rounded-sm inline-block" style={{ background: 'rgba(99,102,241,0.45)' }} />
             {ar ? 'فعلي' : 'Actual'}
           </span>
-          <span className="text-[9px] flex items-center gap-1" style={{ color: '#64748b' }}>
+          <span className="text-[9px] flex items-center gap-1" style={{ color: tsColor(dark) }}>
             <span className="w-2 h-2 rounded-sm inline-block" style={{ background: 'rgba(52,211,153,0.3)', border: '1px dashed rgba(52,211,153,0.5)' }} />
             {ar ? 'متوقع' : 'Forecast'}
           </span>
@@ -126,11 +138,11 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
       {/* Per-day tables */}
       {!rows.length ? (
         <div className="flex flex-col items-center justify-center py-12">
-          <BarChart3 size={30} className="mb-2" style={{ color: '#334155' }} />
-          <p className="text-xs font-semibold" style={{ color: '#64748b' }}>
+          <BarChart3 size={30} className="mb-2" style={{ color: T.faint }} />
+          <p className="text-xs font-semibold" style={{ color: tsColor(dark) }}>
             {ar ? 'لا توجد بيانات لهذه الفترة' : 'No data for this range'}
           </p>
-          <p className="text-[10px] mt-1" style={{ color: '#475569' }}>
+          <p className="text-[10px] mt-1" style={{ color: T.faint }}>
             {ar ? 'البيانات تتجمع تلقائياً كل 5 دقائق من سبرينكلر' : 'Data accumulates automatically every 5 min from Sprinklr'}
           </p>
         </div>
@@ -138,25 +150,25 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
         const dayRows = rows.filter(r => String(r.stat_date).slice(0, 10) === d);
         const tot = report?.days?.[d];
         return (
-          <div key={d} className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <div className="flex items-center justify-between px-3.5 py-2" style={{ background: 'rgba(99,102,241,0.07)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-              <span className="text-xs font-bold tabular-nums" style={{ color: '#e2e8f0' }}>{d}</span>
-              <div className="flex items-center gap-3 text-[10px]" style={{ color: '#94a3b8' }}>
+          <div key={d} className="rounded-2xl overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+            <div className="flex items-center justify-between px-3.5 py-2" style={{ background: 'rgba(99,102,241,0.07)', borderBottom: `1px solid ${T.bdr}` }}>
+              <span className="text-xs font-bold tabular-nums" style={{ color: tp(dark) }}>{d}</span>
+              <div className="flex items-center gap-3 text-[10px]" style={{ color: tsColor(dark) }}>
                 <span>👥 {tot?.agents ?? dayRows.length}</span>
                 <span>⏱ {fmtMin(tot?.workingMinutes ?? 0)}</span>
                 <span>📨 {tot?.contacts || '—'}</span>
                 <span title={ar ? 'متوسط زمن المعالجة لليوم' : 'Daily avg handle time'}>
-                  AHT <b style={{ color: tot?.avgAhtSec ? '#fbbf24' : '#475569' }}>{fmtSec(tot?.avgAhtSec ?? null)}</b>
+                  AHT <b style={{ color: tot?.avgAhtSec ? '#fbbf24' : T.faint }}>{fmtSec(tot?.avgAhtSec ?? null)}</b>
                 </span>
                 <span title={ar ? 'متوسط زمن أول رد لليوم' : 'Daily avg first response'}>
-                  FRT <b style={{ color: tot?.avgFrtSec ? '#34d399' : '#475569' }}>{fmtSec(tot?.avgFrtSec ?? null)}</b>
+                  FRT <b style={{ color: tot?.avgFrtSec ? '#34d399' : T.faint }}>{fmtSec(tot?.avgFrtSec ?? null)}</b>
                 </span>
               </div>
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 920 }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <tr style={{ borderBottom: `1px solid ${T.bdr}` }}>
                     {[
                       ar ? 'الموظف' : 'Agent',
                       ar ? 'رقم الموظف' : 'Emp #',
@@ -172,26 +184,26 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
                       ar ? 'كونتاكتات' : 'Contacts',
                     ].map(h => (
                       <th key={h} className="text-[9px] font-bold px-2.5 py-1.5 whitespace-nowrap"
-                        style={{ color: '#64748b', textAlign: 'start' }}>{h}</th>
+                        style={{ color: tsColor(dark), textAlign: 'start' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {dayRows.map(r => (
-                    <tr key={r.sprinklr_agent_id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <tr key={r.sprinklr_agent_id} style={{ borderBottom: `1px solid ${T.bdr}` }}>
                       <td className="px-2.5 py-1.5">
-                        <div className="text-[11px] font-semibold" style={{ color: '#e2e8f0' }}>
+                        <div className="text-[11px] font-semibold" style={{ color: tp(dark) }}>
                           {r.employee_name || r.agent_name}
                         </div>
                         {r.agent_email && (
-                          <div className="text-[9px]" style={{ color: r.employee_id ? '#4ade80' : '#64748b' }}>
+                          <div className="text-[9px]" style={{ color: r.employee_id ? '#4ade80' : tsColor(dark) }}>
                             {r.agent_email} {r.employee_id ? '✓' : ''}
                           </div>
                         )}
                       </td>
-                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#94a3b8' }}>{r.employee_no || '—'}</td>
-                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#94a3b8' }}>{fmtTime(r.first_login)}</td>
-                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#94a3b8' }}>{fmtTime(r.last_logout)}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: tsColor(dark) }}>{r.employee_no || '—'}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: tsColor(dark) }}>{fmtTime(r.first_login)}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: tsColor(dark) }}>{fmtTime(r.last_logout)}</td>
                       <td className="px-2.5 py-1.5 text-[10px] font-bold tabular-nums" style={{ color: '#34d399' }}>{fmtMin(r.total_working_minutes)}</td>
                       <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#a3e635' }}>{fmtMin(r.idle_no_case_minutes)}</td>
                       <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#fbbf24' }}>{fmtMin(r.idle_with_case_minutes)}</td>
@@ -202,9 +214,9 @@ export function DailyReportPanel({ report, forecast, ar, from, to, onRange, onRe
                         {fmtMin(r.break_breakdown?.total_break ?? r.break_minutes)}
                         {(r.break_breakdown?.total_break ?? r.break_minutes) > 60 ? ' ⚠' : ''}
                       </td>
-                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#94a3b8' }}>{fmtSec(r.aht_seconds)}</td>
-                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: '#94a3b8' }}>{fmtSec(r.avg_response_seconds)}</td>
-                      <td className="px-2.5 py-1.5 text-[10px] font-bold tabular-nums" style={{ color: '#e2e8f0' }}>{r.contacts_received ?? '—'}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: tsColor(dark) }}>{fmtSec(r.aht_seconds)}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] tabular-nums" style={{ color: tsColor(dark) }}>{fmtSec(r.avg_response_seconds)}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] font-bold tabular-nums" style={{ color: tp(dark) }}>{r.contacts_received ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -229,6 +241,8 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
   onRange: (f: string, t: string) => void;
   onRefresh: () => void; refreshing: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const s = report?.summary;
   const activeIntervals = (intraday?.intervals ?? []).filter(i => i.scheduled > 0 || (i.actual ?? 0) > 0);
   const maxHc = Math.max(1, ...activeIntervals.map(i => Math.max(i.scheduled, i.actual ?? 0)));
@@ -238,16 +252,16 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
       {/* Controls */}
       <div className="flex items-center gap-2 flex-wrap">
         <Activity size={14} style={{ color: '#34d399' }} />
-        <span className="text-[11px] font-bold" style={{ color: '#e2e8f0' }}>
+        <span className="text-[11px] font-bold" style={{ color: tp(dark) }}>
           {ar ? 'الالتزام بالجدول' : 'Schedule Adherence'}
         </span>
         <input type="date" value={from} onChange={e => onRange(e.target.value, to)}
           className="rounded-lg text-[11px] px-2 py-1 outline-none"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
-        <span style={{ color: '#475569' }}>→</span>
+          style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark), colorScheme: dark ? 'dark' : 'light' }} />
+        <span style={{ color: T.faint }}>→</span>
         <input type="date" value={to} onChange={e => onRange(from, e.target.value)}
           className="rounded-lg text-[11px] px-2 py-1 outline-none"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
+          style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark), colorScheme: dark ? 'dark' : 'light' }} />
         <button onClick={onRefresh} disabled={refreshing}
           className="flex items-center gap-1 px-3 py-1 rounded-lg text-[11px] font-semibold"
           style={{ background: 'rgba(99,102,241,0.18)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', opacity: refreshing ? .6 : 1 }}>
@@ -275,7 +289,7 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
           <div key={k.lbl} className="rounded-2xl p-3 text-center"
             style={{ background: `${k.color}0a`, border: `1px solid ${k.color}26` }}>
             <div className="text-xl font-black tabular-nums leading-none" style={{ color: k.color }}>{k.val}</div>
-            <div className="text-[9px] mt-1.5 font-semibold" style={{ color: '#64748b' }}>{k.lbl}</div>
+            <div className="text-[9px] mt-1.5 font-semibold" style={{ color: tsColor(dark) }}>{k.lbl}</div>
           </div>
         ))}
       </div>
@@ -289,17 +303,17 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
 
       {/* Intraday: scheduled vs actual HC */}
       {activeIntervals.length > 0 && (
-        <div className="rounded-2xl p-3.5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="rounded-2xl p-3.5" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: '#e2e8f0' }}>
+            <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: tp(dark) }}>
               <BarChart3 size={13} style={{ color: '#818cf8' }} />
               {ar ? 'اليوم لحظة بلحظة — مجدول vs فعلي (كل ٣٠ دقيقة)' : 'Intraday — Scheduled vs Actual HC (30-min)'}
             </span>
             <div className="flex items-center gap-3">
-              <span className="text-[9px] flex items-center gap-1" style={{ color: '#64748b' }}>
+              <span className="text-[9px] flex items-center gap-1" style={{ color: tsColor(dark) }}>
                 <span className="w-2 h-2 rounded-sm inline-block" style={{ background: 'rgba(129,140,248,0.45)' }} />{ar ? 'مجدول' : 'Scheduled'}
               </span>
-              <span className="text-[9px] flex items-center gap-1" style={{ color: '#64748b' }}>
+              <span className="text-[9px] flex items-center gap-1" style={{ color: tsColor(dark) }}>
                 <span className="w-2 h-2 rounded-sm inline-block" style={{ background: 'rgba(52,211,153,0.6)' }} />{ar ? 'فعلي' : 'Actual'}
               </span>
             </div>
@@ -316,7 +330,7 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
                       : (iv.gap ?? 0) < 0 ? 'rgba(239,68,68,0.65)' : 'rgba(52,211,153,0.6)',
                   }} />
                 </div>
-                <span className="text-[7.5px] tabular-nums" style={{ color: '#475569' }}>{iv.interval}</span>
+                <span className="text-[7.5px] tabular-nums" style={{ color: T.faint }}>{iv.interval}</span>
               </div>
             ))}
           </div>
@@ -326,22 +340,22 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
       {/* Per-agent table */}
       {!(report?.rows.length) ? (
         <div className="flex flex-col items-center justify-center py-12">
-          <Activity size={30} className="mb-2" style={{ color: '#334155' }} />
-          <p className="text-xs font-semibold" style={{ color: '#64748b' }}>
+          <Activity size={30} className="mb-2" style={{ color: T.faint }} />
+          <p className="text-xs font-semibold" style={{ color: tsColor(dark) }}>
             {ar ? 'لا توجد بيانات التزام لهذه الفترة' : 'No adherence data for this range'}
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="rounded-2xl overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
           <div style={{ overflowX: 'auto' }}>
             <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 880 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}>
+                <tr style={{ borderBottom: `1px solid ${T.bdr}`, background: T.panel }}>
                   {[ar ? 'التاريخ' : 'Date', ar ? 'الموظف' : 'Employee', ar ? 'الشفت' : 'Shift',
                     ar ? 'الالتزام' : 'Adherence', ar ? 'الإنجاز' : 'Conformance',
                     ar ? 'داخل الشفت' : 'In-Shift', ar ? 'بريك بالشفت' : 'Break',
                     ar ? 'أوفلاين بالشفت' : 'Offline', ar ? 'متتبَّع/مجدول' : 'Tracked/Sched'].map((h, i) => (
-                    <th key={i} className="text-[9px] font-bold px-3 py-2 whitespace-nowrap" style={{ color: '#64748b', textAlign: 'start' }}>{h}</th>
+                    <th key={i} className="text-[9px] font-bold px-3 py-2 whitespace-nowrap" style={{ color: tsColor(dark), textAlign: 'start' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -350,24 +364,24 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
                   const pct = r.adherence_pct != null ? +r.adherence_pct : null;
                   const c = adhColor(pct);
                   return (
-                    <tr key={`${r.stat_date}_${r.employee_id}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                      <td className="px-3 py-2 text-[10px] tabular-nums whitespace-nowrap" style={{ color: '#94a3b8' }}>{String(r.stat_date).slice(0, 10)}</td>
+                    <tr key={`${r.stat_date}_${r.employee_id}`} style={{ borderBottom: `1px solid ${T.bdr}` }}>
+                      <td className="px-3 py-2 text-[10px] tabular-nums whitespace-nowrap" style={{ color: tsColor(dark) }}>{String(r.stat_date).slice(0, 10)}</td>
                       <td className="px-3 py-2">
-                        <div className="text-[11px] font-semibold" style={{ color: '#e2e8f0' }}>{r.employee_name}</div>
+                        <div className="text-[11px] font-semibold" style={{ color: tp(dark) }}>{r.employee_name}</div>
                         <div className="text-[9px]" style={{ color: r.sprinklr_agent_id ? '#4ade80' : '#f59e0b' }}>
                           #{r.employee_no} {r.sprinklr_agent_id ? '✓' : (ar ? '· غير مرتبط' : '· unlinked')}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-[10px] font-bold" style={{ color: '#94a3b8' }}>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ color: tsColor(dark) }}>
                         {r.shift_code ?? '—'}
-                        <div className="text-[8.5px] font-normal" style={{ color: '#475569' }}>
+                        <div className="text-[8.5px] font-normal" style={{ color: T.faint }}>
                           {fmtTime(r.scheduled_start)}–{fmtTime(r.scheduled_end)}
                         </div>
                       </td>
                       <td className="px-3 py-2" style={{ minWidth: 120 }}>
-                        {pct == null ? <span className="text-[10px]" style={{ color: '#475569' }}>{ar ? 'لا تتبع' : 'no tracking'}</span> : (
+                        {pct == null ? <span className="text-[10px]" style={{ color: T.faint }}>{ar ? 'لا تتبع' : 'no tracking'}</span> : (
                           <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)', minWidth: 60 }}>
+                            <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: T.panel, minWidth: 60 }}>
                               <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct)}%`, background: c, transition: 'width .5s' }} />
                             </div>
                             <span className="text-[11px] font-black tabular-nums" style={{ color: c }}>{pct}%</span>
@@ -379,8 +393,8 @@ export function AdherencePanel({ report, intraday, ar, from, to, onRange, onRefr
                       </td>
                       <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: '#34d399' }}>{fmtMin(r.in_adherence_minutes)}</td>
                       <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: '#818cf8' }}>{fmtMin(r.break_in_shift_minutes)}</td>
-                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: r.offline_in_shift_minutes > 30 ? '#f87171' : '#94a3b8' }}>{fmtMin(r.offline_in_shift_minutes)}</td>
-                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: '#64748b' }}>{fmtMin(r.tracked_minutes)} / {fmtMin(r.scheduled_minutes)}</td>
+                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: r.offline_in_shift_minutes > 30 ? '#f87171' : tsColor(dark) }}>{fmtMin(r.offline_in_shift_minutes)}</td>
+                      <td className="px-3 py-2 text-[10px] tabular-nums" style={{ color: tsColor(dark) }}>{fmtMin(r.tracked_minutes)} / {fmtMin(r.scheduled_minutes)}</td>
                     </tr>
                   );
                 })}
@@ -425,6 +439,8 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
   onRange: (f: string, t: string) => void;
   onReview: (id: string, status: string) => void;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [cfg, setCfg] = useState<ComplianceConfig | null>(null);
   const [cfgOpen, setCfgOpen] = useState(false);
@@ -457,16 +473,16 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
       {/* Range controls */}
       <div className="flex items-center gap-2 flex-wrap">
         <Shield size={14} style={{ color: '#818cf8' }} />
-        <span className="text-[11px] font-bold" style={{ color: '#e2e8f0' }}>
+        <span className="text-[11px] font-bold" style={{ color: tp(dark) }}>
           {ar ? 'تقرير الالتزام' : 'Compliance Report'}
         </span>
         <input type="date" value={from} onChange={e => onRange(e.target.value, to)}
           className="rounded-lg text-[11px] px-2 py-1 outline-none"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
-        <span style={{ color: '#475569' }}>→</span>
+          style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark), colorScheme: dark ? 'dark' : 'light' }} />
+        <span style={{ color: T.faint }}>→</span>
         <input type="date" value={to} onChange={e => onRange(from, e.target.value)}
           className="rounded-lg text-[11px] px-2 py-1 outline-none"
-          style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', colorScheme: 'dark' }} />
+          style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark), colorScheme: dark ? 'dark' : 'light' }} />
         {report && (
           <span className="text-[10px] px-2 py-0.5 rounded-full font-bold"
             style={{ background: report.summary.open ? 'rgba(239,68,68,0.12)' : 'rgba(34,197,94,0.12)',
@@ -497,13 +513,13 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
           <div className="flex items-end gap-3 flex-wrap">
             {(Object.keys(CFG_LABELS) as (keyof ComplianceConfig)[]).map(k => (
               <label key={k} className="flex flex-col gap-1">
-                <span className="text-[9px] font-bold" style={{ color: '#94a3b8' }}>
+                <span className="text-[9px] font-bold" style={{ color: tsColor(dark) }}>
                   {ar ? CFG_LABELS[k].ar : CFG_LABELS[k].en}
                 </span>
                 <input type="number" min={0} max={480} value={cfg[k]}
                   onChange={e => setCfg({ ...cfg, [k]: +e.target.value })}
                   className="rounded-lg text-[12px] px-2 py-1 outline-none tabular-nums"
-                  style={{ width: 90, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#e2e8f0' }} />
+                  style={{ width: 90, background: T.panel, border: '1px solid rgba(255,255,255,0.12)', color: tp(dark) }} />
               </label>
             ))}
             <button onClick={saveCfg} disabled={cfgSaving}
@@ -514,7 +530,7 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
             </button>
             {cfgMsg && <span className="text-[10px] font-bold" style={{ color: cfgMsg.startsWith('✅') ? '#4ade80' : '#f87171' }}>{cfgMsg}</span>}
           </div>
-          <p className="text-[9px] mt-2" style={{ color: '#64748b' }}>
+          <p className="text-[9px] mt-2" style={{ color: tsColor(dark) }}>
             {ar ? 'تُطبق العتبات الجديدة على الاحتساب التلقائي القادم (كل ٥ دقائق) أو عند الضغط على "إعادة احتساب" في التقرير اليومي.'
                 : 'New thresholds apply on the next auto-compute (every 5 min) or when pressing Recompute in the Daily Report.'}
           </p>
@@ -530,14 +546,14 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
             <button key={key} onClick={() => setTypeFilter(active ? null : key)}
               className="rounded-2xl p-3 text-center transition-all"
               style={{
-                background: active ? `${meta.color}1c` : n > 0 ? `${meta.color}0c` : 'rgba(255,255,255,0.02)',
-                border: active ? `1.5px solid ${meta.color}66` : `1px solid ${n > 0 ? meta.color + '30' : 'rgba(255,255,255,0.06)'}`,
+                background: active ? `${meta.color}1c` : n > 0 ? `${meta.color}0c` : T.panel,
+                border: active ? `1.5px solid ${meta.color}66` : `1px solid ${n > 0 ? meta.color + '30' : T.bdr}`,
                 cursor: 'pointer',
               }}>
               <div className="text-base mb-1">{meta.icon}</div>
               <div className="text-xl font-black tabular-nums leading-none"
-                style={{ color: n > 0 ? meta.color : '#334155' }}>{n}</div>
-              <div className="text-[8.5px] mt-1.5 font-semibold leading-tight" style={{ color: n > 0 ? '#94a3b8' : '#475569' }}>
+                style={{ color: n > 0 ? meta.color : T.faint }}>{n}</div>
+              <div className="text-[8.5px] mt-1.5 font-semibold leading-tight" style={{ color: n > 0 ? tsColor(dark) : T.faint }}>
                 {ar ? meta.ar : meta.en}
               </div>
             </button>
@@ -554,9 +570,9 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
           <div className="flex gap-2 flex-wrap">
             {report!.topOffenders.slice(0, 6).map(o => (
               <span key={o.agentId} className="text-[10px] px-2.5 py-1 rounded-full font-semibold"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(239,68,68,0.2)', color: '#e2e8f0' }}>
+                style={{ background: T.panel, border: '1px solid rgba(239,68,68,0.2)', color: tp(dark) }}>
                 {o.name} <b style={{ color: '#f87171' }}>×{o.count}</b>
-                {o.totalMinutes > 0 && <span style={{ color: '#64748b' }}> · {fmtMin(o.totalMinutes)}</span>}
+                {o.totalMinutes > 0 && <span style={{ color: tsColor(dark) }}> · {fmtMin(o.totalMinutes)}</span>}
               </span>
             ))}
           </div>
@@ -572,20 +588,20 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
               ? (ar ? 'لا مخالفات من هذا النوع' : 'No violations of this type')
               : (ar ? 'لا توجد مخالفات في هذه الفترة 🎉' : 'No violations in this range 🎉')}
           </p>
-          <p className="text-[10px] mt-1" style={{ color: '#475569' }}>
+          <p className="text-[10px] mt-1" style={{ color: T.faint }}>
             {ar ? 'تُحتسب المخالفات تلقائياً كل ٥ دقائق من بيانات سبرينكلر والجدول' : 'Violations auto-computed every 5 min from Sprinklr + schedule data'}
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="rounded-2xl overflow-hidden" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
           <div style={{ overflowX: 'auto' }}>
             <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 860 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}>
+                <tr style={{ borderBottom: `1px solid ${T.bdr}`, background: T.panel }}>
                   {[ar ? 'التاريخ' : 'Date', ar ? 'الموظف' : 'Agent', ar ? 'المخالفة' : 'Violation',
                     ar ? 'الخطورة' : 'Severity', ar ? 'الدقائق' : 'Minutes',
                     ar ? 'التفاصيل' : 'Details', ar ? 'الحالة' : 'Status', ''].map((h, i) => (
-                    <th key={i} className="text-[9px] font-bold px-3 py-2 whitespace-nowrap" style={{ color: '#64748b', textAlign: 'start' }}>{h}</th>
+                    <th key={i} className="text-[9px] font-bold px-3 py-2 whitespace-nowrap" style={{ color: tsColor(dark), textAlign: 'start' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -609,13 +625,13 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
                     detTxt = `${fmtMin(r.minutes ?? 0)}`;
                   }
                   return (
-                    <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', opacity: r.status !== 'open' ? .55 : 1 }}>
-                      <td className="px-3 py-2 text-[10px] tabular-nums whitespace-nowrap" style={{ color: '#94a3b8' }}>
+                    <tr key={r.id} style={{ borderBottom: `1px solid ${T.bdr}`, opacity: r.status !== 'open' ? .55 : 1 }}>
+                      <td className="px-3 py-2 text-[10px] tabular-nums whitespace-nowrap" style={{ color: tsColor(dark) }}>
                         {String(r.violation_date).slice(0, 10)}
                       </td>
                       <td className="px-3 py-2">
-                        <div className="text-[11px] font-semibold" style={{ color: '#e2e8f0' }}>{r.employee_name || r.agent_name}</div>
-                        {r.employee_no && <div className="text-[9px]" style={{ color: '#64748b' }}>#{r.employee_no}</div>}
+                        <div className="text-[11px] font-semibold" style={{ color: tp(dark) }}>{r.employee_name || r.agent_name}</div>
+                        {r.employee_no && <div className="text-[9px]" style={{ color: tsColor(dark) }}>#{r.employee_no}</div>}
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
@@ -632,7 +648,7 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
                       <td className="px-3 py-2 text-[11px] font-bold tabular-nums" style={{ color: meta.color }}>
                         {r.minutes != null ? fmtMin(r.minutes) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-[10px]" style={{ color: '#94a3b8', maxWidth: 230 }}>{detTxt}</td>
+                      <td className="px-3 py-2 text-[10px]" style={{ color: tsColor(dark), maxWidth: 230 }}>{detTxt}</td>
                       <td className="px-3 py-2">
                         <span className="text-[9px] font-bold" style={{
                           color: r.status === 'open' ? '#f87171' : r.status === 'justified' ? '#4ade80' : '#94a3b8',
@@ -647,7 +663,7 @@ export function CompliancePanel({ report, ar, from, to, onRange, onReview }: {
                           <div className="flex gap-1">
                             <button onClick={() => onReview(r.id, 'reviewed')}
                               className="text-[9px] px-2 py-0.5 rounded-md font-bold"
-                              style={{ background: 'rgba(148,163,184,0.12)', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.25)' }}>
+                              style={{ background: 'rgba(148,163,184,0.12)', color: tsColor(dark), border: '1px solid rgba(148,163,184,0.25)' }}>
                               ✓ {ar ? 'مراجعة' : 'Review'}
                             </button>
                             <button onClick={() => onReview(r.id, 'justified')}
