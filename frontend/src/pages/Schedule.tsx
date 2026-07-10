@@ -12,7 +12,7 @@ import {
 import { apiClient } from '@/api/client';
 import { fmtLocalDate, weekStartSat } from '@/utils/format';
 import { useUiStore } from '@/store/ui.store';
-import { useInjectDsStyles } from '@/components/ds';
+import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DayEntry {
@@ -87,6 +87,14 @@ const CATEGORY_STYLE: Record<string, { bg: string; text: string; border: string 
   // legacy alias so old data with 'evening' category doesn't break
   evening:  { bg: 'rgba(249,115,22,0.14)',  text: '#fb923c', border: 'rgba(249,115,22,0.35)'  },
 };
+
+// Theme-aware neutral tokens (semantic status/shift colors stay hardcoded — same meaning in every theme)
+const neutralT = (dark: boolean) => ({
+  panel:   dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  bdr:     dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+  overlay: dark ? 'rgba(0,0,0,0.75)'       : 'rgba(15,23,42,0.45)',
+  faint:   dark ? '#475569'                : '#94a3b8',
+});
 
 // ─── 12-hour time formatter ───────────────────────────────────────────────────
 /** "07:00:00" → "7am"  |  "16:00:00" → "4pm"  |  "13:30:00" → "1:30pm" */
@@ -289,6 +297,8 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
   anchor?: { gridLeft: number; gridWidth: number; vpH: number };
 }) {
   const ar = lang === 'ar';
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   const [editMode, setEditMode]   = useState(false);
   const [editType, setEditType]   = useState('business_need');
   const [newCode, setNewCode]     = useState('');
@@ -357,7 +367,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
   return createPortal(
     <>
       {/* ── Backdrop ── */}
-      <div className="fixed inset-0 z-50" style={{ background: 'rgba(2,6,18,0.72)', backdropFilter: 'blur(4px)' }} onClick={onClose} />
+      <div className="fixed inset-0 z-50" style={{ background: T.overlay, backdropFilter: 'blur(4px)' }} onClick={onClose} />
 
       {/* ── Card ── */}
       <div
@@ -365,8 +375,8 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
         style={{
           ...modalStyle,
           borderRadius: 20,
-          background: 'linear-gradient(160deg,#0d1424 0%,#0a1020 100%)',
-          border: '1px solid rgba(255,255,255,0.09)',
+          background: 'var(--surface)',
+          border: `1px solid ${T.bdr}`,
           boxShadow: `0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px ${accentColor}20`,
           animation: 'nx-slide 0.16s cubic-bezier(.22,.68,0,1.2)',
         }}
@@ -389,7 +399,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
 
             {/* name + meta */}
             <div className="flex-1 min-w-0">
-              <h3 className="text-[15px] font-bold text-white leading-tight truncate">{emp.name}</h3>
+              <h3 className="text-[15px] font-bold leading-tight truncate" style={{ color: tp(dark) }}>{emp.name}</h3>
               <p className="text-[11px] text-slate-400 mt-0.5 truncate">
                 #{emp.employeeNo}
                 {emp.functionName ? ` · ${emp.functionName}` : ''}
@@ -407,7 +417,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
               </button>
               <div
                 className="text-[10px] font-semibold px-2.5 py-1 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.06)', color: '#94a3b8', border: '1px solid rgba(255,255,255,0.08)' }}
+                style={{ background: T.panel, color: tsColor(dark), border: `1px solid ${T.bdr}` }}
               >
                 {dateInfo.day} {dateInfo.dd} {dateInfo.mon}
               </div>
@@ -444,7 +454,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
             </div>
           )}
 
-          <div style={{ height: 1, background: 'rgba(255,255,255,0.06)' }} />
+          <div style={{ height: 1, background: T.bdr }} />
         </div>
 
         {/* ══════ BODY ══════ */}
@@ -466,14 +476,14 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
               </div>
 
               {/* HC impact */}
-              <div className="rounded-2xl px-4 py-3" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+              <div className="rounded-2xl px-4 py-3" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                 <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-3">
                   {ar ? 'تأثير على الحضور' : 'HC Coverage Impact'}
                 </p>
                 <div className="flex items-center justify-center gap-6">
                   {[
-                    { label: ar ? 'قبل' : 'Before', val: saveResult.hcBefore, color: '#94a3b8' },
-                    { label: ar ? 'بعد' : 'After',  val: saveResult.hcAfter,  color: saveResult.hcDelta > 0 ? '#34d399' : saveResult.hcDelta < 0 ? '#f87171' : '#94a3b8' },
+                    { label: ar ? 'قبل' : 'Before', val: saveResult.hcBefore, color: tsColor(dark) },
+                    { label: ar ? 'بعد' : 'After',  val: saveResult.hcAfter,  color: saveResult.hcDelta > 0 ? '#34d399' : saveResult.hcDelta < 0 ? '#f87171' : tsColor(dark) },
                   ].map(({ label, val, color }) => (
                     <div key={label} className="text-center">
                       <p className="text-[10px] text-slate-500 mb-1">{label}</p>
@@ -549,15 +559,15 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                   {/* time card */}
                   {day.start && (
                     <div className="rounded-2xl p-3 grid grid-cols-2 gap-2"
-                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                      style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                       <div>
                         <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">{ar ? 'بداية' : 'Start'}</p>
-                        <p className="text-base font-extrabold text-white">{fmt12(day.start)}</p>
+                        <p className="text-base font-extrabold" style={{ color: tp(dark) }}>{fmt12(day.start)}</p>
                         <p className="text-[10px] text-slate-500">{fmt24(day.start)}</p>
                       </div>
                       <div>
                         <p className="text-[9px] text-slate-500 uppercase tracking-wider mb-1">{ar ? 'نهاية' : 'End'}</p>
-                        <p className="text-base font-extrabold text-white">{fmt12(day.end)}</p>
+                        <p className="text-base font-extrabold" style={{ color: tp(dark) }}>{fmt12(day.end)}</p>
                         <p className="text-[10px] text-slate-500">{fmt24(day.end)}</p>
                       </div>
                     </div>
@@ -613,7 +623,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                 <>
                   <button onClick={() => setShowHistory(!showHistory)}
                     className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-[11px] transition-colors"
-                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', color: '#64748b' }}>
+                    style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tsColor(dark) }}>
                     <div className="flex items-center gap-1.5"><BadgeCheck size={12} />{ar ? 'سجل التعديلات' : 'Edit notes'}</div>
                     <ChevronDown size={12} style={{ transform: showHistory ? 'rotate(180deg)' : '', transition: 'transform 0.2s' }} />
                   </button>
@@ -623,7 +633,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                         const et = EDIT_TYPES.find(e => e.value === h.type);
                         return (
                           <div key={i} className="rounded-xl px-3 py-2.5 space-y-1.5"
-                            style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                            style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                             <div className="flex items-center justify-between">
                               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
                                 style={{ background: `${et?.color ?? '#64748b'}18`, color: et?.color ?? '#94a3b8', border: `1px solid ${et?.color ?? '#64748b'}30` }}>
@@ -633,7 +643,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                                 {h.at ? new Date(h.at).toLocaleString(ar ? 'ar-KW' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }) : ''}
                               </span>
                             </div>
-                            <p className="text-xs text-slate-300">{h.reason}</p>
+                            <p className="text-xs" style={{ color: tp(dark) }}>{h.reason}</p>
                             <div className="flex items-center gap-1 text-[10px] text-slate-500">
                               <span style={{ color: CATEGORY_STYLE[deriveCategory(h.from?.start)]?.text }}>
                                 {h.from?.start ? fmt12(h.from.start) : h.from?.marker ?? '?'}
@@ -661,7 +671,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                 style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.18)' }}>
                 <div className="text-center">
                   <p className="text-[9px] text-slate-500 mb-1">{ar ? 'الحالية' : 'Current'}</p>
-                  <span className="text-sm font-extrabold text-slate-300">{day?.code || '—'}</span>
+                  <span className="text-sm font-extrabold" style={{ color: tp(dark) }}>{day?.code || '—'}</span>
                 </div>
                 <ArrowRight size={14} className="text-slate-600 flex-shrink-0" />
                 <div className="text-center">
@@ -678,9 +688,9 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                     <button key={et.value} onClick={() => setEditType(et.value)}
                       className="text-[10px] font-semibold py-2 px-1 rounded-xl transition-all leading-tight"
                       style={{
-                        background: editType === et.value ? `${et.color}20` : 'rgba(255,255,255,0.03)',
-                        border: editType === et.value ? `1px solid ${et.color}55` : '1px solid rgba(255,255,255,0.07)',
-                        color: editType === et.value ? et.color : '#475569',
+                        background: editType === et.value ? `${et.color}20` : T.panel,
+                        border: editType === et.value ? `1px solid ${et.color}55` : `1px solid ${T.bdr}`,
+                        color: editType === et.value ? et.color : T.faint,
                       }}>
                       {ar ? et.ar : et.en}
                     </button>
@@ -696,17 +706,17 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                   value={newCode}
                   onChange={e => setNewCode(e.target.value.toUpperCase())}
                   placeholder={ar ? 'مثال: N أو OFF' : 'e.g. N, OFF, MD'}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm font-bold text-white outline-none focus:ring-2 focus:ring-indigo-500/50 mb-2.5"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  className="w-full px-3 py-2.5 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/50 mb-2.5"
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }}
                 />
                 <div className="flex flex-wrap gap-1.5">
                   {QUICK_CODES.map(c => (
                     <button key={c} onClick={() => setNewCode(c)}
                       className="text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all"
                       style={{
-                        background: newCode === c ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.04)',
-                        border: newCode === c ? '1px solid rgba(99,102,241,0.5)' : '1px solid rgba(255,255,255,0.07)',
-                        color: newCode === c ? '#a5b4fc' : '#475569',
+                        background: newCode === c ? 'rgba(99,102,241,0.22)' : T.panel,
+                        border: newCode === c ? '1px solid rgba(99,102,241,0.5)' : `1px solid ${T.bdr}`,
+                        color: newCode === c ? '#a5b4fc' : T.faint,
                       }}>
                       {c}
                     </button>
@@ -721,8 +731,8 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
                 </p>
                 <textarea rows={3} value={reason} onChange={e => setReason(e.target.value)}
                   placeholder={ar ? 'اكتب سبب التعديل...' : 'Explain the reason...'}
-                  className="w-full px-3 py-2.5 rounded-xl text-sm text-white outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }}
                 />
                 <p className="text-[10px] text-slate-600 mt-1">
                   {reason.length}/200 {ar ? 'حرف' : 'chars'}
@@ -743,7 +753,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
 
         {/* ══════ FOOTER ══════ */}
         <div className="flex-shrink-0 px-4 py-3 flex items-center gap-2"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.25)', borderRadius: '0 0 20px 20px' }}>
+          style={{ borderTop: `1px solid ${T.bdr}`, background: T.panel, borderRadius: '0 0 20px 20px' }}>
 
           {saveResult && (
             <>
@@ -764,7 +774,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
             <>
               <button onClick={() => { setEditMode(false); setError(null); setNewCode(''); setReason(''); }} disabled={saving}
                 className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all"
-                style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
+                style={{ background: T.panel, color: tsColor(dark), border: `1px solid ${T.bdr}` }}>
                 {ar ? 'إلغاء' : 'Cancel'}
               </button>
               <button onClick={handleSave} disabled={saving || !newCode.trim() || reason.trim().length < 3}
@@ -780,7 +790,7 @@ function DayModal({ emp, date, day, onClose, onSaved, onTimeline, lang, anchor }
             <>
               <button onClick={onClose}
                 className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all"
-                style={{ background: 'rgba(255,255,255,0.04)', color: '#64748b', border: '1px solid rgba(255,255,255,0.07)' }}>
+                style={{ background: T.panel, color: tsColor(dark), border: `1px solid ${T.bdr}` }}>
                 {ar ? 'إغلاق' : 'Close'}
               </button>
               <button onClick={() => setEditMode(true)}
@@ -1074,6 +1084,8 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
   lang: 'ar' | 'en';
 }) {
   const ar = lang === 'ar';
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   const [search, setSearch] = useState('');
 
   const filtered = search.trim()
@@ -1089,7 +1101,7 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-40"
-        style={{ background: 'rgba(0,0,0,0.5)' }}
+        style={{ background: T.overlay }}
         onClick={onClose}
       />
 
@@ -1098,18 +1110,18 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
         className="fixed top-0 end-0 h-full z-50 flex flex-col"
         style={{
           width: 480,
-          background: 'linear-gradient(160deg,#0d1321,#111827)',
-          borderInlineStart: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--surface)',
+          borderInlineStart: `1px solid ${T.bdr}`,
           boxShadow: '-24px 0 64px rgba(0,0,0,0.6)',
         }}
       >
         {/* Header */}
         <div
           className="flex items-center justify-between px-5 py-4 flex-shrink-0"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+          style={{ borderBottom: `1px solid ${T.bdr}` }}
         >
           <div>
-            <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <h2 className="text-base font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
               <History size={16} className="text-indigo-400" />
               {ar ? 'سجل التعديلات' : 'Edit Audit Log'}
             </h2>
@@ -1131,8 +1143,8 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder={ar ? 'بحث باسم الموظف أو التاريخ...' : 'Search by employee or date…'}
-            className="w-full px-3 py-2 rounded-xl text-xs text-white outline-none"
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
+            className="w-full px-3 py-2 rounded-xl text-xs outline-none"
+            style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }}
           />
         </div>
 
@@ -1172,8 +1184,8 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
                 key={i}
                 className="rounded-2xl p-3.5 space-y-2.5"
                 style={{
-                  background: 'rgba(255,255,255,0.025)',
-                  border: '1px solid rgba(255,255,255,0.06)',
+                  background: T.panel,
+                  border: `1px solid ${T.bdr}`,
                 }}
               >
                 {/* Top row: employee + date */}
@@ -1186,12 +1198,12 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
                       {entry.employeeName.charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-slate-200">{entry.employeeName}</p>
+                      <p className="text-xs font-semibold" style={{ color: tp(dark) }}>{entry.employeeName}</p>
                       <p className="text-[10px] text-slate-500">#{entry.employeeNo} · {entry.functionName}</p>
                     </div>
                   </div>
                   <div className="text-end flex-shrink-0">
-                    <p className="text-[11px] font-bold text-slate-300">
+                    <p className="text-[11px] font-bold" style={{ color: tp(dark) }}>
                       {info.day} {info.dd} {info.mon}
                     </p>
                     <p className="text-[10px] text-slate-500">{editedAt}</p>
@@ -1201,7 +1213,7 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
                 {/* Shift change arrow */}
                 <div
                   className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                  style={{ background: 'rgba(0,0,0,0.3)' }}
+                  style={{ background: T.panel }}
                 >
                   <span
                     className="text-xs font-bold px-2.5 py-1 rounded-lg"
@@ -1228,7 +1240,7 @@ function AuditLogDrawer({ entries, loading, onClose, lang }: {
 
                 {/* Reason + who */}
                 <div className="space-y-1">
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                  <p className="text-[11px] leading-relaxed" style={{ color: tp(dark) }}>
                     {entry.reason}
                   </p>
                   <p className="text-[10px] text-slate-500 flex items-center gap-1">
@@ -1266,6 +1278,8 @@ function CellTimelineDrawer({ emp, date, onClose, lang }: {
   lang: 'ar' | 'en';
 }) {
   const ar = lang === 'ar';
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   const [entries, setEntries] = useState<TimelineEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const dateInfo = fmtDate(date, lang);
@@ -1283,7 +1297,7 @@ function CellTimelineDrawer({ emp, date, onClose, lang }: {
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-40"
-        style={{ background: 'rgba(0,0,0,0.55)' }}
+        style={{ background: T.overlay }}
         onClick={onClose}
       />
 
@@ -1292,23 +1306,23 @@ function CellTimelineDrawer({ emp, date, onClose, lang }: {
         className="fixed top-0 end-0 h-full z-50 flex flex-col"
         style={{
           width: 440,
-          background: 'linear-gradient(160deg,#0a0e1a,#0f1525)',
-          borderInlineStart: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--surface)',
+          borderInlineStart: `1px solid ${T.bdr}`,
           boxShadow: '-24px 0 64px rgba(0,0,0,0.65)',
         }}
       >
         {/* Header */}
         <div
           className="flex items-start justify-between px-5 py-4 flex-shrink-0"
-          style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}
+          style={{ borderBottom: `1px solid ${T.bdr}` }}
         >
           <div>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
               <History size={15} className="text-blue-400" />
               {ar ? 'تاريخ تغييرات الخلية' : 'Cell Change Timeline'}
             </h2>
             <p className="text-xs text-slate-400 mt-1">
-              <span className="font-semibold text-slate-200">{emp.name}</span>
+              <span className="font-semibold" style={{ color: tp(dark) }}>{emp.name}</span>
               {' · '}
               {dateInfo.day} {dateInfo.dd} {dateInfo.mon}
             </p>
@@ -1344,7 +1358,7 @@ function CellTimelineDrawer({ emp, date, onClose, lang }: {
               {/* Vertical line */}
               <div
                 className="absolute start-[18px] top-2 bottom-2 w-px"
-                style={{ background: 'rgba(255,255,255,0.06)' }}
+                style={{ background: T.bdr }}
               />
 
               <div className="space-y-4">
@@ -1377,8 +1391,8 @@ function CellTimelineDrawer({ emp, date, onClose, lang }: {
                       <div
                         className="flex-1 rounded-2xl p-3.5 space-y-2 mb-1"
                         style={{
-                          background: isInitial ? 'rgba(99,102,241,0.05)' : 'rgba(255,255,255,0.025)',
-                          border: `1px solid ${isInitial ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.06)'}`,
+                          background: isInitial ? 'rgba(99,102,241,0.05)' : T.panel,
+                          border: `1px solid ${isInitial ? 'rgba(99,102,241,0.15)' : T.bdr}`,
                         }}
                       >
                         {/* Top: action label + timestamp */}
@@ -1490,7 +1504,7 @@ function CellTimelineDrawer({ emp, date, onClose, lang }: {
         {/* Footer */}
         <div
           className="px-5 py-3 flex-shrink-0"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+          style={{ borderTop: `1px solid ${T.bdr}` }}
         >
           <p className="text-[10px] text-slate-600 text-center">
             {ar

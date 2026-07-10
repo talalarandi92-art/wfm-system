@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
+import { ts as tsColor } from '@/components/ds';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface EmployeeShiftRate {
@@ -284,6 +285,8 @@ function GroupModal({
 export default function ShiftRotationPage() {
   const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
+  // Theme-aware neutral tokens (semantic shift colors stay hardcoded — same meaning in every theme)
+  const faint = dark ? '#475569' : '#94a3b8';
 
   const [data, setData]               = useState<{ summary: Summary; employees: EmployeeShiftRate[]; groups: RotationGroup[] } | null>(null);
   const [loading, setLoading]         = useState(false);
@@ -679,7 +682,7 @@ export default function ShiftRotationPage() {
                   style={{ background: 'rgba(168,85,247,0.12)', color: '#c084fc' }}>
                   {swapImpact.affectedEmployees} {ar ? 'متأثر' : 'affected'}
                 </span>
-                <span className="ms-auto text-xs" style={{ color: '#64748b' }}>{swapOpen ? '▲' : '▼'}</span>
+                <span className="ms-auto text-xs" style={{ color: tsColor(dark) }}>{swapOpen ? '▲' : '▼'}</span>
               </button>
               {swapOpen && (
                 <div className="px-4 pb-3">
@@ -690,7 +693,7 @@ export default function ShiftRotationPage() {
                       : 'Fairness and the generator use the BEFORE numbers — swapping never changes your rotation share.'}
                   </p>
                   {swapImpact.affectedEmployees === 0 ? (
-                    <p className="text-xs py-3 text-center" style={{ color: '#64748b' }}>
+                    <p className="text-xs py-3 text-center" style={{ color: tsColor(dark) }}>
                       {ar ? 'لا توجد تبديلات معتمدة مؤثرة هذه السنة' : 'No approved swaps affecting rotation this year'}
                     </p>
                   ) : (
@@ -698,10 +701,10 @@ export default function ShiftRotationPage() {
                       <table className="w-full text-xs" style={{ borderCollapse: 'collapse', minWidth: 700 }}>
                         <thead>
                           <tr style={{ borderBottom: dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.07)' }}>
-                            <th className="px-2 py-1.5 text-[10px] font-bold" style={{ color: '#64748b', textAlign: 'start' }}>
+                            <th className="px-2 py-1.5 text-[10px] font-bold" style={{ color: tsColor(dark), textAlign: 'start' }}>
                               {ar ? 'الموظف' : 'Employee'}</th>
                             {(['morning', 'evening', 'night', 'midnight'] as const).map(c => (
-                              <th key={c} className="px-2 py-1.5 text-[10px] font-bold text-center" style={{ color: '#64748b' }}>
+                              <th key={c} className="px-2 py-1.5 text-[10px] font-bold text-center" style={{ color: tsColor(dark) }}>
                                 {ar ? ({ morning: 'صباحي', evening: 'مسائي', night: 'ليلي', midnight: 'ميدنايت' }[c]) : c}
                                 <div className="text-[8px] font-normal">{ar ? 'قبل ← بعد' : 'before → after'}</div>
                               </th>
@@ -713,7 +716,7 @@ export default function ShiftRotationPage() {
                             <tr key={r.employeeId} style={{ borderBottom: dark ? '1px solid rgba(255,255,255,0.04)' : '1px solid rgba(0,0,0,0.04)' }}>
                               <td className="px-2 py-2">
                                 <div className="font-semibold" style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>{r.name}</div>
-                                <div className="text-[9px]" style={{ color: '#64748b' }}>#{r.employeeNo} · {r.functionName}</div>
+                                <div className="text-[9px]" style={{ color: tsColor(dark) }}>#{r.employeeNo} · {r.functionName}</div>
                               </td>
                               {(['morning', 'evening', 'night', 'midnight'] as const).map(c => {
                                 const pre = r.preSwap.byCategory[c]?.pct ?? 0;
@@ -722,7 +725,7 @@ export default function ShiftRotationPage() {
                                 return (
                                   <td key={c} className="px-2 py-2 text-center tabular-nums">
                                     <span style={{ color: dark ? '#94a3b8' : '#475569', fontWeight: 700 }}>{pre}%</span>
-                                    <span style={{ color: '#475569' }}> ← </span>
+                                    <span style={{ color: faint }}> ← </span>
                                     <span style={{ color: d > 0 ? '#f87171' : d < 0 ? '#4ade80' : (dark ? '#94a3b8' : '#475569'), fontWeight: 700 }}>
                                       {post}%
                                     </span>
@@ -897,7 +900,7 @@ export default function ShiftRotationPage() {
                             { val: emp.midnightPct,  color: '#6366f1' },
                           ].map((s, i) => (
                             <td key={i} className="py-2.5 px-2 text-center">
-                              <span style={{ color: s.val > 0 ? s.color : '#334155' }}>
+                              <span style={{ color: s.val > 0 ? s.color : faint }}>
                                 {s.val > 0 ? `${s.val}%` : '—'}
                               </span>
                             </td>

@@ -3,12 +3,19 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Radio } from 'lucide-react';
+import { useUiStore } from '@/store/ui.store';
+import { tp, ts as tsColor } from '@/components/ds';
 import {
   SpLive, BreakTracker, Coverage, ContactForecast, ViolationsReport, AdherenceReport,
   CH_COLOR, slaColor, pctColor, fmtNum,
 } from './types';
-import { CH_ICON } from './shared';
+import { CH_ICON, tok } from './shared';
 import { useCountUpOnce, AgentDonut, AgentBoard } from './LivePanels';
+
+/* KEEP-DARK (theme-token sweep): WbKpi + Wallboard below are a full-screen TV
+   overlay rendered on a hardcoded #060912 surface (portal, cinematic wallboard
+   for wall screens) — like a media lightbox they stay dark in every theme, so
+   their neutral hexes/white-overlays are deliberate and must NOT be tokenized. */
 
 /* Module-level so it keeps a STABLE identity across the Wallboard's frequent
    re-renders (clock 1s + rotation progress 120ms). If defined inline it would
@@ -261,6 +268,8 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
   violations: ViolationsReport | null; adherence: AdherenceReport | null; fc: ContactForecast | null;
   ar: boolean; onSelectQueue?: (id: string) => void;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const s = live?.summary;
   const agents = live?.agents ?? [];
   const avail = agents.filter(a => a.status === 'available' || a.status === 'idle').length;
@@ -288,11 +297,11 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
     { l: ar ? 'في استراحة' : 'On Break', v: fmtNum(brk), c: '#a855f7' },
     { l: ar ? 'متوسط SLA' : 'Avg SLA', v: `${s?.avgSla ?? 100}%`, c: slaColor(s?.avgSla ?? 100) },
     { l: ar ? 'إجمالي الموظفين' : 'Agents', v: fmtNum(agents.length), c: '#06b6d4' },
-    { l: ar ? 'الالتزام' : 'Adherence', v: avgAdh != null ? `${Math.round(avgAdh)}%` : '—', c: avgAdh != null ? pctColor(avgAdh) : '#64748b' },
-    { l: ar ? 'مخالفات مفتوحة' : 'Open issues', v: fmtNum(openViol), c: openViol > 0 ? '#f87171' : '#64748b' },
+    { l: ar ? 'الالتزام' : 'Adherence', v: avgAdh != null ? `${Math.round(avgAdh)}%` : '—', c: avgAdh != null ? pctColor(avgAdh) : tsColor(dark) },
+    { l: ar ? 'مخالفات مفتوحة' : 'Open issues', v: fmtNum(openViol), c: openViol > 0 ? '#f87171' : tsColor(dark) },
   ];
 
-  const card: React.CSSProperties = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16 };
+  const card: React.CSSProperties = { background: T.panel, border: `1px solid ${T.bdr}`, borderRadius: 16 };
   const fcMax = Math.max(1, ...((fc?.forecast ?? []).map(f => f.predictedContacts)));
   const byType = violations?.summary.byType ?? {};
 
@@ -310,7 +319,7 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
         {tiles.map(t => (
           <div key={t.l} style={{ ...card, padding: '12px 14px' }}>
             <div className="text-2xl font-bold tabular-nums" style={{ color: t.c, letterSpacing: '-0.02em' }}>{t.v}</div>
-            <div className="text-[10px] mt-1" style={{ color: '#64748b' }}>{t.l}</div>
+            <div className="text-[10px] mt-1" style={{ color: tsColor(dark) }}>{t.l}</div>
           </div>
         ))}
       </div>
@@ -318,17 +327,17 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
         {/* Queue health */}
         <div style={card}>
-          <div className="px-3 py-2 text-xs font-bold" style={{ color: '#cbd5e1', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{ar ? 'صحّة الطوابير' : 'Queue health'}</div>
+          <div className="px-3 py-2 text-xs font-bold" style={{ color: tp(dark), borderBottom: `1px solid ${T.bdr}` }}>{ar ? 'صحّة الطوابير' : 'Queue health'}</div>
           <div className="p-2 space-y-1 max-h-60 overflow-y-auto">
-            {queues.length === 0 && <p className="text-[11px] text-center py-4" style={{ color: '#475569' }}>{ar ? 'لا طوابير' : 'No queues'}</p>}
+            {queues.length === 0 && <p className="text-[11px] text-center py-4" style={{ color: T.faint }}>{ar ? 'لا طوابير' : 'No queues'}</p>}
             {queues.map(q => {
               const sla = q.slaPct ?? 100; const risk = sla < 80 || (q.waiting || 0) > 50;
               return (
                 <div key={q.queueId} onClick={() => onSelectQueue?.(q.queueId)} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[11px] hover:bg-white/[0.04]" style={{ cursor: onSelectQueue ? 'pointer' : 'default', background: risk ? 'rgba(239,68,68,0.06)' : 'transparent' }}>
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: slaColor(sla) }} />
-                  <span className="flex-1 truncate" style={{ color: '#e2e8f0' }}>{q.queueName}</span>
+                  <span className="flex-1 truncate" style={{ color: tp(dark) }}>{q.queueName}</span>
                   <span className="tabular-nums" style={{ color: '#fbbf24', minWidth: 30, textAlign: 'end' }}>{q.waiting}</span>
-                  <span className="tabular-nums" style={{ color: '#64748b', minWidth: 26, textAlign: 'end' }}>{q.inProgress}</span>
+                  <span className="tabular-nums" style={{ color: tsColor(dark), minWidth: 26, textAlign: 'end' }}>{q.inProgress}</span>
                   <span className="tabular-nums font-semibold" style={{ color: slaColor(sla), minWidth: 38, textAlign: 'end' }}>{sla}%</span>
                 </div>
               );
@@ -338,7 +347,7 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
 
         {/* Coverage + agent mix */}
         <div style={card}>
-          <div className="px-3 py-2 text-xs font-bold" style={{ color: '#cbd5e1', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{ar ? 'التغطية وحالة الفريق' : 'Coverage & team mix'}</div>
+          <div className="px-3 py-2 text-xs font-bold" style={{ color: tp(dark), borderBottom: `1px solid ${T.bdr}` }}>{ar ? 'التغطية وحالة الفريق' : 'Coverage & team mix'}</div>
           <div className="p-3 space-y-3">
             <div className="flex justify-center py-1">
               <AgentDonut avail={avail} busy={busy} brk={brk} off={off} ar={ar} size={132} thickness={14} />
@@ -350,9 +359,9 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
                   { l: ar ? 'استئذان' : 'On permission', v: coverage.onPermission ?? 0, c: '#fbbf24' },
                   { l: ar ? 'مسجّل دخول (لايف)' : 'Logged in (live)', v: coverage.liveSprinklr?.totalLoggedIn ?? '—', c: '#06b6d4' },
                 ].map(x => (
-                  <div key={x.l} className="rounded-lg p-2 text-center" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <div key={x.l} className="rounded-lg p-2 text-center" style={{ background: T.panel }}>
                     <div className="text-sm font-bold tabular-nums" style={{ color: x.c }}>{x.v}</div>
-                    <div className="text-[9px] mt-0.5" style={{ color: '#475569' }}>{x.l}</div>
+                    <div className="text-[9px] mt-0.5" style={{ color: T.faint }}>{x.l}</div>
                   </div>
                 ))}
               </div>
@@ -362,7 +371,7 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
 
         {/* Compliance */}
         <div style={card}>
-          <div className="px-3 py-2 text-xs font-bold flex items-center gap-2" style={{ color: '#cbd5e1', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="px-3 py-2 text-xs font-bold flex items-center gap-2" style={{ color: tp(dark), borderBottom: `1px solid ${T.bdr}` }}>
             {ar ? 'الالتزام والمخالفات' : 'Compliance'} {openViol > 0 && <span className="px-1.5 rounded text-[9px] font-bold" style={{ background: '#ef444428', color: '#f87171' }}>{openViol}</span>}
           </div>
           <div className="p-3">
@@ -376,33 +385,33 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
               </div>
             )}
             {unauth > 0 && <div className="mt-2 text-[11px]" style={{ color: '#fb923c' }}>⚠ {unauth} {ar ? 'بريك غير مرخّص الآن' : 'unauthorized breaks now'}</div>}
-            {avgAdh != null && <div className="mt-2 text-[11px]" style={{ color: '#94a3b8' }}>{ar ? 'متوسط الالتزام' : 'Avg adherence'}: <b style={{ color: pctColor(avgAdh) }}>{Math.round(avgAdh)}%</b>{below85 > 0 ? ` · ${below85} ${ar ? 'تحت 85%' : 'below 85%'}` : ''}</div>}
+            {avgAdh != null && <div className="mt-2 text-[11px]" style={{ color: tsColor(dark) }}>{ar ? 'متوسط الالتزام' : 'Avg adherence'}: <b style={{ color: pctColor(avgAdh) }}>{Math.round(avgAdh)}%</b>{below85 > 0 ? ` · ${below85} ${ar ? 'تحت 85%' : 'below 85%'}` : ''}</div>}
           </div>
         </div>
 
         {/* Forecast */}
         <div style={card}>
-          <div className="px-3 py-2 text-xs font-bold flex items-center gap-2" style={{ color: '#cbd5e1', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="px-3 py-2 text-xs font-bold flex items-center gap-2" style={{ color: tp(dark), borderBottom: `1px solid ${T.bdr}` }}>
             {ar ? 'توقّع الحِمل (٧ أيام)' : 'Contact forecast (7d)'}
             {fc?.confidence && <span className="px-1.5 rounded text-[9px] font-semibold" style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc' }}>{fc.confidence}</span>}
           </div>
           <div className="p-3">
             {!fc?.forecast?.length ? (
-              <p className="text-[11px] text-center py-3" style={{ color: '#475569' }}>{ar ? 'لا بيانات كافية للتوقّع' : 'Not enough data to forecast'}</p>
+              <p className="text-[11px] text-center py-3" style={{ color: T.faint }}>{ar ? 'لا بيانات كافية للتوقّع' : 'Not enough data to forecast'}</p>
             ) : (
               <div className="space-y-1.5">
                 {fc.forecast.slice(0, 7).map(f => (
                   <div key={f.date} className="flex items-center gap-2 text-[11px]">
-                    <span style={{ color: '#64748b', minWidth: 58 }}>{new Date(f.date).toLocaleDateString(ar ? 'ar-KW' : 'en-GB', { weekday: 'short', day: 'numeric' })}</span>
-                    <div className="flex-1 h-3 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                    <span style={{ color: tsColor(dark), minWidth: 58 }}>{new Date(f.date).toLocaleDateString(ar ? 'ar-KW' : 'en-GB', { weekday: 'short', day: 'numeric' })}</span>
+                    <div className="flex-1 h-3 rounded-full overflow-hidden" style={{ background: T.panel }}>
                       <div className="h-full rounded-full" style={{ width: `${(f.predictedContacts / fcMax) * 100}%`, background: 'linear-gradient(90deg,#6366f1,#22d3ee)' }} />
                     </div>
-                    <span className="tabular-nums font-semibold" style={{ color: '#e2e8f0', minWidth: 44, textAlign: 'end' }}>{fmtNum(f.predictedContacts)}</span>
+                    <span className="tabular-nums font-semibold" style={{ color: tp(dark), minWidth: 44, textAlign: 'end' }}>{fmtNum(f.predictedContacts)}</span>
                     {f.requiredHcP90 != null && <span className="tabular-nums" style={{ color: '#a5b4fc', minWidth: 52, textAlign: 'end' }}>≈{f.requiredHcP90} {ar ? 'موظف' : 'HC'}</span>}
                   </div>
                 ))}
-                {fc.staffing?.avgAhtSec != null && <p className="text-[9px] mt-1" style={{ color: '#475569' }}>{ar ? `HC المطلوب (P90) من الحِمل × AHT ${Math.round(fc.staffing.avgAhtSec / 60)}د ÷ ${fc.staffing.productiveHoursPerAgent}س منتجة` : `Required HC (P90) from load × AHT ${Math.round(fc.staffing.avgAhtSec / 60)}m ÷ ${fc.staffing.productiveHoursPerAgent}h productive`}</p>}
-                {fc.note && <p className="text-[9px] mt-1" style={{ color: '#475569' }}>{fc.note}</p>}
+                {fc.staffing?.avgAhtSec != null && <p className="text-[9px] mt-1" style={{ color: T.faint }}>{ar ? `HC المطلوب (P90) من الحِمل × AHT ${Math.round(fc.staffing.avgAhtSec / 60)}د ÷ ${fc.staffing.productiveHoursPerAgent}س منتجة` : `Required HC (P90) from load × AHT ${Math.round(fc.staffing.avgAhtSec / 60)}m ÷ ${fc.staffing.productiveHoursPerAgent}h productive`}</p>}
+                {fc.note && <p className="text-[9px] mt-1" style={{ color: T.faint }}>{fc.note}</p>}
               </div>
             )}
           </div>

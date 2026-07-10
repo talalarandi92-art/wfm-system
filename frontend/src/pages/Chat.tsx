@@ -11,6 +11,13 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
+import { tp, ts as tsColor } from '@/components/ds';
+
+// Theme-aware neutral tokens (semantic status colors stay hardcoded — same meaning in every theme)
+const neutralT = (dark: boolean) => ({
+  panel: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)',
+  bdr:   dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+});
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Channel {
@@ -93,11 +100,13 @@ function Avatar({ name, size = 32 }: { name: string; size?: number }) {
 
 // ─── Emoji Picker ─────────────────────────────────────────────────────────────
 function EmojiPicker({ onSelect, onClose, ar }: { onSelect: (e: string) => void; onClose: () => void; ar: boolean }) {
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   return createPortal(
     <div className="fixed inset-0 z-[200]" onClick={onClose}>
       <div
         className="absolute p-3 rounded-2xl shadow-2xl"
-        style={{ background: '#0f1527', border: '1px solid rgba(255,255,255,0.12)',
+        style={{ background: 'var(--surface)', border: `1px solid ${T.bdr}`,
           bottom: 80, right: 16, width: 280 }}
         onClick={e => e.stopPropagation()}
       >
@@ -148,13 +157,15 @@ function ImageLightbox({ url, onClose }: { url: string; onClose: () => void }) {
 function MediaDisplay({ url, type, name, size, onImageClick }: {
   url: string; type: string; name?: string; size?: number; onImageClick: (u: string) => void;
 }) {
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   // Keep relative paths (Vite proxies /uploads → backend); abs URLs pass through
   const full = url.startsWith('http') ? url : url;
   if (type === 'image') return (
     <div className="mt-1.5 cursor-pointer relative group" onClick={() => onImageClick(full)}>
       <img src={full} alt={name || 'image'}
         className="max-w-[240px] max-h-[180px] rounded-xl object-cover"
-        style={{ border: '1px solid rgba(255,255,255,0.1)' }} />
+        style={{ border: `1px solid ${T.bdr}` }} />
       <div className="absolute inset-0 rounded-xl flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
         style={{ background: 'rgba(0,0,0,0.4)' }}>
         <ZoomIn size={22} className="text-white" />
@@ -164,7 +175,7 @@ function MediaDisplay({ url, type, name, size, onImageClick }: {
   if (type === 'video') return (
     <div className="mt-1.5">
       <video src={full} controls className="max-w-[280px] rounded-xl"
-        style={{ border: '1px solid rgba(255,255,255,0.1)' }} />
+        style={{ border: `1px solid ${T.bdr}` }} />
     </div>
   );
   if (type === 'audio') return (
@@ -178,10 +189,10 @@ function MediaDisplay({ url, type, name, size, onImageClick }: {
   return (
     <a href={full} download={name} target="_blank" rel="noreferrer"
       className="mt-1.5 flex items-center gap-2 px-3 py-2 rounded-xl transition-all hover:bg-white/10"
-      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', maxWidth: 240, display: 'flex' }}>
+      style={{ background: T.panel, border: `1px solid ${T.bdr}`, maxWidth: 240, display: 'flex' }}>
       <FileIcon size={18} className="text-indigo-400 flex-shrink-0" />
       <div className="min-w-0">
-        <p className="text-xs text-white truncate">{name}</p>
+        <p className="text-xs truncate" style={{ color: tp(dark) }}>{name}</p>
         {size && <p className="text-[9px] text-slate-500">{fmtSize(size)}</p>}
       </div>
       <Download size={13} className="text-slate-500 flex-shrink-0 ms-1" />
@@ -196,11 +207,13 @@ function MessageBubble({ msg, isMine, showAvatar, onReply, onImageClick, lang }:
 }) {
   const ar = lang === 'ar';
   const [hover, setHover] = useState(false);
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
 
   if (msg.message_type === 'system_event') return (
     <div className="flex items-center justify-center my-2">
       <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] text-slate-500"
-        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
         <AlertCircle size={10} className="text-amber-500" />
         {msg.content}
       </div>
@@ -221,7 +234,7 @@ function MessageBubble({ msg, isMine, showAvatar, onReply, onImageClick, lang }:
         )}
         {msg.reply_to && (
           <div className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-t-xl mb-0.5 max-w-full"
-            style={{ background: 'rgba(255,255,255,0.05)', borderInlineStart: '2px solid rgba(99,102,241,0.6)' }}>
+            style={{ background: T.panel, borderInlineStart: '2px solid rgba(99,102,241,0.6)' }}>
             <Reply size={10} className="text-indigo-400 mt-0.5 flex-shrink-0" />
             <div className="min-w-0">
               <p className="text-[9px] font-semibold text-indigo-400 truncate">{msg.reply_to.sender_name}</p>
@@ -232,9 +245,9 @@ function MessageBubble({ msg, isMine, showAvatar, onReply, onImageClick, lang }:
         <div className="relative flex items-end gap-1.5">
           <div className="px-3 py-2 rounded-2xl text-sm leading-relaxed break-words"
             style={{
-              background: isMine ? 'linear-gradient(135deg,#4338ca,#6366f1)' : 'rgba(255,255,255,0.07)',
-              color: isMine ? '#fff' : '#e2e8f0',
-              border: isMine ? 'none' : '1px solid rgba(255,255,255,0.08)',
+              background: isMine ? 'linear-gradient(135deg,#4338ca,#6366f1)' : T.panel,
+              color: isMine ? '#fff' : tp(dark),
+              border: isMine ? 'none' : `1px solid ${T.bdr}`,
               borderBottomRightRadius: isMine ? 4 : 16,
               borderBottomLeftRadius: isMine ? 16 : 4,
               maxWidth: 320,
@@ -253,7 +266,7 @@ function MessageBubble({ msg, isMine, showAvatar, onReply, onImageClick, lang }:
           {hover && (
             <button onClick={() => onReply(msg)}
               className={`flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center ${isMine ? 'order-first' : ''}`}
-              style={{ background: 'rgba(255,255,255,0.08)', color: '#94a3b8' }}>
+              style={{ background: T.panel, color: tsColor(dark) }}>
               <Reply size={11} />
             </button>
           )}
@@ -268,6 +281,8 @@ function MessageBubble({ msg, isMine, showAvatar, onReply, onImageClick, lang }:
 function ChannelItem({ ch, active, onClick, ar }: {
   ch: Channel; active: boolean; onClick: () => void; ar: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   const lastContent = ch.last_message
     ? (ch.last_message.attachment_type
         ? `[${ch.last_message.attachment_type}]`
@@ -278,12 +293,12 @@ function ChannelItem({ ch, active, onClick, ar }: {
       className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-xl transition-all text-start group
         ${active ? 'bg-indigo-500/15 border border-indigo-500/25' : 'hover:bg-white/5 border border-transparent'}`}>
       <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm flex-shrink-0"
-        style={{ background: active ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.06)' }}>
+        style={{ background: active ? 'rgba(99,102,241,0.25)' : T.panel }}>
         {ch.icon || <Hash size={12} className="text-slate-400" />}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
-          <span className={`text-xs font-${active ? 'bold' : 'medium'} truncate ${active ? 'text-white' : 'text-slate-300'}`}>
+          <span className={`text-xs font-${active ? 'bold' : 'medium'} truncate`} style={{ color: active ? tp(dark) : tsColor(dark) }}>
             {ar ? (ch.name_ar || ch.name) : ch.name}
           </span>
           {ch.last_message && (
@@ -319,6 +334,8 @@ function CreateGroupModal({ users, onClose, onCreate, ar }: {
   const [search, setSearch]       = useState('');
   const [selected, setSelected]   = useState<string[]>([]);
   const [showIcons, setShowIcons] = useState(false);
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   const ICONS = ['💬','📢','🚨','📡','🔧','📋','🏢','👥','🎯','📊','🌟','🔔','⚡','🔒','🎮','📌'];
 
   const toggle = (id: string) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
@@ -326,12 +343,12 @@ function CreateGroupModal({ users, onClose, onCreate, ar }: {
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60" onClick={onClose}>
       <div className="w-[440px] rounded-2xl p-0 overflow-hidden"
-        style={{ background: '#0f1527', border: '1px solid rgba(255,255,255,0.12)' }}
+        style={{ background: 'var(--surface)', border: `1px solid ${T.bdr}` }}
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="px-5 py-4 flex items-center justify-between border-b border-white/[0.07]">
-          <h3 className="text-sm font-bold text-white">{ar ? 'إنشاء مجموعة جديدة' : 'Create new group'}</h3>
+          <h3 className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'إنشاء مجموعة جديدة' : 'Create new group'}</h3>
           <button onClick={onClose} className="text-slate-500 hover:text-white"><X size={16} /></button>
         </div>
 
@@ -341,12 +358,12 @@ function CreateGroupModal({ users, onClose, onCreate, ar }: {
             <div className="relative">
               <button onClick={() => setShowIcons(v => !v)}
                 className="w-12 h-12 rounded-xl text-2xl flex items-center justify-center hover:bg-white/10 transition-all"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                 {icon}
               </button>
               {showIcons && (
                 <div className="absolute top-14 left-0 z-10 p-2 rounded-xl grid grid-cols-4 gap-1"
-                  style={{ background: '#1a2340', border: '1px solid rgba(255,255,255,0.12)' }}>
+                  style={{ background: 'var(--surface-2)', border: `1px solid ${T.bdr}` }}>
                   {ICONS.map(ic => (
                     <button key={ic} onClick={() => { setIcon(ic); setShowIcons(false); }}
                       className="w-8 h-8 text-lg rounded-lg hover:bg-white/10 flex items-center justify-center">{ic}</button>
@@ -357,12 +374,12 @@ function CreateGroupModal({ users, onClose, onCreate, ar }: {
             <div className="flex-1 space-y-2">
               <input value={name} onChange={e => setName(e.target.value)}
                 placeholder={ar ? 'اسم المجموعة (إنجليزي)' : 'Group name (English)'}
-                className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }} />
+                className="w-full px-3 py-2 rounded-xl text-sm outline-none"
+                style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }} />
               <input value={nameAr} onChange={e => setNameAr(e.target.value)}
                 placeholder={ar ? 'اسم المجموعة (عربي) - اختياري' : 'Group name (Arabic) — optional'}
-                className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }} />
+                className="w-full px-3 py-2 rounded-xl text-sm outline-none"
+                style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }} />
             </div>
           </div>
 
@@ -370,11 +387,11 @@ function CreateGroupModal({ users, onClose, onCreate, ar }: {
           <div>
             <p className="text-xs font-semibold text-slate-400 mb-2">{ar ? `إضافة أعضاء (${selected.length} محدد)` : `Add members (${selected.length} selected)`}</p>
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-2"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
               <Search size={12} className="text-slate-500" />
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder={ar ? 'بحث عن موظف...' : 'Search employee...'}
-                className="flex-1 bg-transparent text-xs text-white outline-none placeholder-slate-600" />
+                className="flex-1 bg-transparent text-xs outline-none placeholder-slate-600" style={{ color: tp(dark) }} />
             </div>
             <div className="max-h-44 overflow-y-auto space-y-0.5">
               {users.filter(u => u.name.toLowerCase().includes(search.toLowerCase())).map(u => (
@@ -382,7 +399,7 @@ function CreateGroupModal({ users, onClose, onCreate, ar }: {
                   <input type="checkbox" checked={selected.includes(u.id)} onChange={() => toggle(u.id)}
                     className="w-3.5 h-3.5 rounded accent-indigo-500" />
                   <Avatar name={u.name} size={24} />
-                  <span className="text-xs text-slate-300">{u.name}</span>
+                  <span className="text-xs" style={{ color: tp(dark) }}>{u.name}</span>
                   <span className="ms-auto w-2 h-2 rounded-full flex-shrink-0"
                     style={{ background: presenceDot(u.presence) }} />
                 </label>
@@ -413,6 +430,8 @@ function MembersModal({ channelId, currentUserId, iAmAdmin, users, onClose, ar }
   const [search, setSearch]     = useState('');
   const [addSearch, setAddSearch] = useState('');
   const [tab, setTab]           = useState<'list' | 'add'>('list');
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
 
   useEffect(() => {
     apiClient.get(`/chat/channels/${channelId}/members`).then((r: any) => setMembers(r.data)).catch(() => {});
@@ -439,10 +458,10 @@ function MembersModal({ channelId, currentUserId, iAmAdmin, users, onClose, ar }
   return createPortal(
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60" onClick={onClose}>
       <div className="w-[380px] rounded-2xl overflow-hidden"
-        style={{ background: '#0f1527', border: '1px solid rgba(255,255,255,0.12)' }}
+        style={{ background: 'var(--surface)', border: `1px solid ${T.bdr}` }}
         onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between border-b border-white/[0.07]">
-          <h3 className="text-sm font-bold text-white">{ar ? `الأعضاء (${members.length})` : `Members (${members.length})`}</h3>
+          <h3 className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? `الأعضاء (${members.length})` : `Members (${members.length})`}</h3>
           <div className="flex items-center gap-2">
             {iAmAdmin && (
               <button onClick={() => setTab(t => t === 'add' ? 'list' : 'add')}
@@ -458,18 +477,18 @@ function MembersModal({ channelId, currentUserId, iAmAdmin, users, onClose, ar }
           <div className="p-4 space-y-3">
             <p className="text-xs text-slate-400">{ar ? 'إضافة عضو جديد' : 'Add new member'}</p>
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
               <Search size={12} className="text-slate-500" />
               <input value={addSearch} onChange={e => setAddSearch(e.target.value)}
                 placeholder={ar ? 'بحث...' : 'Search...'} autoFocus
-                className="flex-1 bg-transparent text-xs text-white outline-none placeholder-slate-600" />
+                className="flex-1 bg-transparent text-xs outline-none placeholder-slate-600" style={{ color: tp(dark) }} />
             </div>
             <div className="max-h-56 overflow-y-auto space-y-0.5">
               {addable.map(u => (
                 <button key={u.id} onClick={() => addMember(u.id)}
                   className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-white/5 transition-all text-start">
                   <Avatar name={u.name} size={26} />
-                  <span className="text-xs text-slate-300 flex-1">{u.name}</span>
+                  <span className="text-xs flex-1" style={{ color: tp(dark) }}>{u.name}</span>
                   <Plus size={13} className="text-indigo-400" />
                 </button>
               ))}
@@ -480,11 +499,11 @@ function MembersModal({ channelId, currentUserId, iAmAdmin, users, onClose, ar }
           <>
             <div className="px-3 pt-3 pb-1">
               <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                 <Search size={12} className="text-slate-500" />
                 <input value={search} onChange={e => setSearch(e.target.value)}
                   placeholder={ar ? 'بحث عن عضو...' : 'Search member...'}
-                  className="flex-1 bg-transparent text-xs text-white outline-none placeholder-slate-600" />
+                  className="flex-1 bg-transparent text-xs outline-none placeholder-slate-600" style={{ color: tp(dark) }} />
               </div>
             </div>
             <div className="px-3 pb-4 max-h-72 overflow-y-auto space-y-0.5">
@@ -492,11 +511,11 @@ function MembersModal({ channelId, currentUserId, iAmAdmin, users, onClose, ar }
                 <div key={m.id} className="flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-white/5 transition-all group">
                   <div className="relative">
                     <Avatar name={m.name} size={28} />
-                    <span className="absolute -bottom-0.5 -end-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#0f1527]"
-                      style={{ background: presenceDot(m.presence) }} />
+                    <span className="absolute -bottom-0.5 -end-0.5 w-2.5 h-2.5 rounded-full border-2"
+                      style={{ background: presenceDot(m.presence), borderColor: 'var(--surface)' }} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-slate-300 truncate">{m.name}</p>
+                    <p className="text-xs truncate" style={{ color: tp(dark) }}>{m.name}</p>
                     {m.is_admin && (
                       <span className="text-[9px] font-bold text-amber-400">{ar ? 'أدمن' : 'Admin'}</span>
                     )}
@@ -529,13 +548,14 @@ function MembersModal({ channelId, currentUserId, iAmAdmin, users, onClose, ar }
 function NotifToast({ notif, onClick, onDismiss, ar }: {
   notif: Notif; onClick: () => void; onDismiss: () => void; ar: boolean;
 }) {
+  const { dark } = useUiStore();
   useEffect(() => {
     const t = setTimeout(onDismiss, 5000);
     return () => clearTimeout(t);
   }, [onDismiss]);
   return (
     <div className="flex items-start gap-3 p-3 rounded-2xl cursor-pointer hover:bg-white/10 transition-all"
-      style={{ background: '#121929', border: '1px solid rgba(99,102,241,0.4)', minWidth: 280, maxWidth: 340 }}
+      style={{ background: 'var(--surface)', border: '1px solid rgba(99,102,241,0.4)', minWidth: 280, maxWidth: 340 }}
       onClick={onClick}>
       <div className="w-8 h-8 rounded-xl flex items-center justify-center text-sm flex-shrink-0"
         style={{ background: 'rgba(99,102,241,0.2)' }}>
@@ -543,7 +563,7 @@ function NotifToast({ notif, onClick, onDismiss, ar }: {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-[10px] font-bold text-indigo-400 truncate">{notif.channelName}</p>
-        <p className="text-[11px] font-semibold text-white">{notif.sender}</p>
+        <p className="text-[11px] font-semibold" style={{ color: tp(dark) }}>{notif.sender}</p>
         <p className="text-[10px] text-slate-400 truncate">{notif.content || (ar ? '[ملف مرفق]' : '[Attachment]')}</p>
       </div>
       <button onClick={e => { e.stopPropagation(); onDismiss(); }}
@@ -555,6 +575,8 @@ function NotifToast({ notif, onClick, onDismiss, ar }: {
 // ─── Main Chat Page ───────────────────────────────────────────────────────────
 export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
   const storeLang = useUiStore(s => s.lang);
+  const dark = useUiStore(s => s.dark);
+  const T = neutralT(dark);
   const lang: 'ar' | 'en' = (langProp ?? storeLang) as 'ar' | 'en';
   const ar = lang === 'ar';
   const token = localStorage.getItem('access_token') ?? '';
@@ -965,16 +987,16 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
 
   return (
     <div className="flex h-[calc(100vh-64px)] overflow-hidden rounded-2xl border border-white/10"
-      style={{ background: 'linear-gradient(160deg,#0a0f1e,#080c18)' }}>
+      style={{ background: 'var(--surface)' }}>
 
       {/* ══ SIDEBAR ══ */}
       <div className="w-72 flex-shrink-0 flex flex-col border-e border-white/[0.07]"
-        style={{ background: 'rgba(0,0,0,0.25)' }}>
+        style={{ background: T.panel }}>
 
         <div className="px-4 py-3.5 flex items-center justify-between flex-shrink-0 border-b border-white/[0.07]">
           <div className="flex items-center gap-2">
             <MessageCircle size={15} className="text-indigo-400" />
-            <span className="text-sm font-bold text-white">{ar ? 'الشات' : 'Chat'}</span>
+            <span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'الشات' : 'Chat'}</span>
             <div className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
           </div>
           <div className="flex items-center gap-1">
@@ -998,11 +1020,11 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
 
         <div className="px-3 pt-3 pb-2">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl"
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
             <Search size={12} className="text-slate-500 flex-shrink-0" />
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder={ar ? 'بحث...' : 'Search...'}
-              className="bg-transparent text-xs text-white outline-none flex-1 placeholder-slate-600" />
+              className="bg-transparent text-xs outline-none flex-1 placeholder-slate-600" style={{ color: tp(dark) }} />
           </div>
         </div>
 
@@ -1034,14 +1056,14 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
           <>
             {/* Header */}
             <div className="flex-shrink-0 px-5 py-3 flex items-center justify-between border-b border-white/[0.07]"
-              style={{ background: 'rgba(0,0,0,0.2)' }}>
+              style={{ background: T.panel }}>
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl flex items-center justify-center text-lg"
                   style={{ background: 'rgba(99,102,241,0.15)' }}>
                   {activeChannel.icon || '💬'}
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-white leading-tight">
+                  <h2 className="text-sm font-bold leading-tight" style={{ color: tp(dark) }}>
                     {ar ? (activeChannel.name_ar || activeChannel.name) : activeChannel.name}
                   </h2>
                   {activeChannel.description && (
@@ -1069,14 +1091,14 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
                   </button>
                   {exportOpen && (
                     <div className="absolute top-9 end-0 z-50 rounded-xl shadow-2xl overflow-hidden"
-                      style={{ background: '#0f1527', border: '1px solid rgba(255,255,255,0.12)', minWidth: 160 }}>
+                      style={{ background: 'var(--surface)', border: `1px solid ${T.bdr}`, minWidth: 160 }}>
                       <button onClick={exportCSV}
-                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-slate-300 hover:bg-white/10 transition-all">
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs hover:bg-white/10 transition-all" style={{ color: tsColor(dark) }}>
                         <FileText size={13} className="text-emerald-400" />
                         {ar ? 'تصدير Excel (CSV)' : 'Export CSV'}
                       </button>
                       <button onClick={exportPDF}
-                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-slate-300 hover:bg-white/10 transition-all">
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs hover:bg-white/10 transition-all" style={{ color: tsColor(dark) }}>
                         <Printer size={13} className="text-red-400" />
                         {ar ? 'طباعة / PDF' : 'Print / PDF'}
                       </button>
@@ -1160,7 +1182,7 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-white truncate">{pendingFile.name}</p>
+                    <p className="text-xs truncate" style={{ color: tp(dark) }}>{pendingFile.name}</p>
                     <p className="text-[9px] text-slate-500">{fmtSize(pendingFile.size)} · {pendingFile.type}</p>
                   </div>
                   <button onClick={() => setPendingFile(null)} className="text-slate-500 hover:text-white flex-shrink-0">
@@ -1199,7 +1221,7 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
 
               {/* Main input row */}
               <div className="flex items-center gap-2 px-3 py-2.5 rounded-2xl"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
 
                 {/* Emoji */}
                 <button onClick={() => setShowEmoji(v => !v)}
@@ -1227,7 +1249,7 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
                   onChange={e => handleTyping(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                   placeholder={ar ? 'اكتب رسالة...' : 'Type a message...'}
-                  className="flex-1 bg-transparent text-sm text-white outline-none placeholder-slate-600" />
+                  className="flex-1 bg-transparent text-sm outline-none placeholder-slate-600" style={{ color: tp(dark) }} />
 
                 {/* Voice */}
                 {!audioBlobUrl && (
@@ -1253,7 +1275,7 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
                     disabled={!input.trim() && !pendingFile}
                     className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center transition-all disabled:opacity-30"
                     style={{ background: (input.trim() || pendingFile)
-                      ? 'linear-gradient(135deg,#4338ca,#6366f1)' : 'rgba(255,255,255,0.05)' }}>
+                      ? 'linear-gradient(135deg,#4338ca,#6366f1)' : T.panel }}>
                     <Send size={14} className="text-white" />
                   </button>
                 )}
@@ -1271,9 +1293,9 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
       {/* ══ USERS PANEL ══ */}
       {showUsers && (
         <div className="w-60 flex-shrink-0 flex flex-col border-s border-white/[0.07]"
-          style={{ background: 'rgba(0,0,0,0.2)' }}>
+          style={{ background: T.panel }}>
           <div className="px-4 py-4 border-b border-white/[0.07] flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300">{ar ? 'الأعضاء' : 'Members'}</span>
+            <span className="text-xs font-bold" style={{ color: tp(dark) }}>{ar ? 'الأعضاء' : 'Members'}</span>
             <button onClick={() => setShowUsers(false)} className="text-slate-500 hover:text-white"><X size={13} /></button>
           </div>
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5">
@@ -1282,10 +1304,10 @@ export default function ChatPage({ lang: langProp }: { lang?: 'ar' | 'en' }) {
                 className="w-full flex items-center gap-2.5 px-2 py-2 rounded-xl hover:bg-white/5 transition-all cursor-pointer group">
                 <div className="relative flex-shrink-0">
                   <Avatar name={u.name} size={28} />
-                  <span className="absolute -bottom-0.5 -end-0.5 w-2.5 h-2.5 rounded-full border-2 border-[#080c18]"
-                    style={{ background: presenceDot(presence[u.id] ?? u.presence) }} />
+                  <span className="absolute -bottom-0.5 -end-0.5 w-2.5 h-2.5 rounded-full border-2"
+                    style={{ background: presenceDot(presence[u.id] ?? u.presence), borderColor: 'var(--surface)' }} />
                 </div>
-                <span className="text-xs text-slate-300 truncate flex-1 text-start">{u.name}</span>
+                <span className="text-xs truncate flex-1 text-start" style={{ color: tp(dark) }}>{u.name}</span>
                 <MessageCircle size={12} className="text-slate-600 group-hover:text-indigo-400 transition-all flex-shrink-0" />
               </button>
             ))}
