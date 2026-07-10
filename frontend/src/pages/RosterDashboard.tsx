@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
-import { StatTile } from '@/components/dazzle';
+import { Kpi, KpiRow } from '@/components/kpi';
 
 const dur = (m: number) => { if (!m) return '0'; const h=Math.floor(m/60), mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const adhC = (v: number) => v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
@@ -31,20 +31,43 @@ export default function RosterDashboardPage() {
   const s = d?.summary; const opt = d?.filterOptions;
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
 
+  // ── Provenance (Director's rule: every number → where it came from + drill) ──
+  // All tiles read the ONE dashboard endpoint (with this page's filters applied);
+  // definitions mirror the SQL in roster-reports.controller.ts rosterDashboard summary.
+  const EP = 'GET /api/v1/attendance-recon/roster-dashboard';
+  const pd = `${f.from} → ${f.to}`;
   const kpis = useMemo(() => s ? [
-    { ic: Users, l: ar?'موظفين':'Agents', v: s.agents, sub: `${s.days} ${ar?'يوم':'days'}`, c:'#6366f1' },
-    { ic: ShieldCheck, l: ar?'كونفورمانس':'Conformance', v: s.conformance!=null?s.conformance+'%':'—', c: adhC(s.conformance) },
-    { ic: Clock, l: ar?'تأخير سيستم':'Late', v: s.late_days, sub: dur(s.late_min), c:'#f59e0b' },
-    { ic: LogOut, l: ar?'خروج مبكر':'Early out', v: s.early_days, sub: dur(s.early_min), c:'#f59e0b' },
-    { ic: TimerReset, l: ar?'OT قبل الشفت':'OT before', v: dur(s.ot_before), c:'#10b981' },
-    { ic: Timer, l: ar?'OT بعد الشفت':'OT after', v: dur(s.ot_after), c:'#10b981' },
-    { ic: Timer, l: ar?'إجمالي OT':'Total OT', v: dur(s.ot_total), sub: ar?'شامل OFF/عطلة':'incl off/holiday', c:'#22d3ee' },
-    { ic: Coffee, l: ar?'سيك':'Sick', v: s.sick, c:'#f59e0b' },
-    { ic: UserX, l: ar?'غياب':'Absent', v: s.absent, c:'#f43f5e' },
-    { ic: ListChecks, l: ar?'استئذانات':'Permissions', v: s.permissions, c:'#8b5cf6' },
-    { ic: Building2, l: ar?'مكتب':'Office', v: s.office, c:'#22c55e' },
-    { ic: Building2, l: 'WFH', v: s.wfh, c:'#06b6d4' },
-    { ic: CalendarDays, l: ar?'أوف':'Off', v: s.off, c:'#64748b' },
+    { ic: Users, l: ar?'موظفين':'Agents', v: s.agents, sub: `${s.days} ${ar?'يوم':'days'}`, c:'#6366f1', drill:'/roster?tab=grid',
+      def:'COUNT(DISTINCT person_no) with roster days in the filtered period — canonical persons; inactive ids excluded unless toggled',
+      defAr:'عدد الأشخاص المميزين (person_no) بأيام روستر في الفترة المفلترة — غير النشطين مستثنون ما لم تُفعَّل الإضافة' },
+    { ic: ShieldCheck, l: ar?'كونفورمانس':'Conformance', v: s.conformance!=null?s.conformance+'%':'—', c: adhC(s.conformance), drill:'/attendance?tab=dashboard',
+      def:'ROUND(AVG(adherence_pct),1) over the filtered roster days — conformance folds approved permissions (a permitted late/early still conforms)',
+      defAr:'متوسط adherence_pct على أيام الروستر المفلترة — الكونفورمانس يحتسب الاستئذانات المعتمدة (التأخير المصرّح لا يخصم)' },
+    { ic: Clock, l: ar?'تأخير سيستم':'Late', v: s.late_days, sub: dur(s.late_min), c:'#f59e0b', drill:'/attendance?tab=dashboard',
+      def:'COUNT of days with credited tardiness: sys_late_min BETWEEN 7 AND 240 (system-basis; ≤6 min tolerated, >4h cross-midnight artifacts excluded) — subtitle = SUM of those minutes',
+      defAr:'عدد الأيام بتأخير معتمد: sys_late_min بين 7 و240 دقيقة (على أساس السيستم؛ ≤6 دقائق متسامح بها و>4 ساعات مستثناة كأثر عبور منتصف الليل) — السطر الفرعي مجموع الدقائق' },
+    { ic: LogOut, l: ar?'خروج مبكر':'Early out', v: s.early_days, sub: dur(s.early_min), c:'#f59e0b', drill:'/attendance?tab=dashboard',
+      def:'COUNT of days with credited early-out: sys_early_min BETWEEN 7 AND 240, maternity-7h mothers excluded (their ~2h/day early-out is structural — BR-MAT-001)',
+      defAr:'عدد الأيام بخروج مبكر معتمد: sys_early_min بين 7 و240 دقيقة، مع استثناء أمهات الـ7 ساعات (خروجهن المبكر بنيوي — BR-MAT-001)' },
+    { ic: TimerReset, l: ar?'OT قبل الشفت':'OT before', v: dur(s.ot_before), c:'#10b981', drill:'/roster?tab=ot',
+      def:'SUM(ot_before_min) — before-shift OT minutes only', defAr:'مجموع ot_before_min — أوفرتايم ما قبل الشفت فقط' },
+    { ic: Timer, l: ar?'OT بعد الشفت':'OT after', v: dur(s.ot_after), c:'#10b981', drill:'/roster?tab=ot',
+      def:'SUM(ot_after_min) — after-shift OT minutes only', defAr:'مجموع ot_after_min — أوفرتايم ما بعد الشفت فقط' },
+    { ic: Timer, l: ar?'إجمالي OT':'Total OT', v: dur(s.ot_total), sub: ar?'شامل OFF/عطلة':'incl off/holiday', c:'#22d3ee', drill:'/roster?tab=ot',
+      def:'SUM(TRUE_OT) where TRUE_OT = ot_min + offday_ot_min + holiday_ot_min — the canonical 3 disjoint OT buckets (BR-OT-001)',
+      defAr:'مجموع TRUE_OT حيث TRUE_OT = ot_min + offday_ot_min + holiday_ot_min — فئات الأوفرتايم الثلاث المنفصلة (BR-OT-001)' },
+    { ic: Coffee, l: ar?'سيك':'Sick', v: s.sick, c:'#f59e0b', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'sick'", defAr:"عدد أيام الروستر بحالة 'sick'" },
+    { ic: UserX, l: ar?'غياب':'Absent', v: s.absent, c:'#f43f5e', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'absent'", defAr:"عدد أيام الروستر بحالة 'absent'" },
+    { ic: ListChecks, l: ar?'استئذانات':'Permissions', v: s.permissions, c:'#8b5cf6', drill:'/requests',
+      def:'COUNT of roster days with permission_type IS NOT NULL', defAr:'عدد أيام الروستر المسجّل لها permission_type' },
+    { ic: Building2, l: ar?'مكتب':'Office', v: s.office, c:'#22c55e', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'office'", defAr:"عدد أيام الروستر بحالة 'office'" },
+    { ic: Building2, l: 'WFH', v: s.wfh, c:'#06b6d4', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'wfh'", defAr:"عدد أيام الروستر بحالة 'wfh'" },
+    { ic: CalendarDays, l: ar?'أوف':'Off', v: s.off, c:'#64748b', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'off'", defAr:"عدد أيام الروستر بحالة 'off'" },
   ] : [], [s, ar]);
 
   const RANKS: { key: string; ar: string; en: string; fmt: (v:any)=>string; color: string }[] = [
@@ -111,12 +134,13 @@ export default function RosterDashboardPage() {
       {!loading && !d && <p className="text-sm text-rose-400 py-8 text-center">{ar?'تعذّر التحميل':'Failed to load'}</p>}
 
       {!loading && d && (<>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+        <KpiRow cols={6}>
           {kpis.map((x,i)=>(
-            <StatTile key={i} icon={x.ic} label={x.l} color={x.c} sub={x.sub} delay={i*45}
-              {...(typeof x.v==='number' ? { num: x.v } : { value: String(x.v) })} />
+            <Kpi key={i} icon={<x.ic size={15}/>} label={x.l} accent={x.c} sub={x.sub} drill={x.drill}
+              value={x.v ?? '—'}
+              source={{ endpoint: EP, table: 'roster_days', definition: x.def, definitionAr: x.defAr, period: pd }} />
           ))}
-        </div>
+        </KpiRow>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
           {RANKS.map(rk => { const list = d.rankings?.[rk.key] || [];

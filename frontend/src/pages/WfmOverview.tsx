@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
-import { StatTile, BarRow, Gauge } from '@/components/dazzle';
+import { BarRow, Gauge } from '@/components/dazzle';
+import { Kpi, KpiRow } from '@/components/kpi';
 
 const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
@@ -37,15 +38,33 @@ export default function WfmOverviewPage() {
   const flaggedTLs = (integ?.teamLeaders||[]).filter((t:any)=>!t.verified);
   const maxLate = Math.max(1, ...((dash?.rankings?.mostLate||[]).map((a:any)=>a.v||0)));
 
-  const kpis: { ic:any; l:string; num?:number|null; value?:string; suffix?:string; sub?:string; c:string }[] = s ? [
-    { ic:Users, l:ar?'موظفون نشطون':'Active agents', num:s.agents, c:'#6366f1' },
-    { ic:ShieldCheck, l:ar?'كونفورمانس':'Conformance', num:s.conformance!=null?Number(s.conformance):null, suffix:'%', c:adhC(s.conformance) },
-    { ic:Clock, l:ar?'أيام تأخير':'Late days', num:s.late_days, sub:dur(s.late_min), c:'#f59e0b' },
-    { ic:Timer, l:ar?'OT بعد':'OT after', value:dur(s.ot_after), c:'#10b981' },
-    { ic:Coffee, l:ar?'سيك':'Sick', num:s.sick, c:'#f59e0b' },
-    { ic:UserX, l:ar?'غياب':'Absent', num:s.absent, c:'#f43f5e' },
-    { ic:ListChecks, l:ar?'استئذانات':'Permissions', num:s.permissions, c:'#8b5cf6' },
-    { ic:Building2, l:'WFH', num:s.wfh, c:'#06b6d4' },
+  // ── Provenance (Director's rule: every number → where it came from + drill) ──
+  // All 8 tiles read the ONE dashboard endpoint; per-tile `definition` reflects what
+  // the SQL actually computes (backend/src/modules/attendance-recon/roster-reports.controller.ts,
+  // rosterDashboard summary over roster_days — inactive/resigned ids excluded by default).
+  const EP = 'GET /api/v1/attendance-recon/roster-dashboard';
+  const pd = dash ? `${dash.from} → ${dash.to}` : undefined;
+  const kpis: { ic:any; l:string; num?:number|null; value?:string; suffix?:string; sub?:string; c:string; drill:string; def:string; defAr:string }[] = s ? [
+    { ic:Users, l:ar?'موظفون نشطون':'Active agents', num:s.agents, c:'#6366f1', drill:'/roster?tab=grid',
+      def:'COUNT(DISTINCT person_no) with roster days in the period — canonical persons; inactive/resigned ids excluded by default',
+      defAr:'عدد الأشخاص المميزين (person_no بعد توحيد الهوية) الذين لهم أيام روستر في الفترة — غير النشطين مستثنون افتراضياً' },
+    { ic:ShieldCheck, l:ar?'كونفورمانس':'Conformance', num:s.conformance!=null?Number(s.conformance):null, suffix:'%', c:adhC(s.conformance), drill:'/attendance?tab=dashboard',
+      def:'ROUND(AVG(adherence_pct),1) over roster days — conformance folds approved permissions (a permitted late/early still conforms)',
+      defAr:'متوسط adherence_pct على أيام الروستر — الكونفورمانس يحتسب الاستئذانات المعتمدة (التأخير المصرّح لا يخصم)' },
+    { ic:Clock, l:ar?'أيام تأخير':'Late days', num:s.late_days, sub:dur(s.late_min), c:'#f59e0b', drill:'/attendance?tab=dashboard',
+      def:'COUNT of days with credited tardiness: sys_late_min BETWEEN 7 AND 240 (system-basis; ≤6 min tolerated, >4h cross-midnight artifacts excluded) — subtitle = SUM of those minutes',
+      defAr:'عدد الأيام بتأخير معتمد: sys_late_min بين 7 و240 دقيقة (على أساس السيستم؛ ≤6 دقائق متسامح بها و>4 ساعات مستثناة كأثر عبور منتصف الليل) — السطر الفرعي مجموع الدقائق' },
+    { ic:Timer, l:ar?'OT بعد':'OT after', value:dur(s.ot_after), c:'#10b981', drill:'/roster?tab=ot',
+      def:'SUM(ot_after_min) — after-shift OT only (NOT the canonical TRUE_OT = ot + offday_ot + holiday_ot 3-bucket total; drill for the split)',
+      defAr:'مجموع ot_after_min — أوفرتايم ما بعد الشفت فقط (ليس TRUE_OT الكامل بفئاته الثلاث؛ افتح التفصيل للتقسيم)' },
+    { ic:Coffee, l:ar?'سيك':'Sick', num:s.sick, c:'#f59e0b', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'sick'", defAr:"عدد أيام الروستر بحالة 'sick'" },
+    { ic:UserX, l:ar?'غياب':'Absent', num:s.absent, c:'#f43f5e', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'absent'", defAr:"عدد أيام الروستر بحالة 'absent'" },
+    { ic:ListChecks, l:ar?'استئذانات':'Permissions', num:s.permissions, c:'#8b5cf6', drill:'/requests',
+      def:'COUNT of roster days with permission_type IS NOT NULL', defAr:'عدد أيام الروستر المسجّل لها permission_type' },
+    { ic:Building2, l:'WFH', num:s.wfh, c:'#06b6d4', drill:'/roster?tab=grid',
+      def:"COUNT of roster days with presence = 'wfh'", defAr:"عدد أيام الروستر بحالة 'wfh'" },
   ] : [];
 
   const TILES: { ic:any; ar:string; en:string; to:string; c:string }[] = [
@@ -112,13 +131,14 @@ export default function WfmOverviewPage() {
       {loading && <p className="text-sm text-slate-500 py-6 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}
 
       {!loading && s && (<>
-        {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {kpis.map((x,i)=> x.num!=null
-            ? <StatTile key={i} icon={x.ic} label={x.l} num={x.num} suffix={x.suffix||''} sub={x.sub} color={x.c} delay={i*55} />
-            : <StatTile key={i} icon={x.ic} label={x.l} value={x.value ?? '—'} sub={x.sub} color={x.c} delay={i*55} />
-          )}
-        </div>
+        {/* KPIs — provenance kit: every number clickable + ⓘ source */}
+        <KpiRow>
+          {kpis.map((x,i)=>(
+            <Kpi key={i} icon={<x.ic size={15}/>} label={x.l} accent={x.c} sub={x.sub} drill={x.drill}
+              value={x.num!=null ? `${x.num}${x.suffix||''}` : (x.value ?? '—')}
+              source={{ endpoint: EP, table: 'roster_days', definition: x.def, definitionAr: x.defAr, period: pd }} />
+          ))}
+        </KpiRow>
 
         {/* tiles + top rankings */}
         <div className="grid lg:grid-cols-3 gap-3">

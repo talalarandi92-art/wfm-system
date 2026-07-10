@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
-import { StatTile, Gauge, Donut, BarRow, Sparkline } from '@/components/dazzle';
+import { Gauge, Donut, BarRow } from '@/components/dazzle';
+import { Kpi, KpiRow, KpiSource } from '@/components/kpi';
 
 /** Executive Command Center — the cinematic single-screen operation overview.
  *  Aggregates only VERIFIED endpoints (dashboard, coverage-impact, fairness, attrition,
@@ -39,12 +40,6 @@ export default function CommandCenter() {
     ok: { c: '#22c55e', ar: 'مستقرّ', en: 'Stable' }, info: { c: '#64748b', ar: 'معلومة', en: 'Info' },
   };
   const adhC = (v: number) => v >= 95 ? '#22c55e' : v >= 85 ? '#06b6d4' : v >= 70 ? '#f59e0b' : '#f43f5e';
-  // tiny source/time-basis tag so a live-ops number is never read as a corrected-roster number
-  const srcTag = (txt: string, c: string) => (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-      <span style={{ width: 5, height: 5, borderRadius: '50%', background: c, boxShadow: `0 0 5px ${c}` }} />{txt}
-    </span>
-  );
 
   // ── derive verified numbers ──
   const coverage = d.cov?.totals?.coverage ?? null;
@@ -62,8 +57,6 @@ export default function CommandCenter() {
   const leave = d.ros?.summary?.leave ?? null;
   const absent = d.ros?.summary?.absent ?? null;
   const attrRate = d.attr?.summary?.attritionRateAnnualized ?? null;
-  const attrTrend = [...(d.attr?.byMonth ?? [])].sort((a: any, b: any) => String(a.key).localeCompare(String(b.key))).map((m: any) => m.total);
-  const presentTrend = (d.sum?.trend ?? []).map((x: any) => x.present);
   const riskRows = [...(d.cov?.rows ?? [])].filter((r: any) => r.coverage != null).sort((a: any, b: any) => a.coverage - b.coverage);
   const maxPlanned = Math.max(1, ...riskRows.map((r: any) => r.planned || 0));
   const posture = d.chief ? (sev[d.chief.posture] || sev.info) : null;
@@ -122,15 +115,39 @@ export default function CommandCenter() {
         ))}
       </div>
 
-      {/* ── KPI TILES (count-up, with trends) ── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
-        <StatTile icon={Users} label={ar ? 'القوى العاملة' : 'Headcount'} num={headcount ?? undefined} value={headcount == null ? '—' : undefined} color="#6366f1" delay={0} sub={srcTag(ar ? 'لايف' : 'live', '#06b6d4')} />
-        <StatTile icon={CheckCircle2} label={ar ? 'مجدول اليوم' : 'Scheduled today'} num={present ?? undefined} value={present == null ? '—' : undefined} color="#22c55e" delay={60} trend={presentTrend.length > 1 ? presentTrend : undefined} sub={srcTag(ar ? 'لايف · اليوم' : 'live · today', '#06b6d4')} />
-        <StatTile icon={FileText} label={ar ? 'على إذن' : 'On permission'} num={onPerm ?? undefined} value={onPerm == null ? '—' : undefined} color="#8b5cf6" delay={120} sub={srcTag(ar ? 'مُصحّح' : 'corrected', '#22c55e')} />
-        <StatTile icon={CalendarClock} label={ar ? 'طلبات معلّقة' : 'Pending requests'} num={pending ?? undefined} value={pending == null ? '—' : undefined} color="#f59e0b" delay={180} onClick={() => nav('/requests')} sub={srcTag(ar ? 'لايف' : 'live', '#06b6d4')} />
-        <StatTile icon={UserMinus} label={ar ? 'التسرّب السنوي' : 'Annual attrition'} num={attrRate ?? undefined} suffix="%" value={attrRate == null ? '—' : undefined} color={attrRate != null && attrRate >= 35 ? '#ef4444' : attrRate != null && attrRate >= 20 ? '#f59e0b' : '#22c55e'} delay={240} trend={attrTrend.length > 1 ? attrTrend : undefined} onClick={() => nav('/analytics?tab=attrition')} sub={srcTag(ar ? 'آخر 12 شهر' : 'last 12mo', '#a78bfa')} />
-        <StatTile icon={Clock} label={ar ? 'ساعات OT (الفترة)' : 'OT hours (period)'} num={otHours ?? undefined} suffix={ar ? 'س' : 'h'} value={otHours == null ? '—' : undefined} color="#22d3ee" delay={300} onClick={() => nav('/ot-exceptions')} sub={srcTag(ar ? 'مُصحّح · الفترة' : 'corrected · period', '#22c55e')} />
-      </div>
+      {/* ── KPI TILES — provenance kit: every number clickable + ⓘ source ── */}
+      <KpiRow cols={6}>
+        <Kpi label={ar ? 'القوى العاملة' : 'Headcount'} value={headcount ?? '—'} accent="#6366f1" icon={<Users size={15} />} drill="/roster?tab=grid" sub={ar ? 'لايف' : 'live'}
+          source={{ endpoint: 'GET /api/v1/dashboard/summary', table: 'employees',
+            definition: "COUNT(*) of employees with status = 'active' (live HR master — includes interns)",
+            definitionAr: "عدد الموظفين بحالة 'active' في جدول الموظفين (لحظي — يشمل المتدربين)",
+            period: ar ? 'الآن' : 'now' } satisfies KpiSource} />
+        <Kpi label={ar ? 'حاضرون اليوم' : 'Present today'} value={present ?? '—'} accent="#22c55e" icon={<CheckCircle2 size={15} />} drill="/attendance?tab=dashboard" sub={ar ? 'لايف · اليوم' : 'live · today'}
+          source={{ endpoint: 'GET /api/v1/dashboard/summary', table: 'attendance_records',
+            definition: "COUNT of records with attendance_marker = 'present' on the reference date (today if attendance exists, else the latest date ≤ today) — live attendance spine, not the corrected roster",
+            definitionAr: "عدد سجلات الحضور بعلامة 'present' في تاريخ المرجع (اليوم إن وُجد حضور، وإلا آخر تاريخ ≤ اليوم) — من سجل الحضور اللحظي وليس الروستر المُصحّح",
+            period: d.sum?.refDate ?? undefined } satisfies KpiSource} />
+        <Kpi label={ar ? 'على إذن' : 'On permission'} value={onPerm ?? '—'} accent="#8b5cf6" icon={<FileText size={15} />} drill="/requests" sub={ar ? 'مُصحّح' : 'corrected'}
+          source={{ endpoint: 'GET /api/v1/attendance-recon/roster-v2/coverage-impact', table: 'roster_days',
+            definition: 'COUNT of rows with permission_type IS NOT NULL on the latest day with real coverage (≥20 working rows), summed across functions — corrected reconciliation spine',
+            definitionAr: 'عدد أيام الروستر التي سُجّل لها permission_type في آخر يوم بتغطية حقيقية (≥20 صف عمل)، مجموعاً على كل الأقسام — من التسوية المعتمدة',
+            period: d.cov?.date ?? undefined } satisfies KpiSource} />
+        <Kpi label={ar ? 'طلبات معلّقة' : 'Pending requests'} value={pending ?? '—'} accent="#f59e0b" icon={<CalendarClock size={15} />} drill="/requests" sub={ar ? 'لايف' : 'live'}
+          source={{ endpoint: 'GET /api/v1/dashboard/summary', table: 'requests',
+            definition: "COUNT of requests with status = 'pending' (peer_pending is returned separately and NOT included here)",
+            definitionAr: "عدد الطلبات بحالة 'pending' (حالة peer_pending تُعاد منفصلة وغير مشمولة هنا)",
+            period: ar ? 'الآن' : 'now' } satisfies KpiSource} />
+        <Kpi label={ar ? 'التسرّب السنوي' : 'Annual attrition'} value={attrRate != null ? `${attrRate}%` : '—'} accent={attrRate != null && attrRate >= 35 ? '#ef4444' : attrRate != null && attrRate >= 20 ? '#f59e0b' : '#22c55e'} icon={<UserMinus size={15} />} drill="/analytics?tab=attrition" sub={ar ? 'من علامات RES/TER' : 'from RES/TER markers'}
+          source={{ endpoint: 'GET /api/v1/attrition', table: 'roster_days',
+            definition: 'Distinct canonical persons with a RES/TER marker ÷ average monthly headcount × (12 / months in window), annualized — internal TRANSFERs excluded',
+            definitionAr: 'عدد الأشخاص (بعد توحيد الهوية) بعلامة RES/TER ÷ متوسط الهيدكاونت الشهري × (12 ÷ عدد الأشهر) — التنقلات الداخلية TRANSFER مستثناة',
+            period: d.attr ? `${d.attr.from} → ${d.attr.to}` : undefined } satisfies KpiSource} />
+        <Kpi label={ar ? 'ساعات OT (الفترة)' : 'OT hours (period)'} value={otHours != null ? `${otHours}${ar ? 'س' : 'h'}` : '—'} accent="#22d3ee" icon={<Clock size={15} />} drill="/roster?tab=ot" sub={ar ? 'مُصحّح · TRUE_OT' : 'corrected · TRUE_OT'}
+          source={{ endpoint: 'GET /api/v1/attendance-recon/roster-v2', table: 'roster_days',
+            definition: 'ROUND(SUM(TRUE_OT)/60) where TRUE_OT = ot_min + offday_ot_min + holiday_ot_min — the 3 disjoint OT buckets (BR-OT-001); this page queries a fixed window',
+            definitionAr: 'مجموع TRUE_OT ÷ 60 حيث TRUE_OT = ot_min + offday_ot_min + holiday_ot_min — فئات الأوفرتايم الثلاث المنفصلة (BR-OT-001)؛ هذه الصفحة تستعلم عن نافذة ثابتة',
+            period: '2026-06-01 → 2026-06-20' } satisfies KpiSource} />
+      </KpiRow>
 
       {/* ── COVERAGE RISK + PRESENCE MIX ── */}
       <div className="grid lg:grid-cols-3 gap-3">
