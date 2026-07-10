@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, UserSearch, Search, ShieldCheck, Clock, TimerReset, Timer, Coffee, UserX,
   Building2, CalendarDays, ListChecks, Briefcase, ChevronDown, Wrench, FileSpreadsheet, LayoutList, Table2, XCircle, GitCompareArrows,
@@ -8,9 +8,8 @@ import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile, Gauge } from '@/components/dazzle';
 import { DateRangeBar } from '@/components/DateRangeBar';
+import { dur, confColor as adhC, team360Url, PEOPLE_360_URL, Open360Link } from '@/components/agent360/shared';
 
-const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
-const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
 const scoreColor = (v:number)=> v>=85?'#22c55e':v>=70?'#06b6d4':v>=55?'#f59e0b':'#f43f5e';
 const BAND_ORDER = ['On time','Late 1-5','Late 6-15','Late 16-20','Late 21-29','Late 30-59','Late 60+','No show'];
 const BAND_COLOR: Record<string,string> = { 'On time':'#22c55e','Late 1-5':'#84cc16','Late 6-15':'#f59e0b','Late 16-20':'#f97316','Late 21-29':'#ef4444','Late 30-59':'#dc2626','Late 60+':'#991b1b','No show':'#7f1d1d' };
@@ -37,6 +36,7 @@ const PROG_METRICS: { key:string; ar:string; en:string; unit:'pct'|'pts'|'count'
 export default function Agent360Page() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
   const nav = useNavigate();
+  const [sp] = useSearchParams();
   const [people, setPeople] = useState<any[]>([]);
   const [person, setPerson] = useState('');
   const [q, setQ] = useState(''); const [open, setOpen] = useState(false);
@@ -53,7 +53,10 @@ export default function Agent360Page() {
   // customizable Progress-over-time columns (user picks which metrics to track)
   const [progCols, setProgCols] = useState<string[]>(['conf','net','lateDays','absent','otMin']);
 
-  useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ setPeople(r.data.rows||[]); if(r.data.rows?.[0]) setPerson(r.data.rows[0].person_no); }).catch(()=>{}); }, []);
+  // ?person= deep link (Team360 / People360 / RTA drawer / leaderboard preselect an agent here)
+  useEffect(() => { apiClient.get('/attendance-recon/roster-v2/employee-master').then((r:any)=>{ const rows=r.data.rows||[]; setPeople(rows); const pre=sp.get('person'); if(pre) setPerson(String(pre)); else if(rows[0]) setPerson(rows[0].person_no); }).catch(()=>{}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const spPerson = sp.get('person');
+  useEffect(() => { if (spPerson && spPerson !== person) setPerson(String(spPerson)); }, [spPerson]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(() => {
     if (!person) return; setLoading(true); setErr('');
@@ -219,6 +222,11 @@ export default function Agent360Page() {
             <div key={i}><p className="text-[9px] text-slate-500 uppercase font-semibold">{l}</p><p className="text-xs text-slate-200">{v||'—'}</p></div>
           ))}
           {!e.include_tardiness && <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background:'rgba(245,158,11,0.18)', color:'#fbbf24' }}>{ar?'مستثنى من حساب التأخير (8 ساعات)':'excluded from tardiness KPI (8h)'}</span>}
+          {/* cross-links to the sibling 360 surfaces */}
+          <div className="flex items-center gap-1.5">
+            {e.team_leader && <Open360Link to={team360Url(e.team_leader)} label={ar?'فريقه 360':'Team 360'} ar={ar} title={ar?`افتح فريق ${e.team_leader}`:`Open ${e.team_leader}'s team`} />}
+            <Open360Link to={PEOPLE_360_URL} label={ar?'الأفراد 360':'People 360'} ar={ar} title={ar?'تحليل كل الموظفين (Analytics)':'All-people analytics view'} />
+          </div>
           {score && (
             <button onClick={()=>nav('/agent-scores')} className="ms-auto flex items-center gap-2 px-3 py-1.5 rounded-xl" style={{ background:`${scoreColor(score.score)}18`, border:`1px solid ${scoreColor(score.score)}40` }} title={ar?'سكور الحضور والالتزام':'Attendance & adherence score'}>
               <div className="text-end"><p className="text-[8px] text-slate-400 uppercase font-semibold">{ar?'سكور الالتزام':'Adherence'}</p>

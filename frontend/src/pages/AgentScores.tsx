@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Trophy, CalendarDays, Search, Medal, Info } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { agent360Url } from '@/components/agent360/shared';
 
-const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
 const GRADE_C: Record<string,string> = { A:'#22c55e', B:'#06b6d4', C:'#f59e0b', D:'#f43f5e' };
 const scoreC = (v:number)=> v>=85?'#22c55e':v>=70?'#06b6d4':v>=55?'#f59e0b':'#f43f5e';
 
@@ -78,7 +78,7 @@ export default function AgentScoresPage() {
               {['#',ar?'الموظف':'Agent',ar?'الدور':'Role',ar?'التيم ليدر':'TL',ar?'عمل':'Worked',ar?'كونف%':'Conf%',ar?'تأخير':'Late',ar?'غياب':'Abs','Net Pts',ar?'الدرجة':'Score',''].map((h,i)=><th key={i} className={`px-2 py-2 font-semibold whitespace-nowrap ${i<=1?'text-start':'text-center'}`}>{h}</th>)}
             </tr></thead>
             <tbody>{agents.map((a:any)=>(
-              <tr key={a.person_no} className="border-t border-white/5 hover:bg-white/[0.03] cursor-pointer" onClick={()=>nav('/agent-360')}>
+              <tr key={a.person_no} className="border-t border-white/5 hover:bg-white/[0.03] cursor-pointer" onClick={()=>nav(agent360Url(a.person_no))}>
                 <td className="px-2 py-1.5 text-center font-bold" style={{ color:a.rank<=3?'#fbbf24':'#64748b' }}>{a.rank<=3?<Medal size={13} className="inline"/>:''}{a.rank}</td>
                 <td className="px-2 py-1.5 text-white font-medium">{a.name}</td>
                 <td className="px-2 py-1.5 text-slate-400">{a.role}</td>

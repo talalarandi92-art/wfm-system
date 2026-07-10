@@ -1,20 +1,20 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft, Users, ShieldCheck, Clock, Timer, Coffee, UserX, ListChecks, CalendarDays, Briefcase, UserSearch, GitCompareArrows,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
-
-const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
-const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
+import { dur, confColor as adhC, Kpi360Card, agent360Url, PEOPLE_360_URL, Open360Link } from '@/components/agent360/shared';
 
 /** Team 360 — a team-leader's whole team WFM card: aggregate KPIs + per-agent
  *  breakdown + shift distribution. */
 export default function Team360Page() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
   const nav = useNavigate();
-  const [tl, setTl] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('');
+  const [sp] = useSearchParams();
+  // ?tl= deep link (Agent 360's "Team 360" cross-link preselects the leader here)
+  const [tl, setTl] = useState(() => sp.get('tl') || ''); const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true); const [sort, setSort] = useState('conformance');
   const [prog, setProg] = useState<any>(null);
   const [tl2, setTl2] = useState(''); const [d2, setD2] = useState<any>(null);  // compare-with second team
@@ -80,11 +80,7 @@ export default function Team360Page() {
       {!loading && d && s && (<>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {kpis.map((x,i)=>(
-            <div key={i} className="flex items-center gap-2.5 p-3 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:`${x.c}22`, color:x.c }}><x.ic size={18}/></div>
-              <div className="min-w-0"><p className="text-[9px] text-slate-500 uppercase font-semibold truncate">{x.l}</p>
-                <p className="text-xl font-bold text-white leading-tight">{typeof x.v==='number'?x.v.toLocaleString():x.v}</p>{x.sub&&<p className="text-[9px] text-slate-500">{x.sub}</p>}</div>
-            </div>
+            <Kpi360Card key={i} icon={x.ic} label={x.l} value={x.v} sub={x.sub} color={x.c} />
           ))}
         </div>
 
@@ -155,7 +151,7 @@ export default function Team360Page() {
             <div className="overflow-x-auto"><table className="w-full text-[11px]">
               <thead><tr className="text-slate-500">{[ar?'الموظف':'Agent',ar?'الدور':'Role',ar?'عمل':'Worked',ar?'تأخير':'Late',ar?'OT':'OT',ar?'سيك':'Sick',ar?'غياب':'Abs',ar?'كونف%':'Conf%'].map((h,i)=><th key={i} className={`pb-1.5 font-semibold ${i===0?'text-start':'text-center'}`}>{h}</th>)}</tr></thead>
               <tbody>{agents.map((a:any,i:number)=>(
-                <tr key={i} className="border-t border-white/5 hover:bg-white/[0.03] cursor-pointer" onClick={()=>nav('/agent-360')}>
+                <tr key={i} className="border-t border-white/5 hover:bg-white/[0.03] cursor-pointer" onClick={()=>nav(agent360Url(a.person_no))}>
                   <td className="py-1 text-slate-200">{a.name}</td>
                   <td className="py-1 text-center text-slate-400">{a.role}</td>
                   <td className="py-1 text-center text-slate-300">{a.worked}</td>
@@ -180,7 +176,8 @@ export default function Team360Page() {
             ))}
           </div>
         </div>
-        <p className="text-[10px] text-slate-500 flex items-center gap-1"><UserSearch size={11}/>{ar?'اضغط أي موظف لفتح ملفه 360':'click any agent to open their 360 profile'}</p>
+        <p className="text-[10px] text-slate-500 flex items-center gap-2"><UserSearch size={11}/>{ar?'اضغط أي موظف لفتح ملفه 360':'click any agent to open their 360 profile'}
+          <Open360Link to={PEOPLE_360_URL} label={ar?'الأفراد 360':'People 360'} ar={ar} title={ar?'تحليل كل الموظفين (Analytics)':'All-people analytics view'} /></p>
       </>)}
     </div>
   );

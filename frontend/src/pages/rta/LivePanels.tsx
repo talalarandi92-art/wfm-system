@@ -15,6 +15,7 @@ import {
 } from './types';
 import { CH_ICON, KpiCard, AgentRow, tok } from './shared';
 import { StationPanel } from './StationPanels';
+import { agent360Url, Open360Link } from '@/components/agent360/shared';
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  QUEUE DETAIL PANEL                                                         */
@@ -390,6 +391,8 @@ export function Agent360Drawer({ agentId, fallbackName, ar, dark, onClose }: {
               {(d?.function_name && d.function_name !== '—') ? d.function_name : ''}{d?.employee_no ? ` · #${d.employee_no}` : ''}{d?.agent_email ? ` · ${d.agent_email}` : ''}
             </div>
           </div>
+          {/* cross-link → the full historical Agent 360 (this drawer is the LIVE Sprinklr day only) */}
+          {d?.employee_no && <Open360Link to={agent360Url(d.employee_no)} label={ar ? 'الملف الكامل 360' : 'Full 360'} ar={ar} title={ar ? 'افتح ملف الموظف 360 الكامل (سكوركارد)' : 'Open the full Agent 360 profile (Scorecard hub)'} />}
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10"><X size={16} style={{ color: muted }} /></button>
         </div>
 

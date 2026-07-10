@@ -5,12 +5,12 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
+import { Kpi360Card, agent360Url, confColor as cf, Open360Link } from '@/components/agent360/shared';
 
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 const hms = (s: number | null) => s == null ? '—' : (s >= 60 ? `${Math.floor(s/60)}m ${Math.round(s%60)}s` : `${Math.round(s)}s`);
 const n0 = (v: any) => v == null ? '—' : Number(v).toLocaleString();
 const pct = (v: any) => v == null ? '—' : `${v}%`;
-const cf = (v: number | null) => v == null ? '#64748b' : v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
 const sc = (v: number | null) => v == null ? '#64748b' : v>=90?'#22c55e':v>=75?'#06b6d4':v>=60?'#f59e0b':'#f43f5e';
 const fc = (v: number | null) => v == null ? '#64748b' : v>=70?'#22c55e':v>=60?'#f59e0b':'#f43f5e';
 const todayISO = '2026-06-30', firstOfMonth = '2026-06-01';
@@ -145,10 +145,7 @@ export default function People360Page() {
               { ic: Clock,      l: ar?'تأخير':'Late', v: summary.late, c:'#f59e0b' },
               { ic: Clock,      l: ar?'OT س':'OT h', v: summary.ot, c:'#10b981' },
             ].map((x,i) => (
-              <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:`${x.c}22`, color:x.c }}><x.ic size={15} /></div>
-                <div className="min-w-0"><p className="text-[9px] text-slate-500 uppercase font-semibold tracking-wide truncate">{x.l}</p><p className="text-base font-bold text-white leading-tight">{typeof x.v==='number'?n0(x.v):x.v}</p></div>
-              </div>
+              <Kpi360Card key={i} icon={x.ic} label={x.l} value={x.v} color={x.c} small />
             ))}
           </div>
         )}
@@ -175,6 +172,7 @@ export default function People360Page() {
                           <p className="text-white font-semibold leading-tight truncate">{r.name}</p>
                           <p className="text-[10px] text-slate-500 truncate">{r.employee_no} · {r.function_name||'—'}</p>
                         </div>
+                        {r.employee_no && <span className="ms-auto flex-shrink-0"><Open360Link to={agent360Url(r.employee_no)} ar={ar} title={ar?'افتح ملف الموظف 360 (سكوركارد)':'Open Agent 360 profile (Scorecard hub)'} /></span>}
                       </div>
                     </td>
                     <td className="px-2 py-2.5 text-center text-slate-200 font-semibold">{r.working_days}</td>
