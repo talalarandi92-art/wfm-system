@@ -257,7 +257,10 @@ const sheetEvidenceDates = new Set();
   try { wfhCarry = JSON.parse(fs.readFileSync(SCRATCH + '/wfh-evidence.json', 'utf8')); } catch (e) { /* none exported */ }
   try {
     const wb = XLSX.readFile(SRC, { cellDates: false, raw: true });
-    const sn = wb.SheetNames.find(n => /^(final|shift)/i.test(n)) || wb.SheetNames[0];
+    // honor MANUAL_SHEET like foundation-v2 does (fix 2026-07-10: with the sheet named "Roster",
+    // the hardcoded /^(final|shift)/ silently read the WRONG matrix sheet and found no evidence)
+    const SUP_RE = process.env.MANUAL_SHEET ? new RegExp('^' + process.env.MANUAL_SHEET, 'i') : /^(final|shift)/i;
+    const sn = wb.SheetNames.find(n => SUP_RE.test(n)) || wb.SheetNames[0];
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, defval: null, blankrows: false, raw: true });
     // day-coverage of the dedicated sources: any key on that date means the file covered the date
     const odooDates = new Set(Object.keys(odoo).map(k => k.split('|')[1]));

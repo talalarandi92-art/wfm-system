@@ -109,9 +109,16 @@ module.exports = function build() {
       // RESCUE (sign-off 2026-06-28): Odoo marked "Absence" but the system proves a full shift (>=6h) with no
       // biometric punch => the person worked from home; combine-sources corrects the false absence.
       const odooAbsenceWorked = isWorkingKind && !hasPunch && /absence/i.test(odStatus) && sysEvidenceMin != null && sysEvidenceMin >= 360;
-      const wfhStatus = isWorkingKind ? ((codeWFH || locWFH || odooWFH || odooAbsenceWorked) ? 'WFH' : 'Office') : '';
+      // BR-WFH-002 (Director 2026-07-08, "md mn = wfh"): midnight shifts are WFH BY DEFAULT —
+      // Office only when BOTH a biometric punch AND a system session prove physical presence.
+      // Covers MD/MN and the Ramadan variants MDR/MNR (same midnight family).
+      const midnightCode = isWorkingKind && /^(MD|MN)R?$/i.test(String(c.norm || raw || '').trim());
+      const midnightWFH = midnightCode && !(hasPunch && sysEvidenceMin != null);
+      const wfhStatus = isWorkingKind ? ((codeWFH || locWFH || odooWFH || odooAbsenceWorked || midnightWFH) ? 'WFH' : 'Office') : '';
       const isWFH = wfhStatus === 'WFH';
-      const reclassNote = odooAbsenceWorked ? ('System-verified WFH — Odoo had marked Absence; ' + (sysEvidenceMin / 60).toFixed(1) + 'h proven in system') : '';
+      const reclassNote = odooAbsenceWorked
+        ? ('System-verified WFH — Odoo had marked Absence; ' + (sysEvidenceMin / 60).toFixed(1) + 'h proven in system')
+        : (midnightWFH && !codeWFH && !locWFH && !odooWFH ? 'Midnight shift — WFH by rule BR-WFH-002 (Office requires punch + system)' : '');
 
       // ---- scheduled window ----
       const schedStart = c.start, schedEnd = c.end;
