@@ -7,7 +7,8 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
-import { StatTile, Donut, BarRow, Gauge } from '@/components/dazzle';
+import { Donut, BarRow, Gauge } from '@/components/dazzle';
+import { Kpi, KpiRow, KpiSource } from '@/components/kpi';
 
 interface Bundle {
   period: { from: string; to: string; attendanceDate: string };
@@ -46,11 +47,14 @@ export default function ControlDashboardsPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // count-up KPI tile (kit) — keeps all existing call sites; numbers count up, strings show as-is
-  const Kpi = ({ label, value, color, icon: Icon, sub }: { label: string; value: any; color: string; icon: any; sub?: string }) => {
-    const isNum = typeof value === 'number';
-    return <StatTile icon={Icon} label={label} num={isNum ? value : undefined} value={isNum ? undefined : String(value)} sub={sub} color={color} />;
-  };
+  // ── Provenance (Director's rule: every number → where it came from + drill) ──
+  // All tiles read the ONE bundle endpoint; per-tile `table`/`definition` reflect
+  // what the controller SQL actually computes (backend/src/modules/control-dashboard).
+  const EP = 'GET /api/v1/control-dashboard';
+  const reqPeriod = data ? `${data.period.from} → ${data.period.to}` : undefined;
+  const attPeriod = data ? `${data.period.attendanceDate} (${ar ? 'آخر يوم حضور' : 'latest attendance date'})` : undefined;
+  const src = (table: string, definition: string, definitionAr: string, period?: string): KpiSource =>
+    ({ endpoint: EP, table, definition, definitionAr, period });
 
   const FnTable = () => (
     <div className="rounded-2xl overflow-x-auto mt-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -111,16 +115,24 @@ export default function ControlDashboardsPage() {
           {/* EXECUTIVE */}
           {role === 'exec' && (
             <>
-              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                <Kpi label={ar ? 'إجمالي الطلبات' : 'Total requests'} value={d.requests.total} color="#818cf8" icon={FileText} />
-                <Kpi label={ar ? 'موافق عليها' : 'Approved'} value={d.requests.approved} color="#22c55e" icon={CheckCircle2} />
-                <Kpi label={ar ? 'مرفوضة' : 'Rejected'} value={d.requests.rejected} color="#f87171" icon={XCircle} />
-                <Kpi label={ar ? 'متوسط زمن القرار' : 'Avg decision'} value={d.requests.avgDecisionHours != null ? `${d.requests.avgDecisionHours}h` : '—'} color="#38bdf8" icon={Clock} />
-                <Kpi label={ar ? 'متأخرة عن SLA' : 'SLA overdue'} value={d.requests.overdue} color="#fb923c" icon={AlertTriangle} sub={d.requests.escalated ? `${d.requests.escalated} ${ar ? 'مُصعّد' : 'escalated'}` : undefined} />
-                <Kpi label={ar ? 'إضافي (ساعات)' : 'Overtime (h)'} value={d.otHours} color="#22d3ee" icon={Zap} />
-                <Kpi label={ar ? 'حملات نشطة' : 'Active campaigns'} value={d.campaignsActive} color="#f59e0b" icon={Megaphone} />
-                <Kpi label={ar ? 'كوتشينج (عالية)' : 'Coaching (high)'} value={d.coaching.high} color="#a855f7" icon={GraduationCap} sub={`${d.coaching.medium + d.coaching.low} ${ar ? 'أخرى' : 'others'}`} />
-              </div>
+              <KpiRow>
+                <Kpi label={ar ? 'إجمالي الطلبات' : 'Total requests'} value={d.requests.total} accent="#818cf8" icon={<FileText size={15} />} drill="/requests"
+                  source={src('requests', 'COUNT(*) of requests submitted in the period (all statuses)', 'عدد الطلبات المقدَّمة خلال الفترة (كل الحالات)', reqPeriod)} />
+                <Kpi label={ar ? 'موافق عليها' : 'Approved'} value={d.requests.approved} accent="#22c55e" icon={<CheckCircle2 size={15} />} drill="/requests"
+                  source={src('requests', "Requests submitted in the period with status = 'approved'", "الطلبات المقدَّمة خلال الفترة بحالة 'approved'", reqPeriod)} />
+                <Kpi label={ar ? 'مرفوضة' : 'Rejected'} value={d.requests.rejected} accent="#f87171" icon={<XCircle size={15} />} drill="/requests"
+                  source={src('requests', "Requests submitted in the period with status = 'rejected'", "الطلبات المقدَّمة خلال الفترة بحالة 'rejected'", reqPeriod)} />
+                <Kpi label={ar ? 'متوسط زمن القرار' : 'Avg decision'} value={d.requests.avgDecisionHours != null ? `${d.requests.avgDecisionHours}h` : '—'} accent="#38bdf8" icon={<Clock size={15} />} drill="/requests"
+                  source={src('requests', 'AVG hours from submitted_at to first decision timestamp (approved L1/L2 or rejected), decided requests only', 'متوسط الساعات من التقديم حتى أول قرار (موافقة L1/L2 أو رفض) — للطلبات المبتوت فيها فقط', reqPeriod)} />
+                <Kpi label={ar ? 'متأخرة عن SLA' : 'SLA overdue'} value={d.requests.overdue} accent="#fb923c" icon={<AlertTriangle size={15} />} drill="/requests" sub={d.requests.escalated ? `${d.requests.escalated} ${ar ? 'مُصعّد' : 'escalated'}` : undefined}
+                  source={src('requests', 'Still-pending requests (pending / peer_pending) whose sla_due_at is already past', 'طلبات ما زالت معلّقة وتجاوز موعد sla_due_at الخاص بها', reqPeriod)} />
+                <Kpi label={ar ? 'إضافي (ساعات)' : 'Overtime (h)'} value={d.otHours} accent="#22d3ee" icon={<Zap size={15} />} drill="/roster?tab=ot"
+                  source={src('attendance_records', 'SUM(ot_minutes)/60 over the period — attendance-spine OT only (NOT the canonical TRUE_OT = ot + offday_ot + holiday_ot from roster_days; drill for the 3-bucket split)', 'مجموع ot_minutes÷60 خلال الفترة — من سجل الحضور فقط (ليس TRUE_OT الكامل بثلاث فئات من roster_days؛ افتح التفصيل للتقسيم)', reqPeriod)} />
+                <Kpi label={ar ? 'حملات نشطة' : 'Active campaigns'} value={d.campaignsActive} accent="#f59e0b" icon={<Megaphone size={15} />} drill="/schedule?tab=campaigns"
+                  source={src('campaigns', 'COUNT of campaigns with is_active = TRUE and today between start_date and end_date', 'عدد الحملات المفعّلة التي يقع اليوم ضمن مدتها', ar ? 'اليوم' : 'today')} />
+                <Kpi label={ar ? 'كوتشينج (عالية)' : 'Coaching (high)'} value={d.coaching.high} accent="#a855f7" icon={<GraduationCap size={15} />} drill="/scorecard?tab=coaching" sub={`${d.coaching.medium + d.coaching.low} ${ar ? 'أخرى' : 'others'}`}
+                  source={src('coaching_flags', "Open coaching flags with severity = 'high' (medium + low shown in subtitle)", "أعلام الكوتشينج المفتوحة بخطورة 'high' (وتظهر medium+low في السطر الفرعي)", ar ? 'المفتوحة حالياً' : 'currently open')} />
+              </KpiRow>
               <div className="mt-4 grid lg:grid-cols-3 gap-3">
                 {/* approval-rate gauge */}
                 {(() => {
@@ -168,16 +180,24 @@ export default function ControlDashboardsPage() {
           {/* WFM / RTA */}
           {role === 'wfm' && (
             <>
-              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                <Kpi label={ar ? 'قيد الموافقة' : 'Pending'} value={d.requests.pending} color="#fbbf24" icon={Clock} />
-                <Kpi label={ar ? 'متأخرة عن SLA' : 'SLA overdue'} value={d.requests.overdue} color="#f87171" icon={AlertTriangle} />
-                <Kpi label={ar ? 'مُصعّدة' : 'Escalated'} value={d.requests.escalated} color="#fb923c" icon={TrendingUp} />
-                <Kpi label={ar ? 'عاجلة' : 'Urgent'} value={d.requests.urgent} color="#ef4444" icon={Zap} />
-                <Kpi label={ar ? 'متأخرون اليوم' : 'Late today'} value={d.attendance.late} color="#fb923c" icon={Clock} />
-                <Kpi label={ar ? 'خروج مبكر' : 'Early out'} value={d.attendance.earlyOut} color="#f59e0b" icon={AlertTriangle} />
-                <Kpi label={ar ? 'بصمات ناقصة' : 'Missing punch'} value={d.attendance.missingPunch} color="#a855f7" icon={AlertTriangle} />
-                <Kpi label={ar ? 'إضافي (ساعات)' : 'OT (h)'} value={d.otHours} color="#22d3ee" icon={Zap} />
-              </div>
+              <KpiRow>
+                <Kpi label={ar ? 'قيد الموافقة' : 'Pending'} value={d.requests.pending} accent="#fbbf24" icon={<Clock size={15} />} drill="/requests"
+                  source={src('requests', "Requests submitted in the period with status IN ('pending','peer_pending')", "الطلبات المقدَّمة خلال الفترة بحالة 'pending' أو 'peer_pending'", reqPeriod)} />
+                <Kpi label={ar ? 'متأخرة عن SLA' : 'SLA overdue'} value={d.requests.overdue} accent="#f87171" icon={<AlertTriangle size={15} />} drill="/requests"
+                  source={src('requests', 'Still-pending requests (pending / peer_pending) whose sla_due_at is already past', 'طلبات ما زالت معلّقة وتجاوز موعد sla_due_at الخاص بها', reqPeriod)} />
+                <Kpi label={ar ? 'مُصعّدة' : 'Escalated'} value={d.requests.escalated} accent="#fb923c" icon={<TrendingUp size={15} />} drill="/requests"
+                  source={src('requests', 'Requests submitted in the period with escalated_at set (auto SLA escalation or manual)', 'الطلبات المقدَّمة خلال الفترة التي سُجّل لها escalated_at (تصعيد SLA تلقائي أو يدوي)', reqPeriod)} />
+                <Kpi label={ar ? 'عاجلة' : 'Urgent'} value={d.requests.urgent} accent="#ef4444" icon={<Zap size={15} />} drill="/requests"
+                  source={src('requests', 'Requests submitted in the period flagged is_urgent = TRUE', 'الطلبات المقدَّمة خلال الفترة الموسومة is_urgent', reqPeriod)} />
+                <Kpi label={ar ? 'متأخرون اليوم' : 'Late today'} value={d.attendance.late} accent="#fb923c" icon={<Clock size={15} />} drill="/attendance?tab=dashboard"
+                  source={src('attendance_records', 'Records on the latest attendance date with punch_late_minutes > 0 (any punch lateness — NOT the credited 7..240-min tardiness definition; drill for that)', 'سجلات آخر يوم حضور حيث punch_late_minutes > 0 (أي تأخير بصمة — ليس تعريف التأخير المعتمد 7..240 دقيقة؛ افتح التفصيل له)', attPeriod)} />
+                <Kpi label={ar ? 'خروج مبكر' : 'Early out'} value={d.attendance.earlyOut} accent="#f59e0b" icon={<AlertTriangle size={15} />} drill="/attendance?tab=dashboard"
+                  source={src('attendance_records', 'Records on the latest attendance date with punch_early_out_minutes > 0', 'سجلات آخر يوم حضور حيث punch_early_out_minutes > 0', attPeriod)} />
+                <Kpi label={ar ? 'بصمات ناقصة' : 'Missing punch'} value={d.attendance.missingPunch} accent="#a855f7" icon={<AlertTriangle size={15} />} drill="/attendance?tab=dashboard"
+                  source={src('attendance_records', 'Records on the latest attendance date flagged is_missing_punch = TRUE', 'سجلات آخر يوم حضور الموسومة is_missing_punch', attPeriod)} />
+                <Kpi label={ar ? 'إضافي (ساعات)' : 'OT (h)'} value={d.otHours} accent="#22d3ee" icon={<Zap size={15} />} drill="/roster?tab=ot"
+                  source={src('attendance_records', 'SUM(ot_minutes)/60 over the period — attendance-spine OT only (NOT the canonical TRUE_OT = ot + offday_ot + holiday_ot from roster_days; drill for the 3-bucket split)', 'مجموع ot_minutes÷60 خلال الفترة — من سجل الحضور فقط (ليس TRUE_OT الكامل بثلاث فئات من roster_days؛ افتح التفصيل للتقسيم)', reqPeriod)} />
+              </KpiRow>
               <FnTable />
             </>
           )}
@@ -185,12 +205,16 @@ export default function ControlDashboardsPage() {
           {/* TEAM LEADER */}
           {role === 'tl' && (
             <>
-              <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                <Kpi label={ar ? 'حاضرون' : 'Present'} value={d.attendance.present} color="#22c55e" icon={Users} />
-                <Kpi label={ar ? 'متأخرون' : 'Late'} value={d.attendance.late} color="#fb923c" icon={Clock} />
-                <Kpi label={ar ? 'غائبون' : 'Absent'} value={d.attendance.absent} color="#f87171" icon={XCircle} />
-                <Kpi label={ar ? 'كوتشينج مفتوح' : 'Open coaching'} value={d.coaching.high + d.coaching.medium + d.coaching.low} color="#a855f7" icon={GraduationCap} sub={`${d.coaching.high} ${ar ? 'عالية' : 'high'}`} />
-              </div>
+              <KpiRow>
+                <Kpi label={ar ? 'حاضرون' : 'Present'} value={d.attendance.present} accent="#22c55e" icon={<Users size={15} />} drill="/attendance?tab=dashboard"
+                  source={src('attendance_records', "Records on the latest attendance date with attendance_marker = 'present'", "سجلات آخر يوم حضور بعلامة 'present'", attPeriod)} />
+                <Kpi label={ar ? 'متأخرون' : 'Late'} value={d.attendance.late} accent="#fb923c" icon={<Clock size={15} />} drill="/attendance?tab=dashboard"
+                  source={src('attendance_records', 'Records on the latest attendance date with punch_late_minutes > 0 (any punch lateness — NOT the credited 7..240-min tardiness definition; drill for that)', 'سجلات آخر يوم حضور حيث punch_late_minutes > 0 (أي تأخير بصمة — ليس تعريف التأخير المعتمد 7..240 دقيقة؛ افتح التفصيل له)', attPeriod)} />
+                <Kpi label={ar ? 'غائبون' : 'Absent'} value={d.attendance.absent} accent="#f87171" icon={<XCircle size={15} />} drill="/attendance?tab=dashboard"
+                  source={src('attendance_records', "Records on the latest attendance date with attendance_marker = 'absent'", "سجلات آخر يوم حضور بعلامة 'absent'", attPeriod)} />
+                <Kpi label={ar ? 'كوتشينج مفتوح' : 'Open coaching'} value={d.coaching.high + d.coaching.medium + d.coaching.low} accent="#a855f7" icon={<GraduationCap size={15} />} drill="/scorecard?tab=coaching" sub={`${d.coaching.high} ${ar ? 'عالية' : 'high'}`}
+                  source={src('coaching_flags', "All open coaching flags (high + medium + low severity), computed client-side from the per-severity counts", 'كل أعلام الكوتشينج المفتوحة (high + medium + low) — مجموع محسوب في الواجهة من العدّادات حسب الخطورة', ar ? 'المفتوحة حالياً' : 'currently open')} />
+              </KpiRow>
               <FnTable />
             </>
           )}

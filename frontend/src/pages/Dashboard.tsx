@@ -228,8 +228,8 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
 /* ─── Adherence bar chart ────────────────────────────────────────────────── */
 function AdherenceChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean; ar: boolean }) {
   const d = data.slice(-7);
+  const [hov, setHov] = useState<number|null>(null); // hook must run before any early return (rules-of-hooks)
   if (!d.length) return <div style={{ height:160, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, color:'#64748b' }}>{ar?'لا بيانات':'No data'}</div>;
-  const [hov, setHov] = useState<number|null>(null);
   const W=340, H=220, PL=28, PB=24, PT=14, PR=8;
   const cw=W-PL-PR, ch=H-PT-PB;
   const bw = Math.max(Math.floor(cw/d.length)-6, 8);

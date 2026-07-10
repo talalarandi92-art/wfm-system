@@ -7,11 +7,13 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useCountUp } from '@/components/dazzle';
+import { useUiStore } from '@/store/ui.store';
+import { tp, ts as tsColor } from '@/components/ds';
 import {
   SpAgent, SpQueue, SpLive, BreakTracker, QueueDetail,
   CH_COLOR, slaColor, pctColor, fmtMin,
 } from './types';
-import { CH_ICON, KpiCard, AgentRow } from './shared';
+import { CH_ICON, KpiCard, AgentRow, tok } from './shared';
 import { StationPanel } from './StationPanels';
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -29,24 +31,26 @@ const STATE_DEFS: { key: string; ar: string; en: string; color: string; match: (
 ];
 
 export function AgentStateBreakdown({ agents, breakData, ar, onSelectAgent }: { agents: SpAgent[]; breakData: BreakTracker | null; ar: boolean; onSelectAgent?: (id: string) => void }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [open, setOpen] = useState<string | null>('available');
   const groups = STATE_DEFS.map(s => ({ ...s, list: agents.filter(s.match) })).filter(g => g.list.length > 0);
   if (!agents.length) return null;
   const breakInfo = (id: string) => breakData?.onBreakNow.find(b => b.agentId === id) ?? null;
 
   return (
-    <div className="rounded-2xl overflow-hidden mb-3" style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
-      <div className="px-3 py-2 flex items-center gap-2" style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <Users size={11} style={{ color: '#64748b' }} />
-        <span className="text-xs font-semibold" style={{ color: '#64748b' }}>{ar ? 'حالة الإيجنتات الآن — مين بكل حالة' : 'Agent states now — who is where'}</span>
-        <span className="text-[9px] ms-auto" style={{ color: '#334155' }}>{ar ? 'على مستوى المحطة' : 'station-wide'}</span>
+    <div className="rounded-2xl overflow-hidden mb-3" style={{ border: `1px solid ${T.bdr}` }}>
+      <div className="px-3 py-2 flex items-center gap-2" style={{ background: T.panel, borderBottom: `1px solid ${T.bdr}` }}>
+        <Users size={11} style={{ color: tsColor(dark) }} />
+        <span className="text-xs font-semibold" style={{ color: tsColor(dark) }}>{ar ? 'حالة الإيجنتات الآن — مين بكل حالة' : 'Agent states now — who is where'}</span>
+        <span className="text-[9px] ms-auto" style={{ color: T.faint }}>{ar ? 'على مستوى المحطة' : 'station-wide'}</span>
       </div>
       {/* Count chips */}
       <div className="p-2 flex flex-wrap gap-1.5">
         {groups.map(g => (
           <button key={g.key} onClick={() => setOpen(open === g.key ? null : g.key)}
             className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-xl transition-colors"
-            style={{ background: open === g.key ? `${g.color}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${open === g.key ? g.color + '55' : 'rgba(255,255,255,0.06)'}`, color: g.color }}>
+            style={{ background: open === g.key ? `${g.color}22` : T.panel, border: `1px solid ${open === g.key ? g.color + '55' : T.bdr}`, color: g.color }}>
             <span className="w-2 h-2 rounded-full" style={{ background: g.color }} />
             {ar ? g.ar : g.en} <b className="tabular-nums">{g.list.length}</b>
           </button>
@@ -61,11 +65,11 @@ export function AgentStateBreakdown({ agents, breakData, ar, onSelectAgent }: { 
             return (
               <span key={a.agentId} onClick={() => onSelectAgent?.(a.agentId)}
                 className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg transition-colors hover:brightness-125"
-                style={{ background: `${color}10`, border: `1px solid ${color}22`, color: '#cbd5e1', cursor: onSelectAgent ? 'pointer' : 'default' }}>
+                style={{ background: `${color}10`, border: `1px solid ${color}22`, color: tp(dark), cursor: onSelectAgent ? 'pointer' : 'default' }}>
                 {a.agentName}
-                {a.statusSec != null && a.statusSec > 0 && <span className="text-[9px] tabular-nums" style={{ color: '#475569' }}>· {fmtSince(a.statusSec, ar)}</span>}
+                {a.statusSec != null && a.statusSec > 0 && <span className="text-[9px] tabular-nums" style={{ color: T.faint }}>· {fmtSince(a.statusSec, ar)}</span>}
                 {bi?.statusRaw && <span className="text-[9px]" style={{ color }}>· {bi.statusRaw}{bi.minutesSoFar != null ? ` ${bi.minutesSoFar}${ar ? 'د' : 'm'}` : ''}{bi.isAuthorized === false ? ' ⚠' : ''}</span>}
-                {!bi && a.statusRaw && a.statusRaw !== a.status && <span className="text-[9px]" style={{ color: '#475569' }}>· {a.statusRaw}</span>}
+                {!bi && a.statusRaw && a.statusRaw !== a.status && <span className="text-[9px]" style={{ color: T.faint }}>· {a.statusRaw}</span>}
               </span>
             );
           })}
@@ -121,7 +125,9 @@ export function useCountUpOnce(target: number) {
 }
 
 /* Self-contained SVG donut for the agent-state mix (explicit colors → safe on
-   the dark Wallboard regardless of theme). Center shows total agents. */
+   the dark Wallboard regardless of theme). Center shows total agents.
+   KEEP-DARK (theme-token sweep): embedded in the full-screen TV Wallboard whose
+   surface is hardcoded dark, so its neutrals stay explicit — do not tokenize. */
 export function AgentDonut({ avail, busy, brk, off, ar, size = 150, thickness = 16 }: { avail: number; busy: number; brk: number; off: number; ar: boolean; size?: number; thickness?: number }) {
   const segs = [
     { v: avail, c: '#22c55e', l: ar ? 'متاح' : 'Available' },
@@ -161,6 +167,9 @@ export function AgentDonut({ avail, busy, brk, off, ar, size = 150, thickness = 
 }
 
 /* ── Agent Board — rich live roster: status + duration + today's stats ──────── */
+/* KEEP-DARK (theme-token sweep): AgentBoard is rendered INSIDE the full-screen
+   TV Wallboard (big) whose surface is hardcoded #060912 regardless of theme —
+   theming its neutrals would break the wallboard, so they stay explicit. */
 interface BoardRow {
   agentId: string; name: string; email: string | null; employeeNo: string | null; functionName: string | null;
   status: string; statusRaw: string | null; statusSec: number | null;
@@ -368,7 +377,7 @@ export function Agent360Drawer({ agentId, fallbackName, ar, dark, onClose }: {
 
   return createPortal((
     <div style={{ position: 'fixed', inset: 0, zIndex: 9998, display: 'flex', justifyContent: ar ? 'flex-start' : 'flex-end' }}>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(2px)' }} />
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: tok(dark).overlay, backdropFilter: 'blur(2px)' }} />
       <div className="h-full overflow-y-auto" dir={ar ? 'rtl' : 'ltr'}
         style={{ position: 'relative', width: 440, maxWidth: '92vw', background: dark ? '#0b0f1c' : '#f8fafc', borderInlineStart: `1px solid ${border}`, boxShadow: '0 0 40px rgba(0,0,0,0.5)', animation: 'ds-slide .25s ease' }}>
         {/* Header */}
@@ -503,6 +512,8 @@ export function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose, on
   q: SpQueue; detail: QueueDetail | null; agents: SpAgent[];
   breakData: BreakTracker | null; ar: boolean; onClose: () => void; onSelectAgent?: (id: string) => void;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const chColor = CH_COLOR[q.channel] || '#64748b';
   const queueAgents = useMemo(() =>
     detail?.agents.length ? detail.agents : agents.filter(a => a.queueId === q.queueId),
@@ -517,11 +528,11 @@ export function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose, on
           {CH_ICON[q.channel]}
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-bold truncate" style={{ color: '#e2e8f0' }}>{q.queueName}</h2>
-          <p className="text-[10px] capitalize" style={{ color: '#475569' }}>{q.channel}</p>
+          <h2 className="text-sm font-bold truncate" style={{ color: tp(dark) }}>{q.queueName}</h2>
+          <p className="text-[10px] capitalize" style={{ color: T.faint }}>{q.channel}</p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
-          <X size={14} style={{ color: '#64748b' }} />
+          <X size={14} style={{ color: tsColor(dark) }} />
         </button>
       </div>
 
@@ -536,19 +547,19 @@ export function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose, on
       {/* Extra — full per-queue metric set (backlog, wait, AHT, breached, staffing) */}
       <div className="grid grid-cols-4 gap-2 mb-3">
         {[
-          { l: ar ? 'باكلوج' : 'Backlog',     v: q.backlog ?? 0,                                                          c: (q.backlog ?? 0) > 0 ? '#f59e0b' : '#64748b' },
-          { l: ar ? 'وقت انتظار' : 'Avg Wait', v: q.avgWaitSeconds > 0 ? `${Math.round(q.avgWaitSeconds / 60)}${ar ? 'د' : 'm'}` : '—', c: '#64748b' },
+          { l: ar ? 'باكلوج' : 'Backlog',     v: q.backlog ?? 0,                                                          c: (q.backlog ?? 0) > 0 ? '#f59e0b' : tsColor(dark) },
+          { l: ar ? 'وقت انتظار' : 'Avg Wait', v: q.avgWaitSeconds > 0 ? `${Math.round(q.avgWaitSeconds / 60)}${ar ? 'د' : 'm'}` : '—', c: tsColor(dark) },
           { l: ar ? 'AHT الكيو' : 'Queue AHT', v: q.aht > 0 ? `${Math.round(q.aht / 60)}${ar ? 'د' : 'm'}` : '—',           c: '#818cf8' },
-          { l: ar ? 'SLA خُرق' : 'Breached',   v: q.slaBreached,                                                           c: q.slaBreached > 0 ? '#f87171' : '#64748b' },
+          { l: ar ? 'SLA خُرق' : 'Breached',   v: q.slaBreached,                                                           c: q.slaBreached > 0 ? '#f87171' : tsColor(dark) },
           { l: ar ? 'مشغول' : 'Busy',         v: q.agentsBusy ?? 0,                                                       c: '#818cf8' },
-          { l: ar ? 'بريك' : 'On Break',      v: q.agentsBreak ?? 0,                                                      c: (q.agentsBreak ?? 0) > 0 ? '#fb923c' : '#64748b' },
+          { l: ar ? 'بريك' : 'On Break',      v: q.agentsBreak ?? 0,                                                      c: (q.agentsBreak ?? 0) > 0 ? '#fb923c' : tsColor(dark) },
           { l: ar ? 'مسجّل دخول' : 'Logged In', v: q.agentsLoggedIn ?? '—',                                               c: '#22c55e' },
           { l: ar ? 'خامل' : 'Idle',          v: q.agentsIdle ?? '—',                                                     c: '#f59e0b' },
         ].map(item => (
           <div key={item.l} className="rounded-xl p-2 text-center"
-            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
             <div className="text-sm font-bold tabular-nums" style={{ color: item.c }}>{item.v}</div>
-            <div className="text-[10px] mt-0.5" style={{ color: '#334155' }}>{item.l}</div>
+            <div className="text-[10px] mt-0.5" style={{ color: T.faint }}>{item.l}</div>
           </div>
         ))}
       </div>
@@ -559,11 +570,11 @@ export function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose, on
       {/* HC breakdown */}
       {queueAgents.length > 0 && (
         <div className="rounded-2xl overflow-hidden mb-3"
-          style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+          style={{ border: `1px solid ${T.bdr}` }}>
           <div className="px-3 py-2 flex items-center gap-2"
-            style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            <Users size={11} style={{ color: '#64748b' }} />
-            <span className="text-xs font-semibold" style={{ color: '#64748b' }}>
+            style={{ background: T.panel, borderBottom: `1px solid ${T.bdr}` }}>
+            <Users size={11} style={{ color: tsColor(dark) }} />
+            <span className="text-xs font-semibold" style={{ color: tsColor(dark) }}>
               {ar ? 'إيجنت الطابور' : 'Queue Agents'} ({queueAgents.length})
             </span>
           </div>
@@ -603,7 +614,7 @@ export function QueueDetailPanel({ q, detail, agents, breakData, ar, onClose, on
       )}
 
       {queueAgents.length === 0 && overflow.length === 0 && (
-        <p className="text-xs text-center py-4" style={{ color: '#334155' }}>
+        <p className="text-xs text-center py-4" style={{ color: T.faint }}>
           {ar ? 'لا توجد بيانات إيجنت لهذا الطابور' : 'No agent data for this queue'}
         </p>
       )}

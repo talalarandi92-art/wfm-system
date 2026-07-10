@@ -2,10 +2,21 @@ import {
   MessageSquare, Mail, Phone, Hash, Activity,
 } from 'lucide-react';
 import { StatTile } from '@/components/dazzle';
+import { useUiStore } from '@/store/ui.store';
+import { tp, ts as tsColor } from '@/components/ds';
 import {
   SpQueue, SpAgent, BreakAgent, AgentBreakHistory,
   CH_COLOR, ST_COLOR, slaColor, fmtNum, fmtMin, stLabel,
 } from './types';
+
+/* Theme-aware neutral tokens (recipe of dd234d7) — shared by all RTA panels.
+   Semantic status/severity/queue-state colors stay fixed. */
+export const tok = (dark: boolean) => ({
+  panel:   dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  bdr:     dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+  overlay: dark ? 'rgba(0,0,0,0.75)'       : 'rgba(15,23,42,0.45)',
+  faint:   dark ? '#475569'                : '#94a3b8',
+});
 
 export const CH_ICON: Record<string, React.ReactNode> = {
   whatsapp: <MessageSquare size={12} />, chat: <MessageSquare size={12} />,
@@ -24,6 +35,8 @@ export function KpiCard({ label, val, color, icon: Icon, sub }: {
 
 /* ── Queue Grid Card ─────────────────────────────────────────────────────── */
 export function QueueCard({ q, selected, onClick, ar }: { q: SpQueue; selected: boolean; onClick: () => void; ar: boolean }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const risk = (q.slaPct ?? 100) < 80 || q.waiting > 50;
   const chColor = CH_COLOR[q.channel] || '#64748b';
   const total = Math.max(1, q.waiting + q.inProgress);
@@ -33,10 +46,10 @@ export function QueueCard({ q, selected, onClick, ar }: { q: SpQueue; selected: 
       style={{
         background: selected
           ? `linear-gradient(135deg, ${chColor}22 0%, ${chColor}0a 100%)`
-          : risk ? 'rgba(239,68,68,0.05)' : 'rgba(255,255,255,0.03)',
+          : risk ? 'rgba(239,68,68,0.05)' : T.panel,
         border: selected
           ? `1.5px solid ${chColor}55`
-          : risk ? '1px solid rgba(239,68,68,0.22)' : '1px solid rgba(255,255,255,0.07)',
+          : risk ? '1px solid rgba(239,68,68,0.22)' : `1px solid ${T.bdr}`,
         borderRadius: 14,
         padding: '11px 13px',
         boxShadow: selected ? `0 0 0 3px ${chColor}18` : 'none',
@@ -55,7 +68,7 @@ export function QueueCard({ q, selected, onClick, ar }: { q: SpQueue; selected: 
           {CH_ICON[q.channel]}
         </span>
         <span className="text-xs font-semibold leading-tight flex-1 min-w-0"
-          style={{ color: selected ? '#f1f5f9' : '#94a3b8', wordBreak: 'break-word' }}>
+          style={{ color: selected ? tp(dark) : tsColor(dark), wordBreak: 'break-word' }}>
           {q.queueName}
         </span>
       </div>
@@ -64,29 +77,29 @@ export function QueueCard({ q, selected, onClick, ar }: { q: SpQueue; selected: 
       <div className="flex items-end gap-3 mb-2">
         <div>
           <div className="text-2xl font-black tabular-nums leading-none"
-            style={{ color: q.waiting > 0 ? (risk ? '#f87171' : '#fbbf24') : '#334155' }}>
+            style={{ color: q.waiting > 0 ? (risk ? '#f87171' : '#fbbf24') : T.faint }}>
             {fmtNum(q.waiting)}
           </div>
-          <div className="text-[9px] mt-0.5" style={{ color: '#334155' }}>{ar ? 'انتظار' : 'Waiting'}</div>
+          <div className="text-[9px] mt-0.5" style={{ color: T.faint }}>{ar ? 'انتظار' : 'Waiting'}</div>
         </div>
         <div className="flex gap-3 mb-0.5 ms-auto">
           <div className="text-center">
             <div className="text-sm font-bold" style={{ color: '#818cf8' }}>{q.inProgress}</div>
-            <div className="text-[9px]" style={{ color: '#334155' }}>{ar ? 'نشط' : 'Active'}</div>
+            <div className="text-[9px]" style={{ color: T.faint }}>{ar ? 'نشط' : 'Active'}</div>
           </div>
           <div className="text-center">
             <div className="text-sm font-bold" style={{ color: '#22c55e' }}>{q.agentsAvailable}</div>
-            <div className="text-[9px]" style={{ color: '#334155' }}>{ar ? 'متاح' : 'Available'}</div>
+            <div className="text-[9px]" style={{ color: T.faint }}>{ar ? 'متاح' : 'Available'}</div>
           </div>
           <div className="text-center">
             <div className="text-sm font-bold" style={{ color: slaColor(q.slaPct ?? 100) }}>{q.slaPct ?? 100}%</div>
-            <div className="text-[9px]" style={{ color: '#334155' }}>SLA</div>
+            <div className="text-[9px]" style={{ color: T.faint }}>SLA</div>
           </div>
         </div>
       </div>
 
       {/* Progress bar */}
-      <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.06)' }}>
+      <div className="h-1 rounded-full overflow-hidden" style={{ background: T.panel }}>
         <div className="h-full rounded-full transition-all"
           style={{ width: `${Math.min(100, (q.waiting / total) * 100)}%`, background: risk ? '#ef4444' : chColor }} />
       </div>
@@ -99,13 +112,15 @@ export function AgentRow({ agent, showBreakInfo, breakHistory, ar }: {
   agent: SpAgent | BreakAgent; showBreakInfo?: boolean;
   breakHistory?: AgentBreakHistory | null; ar: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const color = ST_COLOR[agent.status] || '#64748b';
   const ba = agent as BreakAgent;
   return (
     <div className="flex items-center gap-2.5 py-2 px-3"
-      style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+      style={{ borderBottom: `1px solid ${T.bdr}` }}>
       <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-      <span className="text-xs font-medium flex-1 truncate" style={{ color: '#cbd5e1' }}>{agent.agentName}</span>
+      <span className="text-xs font-medium flex-1 truncate" style={{ color: tp(dark) }}>{agent.agentName}</span>
       {showBreakInfo && (
         <>
           <span className="text-[10px] px-1.5 py-0.5 rounded-lg"
@@ -113,7 +128,7 @@ export function AgentRow({ agent, showBreakInfo, breakHistory, ar }: {
             {breakHistory?.breakCount ?? ba.breakCount ?? 0}×
           </span>
           <span className="text-[10px] px-1.5 py-0.5 rounded-lg"
-            style={{ background: 'rgba(255,255,255,0.05)', color: '#64748b' }}>
+            style={{ background: T.panel, color: tsColor(dark) }}>
             {fmtMin(breakHistory?.totalBreakMinutes ?? ba.totalBreakMinutes ?? 0)}
           </span>
           {ba.isAuthorized !== undefined && (
@@ -135,14 +150,16 @@ export function AgentRow({ agent, showBreakInfo, breakHistory, ar }: {
 
 /* ── Empty State ──────────────────────────────────────────────────────────── */
 export function EmptyState({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center"
-        style={{ background: 'rgba(100,116,139,0.08)', color: '#334155' }}>
+        style={{ background: 'rgba(100,116,139,0.08)', color: T.faint }}>
         {icon}
       </div>
-      <p className="text-sm font-medium mb-1" style={{ color: '#475569' }}>{title}</p>
-      <p className="text-xs" style={{ color: '#334155' }}>{sub}</p>
+      <p className="text-sm font-medium mb-1" style={{ color: tsColor(dark) }}>{title}</p>
+      <p className="text-xs" style={{ color: T.faint }}>{sub}</p>
     </div>
   );
 }

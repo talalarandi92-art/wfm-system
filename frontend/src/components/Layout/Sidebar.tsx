@@ -67,6 +67,14 @@ const NAV_SECTIONS = [
   },
 ];
 
+/* ── Palette ──────────────────────────────────────────────────────────────── */
+// keep-dark nav rail (design decision): the sidebar stays dark in ALL themes
+// (Dark / Light / Aurora-Glass) — do NOT swap these for theme tokens.
+const RAIL_BG_GRADIENT   = 'linear-gradient(180deg,#0d1120 0%,#0b0f1c 100%)'; // dark navy rail
+const RAIL_HAIRLINE      = 'rgba(255,255,255,0.05)';                          // edge + logo divider
+const RAIL_ACCENT        = '#6366f1';                                         // indigo active dot/glow
+const RAIL_TOGGLE_BG     = 'linear-gradient(135deg,#151b2e,#0f1527)';         // collapse-toggle knob
+
 /* ── Component ────────────────────────────────────────────────────────────── */
 export default function Sidebar() {
   const { hasPermission } = useAuthStore();
@@ -90,8 +98,8 @@ export default function Sidebar() {
         ${sidebarOpen ? 'w-64' : 'w-[68px]'}
       `}
       style={{
-        background: 'linear-gradient(180deg,#0d1120 0%,#0b0f1c 100%)',
-        borderInlineEnd: '1px solid rgba(255,255,255,0.05)',
+        background: RAIL_BG_GRADIENT,
+        borderInlineEnd: `1px solid ${RAIL_HAIRLINE}`,
         boxShadow: '4px 0 24px rgba(0,0,0,0.4)',
       }}
     >
@@ -99,7 +107,7 @@ export default function Sidebar() {
       {/* ── Logo ──────────────────────────────────────────────────────────── */}
       <div
         className="flex items-center h-[60px] px-4 flex-shrink-0"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+        style={{ borderBottom: `1px solid ${RAIL_HAIRLINE}` }}
       >
         {/* Logo mark — the Director's fused seal (T + orchestrator + north star + crown) */}
         <div className="flex-shrink-0 w-9 h-9 flex items-center justify-center">
@@ -177,7 +185,7 @@ export default function Sidebar() {
                     {isActive && !sidebarOpen && (
                       <span
                         className="absolute bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
-                        style={{ background: '#6366f1', boxShadow: '0 0 4px #6366f1' }}
+                        style={{ background: RAIL_ACCENT, boxShadow: `0 0 4px ${RAIL_ACCENT}` }}
                       />
                     )}
                   </NavLink>
@@ -200,7 +208,7 @@ export default function Sidebar() {
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500
         `}
         style={{
-          background: 'linear-gradient(135deg,#151b2e,#0f1527)',
+          background: RAIL_TOGGLE_BG,
           boxShadow: '0 2px 8px rgba(0,0,0,.5)',
         }}
         aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}

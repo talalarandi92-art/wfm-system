@@ -574,6 +574,7 @@ function AgentScoreView({
 
 /* ─── Trend badge ─────────────────────────────────────────────────────────── */
 function TrendBadge({ delta }: { delta: number | null }) {
+  const { dark } = useUiStore();
   if (delta === null) return null;
   if (delta > 0) return (
     <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
@@ -589,7 +590,7 @@ function TrendBadge({ delta }: { delta: number | null }) {
   );
   return (
     <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-      style={{ background: 'rgba(255,255,255,0.06)', color: '#64748b' }}>
+      style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)', color: '#64748b' }}>
       <Minus size={7} />0
     </span>
   );

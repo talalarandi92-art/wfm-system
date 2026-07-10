@@ -101,7 +101,9 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
                         ? { rejectUnauthorized: config.get('POSTGRES_SSL_INSECURE') !== 'true' }
                         : false,
         extra: {
-          max: 20,             // Connection pool max
+          // Pool sized for 100+ concurrent users (EXECUTION_BRIEF DoD). Postgres default
+          // max_connections=100 — keep DB_POOL_MAX below that minus other clients (scripts, psql).
+          max: config.get<number>('DB_POOL_MAX', 50),
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,
         },

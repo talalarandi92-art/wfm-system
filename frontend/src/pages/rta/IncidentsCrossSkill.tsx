@@ -4,11 +4,13 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { fmtDuration } from '@/utils/format';
+import { useUiStore } from '@/store/ui.store';
+import { tp, ts as tsColor } from '@/components/ds';
 import {
   SpQueue, BreakAgent, IncidentReport, CrossSkillCandidate, SkillDispatchForm,
   CH_COLOR, fmtTime,
 } from './types';
-import { CH_ICON } from './shared';
+import { CH_ICON, tok } from './shared';
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  REPORT INCIDENT MODAL                                                       */
@@ -18,6 +20,8 @@ export function ReportIncidentModal({
 }: {
   initial: IncidentReport; onClose: () => void; ar: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [form, setForm]       = useState<IncidentReport>(initial);
   const [submitting, setSub]  = useState(false);
   const [done, setDone]       = useState(false);
@@ -48,20 +52,20 @@ export function ReportIncidentModal({
 
   if (done) return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)' }}
+      style={{ background: T.overlay, backdropFilter: 'blur(6px)' }}
       onClick={onClose}>
       <div className="w-full max-w-sm rounded-3xl p-6 text-center"
-        style={{ background: '#0f172a', border: '1px solid rgba(239,68,68,0.3)' }}
+        style={{ background: 'var(--surface)', border: '1px solid rgba(239,68,68,0.3)' }}
         onClick={e => e.stopPropagation()}>
         <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center"
           style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)' }}>
           <Shield size={26} style={{ color: '#f87171' }} />
         </div>
-        <h2 className="text-base font-bold mb-2" style={{ color: '#e2e8f0' }}>
+        <h2 className="text-base font-bold mb-2" style={{ color: tp(dark) }}>
           {ar ? 'تم رفع الإنسيدينت' : 'Incident Reported'}
         </h2>
-        <p className="text-sm mb-1" style={{ color: '#94a3b8' }}>{form.employeeName}</p>
-        <p className="text-xs mb-5" style={{ color: '#475569' }}>
+        <p className="text-sm mb-1" style={{ color: tsColor(dark) }}>{form.employeeName}</p>
+        <p className="text-xs mb-5" style={{ color: T.faint }}>
           {ar
             ? 'تم تسجيل الإنسيدينت وسيصلك تأكيد.'
             : 'Incident logged. You will receive confirmation.'}
@@ -77,10 +81,10 @@ export function ReportIncidentModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)' }}
+      style={{ background: T.overlay, backdropFilter: 'blur(6px)' }}
       onClick={onClose}>
       <div className="w-full max-w-md rounded-3xl p-5 space-y-3"
-        style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)' }}
+        style={{ background: 'var(--surface)', border: `1px solid ${T.bdr}` }}
         onClick={e => e.stopPropagation()}>
 
         {/* Header */}
@@ -91,15 +95,15 @@ export function ReportIncidentModal({
               <Shield size={14} style={{ color: '#f87171' }} />
             </div>
             <div>
-              <h2 className="text-sm font-bold leading-none" style={{ color: '#e2e8f0' }}>
+              <h2 className="text-sm font-bold leading-none" style={{ color: tp(dark) }}>
                 {ar ? 'رفع إنسيدينت' : 'Report Incident'}
               </h2>
-              <p className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>
+              <p className="text-[10px] mt-0.5" style={{ color: tsColor(dark) }}>
                 {ar ? 'سيُسجَّل في سجل الأحداث' : 'Will be logged in incident register'}
               </p>
             </div>
           </div>
-          <button onClick={onClose}><X size={16} style={{ color: '#64748b' }} /></button>
+          <button onClick={onClose}><X size={16} style={{ color: tsColor(dark) }} /></button>
         </div>
 
         {/* Employee info card */}
@@ -107,7 +111,7 @@ export function ReportIncidentModal({
           style={{ background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.15)' }}>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-bold truncate" style={{ color: '#fca5a5' }}>{form.employeeName}</div>
-            <div className="flex flex-wrap gap-2 mt-1 text-[10px]" style={{ color: '#64748b' }}>
+            <div className="flex flex-wrap gap-2 mt-1 text-[10px]" style={{ color: tsColor(dark) }}>
               <span>{incLabel(form.incidentType)}</span>
               <span>·</span>
               <span>{fmtTime(form.occurredAt)}</span>
@@ -120,7 +124,7 @@ export function ReportIncidentModal({
 
         {/* Incident type */}
         <div>
-          <label className="text-[11px] mb-1.5 block" style={{ color: '#64748b' }}>
+          <label className="text-[11px] mb-1.5 block" style={{ color: tsColor(dark) }}>
             {ar ? 'نوع الإنسيدينت' : 'Incident Type'}
           </label>
           <div className="grid grid-cols-2 gap-2">
@@ -128,9 +132,9 @@ export function ReportIncidentModal({
               <button key={t} onClick={() => set('incidentType', t)}
                 className="py-2 px-3 rounded-xl text-[11px] font-medium text-start transition-all"
                 style={{
-                  background: form.incidentType === t ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.03)',
-                  border: form.incidentType === t ? '1px solid rgba(239,68,68,0.4)' : '1px solid rgba(255,255,255,0.07)',
-                  color: form.incidentType === t ? '#fca5a5' : '#64748b',
+                  background: form.incidentType === t ? 'rgba(239,68,68,0.15)' : T.panel,
+                  border: form.incidentType === t ? '1px solid rgba(239,68,68,0.4)' : `1px solid ${T.bdr}`,
+                  color: form.incidentType === t ? '#fca5a5' : tsColor(dark),
                 }}>
                 {incLabel(t)}
               </button>
@@ -140,7 +144,7 @@ export function ReportIncidentModal({
 
         {/* Severity */}
         <div>
-          <label className="text-[11px] mb-1.5 block" style={{ color: '#64748b' }}>
+          <label className="text-[11px] mb-1.5 block" style={{ color: tsColor(dark) }}>
             {ar ? 'الخطورة' : 'Severity'}
           </label>
           <div className="grid grid-cols-3 gap-2">
@@ -152,9 +156,9 @@ export function ReportIncidentModal({
               <button key={v} onClick={() => set('severity', v)}
                 className="py-2 rounded-xl text-[11px] font-semibold transition-all"
                 style={{
-                  background:  form.severity === v ? bg : 'rgba(255,255,255,0.03)',
-                  border:      form.severity === v ? `1px solid ${c}66` : '1px solid rgba(255,255,255,0.07)',
-                  color:       form.severity === v ? c : '#475569',
+                  background:  form.severity === v ? bg : T.panel,
+                  border:      form.severity === v ? `1px solid ${c}66` : `1px solid ${T.bdr}`,
+                  color:       form.severity === v ? c : T.faint,
                 }}>
                 {l}
               </button>
@@ -164,7 +168,7 @@ export function ReportIncidentModal({
 
         {/* Notes */}
         <div>
-          <label className="text-[11px] mb-1 block" style={{ color: '#64748b' }}>
+          <label className="text-[11px] mb-1 block" style={{ color: tsColor(dark) }}>
             {ar ? 'الملاحظات *' : 'Notes *'}
           </label>
           <textarea rows={3} className="inp w-full resize-none" autoFocus
@@ -184,7 +188,7 @@ export function ReportIncidentModal({
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose}
             className="px-4 py-1.5 rounded-xl text-xs font-medium"
-            style={{ color: '#64748b', border: '1px solid rgba(100,116,139,0.25)' }}>
+            style={{ color: tsColor(dark), border: '1px solid rgba(100,116,139,0.25)' }}>
             {ar ? 'إلغاء' : 'Cancel'}
           </button>
           <button onClick={submit} disabled={submitting}
@@ -209,6 +213,8 @@ export function UnauthorizedBreakAlert({
   onReport: (inc: IncidentReport) => void;
   ar: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const visible = agents.filter(a => !dismissed.has(a.agentId));
   if (!visible.length) return null;
@@ -259,8 +265,8 @@ export function UnauthorizedBreakAlert({
             <div key={a.agentId}
               className="flex items-center gap-2 py-2 px-2.5 rounded-xl"
               style={{
-                background: isLong ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.02)',
-                border: isLong ? '1px solid rgba(239,68,68,0.2)' : '1px solid rgba(255,255,255,0.05)',
+                background: isLong ? 'rgba(239,68,68,0.08)' : T.panel,
+                border: isLong ? '1px solid rgba(239,68,68,0.2)' : `1px solid ${T.bdr}`,
               }}>
               {/* Status dot */}
               <span className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse"
@@ -272,10 +278,10 @@ export function UnauthorizedBreakAlert({
                   {a.agentName}
                 </span>
                 {a.lastBreakStart && (
-                  <span className="text-[10px]" style={{ color: '#64748b' }}>
+                  <span className="text-[10px]" style={{ color: tsColor(dark) }}>
                     {ar ? 'منذ' : 'since'} {fmtTime(a.lastBreakStart)}
                     {durationMins > 0 && (
-                      <span className="ms-1 font-semibold" style={{ color: isLong ? '#f87171' : '#94a3b8' }}>
+                      <span className="ms-1 font-semibold" style={{ color: isLong ? '#f87171' : tsColor(dark) }}>
                         ({durationMins}{ar ? 'د' : 'm'})
                       </span>
                     )}
@@ -300,7 +306,7 @@ export function UnauthorizedBreakAlert({
               {/* Dismiss */}
               <button onClick={() => setDismissed(p => { const n = new Set(p); n.add(a.agentId); return n; })}
                 className="p-0.5 opacity-40 hover:opacity-70 transition-opacity flex-shrink-0">
-                <X size={11} style={{ color: '#64748b' }} />
+                <X size={11} style={{ color: tsColor(dark) }} />
               </button>
             </div>
           );
@@ -324,6 +330,8 @@ export function CrossSkillAlertPanel({
   onDispatch: (form: SkillDispatchForm) => void;
   ar: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [candidates, setCandidates] = useState<Record<string, CrossSkillCandidate[]>>({});
   const [loadingC, setLoadingC] = useState<Record<string, boolean>>({});
@@ -394,8 +402,8 @@ export function CrossSkillAlertPanel({
           return (
             <div key={q.queueId} className="rounded-xl overflow-hidden"
               style={{
-                background: isOpen ? 'rgba(251,146,60,0.06)' : 'rgba(255,255,255,0.02)',
-                border: isOpen ? '1px solid rgba(251,146,60,0.2)' : '1px solid rgba(255,255,255,0.06)',
+                background: isOpen ? 'rgba(251,146,60,0.06)' : T.panel,
+                border: isOpen ? '1px solid rgba(251,146,60,0.2)' : `1px solid ${T.bdr}`,
               }}>
               <div className="flex items-center gap-2 py-1.5 px-2.5">
                 <span className="w-5 h-5 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -419,7 +427,7 @@ export function CrossSkillAlertPanel({
                 </button>
                 <button onClick={() => setDismissed(p => { const n = new Set(p); n.add(q.queueId); return n; })}
                   className="p-0.5 opacity-40 hover:opacity-70 transition-opacity">
-                  <X size={11} style={{ color: '#64748b' }} />
+                  <X size={11} style={{ color: tsColor(dark) }} />
                 </button>
               </div>
 
@@ -428,12 +436,12 @@ export function CrossSkillAlertPanel({
                   {isLoad || isLoad === undefined ? (
                     <div className="flex items-center gap-2 py-2">
                       <Loader2 size={11} className="animate-spin" style={{ color: '#fb923c' }} />
-                      <span className="text-[11px]" style={{ color: '#64748b' }}>
+                      <span className="text-[11px]" style={{ color: tsColor(dark) }}>
                         {ar ? 'جارٍ البحث عن مرشحين...' : 'Finding candidates...'}
                       </span>
                     </div>
                   ) : !cands || cands.length === 0 ? (
-                    <p className="text-[11px] py-2" style={{ color: '#475569' }}>
+                    <p className="text-[11px] py-2" style={{ color: T.faint }}>
                       {ar ? 'لا يوجد إيجنت متاح بالمهارة المطلوبة' : 'No cross-skilled agents available right now'}
                     </p>
                   ) : (
@@ -441,10 +449,10 @@ export function CrossSkillAlertPanel({
                       {cands.map(c => (
                         <div key={c.employeeId}
                           className="flex items-center gap-2 py-1.5 px-2 rounded-xl"
-                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                          style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                           <div className="flex-1 min-w-0">
-                            <div className="text-[11px] font-medium truncate" style={{ color: '#e2e8f0' }}>{c.name}</div>
-                            <div className="text-[10px] flex items-center gap-1" style={{ color: '#475569' }}>
+                            <div className="text-[11px] font-medium truncate" style={{ color: tp(dark) }}>{c.name}</div>
+                            <div className="text-[10px] flex items-center gap-1" style={{ color: T.faint }}>
                               {c.function}
                               {c.proficiency && (
                                 <span className="px-1 rounded"
@@ -484,28 +492,30 @@ export function SkillDispatchModal({
   onSubmit: (f: SkillDispatchForm) => void;
   dispatching: boolean; done: boolean; ar: boolean;
 }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const [local, setLocal] = useState<SkillDispatchForm>(form);
 
   if (done) return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
+      style={{ background: T.overlay, backdropFilter: 'blur(6px)' }}
       onClick={onClose}>
       <div className="w-full max-w-sm rounded-3xl p-6 text-center"
-        style={{ background: '#0f172a', border: '1px solid rgba(34,197,94,0.3)' }}
+        style={{ background: 'var(--surface)', border: '1px solid rgba(34,197,94,0.3)' }}
         onClick={e => e.stopPropagation()}>
         <div className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center"
           style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)' }}>
           <CheckCircle2 size={26} style={{ color: '#4ade80' }} />
         </div>
-        <h2 className="text-base font-bold mb-2" style={{ color: '#e2e8f0' }}>
+        <h2 className="text-base font-bold mb-2" style={{ color: tp(dark) }}>
           {ar ? 'تم التوجيه بنجاح' : 'Dispatch Sent'}
         </h2>
-        <p className="text-sm mb-1" style={{ color: '#94a3b8' }}>
+        <p className="text-sm mb-1" style={{ color: tsColor(dark) }}>
           {ar
             ? `سيتم تحويل ${local.employeeName} إلى ${local.toFunction}`
             : `${local.employeeName} → ${local.toFunction}`}
         </p>
-        <p className="text-[11px] mb-5" style={{ color: '#334155' }}>
+        <p className="text-[11px] mb-5" style={{ color: T.faint }}>
           {ar
             ? 'تم إرسال إشعار للموظف وسيظهر التكليف في التقويم.'
             : 'Employee notified. Assignment visible in the calendar.'}
@@ -521,10 +531,10 @@ export function SkillDispatchModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
+      style={{ background: T.overlay, backdropFilter: 'blur(6px)' }}
       onClick={onClose}>
       <div className="w-full max-w-md rounded-3xl p-5 space-y-3"
-        style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)' }}
+        style={{ background: 'var(--surface)', border: `1px solid ${T.bdr}` }}
         onClick={e => e.stopPropagation()}>
 
         <div className="flex items-center justify-between">
@@ -533,19 +543,19 @@ export function SkillDispatchModal({
               style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.25)' }}>
               <ArrowLeftRight size={14} style={{ color: '#818cf8' }} />
             </div>
-            <h2 className="text-sm font-bold" style={{ color: '#e2e8f0' }}>
+            <h2 className="text-sm font-bold" style={{ color: tp(dark) }}>
               {ar ? 'توجيه كروس-سكيل' : 'Cross-Skill Dispatch'}
             </h2>
           </div>
-          <button onClick={onClose}><X size={16} style={{ color: '#64748b' }} /></button>
+          <button onClick={onClose}><X size={16} style={{ color: tsColor(dark) }} /></button>
         </div>
 
         {/* Employee + route */}
         <div className="rounded-xl p-3"
           style={{ background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)' }}>
-          <div className="text-sm font-bold mb-1" style={{ color: '#c7d2fe' }}>{local.employeeName}</div>
-          <div className="flex items-center gap-2 text-xs" style={{ color: '#64748b' }}>
-            <span style={{ color: '#94a3b8' }}>{local.fromFunction}</span>
+          <div className="text-sm font-bold mb-1" style={{ color: tp(dark) }}>{local.employeeName}</div>
+          <div className="flex items-center gap-2 text-xs" style={{ color: tsColor(dark) }}>
+            <span style={{ color: tsColor(dark) }}>{local.fromFunction}</span>
             <ArrowLeftRight size={11} style={{ color: '#6366f1' }} />
             <span style={{ color: '#fbbf24' }}>{local.toFunction}</span>
           </div>
@@ -554,7 +564,7 @@ export function SkillDispatchModal({
         {/* Time range */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[11px] mb-1 block" style={{ color: '#64748b' }}>
+            <label className="text-[11px] mb-1 block" style={{ color: tsColor(dark) }}>
               {ar ? 'من الساعة' : 'From'}
             </label>
             <input type="time" className="inp w-full"
@@ -562,7 +572,7 @@ export function SkillDispatchModal({
               onChange={e => setLocal(p => ({ ...p, startAt: `${p.startAt.slice(0, 11)}${e.target.value}:00` }))} />
           </div>
           <div>
-            <label className="text-[11px] mb-1 block" style={{ color: '#64748b' }}>
+            <label className="text-[11px] mb-1 block" style={{ color: tsColor(dark) }}>
               {ar ? 'حتى الساعة' : 'Until'}
             </label>
             <input type="time" className="inp w-full"
@@ -573,7 +583,7 @@ export function SkillDispatchModal({
 
         {/* Reason */}
         <div>
-          <label className="text-[11px] mb-1 block" style={{ color: '#64748b' }}>
+          <label className="text-[11px] mb-1 block" style={{ color: tsColor(dark) }}>
             {ar ? 'السبب' : 'Reason'}
           </label>
           <input className="inp w-full" value={local.reason}
@@ -581,7 +591,7 @@ export function SkillDispatchModal({
         </div>
 
         <p className="text-[10px] rounded-xl px-3 py-2.5"
-          style={{ background: 'rgba(255,255,255,0.03)', color: '#475569', border: '1px solid rgba(255,255,255,0.06)' }}>
+          style={{ background: T.panel, color: tsColor(dark), border: `1px solid ${T.bdr}` }}>
           {ar
             ? 'سيتلقى الموظف إشعاراً فورياً بتغيير الوظيفة وستظهر في التقويم.'
             : 'Employee receives an instant notification. The temporary assignment appears in the calendar for all.'}
@@ -590,7 +600,7 @@ export function SkillDispatchModal({
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose}
             className="px-4 py-1.5 rounded-xl text-xs font-medium"
-            style={{ color: '#64748b', border: '1px solid rgba(100,116,139,0.25)' }}>
+            style={{ color: tsColor(dark), border: '1px solid rgba(100,116,139,0.25)' }}>
             {ar ? 'إلغاء' : 'Cancel'}
           </button>
           <button onClick={() => onSubmit(local)} disabled={dispatching}

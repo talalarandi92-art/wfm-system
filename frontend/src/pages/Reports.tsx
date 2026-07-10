@@ -70,10 +70,20 @@ const downloadFile = async (url: string, params: any, filename: string, format: 
 };
 
 /* ─── Page ───────────────────────────────────────────────────────────────── */
+
+// Theme-aware neutral tokens (recipe of dd234d7) — semantic status colors stay fixed
+const tok = (dark: boolean) => ({
+  panel:   dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  bdr:     dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+  overlay: dark ? 'rgba(0,0,0,0.75)'       : 'rgba(15,23,42,0.45)',
+  faint:   dark ? '#475569'                : '#94a3b8',
+});
+
 export default function ReportsPage() {
   const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
   useInjectDsStyles();
+  const T = tok(dark);
 
   const [active, setActive]   = useState<Report>('home');
   const [meta, setMeta]       = useState<Meta | null>(null);
@@ -223,11 +233,11 @@ export default function ReportsPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }}
               className="text-xs rounded-xl px-3 py-1.5 outline-none"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
-            <span className="text-xs" style={{ color: '#475569' }}>→</span>
+              style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }} />
+            <span className="text-xs" style={{ color: T.faint }}>→</span>
             <input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }}
               className="text-xs rounded-xl px-3 py-1.5 outline-none"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
+              style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }} />
             <button onClick={() => handleDownload('xlsx')} disabled={dlLoading}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold disabled:opacity-60 transition-opacity hover:opacity-80"
               style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.35)', color: '#22c55e' }}>
@@ -257,8 +267,8 @@ export default function ReportsPage() {
       {active !== 'home' && (
         <div className="flex items-center gap-1.5 mb-5 text-xs">
           <button onClick={() => setActive('home')} style={{ color: '#818cf8' }}>{ar ? 'التقارير' : 'Reports'}</button>
-          <ChevronRight size={11} style={{ color: '#334155' }} />
-          <span style={{ color: '#e2e8f0' }}>
+          <ChevronRight size={11} style={{ color: T.faint }} />
+          <span style={{ color: tp(dark) }}>
             {REPORTS.find(r => r.id === active)?.[ar ? 'labelAr' : 'labelEn']}
           </span>
         </div>
@@ -293,7 +303,7 @@ export default function ReportsPage() {
       {/* Loading */}
       {active !== 'home' && loading && (
         <div className="flex items-center justify-center py-20">
-          <Loader2 size={24} className="animate-spin" style={{ color: '#475569' }} />
+          <Loader2 size={24} className="animate-spin" style={{ color: T.faint }} />
         </div>
       )}
 
@@ -315,13 +325,13 @@ export default function ReportsPage() {
             const mc = markerColor[e.marker] ?? '#64748b';
             return (
               <tr key={i} className="hover:bg-white/[0.015]"
-                style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                style={{ borderBottom: `1px solid ${T.bdr}` }}>
                 <Td><span className="font-mono text-[10px]">{typeof e.date === 'string' ? e.date.slice(0,10) : new Date(e.date).toISOString().slice(0,10)}</span></Td>
                 <Td>
-                  <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{e.employeeName}</div>
-                  <div className="text-[10px]" style={{ color: '#475569' }}>#{e.employeeNo}</div>
+                  <div className="text-xs font-medium" style={{ color: tp(dark) }}>{e.employeeName}</div>
+                  <div className="text-[10px]" style={{ color: T.faint }}>#{e.employeeNo}</div>
                 </Td>
-                <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.function}</span></Td>
+                <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.function}</span></Td>
                 <Td>
                   <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${mc}18`, color: mc }}>
                     {e.isWfh ? 'WFH' : e.marker}
@@ -342,13 +352,13 @@ export default function ReportsPage() {
       {active === 'late' && !loading && (
         <TableShell head={[ar ? '#' : '#', ar ? 'الموظف' : 'Employee', ar ? 'الوظيفة' : 'Function', ar ? 'مرات التأخر' : 'Late count', ar ? 'إجمالي الدقائق' : 'Total min', ar ? 'متوسط الدقائق' : 'Avg min']}>
           {lateData.map((e, i) => (
-            <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-              <Td><span style={{ color: e.rank <= 3 ? '#fbbf24' : '#475569' }} className="font-bold">{e.rank}</span></Td>
+            <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: `1px solid ${T.bdr}` }}>
+              <Td><span style={{ color: e.rank <= 3 ? '#fbbf24' : T.faint }} className="font-bold">{e.rank}</span></Td>
               <Td>
-                <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{e.employeeName ?? e.fullName}</div>
-                <div className="text-[10px]" style={{ color: '#475569' }}>#{e.employeeNo}</div>
+                <div className="text-xs font-medium" style={{ color: tp(dark) }}>{e.employeeName ?? e.fullName}</div>
+                <div className="text-[10px]" style={{ color: T.faint }}>#{e.employeeNo}</div>
               </Td>
-              <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.functionName}</span></Td>
+              <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.functionName}</span></Td>
               <Td color="#fb923c"><span className="font-bold">{e.lateCount}</span></Td>
               <Td color="#fb923c">{e.totalLateMin ?? e.totalLateMinutes}</Td>
               <Td color="#fbbf24">{e.avgLateMin ?? e.avgLateMinutes}</Td>
@@ -361,13 +371,13 @@ export default function ReportsPage() {
       {active === 'overtime' && !loading && (
         <TableShell head={[ar ? '#' : '#', ar ? 'الموظف' : 'Employee', ar ? 'الوظيفة' : 'Function', ar ? 'مرات الإضافي' : 'OT count', ar ? 'إجمالي الدقائق' : 'Total min', ar ? 'إجمالي الساعات' : 'Total hours']}>
           {otData.map((e, i) => (
-            <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-              <Td><span style={{ color: e.rank <= 3 ? '#fbbf24' : '#475569' }} className="font-bold">{e.rank}</span></Td>
+            <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: `1px solid ${T.bdr}` }}>
+              <Td><span style={{ color: e.rank <= 3 ? '#fbbf24' : T.faint }} className="font-bold">{e.rank}</span></Td>
               <Td>
-                <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{e.employeeName ?? e.fullName}</div>
-                <div className="text-[10px]" style={{ color: '#475569' }}>#{e.employeeNo}</div>
+                <div className="text-xs font-medium" style={{ color: tp(dark) }}>{e.employeeName ?? e.fullName}</div>
+                <div className="text-[10px]" style={{ color: T.faint }}>#{e.employeeNo}</div>
               </Td>
-              <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.functionName}</span></Td>
+              <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.functionName}</span></Td>
               <Td color="#22d3ee">{e.otCount ?? e.otDays}</Td>
               <Td color="#22d3ee">{e.totalOtMin ?? e.totalOtMinutes}</Td>
               <Td><span className="font-bold" style={{ color: '#22d3ee' }}>{e.totalOtHours ?? Math.round((e.totalOtMin ?? e.totalOtMinutes ?? 0) / 60)}h</span></Td>
@@ -397,14 +407,14 @@ export default function ReportsPage() {
             {reqData.map((e, i) => {
               const m = REQ_STATUS_META[e.status] ?? { ar: e.status, en: e.status, color: '#64748b' };
               return (
-                <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                  <Td><span className="text-[11px]" style={{ color: '#94a3b8' }}>{e.submittedAt ? new Date(e.submittedAt).toLocaleDateString(ar ? 'ar-KW' : 'en-GB', { day: '2-digit', month: 'short' }) : '—'}</span>{e.urgent && <span className="ms-1 text-[9px] text-red-400">●</span>}</Td>
+                <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: `1px solid ${T.bdr}` }}>
+                  <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.submittedAt ? new Date(e.submittedAt).toLocaleDateString(ar ? 'ar-KW' : 'en-GB', { day: '2-digit', month: 'short' }) : '—'}</span>{e.urgent && <span className="ms-1 text-[9px] text-red-400">●</span>}</Td>
                   <Td>
-                    <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{e.employeeName || '—'}</div>
-                    {e.employeeNo && <div className="text-[10px]" style={{ color: '#475569' }}>#{e.employeeNo}</div>}
+                    <div className="text-xs font-medium" style={{ color: tp(dark) }}>{e.employeeName || '—'}</div>
+                    {e.employeeNo && <div className="text-[10px]" style={{ color: T.faint }}>#{e.employeeNo}</div>}
                   </Td>
-                  <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.function || '—'}</span></Td>
-                  <Td><span className="text-[11px]" style={{ color: '#cbd5e1' }}>{e.type}</span></Td>
+                  <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.function || '—'}</span></Td>
+                  <Td><span className="text-[11px]" style={{ color: tp(dark) }}>{e.type}</span></Td>
                   <Td><span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: `${m.color}22`, color: m.color }}>{ar ? m.ar : m.en}</span></Td>
                 </tr>
               );
@@ -417,16 +427,16 @@ export default function ReportsPage() {
       {active === 'crossSkill' && !loading && (
         <TableShell head={[ar ? 'الوقت' : 'When', ar ? 'الموظف' : 'Employee', ar ? 'من' : 'From', ar ? 'إلى' : 'To', ar ? 'الحالة' : 'Status', ar ? 'طلب من' : 'Requested by']}>
           {csData.map((e, i) => (
-            <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-              <Td><span className="text-[11px]" style={{ color: '#94a3b8' }}>{e.startAt ? new Date(e.startAt).toLocaleString(ar ? 'ar-KW' : 'en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—'}</span></Td>
-              <Td><div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{e.employeeName || '—'}</div>{e.employeeNo && <div className="text-[10px]" style={{ color: '#475569' }}>#{e.employeeNo}</div>}</Td>
-              <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.fromFunction || '—'}</span></Td>
+            <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: `1px solid ${T.bdr}` }}>
+              <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.startAt ? new Date(e.startAt).toLocaleString(ar ? 'ar-KW' : 'en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—'}</span></Td>
+              <Td><div className="text-xs font-medium" style={{ color: tp(dark) }}>{e.employeeName || '—'}</div>{e.employeeNo && <div className="text-[10px]" style={{ color: T.faint }}>#{e.employeeNo}</div>}</Td>
+              <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.fromFunction || '—'}</span></Td>
               <Td><span className="text-[11px] font-semibold" style={{ color: '#fb923c' }}>{e.toFunction || '—'}</span></Td>
               <Td><span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: e.status === 'approved' ? 'rgba(52,211,153,0.15)' : 'rgba(148,163,184,0.15)', color: e.status === 'approved' ? '#34d399' : '#94a3b8' }}>{e.status}</span></Td>
-              <Td><span className="text-[11px]" style={{ color: '#64748b' }}>{e.requestedBy || '—'}</span></Td>
+              <Td><span className="text-[11px]" style={{ color: tsColor(dark) }}>{e.requestedBy || '—'}</span></Td>
             </tr>
           ))}
-          {csData.length === 0 && <tr><td colSpan={6} className="text-center py-10" style={{ color: '#475569' }}>{ar ? 'لا توجد تغطيات cross-skill بعد' : 'No cross-skill coverage yet'}</td></tr>}
+          {csData.length === 0 && <tr><td colSpan={6} className="text-center py-10" style={{ color: T.faint }}>{ar ? 'لا توجد تغطيات cross-skill بعد' : 'No cross-skill coverage yet'}</td></tr>}
         </TableShell>
       )}
 
@@ -446,17 +456,17 @@ export default function ReportsPage() {
       {/* ── Generic detailed-report table (permissions/breaks/audit/OT/coaching/outages/tech) ── */}
       {GENERIC[active] && active !== 'requestsDetailed' && !loading && (
         genRows.length === 0 ? (
-          <div className="text-center py-16 rounded-2xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#475569' }}>
+          <div className="text-center py-16 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: T.faint }}>
             {ar ? 'لا توجد بيانات في هذه الفترة' : 'No data in this period'}
           </div>
         ) : (
-          <div className="rounded-2xl overflow-x-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="rounded-2xl overflow-x-auto" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
             <table className="w-full border-collapse">
               <thead>
-                <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <tr style={{ background: dark ? 'rgba(0,0,0,0.25)' : 'rgba(15,23,42,0.05)', borderBottom: `1px solid ${T.bdr}` }}>
                   {Object.keys(genRows[0]).map(h => (
                     <th key={h} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2.5"
-                      style={{ color: '#475569', whiteSpace: 'nowrap' }}>
+                      style={{ color: T.faint, whiteSpace: 'nowrap' }}>
                       {h.replace(/([A-Z])/g, ' $1').trim()}
                     </th>
                   ))}
@@ -464,15 +474,15 @@ export default function ReportsPage() {
               </thead>
               <tbody>
                 {genRows.slice((page - 1) * limit, page * limit).map((row, i) => (
-                  <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                  <tr key={i} className="hover:bg-white/[0.015]" style={{ borderBottom: `1px solid ${T.bdr}` }}>
                     {Object.keys(genRows[0]).map(h => {
                       const v = row[h];
                       const isStatus = h === 'status' || h === 'slaStatus';
                       const col = isStatus
                         ? (String(v).toLowerCase().includes('approv') || v === 'Met' ? '#34d399'
                           : String(v).toLowerCase().includes('reject') || String(v).includes('Breach') ? '#f87171'
-                          : '#94a3b8')
-                        : '#94a3b8';
+                          : tsColor(dark))
+                        : tsColor(dark);
                       return (
                         <td key={h} className="px-3 py-2 text-[11px] tabular-nums align-middle"
                           style={{ color: col, whiteSpace: 'nowrap', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}
@@ -497,7 +507,7 @@ export default function ReportsPage() {
             .map(p => (
               <button key={p} onClick={() => setPage(p)}
                 className="w-8 h-8 rounded-lg text-xs font-medium"
-                style={{ background: p === page ? 'rgba(52,211,153,0.2)' : 'rgba(255,255,255,0.04)', color: p === page ? '#34d399' : '#64748b', border: p === page ? '1px solid rgba(52,211,153,0.35)' : '1px solid rgba(255,255,255,0.06)' }}>
+                style={{ background: p === page ? 'rgba(52,211,153,0.2)' : T.panel, color: p === page ? '#34d399' : tsColor(dark), border: p === page ? '1px solid rgba(52,211,153,0.35)' : `1px solid ${T.bdr}` }}>
                 {p}
               </button>
             ))}
@@ -510,15 +520,17 @@ export default function ReportsPage() {
 function rateColor(r: number) { return r >= 90 ? '#34d399' : r >= 75 ? '#fbbf24' : '#f87171'; }
 
 function TableShell({ head, children }: { head: string[]; children: React.ReactNode }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   return (
     <div className="rounded-2xl overflow-x-auto"
-      style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
       <table className="w-full border-collapse">
         <thead>
-          <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <tr style={{ background: dark ? 'rgba(0,0,0,0.25)' : 'rgba(15,23,42,0.05)', borderBottom: `1px solid ${T.bdr}` }}>
             {head.map((h, i) => (
               <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-4 py-2.5"
-                style={{ color: '#475569', whiteSpace: 'nowrap' }}>
+                style={{ color: T.faint, whiteSpace: 'nowrap' }}>
                 {h}
               </th>
             ))}
@@ -531,9 +543,10 @@ function TableShell({ head, children }: { head: string[]; children: React.ReactN
 }
 
 function Td({ children, color }: { children: React.ReactNode; color?: string }) {
+  const { dark } = useUiStore();
   return (
     <td className="px-4 py-2.5 text-xs tabular-nums align-middle whitespace-nowrap"
-      style={color ? { color } : { color: '#94a3b8' }}>
+      style={color ? { color } : { color: tsColor(dark) }}>
       {children}
     </td>
   );
@@ -544,15 +557,16 @@ function Td({ children, color }: { children: React.ReactNode; color?: string }) 
 // One KPI tile.
 function Kpi({ label, value, sub, color, icon: Icon }:
   { label: string; value: string | number; sub?: string; color: string; icon: any }) {
+  const { dark } = useUiStore();
   return (
     <div className="rounded-2xl p-3.5 flex flex-col gap-1.5"
       style={{ background: `${color}10`, border: `1px solid ${color}28` }}>
       <div className="flex items-center gap-1.5">
         <Icon size={13} style={{ color }} />
-        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#94a3b8' }}>{label}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: tsColor(dark) }}>{label}</span>
       </div>
       <div className="text-2xl font-extrabold tabular-nums" style={{ color }}>{value}</div>
-      {sub && <div className="text-[10px]" style={{ color: '#64748b' }}>{sub}</div>}
+      {sub && <div className="text-[10px]" style={{ color: tsColor(dark) }}>{sub}</div>}
     </div>
   );
 }
@@ -587,6 +601,8 @@ function buildTimeline(r: any, ar: boolean) {
 
 // Horizontal timeline strip for an expanded request.
 function Timeline({ row, ar }: { row: any; ar: boolean }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
   const steps = buildTimeline(row, ar);
   return (
     <div className="flex flex-wrap items-stretch gap-1 py-2">
@@ -598,10 +614,10 @@ function Timeline({ row, ar }: { row: any; ar: boolean }) {
               <s.icon size={12} style={{ color: s.color }} />
               <span className="text-[11px] font-bold" style={{ color: s.color }}>{s.label}</span>
             </div>
-            <div className="text-[10px] font-mono" style={{ color: '#cbd5e1' }}>{s.at || (ar ? '—' : 'pending')}</div>
-            {s.actor && <div className="text-[10px]" style={{ color: '#64748b' }}>{s.actor}</div>}
+            <div className="text-[10px] font-mono" style={{ color: tp(dark) }}>{s.at || (ar ? '—' : 'pending')}</div>
+            {s.actor && <div className="text-[10px]" style={{ color: tsColor(dark) }}>{s.actor}</div>}
           </div>
-          {i < steps.length - 1 && <ChevronRight size={14} style={{ color: '#334155' }} className={ar ? 'rotate-180' : ''} />}
+          {i < steps.length - 1 && <ChevronRight size={14} style={{ color: T.faint }} className={ar ? 'rotate-180' : ''} />}
         </div>
       ))}
     </div>
@@ -612,9 +628,10 @@ function Timeline({ row, ar }: { row: any; ar: boolean }) {
 function RequestsWorkflow({ ar, dark, rows, summary, page, limit, expanded, setExpanded }:
   { ar: boolean; dark: boolean; rows: any[]; summary: any; page: number; limit: number;
     expanded: number | null; setExpanded: (n: number | null) => void }) {
+  const T = tok(dark);
   if (!rows || rows.length === 0)
     return (
-      <div className="text-center py-16 rounded-2xl" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', color: '#475569' }}>
+      <div className="text-center py-16 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: T.faint }}>
         {ar ? 'لا توجد طلبات في هذه الفترة' : 'No requests in this period'}
       </div>
     );
@@ -640,24 +657,24 @@ function RequestsWorkflow({ ar, dark, rows, summary, page, limit, expanded, setE
 
       {/* Per-type breakdown */}
       {Array.isArray(s.byType) && s.byType.length > 0 && (
-        <div className="rounded-2xl overflow-x-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-          <div className="px-4 pt-3 pb-2 text-xs font-bold" style={{ color: '#cbd5e1' }}>
+        <div className="rounded-2xl overflow-x-auto" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+          <div className="px-4 pt-3 pb-2 text-xs font-bold" style={{ color: tp(dark) }}>
             {ar ? 'حسب نوع الطلب' : 'By request type'}
           </div>
           <table className="w-full border-collapse">
             <thead>
-              <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <tr style={{ background: dark ? 'rgba(0,0,0,0.25)' : 'rgba(15,23,42,0.05)', borderBottom: `1px solid ${T.bdr}` }}>
                 {[ar ? 'النوع' : 'Type', ar ? 'إجمالي' : 'Total', ar ? 'موافق' : 'Appr.', ar ? 'مرفوض' : 'Rej.',
                   ar ? 'قيد' : 'Pend.', ar ? 'متوسط (س)' : 'Avg h', 'SLA %'].map((h, i) => (
-                  <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2" style={{ color: '#475569' }}>{h}</th>
+                  <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2" style={{ color: T.faint }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {s.byType.map((t: any, i: number) => (
-                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                  <td className="px-3 py-2 text-[11px] font-medium" style={{ color: '#e2e8f0' }}>{t.type || t.typeCode}</td>
-                  <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#94a3b8' }}>{t.total}</td>
+                <tr key={i} style={{ borderBottom: `1px solid ${T.bdr}` }}>
+                  <td className="px-3 py-2 text-[11px] font-medium" style={{ color: tp(dark) }}>{t.type || t.typeCode}</td>
+                  <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: tsColor(dark) }}>{t.total}</td>
                   <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#34d399' }}>{t.approved}</td>
                   <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#f87171' }}>{t.rejected}</td>
                   <td className="px-3 py-2 text-[11px] tabular-nums" style={{ color: '#fbbf24' }}>{t.pending}</td>
@@ -671,13 +688,13 @@ function RequestsWorkflow({ ar, dark, rows, summary, page, limit, expanded, setE
       )}
 
       {/* Detail table with expandable approval-chain timeline */}
-      <div className="rounded-2xl overflow-x-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="rounded-2xl overflow-x-auto" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
         <table className="w-full border-collapse">
           <thead>
-            <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+            <tr style={{ background: dark ? 'rgba(0,0,0,0.25)' : 'rgba(15,23,42,0.05)', borderBottom: `1px solid ${T.bdr}` }}>
               {['', ar ? 'تاريخ التقديم' : 'Submitted', ar ? 'الموظف' : 'Employee', ar ? 'النوع' : 'Type',
                 ar ? 'التفاصيل' : 'Detail', ar ? 'الحالة' : 'Status', 'SLA', ar ? 'مدة الموافقة' : 'Approval'].map((h, i) => (
-                <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2.5" style={{ color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
+                <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-3 py-2.5" style={{ color: T.faint, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -692,19 +709,19 @@ function RequestsWorkflow({ ar, dark, rows, summary, page, limit, expanded, setE
                 <Fragment key={idx}>
                   <tr onClick={() => setExpanded(isOpen ? null : idx)}
                     className="cursor-pointer hover:bg-white/[0.025]"
-                    style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', background: isOpen ? 'rgba(129,140,248,0.06)' : undefined }}>
+                    style={{ borderBottom: `1px solid ${T.bdr}`, background: isOpen ? 'rgba(129,140,248,0.06)' : undefined }}>
                     <td className="px-3 py-2.5">
-                      {isOpen ? <ChevronDown size={13} style={{ color: '#818cf8' }} /> : <ChevronRight size={13} style={{ color: '#475569' }} className={ar ? 'rotate-180' : ''} />}
+                      {isOpen ? <ChevronDown size={13} style={{ color: '#818cf8' }} /> : <ChevronRight size={13} style={{ color: T.faint }} className={ar ? 'rotate-180' : ''} />}
                     </td>
-                    <td className="px-3 py-2.5 text-[11px] font-mono" style={{ color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                    <td className="px-3 py-2.5 text-[11px] font-mono" style={{ color: tsColor(dark), whiteSpace: 'nowrap' }}>
                       {r.submittedAt || '—'}{r.urgent === 'Yes' && <span className="ms-1" style={{ color: '#f87171' }}>●</span>}
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="text-[11px] font-medium" style={{ color: '#e2e8f0' }}>{r.employee || '—'}</div>
-                      {r.employeeNo && <div className="text-[10px]" style={{ color: '#475569' }}>#{r.employeeNo} · {r.function}</div>}
+                      <div className="text-[11px] font-medium" style={{ color: tp(dark) }}>{r.employee || '—'}</div>
+                      {r.employeeNo && <div className="text-[10px]" style={{ color: T.faint }}>#{r.employeeNo} · {r.function}</div>}
                     </td>
-                    <td className="px-3 py-2.5 text-[11px]" style={{ color: '#cbd5e1', whiteSpace: 'nowrap' }}>{r.type}</td>
-                    <td className="px-3 py-2.5 text-[11px]" style={{ color: '#94a3b8', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.detail}>{r.detail || '—'}</td>
+                    <td className="px-3 py-2.5 text-[11px]" style={{ color: tp(dark), whiteSpace: 'nowrap' }}>{r.type}</td>
+                    <td className="px-3 py-2.5 text-[11px]" style={{ color: tsColor(dark), maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.detail}>{r.detail || '—'}</td>
                     <td className="px-3 py-2.5">
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: `${stc}22`, color: stc }}>{r.status}</span>
                     </td>
@@ -712,14 +729,14 @@ function RequestsWorkflow({ ar, dark, rows, summary, page, limit, expanded, setE
                     <td className="px-3 py-2.5 text-[11px] tabular-nums" style={{ color: '#22d3ee' }}>{r.decisionHours != null ? `${r.decisionHours}h` : '—'}</td>
                   </tr>
                   {isOpen && (
-                    <tr style={{ background: 'rgba(0,0,0,0.18)' }}>
+                    <tr style={{ background: dark ? 'rgba(0,0,0,0.18)' : 'rgba(15,23,42,0.04)' }}>
                       <td colSpan={8} className="px-4 py-2">
                         <Timeline row={r} ar={ar} />
                         <div className="flex flex-wrap gap-x-6 gap-y-1 mt-1 text-[11px]">
-                          <span style={{ color: '#64748b' }}>{ar ? 'SLA المستحق' : 'SLA due'}: <span style={{ color: '#cbd5e1' }}>{r.slaDueAt || '—'}</span></span>
-                          {r.reason && <span style={{ color: '#64748b' }}>{ar ? 'السبب' : 'Reason'}: <span style={{ color: '#cbd5e1' }}>{r.reason}</span></span>}
-                          {r.rejectionReason && <span style={{ color: '#64748b' }}>{ar ? 'سبب الرفض' : 'Rejection'}: <span style={{ color: '#f87171' }}>{r.rejectionReason}</span></span>}
-                          {r.notes && <span style={{ color: '#64748b' }}>{ar ? 'ملاحظات' : 'Notes'}: <span style={{ color: '#cbd5e1' }}>{r.notes}</span></span>}
+                          <span style={{ color: tsColor(dark) }}>{ar ? 'SLA المستحق' : 'SLA due'}: <span style={{ color: tp(dark) }}>{r.slaDueAt || '—'}</span></span>
+                          {r.reason && <span style={{ color: tsColor(dark) }}>{ar ? 'السبب' : 'Reason'}: <span style={{ color: tp(dark) }}>{r.reason}</span></span>}
+                          {r.rejectionReason && <span style={{ color: tsColor(dark) }}>{ar ? 'سبب الرفض' : 'Rejection'}: <span style={{ color: '#f87171' }}>{r.rejectionReason}</span></span>}
+                          {r.notes && <span style={{ color: tsColor(dark) }}>{ar ? 'ملاحظات' : 'Notes'}: <span style={{ color: tp(dark) }}>{r.notes}</span></span>}
                         </div>
                       </td>
                     </tr>

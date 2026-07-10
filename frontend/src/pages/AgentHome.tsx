@@ -9,6 +9,14 @@ import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
 import { conformanceGrade } from '@/utils/format';
+import { tp, ts as tsColor } from '@/components/ds';
+
+// Theme-aware neutral tokens (semantic status colors stay hardcoded — same meaning in every theme)
+const neutralT = (dark: boolean) => ({
+  panel: dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  bdr:   dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+  faint: dark ? '#475569'                : '#94a3b8',
+});
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface AttSummary {
@@ -89,15 +97,17 @@ const REQ_TYPE_AR: Record<string, string> = {
 function Stat({ icon: Icon, label, value, sub, color = '#6366f1' }: {
   icon: any; label: string; value: string | number; sub?: string; color?: string;
 }) {
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   return (
-    <div className="p-3.5 rounded-2xl" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+    <div className="p-3.5 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
       <div className="flex items-center gap-2 mb-1.5">
         <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${color}22`, color }}>
           <Icon size={14} />
         </div>
         <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wide truncate">{label}</span>
       </div>
-      <p className="text-2xl font-bold text-white leading-none">{value}</p>
+      <p className="text-2xl font-bold leading-none" style={{ color: tp(dark) }}>{value}</p>
       {sub && <p className="text-[10px] text-slate-500 mt-1">{sub}</p>}
     </div>
   );
@@ -105,7 +115,8 @@ function Stat({ icon: Icon, label, value, sub, color = '#6366f1' }: {
 
 /* ─── Main ──────────────────────────────────────────────────────────────── */
 export default function AgentHome() {
-  const { lang } = useUiStore();
+  const { lang, dark } = useUiStore();
+  const T = neutralT(dark);
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const ar = lang === 'ar';
@@ -187,7 +198,7 @@ export default function AgentHome() {
         style={{ background: 'linear-gradient(135deg, rgba(67,56,202,0.25), rgba(99,102,241,0.1))', border: '1px solid rgba(99,102,241,0.2)' }}>
         <div>
           <p className="text-sm text-indigo-300">{greeting} 👋</p>
-          <h1 className="text-2xl font-bold text-white mt-0.5">{firstName || (ar ? 'مرحباً' : 'Welcome')}</h1>
+          <h1 className="text-2xl font-bold mt-0.5" style={{ color: tp(dark) }}>{firstName || (ar ? 'مرحباً' : 'Welcome')}</h1>
           <p className="text-xs text-slate-400 mt-1">
             {user?.employee?.functionName && <span>{user.employee.functionName} · </span>}
             {user?.employee?.employeeNo && <span>#{user.employee.employeeNo} · </span>}
@@ -196,11 +207,11 @@ export default function AgentHome() {
         </div>
         {/* Today's shift */}
         <div className="px-4 py-3 rounded-xl text-center min-w-[140px]"
-          style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.1)' }}>
+          style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
           <p className="text-[10px] text-slate-500 uppercase font-semibold mb-1">{ar ? 'ورديتي اليوم' : "Today's shift"}</p>
           {todayRow ? (
             <>
-              <p className="text-xl font-bold" style={{ color: MARKER_COLOR[todayRow.attendance_marker] ?? '#fff' }}>
+              <p className="text-xl font-bold" style={{ color: MARKER_COLOR[todayRow.attendance_marker] ?? tp(dark) }}>
                 {todayRow.shift_code || (ar ? (MARKER_AR[todayRow.attendance_marker] ?? todayRow.attendance_marker) : todayRow.attendance_marker)}
               </p>
               <p className="text-[10px] text-slate-400 mt-0.5">{ar ? (MARKER_AR[todayRow.attendance_marker] ?? '') : todayRow.attendance_marker}</p>
@@ -229,8 +240,8 @@ export default function AgentHome() {
         if (!livePerf) return null;
         if (!livePerf.linked) {
           return (
-            <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-              <p className="text-sm font-bold text-white mb-1">{ar ? '⚡ أدائي اللحظي' : '⚡ My Live Performance'}</p>
+            <div className="rounded-2xl p-4" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+              <p className="text-sm font-bold mb-1" style={{ color: tp(dark) }}>{ar ? '⚡ أدائي اللحظي' : '⚡ My Live Performance'}</p>
               <p className="text-xs text-slate-500">{ar ? 'حسابك غير مربوط بحساب سبرينكلر بعد — سيظهر أداؤك اللحظي تلقائياً بمجرد الربط.' : 'Your account is not linked to a Sprinklr agent yet — your live performance will appear automatically once linked.'}</p>
             </div>
           );
@@ -239,9 +250,9 @@ export default function AgentHome() {
         const tl = (livePerf.timeline ?? []) as { status: string; duration_sec: number }[];
         const tlTotal = tl.reduce((s, x) => s + (x.duration_sec || 0), 0) || 1;
         return (
-          <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <div className="rounded-2xl p-4" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
             <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-              <p className="text-sm font-bold text-white">{ar ? '⚡ أدائي اللحظي' : '⚡ My Live Performance'}{d?.stat_date ? <span className="text-[11px] text-slate-500 font-normal"> · {d.stat_date}</span> : null}</p>
+              <p className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? '⚡ أدائي اللحظي' : '⚡ My Live Performance'}{d?.stat_date ? <span className="text-[11px] text-slate-500 font-normal"> · {d.stat_date}</span> : null}</p>
               {lv && (
                 <span className="flex items-center gap-2 px-3 py-1 rounded-xl text-xs font-bold" style={{ background: `${m}1a`, border: `1px solid ${m}40`, color: m }}>
                   <span className="w-2 h-2 rounded-full" style={{ background: m, boxShadow: `0 0 8px ${m}` }} />
@@ -258,7 +269,7 @@ export default function AgentHome() {
                     { l: ar ? 'الإشغال' : 'Utilization', v: d.utilizationPct != null ? `${d.utilizationPct}%` : '—', c: '#f59e0b' },
                     { l: ar ? 'زمن أول رد' : 'First Response', v: fS(d.avg_response_seconds), c: '#06b6d4' },
                   ].map(k => (
-                    <div key={k.l} className="rounded-xl p-2.5" style={{ background: 'rgba(0,0,0,0.2)' }}>
+                    <div key={k.l} className="rounded-xl p-2.5" style={{ background: T.panel }}>
                       <div className="text-lg font-bold tabular-nums" style={{ color: k.c }}>{k.v}</div>
                       <div className="text-[10px] text-slate-500 mt-0.5">{k.l}</div>
                     </div>
@@ -266,7 +277,7 @@ export default function AgentHome() {
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-2">
                   {[
-                    { l: ar ? 'عمل' : 'Working', v: fM(d.total_working_minutes), c: '#e2e8f0' },
+                    { l: ar ? 'عمل' : 'Working', v: fM(d.total_working_minutes), c: tp(dark) },
                     { l: ar ? 'مشغول' : 'Busy', v: fM(d.busy_minutes), c: '#818cf8' },
                     { l: ar ? 'خامل' : 'Idle', v: fM(d.idle_no_case_minutes), c: '#f59e0b' },
                     { l: ar ? 'هولد' : 'Hold', v: fM(d.idle_with_case_minutes), c: '#22d3ee' },
@@ -295,7 +306,7 @@ export default function AgentHome() {
       {/* ── This-month metrics ── */}
       {summary && (
         <div>
-          <h2 className="text-sm font-bold text-white mb-2 flex items-center gap-2">
+          <h2 className="text-sm font-bold mb-2 flex items-center gap-2" style={{ color: tp(dark) }}>
             <Activity size={15} className="text-indigo-400" /> {ar ? 'ملخص هذا الشهر' : 'This Month'}
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -316,8 +327,8 @@ export default function AgentHome() {
       {overview?.linked && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Shift distribution (my rotation) */}
-          <div className="lg:col-span-1 p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+          <div className="lg:col-span-1 p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+            <h2 className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: tp(dark) }}>
               <Activity size={15} className="text-purple-400" /> {ar ? 'توزيع ورديّاتي (السنة)' : 'My Shift Mix (YTD)'}
             </h2>
             {overview.shiftRate && overview.shiftRate.working > 0 ? (
@@ -330,24 +341,24 @@ export default function AgentHome() {
                 ].map(s => (
                   <div key={s.label} className="flex items-center gap-2">
                     <span className="text-[10px] text-slate-400 w-20 flex-shrink-0">{s.label}</span>
-                    <div className="flex-1 h-4 rounded-md overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <div className="flex-1 h-4 rounded-md overflow-hidden" style={{ background: T.panel }}>
                       <div className="h-full rounded-md" style={{ width: `${Math.max(s.p, 2)}%`, background: s.c }} />
                     </div>
-                    <span className="text-[10px] font-bold text-white w-14 text-end">{s.v} · {s.p}%</span>
+                    <span className="text-[10px] font-bold w-14 text-end" style={{ color: tp(dark) }}>{s.v} · {s.p}%</span>
                   </div>
                 ))}
                 <div className="flex items-center gap-3 pt-1 text-[10px] text-slate-500">
-                  <span>{ar ? 'أيام عمل:' : 'Worked:'} <b className="text-white">{overview.shiftRate.working}</b></span>
-                  <span>{ar ? 'راحات:' : 'Off:'} <b className="text-white">{overview.shiftRate.offDays}</b></span>
-                  <span>{ar ? 'إجازات:' : 'Leave:'} <b className="text-white">{overview.shiftRate.leaveDays}</b></span>
+                  <span>{ar ? 'أيام عمل:' : 'Worked:'} <b style={{ color: tp(dark) }}>{overview.shiftRate.working}</b></span>
+                  <span>{ar ? 'راحات:' : 'Off:'} <b style={{ color: tp(dark) }}>{overview.shiftRate.offDays}</b></span>
+                  <span>{ar ? 'إجازات:' : 'Leave:'} <b style={{ color: tp(dark) }}>{overview.shiftRate.leaveDays}</b></span>
                 </div>
               </div>
             ) : <p className="text-xs text-slate-600 text-center py-4">{ar ? 'لا بيانات' : 'No data'}</p>}
           </div>
 
           {/* Adherence (التزام) */}
-          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+          <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+            <h2 className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: tp(dark) }}>
               <CheckCircle2 size={15} className="text-emerald-400" /> {ar ? 'التزامي (30 يوم)' : 'My Adherence (30d)'}
             </h2>
             {overview.adherence && overview.adherence.days > 0 ? (
@@ -360,7 +371,7 @@ export default function AgentHome() {
                     <p className="text-[10px] text-slate-500">{ar ? 'الالتزام' : 'Adherence'}</p>
                   </div>
                   <div>
-                    <p className="text-xl font-bold text-slate-300">{overview.adherence.avgConformance ?? '—'}<span className="text-sm">%</span></p>
+                    <p className="text-xl font-bold" style={{ color: tp(dark) }}>{overview.adherence.avgConformance ?? '—'}<span className="text-sm">%</span></p>
                     <p className="text-[10px] text-slate-500">{ar ? 'المطابقة' : 'Conformance'}</p>
                   </div>
                 </div>
@@ -370,9 +381,9 @@ export default function AgentHome() {
           </div>
 
           {/* Score (سكور) */}
-          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
                 <Award size={15} className="text-amber-400" /> {ar ? 'تقييمي' : 'My Score'}
               </h2>
               <button onClick={() => navigate('/scorecard')} className="text-[10px] text-indigo-400 hover:underline">{ar ? 'التفاصيل' : 'Details'}</button>
@@ -380,7 +391,7 @@ export default function AgentHome() {
             {overview.score ? (
               <div className="space-y-1.5">
                 <div className="flex items-end gap-3">
-                  <p className="text-3xl font-bold text-white">{overview.score.netPoints ?? '—'}</p>
+                  <p className="text-3xl font-bold" style={{ color: tp(dark) }}>{overview.score.netPoints ?? '—'}</p>
                   <p className="text-[10px] text-slate-500 mb-1.5">{ar ? 'نقطة' : 'pts'}</p>
                   {overview.score.functionRank && (
                     <span className="ms-auto text-[11px] font-bold text-amber-300 px-2 py-1 rounded-lg" style={{ background: 'rgba(245,158,11,0.15)' }}>
@@ -389,8 +400,8 @@ export default function AgentHome() {
                   )}
                 </div>
                 <div className="flex items-center gap-3 text-[10px] text-slate-500">
-                  {overview.score.qualityPct !== null && <span>{ar ? 'جودة' : 'Quality'}: <b className="text-white">{overview.score.qualityPct}%</b></span>}
-                  {overview.score.fcrPct !== null && <span>FCR: <b className="text-white">{overview.score.fcrPct}%</b></span>}
+                  {overview.score.qualityPct !== null && <span>{ar ? 'جودة' : 'Quality'}: <b style={{ color: tp(dark) }}>{overview.score.qualityPct}%</b></span>}
+                  {overview.score.fcrPct !== null && <span>FCR: <b style={{ color: tp(dark) }}>{overview.score.fcrPct}%</b></span>}
                 </div>
                 <p className="text-[10px] text-slate-600">{overview.score.periodName}</p>
               </div>
@@ -401,9 +412,9 @@ export default function AgentHome() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* ── Recent attendance ── */}
-        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
               <CalendarClock size={15} className="text-indigo-400" /> {ar ? 'جدولي' : 'My Schedule'}
             </h2>
             <button onClick={() => navigate('/attendance')} className="text-[10px] text-indigo-400 hover:underline flex items-center gap-0.5">
@@ -412,11 +423,11 @@ export default function AgentHome() {
           </div>
           <div className="space-y-1">
             {recent.slice(0, 8).map((r, i) => (
-              <div key={i} className="flex items-center justify-between px-2.5 py-2 rounded-lg group/row" style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <div key={i} className="flex items-center justify-between px-2.5 py-2 rounded-lg group/row" style={{ background: T.panel }}>
                 <div className="flex items-center gap-2.5">
                   <span className="text-[11px] text-slate-500 w-12">{fmtD(r.attendance_date)}</span>
-                  <span className="text-xs font-bold text-white w-12">{r.shift_code || '—'}</span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${MARKER_COLOR[r.attendance_marker] ?? '#64748b'}22`, color: MARKER_COLOR[r.attendance_marker] ?? '#94a3b8' }}>
+                  <span className="text-xs font-bold w-12" style={{ color: tp(dark) }}>{r.shift_code || '—'}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${MARKER_COLOR[r.attendance_marker] ?? '#64748b'}22`, color: MARKER_COLOR[r.attendance_marker] ?? tsColor(dark) }}>
                     {ar ? (MARKER_AR[r.attendance_marker] ?? r.attendance_marker) : r.attendance_marker}
                   </span>
                 </div>
@@ -442,15 +453,15 @@ export default function AgentHome() {
         {/* ── OT requests awaiting my acknowledgement ── */}
         {otPending.length > 0 && (
           <div className="p-4 rounded-2xl" style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.35)' }}>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+            <h2 className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: tp(dark) }}>
               <Zap size={15} style={{ color: '#a78bfa' }} /> {ar ? 'طلبات أوفر تايم بانتظار إقرارك' : 'Overtime awaiting your acknowledgement'}
               <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold" style={{ background: 'rgba(139,92,246,0.25)', color: '#c4b5fd' }}>{otPending.length}</span>
             </h2>
             <div className="space-y-2">
               {otPending.map((o: any) => (
-                <div key={o.id} className="flex items-center justify-between gap-2 rounded-xl p-2.5" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                <div key={o.id} className="flex items-center justify-between gap-2 rounded-xl p-2.5" style={{ background: T.panel }}>
                   <div className="min-w-0">
-                    <div className="text-[12px] font-semibold text-white">{o.d} · {o.start}–{o.end} <span className="text-slate-400">({o.dur} {ar ? 'دقيقة' : 'min'})</span></div>
+                    <div className="text-[12px] font-semibold" style={{ color: tp(dark) }}>{o.d} · {o.start}–{o.end} <span className="text-slate-400">({o.dur} {ar ? 'دقيقة' : 'min'})</span></div>
                     <div className="text-[10px] text-slate-400">{o.function ? o.function + ' · ' : ''}{ar ? 'طلب من الإدارة لتغطية نقص' : 'requested by management to cover a gap'}</div>
                   </div>
                   <div className="flex gap-1.5 flex-shrink-0">
@@ -464,9 +475,9 @@ export default function AgentHome() {
         )}
 
         {/* ── My requests ── */}
-        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
               <FileText size={15} className="text-indigo-400" /> {ar ? 'طلباتي' : 'My Requests'}
             </h2>
             <button onClick={() => navigate('/requests')}
@@ -478,9 +489,9 @@ export default function AgentHome() {
             {requests.map(r => {
               const st = STATUS_META[r.status] ?? STATUS_META.pending;
               return (
-                <div key={r.id} className="flex items-center justify-between px-2.5 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                <div key={r.id} className="flex items-center justify-between px-2.5 py-2 rounded-lg" style={{ background: T.panel }}>
                   <div className="min-w-0">
-                    <p className="text-xs text-white truncate">{ar ? (REQ_TYPE_AR[r.type] ?? r.type) : r.type}</p>
+                    <p className="text-xs truncate" style={{ color: tp(dark) }}>{ar ? (REQ_TYPE_AR[r.type] ?? r.type) : r.type}</p>
                     <p className="text-[9px] text-slate-600">{r.submitted_at ? fmtD(r.submitted_at) : ''}</p>
                   </div>
                   <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg flex-shrink-0" style={{ background: `${st.color}22`, color: st.color }}>
@@ -498,17 +509,17 @@ export default function AgentHome() {
       {myAtt?.linked && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Leave balance */}
-          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+          <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+            <h2 className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: tp(dark) }}>
               <Plane size={15} className="text-indigo-400" /> {ar ? 'رصيد إجازاتي' : 'My Leave Balance'}
             </h2>
             {myAtt.leaveBalance.length > 0 ? (
               <div className="space-y-2">
                 {myAtt.leaveBalance.map(l => (
-                  <div key={l.leaveType} className="flex items-center justify-between px-2.5 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    <span className="text-xs text-slate-200">{ar ? (LEAVE_AR[l.leaveType] ?? l.leaveType) : l.leaveType.replace(/_/g, ' ')}</span>
+                  <div key={l.leaveType} className="flex items-center justify-between px-2.5 py-2 rounded-lg" style={{ background: T.panel }}>
+                    <span className="text-xs" style={{ color: tp(dark) }}>{ar ? (LEAVE_AR[l.leaveType] ?? l.leaveType) : l.leaveType.replace(/_/g, ' ')}</span>
                     <div className="flex items-center gap-3 text-[10px]">
-                      <span className="text-slate-500">{ar ? 'مستحق' : 'Entitled'} <b className="text-white">{l.entitlement}</b></span>
+                      <span className="text-slate-500">{ar ? 'مستحق' : 'Entitled'} <b style={{ color: tp(dark) }}>{l.entitlement}</b></span>
                       <span className="text-amber-400">{ar ? 'مأخوذ' : 'Taken'} <b>{l.taken}</b></span>
                       {l.pending > 0 && <span className="text-purple-400">{ar ? 'معلّق' : 'Pending'} <b>{l.pending}</b></span>}
                       <span className="font-bold px-2 py-0.5 rounded-md" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
@@ -526,14 +537,14 @@ export default function AgentHome() {
           </div>
 
           {/* Permissions this year + own ops contacts */}
-          <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+          <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+            <h2 className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: tp(dark) }}>
               <Clock size={15} className="text-amber-400" /> {ar ? 'استئذاناتي (السنة)' : 'My Permissions (YTD)'}
             </h2>
             {myAtt.permissions ? (
               <div className="grid grid-cols-3 gap-2 mb-3">
-                <div className="text-center px-2 py-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <p className="text-xl font-bold text-white">{myAtt.permissions.total}</p>
+                <div className="text-center px-2 py-2 rounded-lg" style={{ background: T.panel }}>
+                  <p className="text-xl font-bold" style={{ color: tp(dark) }}>{myAtt.permissions.total}</p>
                   <p className="text-[9px] text-slate-500">{ar ? 'الإجمالي' : 'Total'}</p>
                 </div>
                 <div className="text-center px-2 py-2 rounded-lg" style={{ background: 'rgba(34,197,94,0.08)' }}>
@@ -551,7 +562,7 @@ export default function AgentHome() {
               <div className="pt-2 border-t border-white/5">
                 {myAtt.ops.hasContactData ? (
                   <div className="flex items-center gap-3 text-[10px] text-slate-400">
-                    <span>{ar ? 'تواصلاتي (الشهر)' : 'My contacts (mo)'}: <b className="text-white">{myAtt.ops.contacts}</b></span>
+                    <span>{ar ? 'تواصلاتي (الشهر)' : 'My contacts (mo)'}: <b style={{ color: tp(dark) }}>{myAtt.ops.contacts}</b></span>
                     <span className="text-emerald-400">+{myAtt.ops.positive}</span>
                     <span className="text-red-400">−{myAtt.ops.negative}</span>
                   </div>
@@ -566,9 +577,9 @@ export default function AgentHome() {
 
       {/* ── Tardiness vs authorized permission (this month) ── */}
       {myAtt?.linked && myAtt.monthly && (
-        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
               <AlertCircle size={15} className="text-red-400" /> {ar ? 'التأخير مقابل الاستئذان (هذا الشهر)' : 'Tardiness vs Permission (this month)'}
             </h2>
             {myAtt.monthly.conformancePct != null && (() => {
@@ -603,7 +614,7 @@ export default function AgentHome() {
               <p className="text-[9px] text-slate-500">{ar ? 'خروج مبكر باستئذان' : 'Early-out (permitted)'}</p>
             </div>
           </div>
-          <p className="text-[10px] mt-2" style={{ color: '#475569' }}>
+          <p className="text-[10px] mt-2" style={{ color: T.faint }}>
             {ar ? 'التأخير = دخول متأخر أو خروج/إغلاق سيستم مبكر بدون استئذان معتمد لنفس اليوم.'
                 : 'Tardiness = late arrival or early departure/system-close without an approved permission that day.'}
           </p>
@@ -612,8 +623,8 @@ export default function AgentHome() {
 
       {/* ── Punch & system times (detailed, self only) ── */}
       {myAtt?.linked && myAtt.recent.length > 0 && (
-        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-          <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+        <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+          <h2 className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: tp(dark) }}>
             <Clock size={15} className="text-cyan-400" /> {ar ? 'بصمتي والسيستم (تفصيلي)' : 'My Punch & System Log'}
           </h2>
           <div className="overflow-x-auto">
@@ -634,12 +645,12 @@ export default function AgentHome() {
               <tbody>
                 {myAtt.recent.slice(0, 14).map((d, i) => (
                   <tr key={i} className="border-t border-white/5">
-                    <td className="py-1.5 px-2 text-slate-300">{fmtD(d.date)}</td>
-                    <td className="py-1.5 px-2 font-bold" style={{ color: MARKER_COLOR[d.marker] ?? '#fff' }}>{d.shiftCode || (ar ? (MARKER_AR[d.marker] ?? d.marker) : d.marker)}</td>
-                    <td className="py-1.5 px-2 text-center text-white">{d.punchIn ?? (d.missingPunch ? <span className="text-red-400">{ar ? 'ناقص' : 'miss'}</span> : '—')}</td>
-                    <td className="py-1.5 px-2 text-center text-white">{d.punchOut ?? '—'}</td>
-                    <td className="py-1.5 px-2 text-center text-slate-300">{d.systemLogin ?? (d.missingSystem ? <span className="text-red-400">{ar ? 'ناقص' : 'miss'}</span> : '—')}</td>
-                    <td className="py-1.5 px-2 text-center text-slate-300">{d.systemLogout ?? '—'}</td>
+                    <td className="py-1.5 px-2" style={{ color: tsColor(dark) }}>{fmtD(d.date)}</td>
+                    <td className="py-1.5 px-2 font-bold" style={{ color: MARKER_COLOR[d.marker] ?? tp(dark) }}>{d.shiftCode || (ar ? (MARKER_AR[d.marker] ?? d.marker) : d.marker)}</td>
+                    <td className="py-1.5 px-2 text-center" style={{ color: tp(dark) }}>{d.punchIn ?? (d.missingPunch ? <span className="text-red-400">{ar ? 'ناقص' : 'miss'}</span> : '—')}</td>
+                    <td className="py-1.5 px-2 text-center" style={{ color: tp(dark) }}>{d.punchOut ?? '—'}</td>
+                    <td className="py-1.5 px-2 text-center" style={{ color: tsColor(dark) }}>{d.systemLogin ?? (d.missingSystem ? <span className="text-red-400">{ar ? 'ناقص' : 'miss'}</span> : '—')}</td>
+                    <td className="py-1.5 px-2 text-center" style={{ color: tsColor(dark) }}>{d.systemLogout ?? '—'}</td>
                     <td className="py-1.5 px-2 text-center">
                       {d.punchLate > 0 ? (
                         <span className="inline-flex items-center gap-1" style={{ color: d.lateIsTardy ? '#f87171' : '#22c55e' }}>
@@ -679,28 +690,28 @@ export default function AgentHome() {
         ].map(a => (
           <button key={a.to} onClick={() => navigate(a.to)}
             className="flex items-center gap-2.5 p-3.5 rounded-2xl transition-all hover:bg-white/[0.06]"
-            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+            style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
             <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${a.color}22`, color: a.color }}>
               <a.icon size={17} />
             </div>
-            <span className="text-xs font-semibold text-slate-200">{a.label}</span>
+            <span className="text-xs font-semibold" style={{ color: tp(dark) }}>{a.label}</span>
           </button>
         ))}
       </div>
 
       {/* ── Notifications ── */}
       {notifs.length > 0 && (
-        <div className="p-4 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-          <h2 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
+        <div className="p-4 rounded-2xl" style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+          <h2 className="text-sm font-bold flex items-center gap-2 mb-3" style={{ color: tp(dark) }}>
             <Bell size={15} className="text-indigo-400" /> {ar ? 'الإشعارات' : 'Notifications'}
           </h2>
           <div className="space-y-1">
             {notifs.map(n => (
               <div key={n.id} className="flex items-start gap-2.5 px-2.5 py-2 rounded-lg"
-                style={{ background: n.isRead ? 'rgba(255,255,255,0.02)' : 'rgba(99,102,241,0.08)' }}>
+                style={{ background: n.isRead ? T.panel : 'rgba(99,102,241,0.08)' }}>
                 {!n.isRead && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0" />}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs text-white truncate">{ar ? (n.titleAr || n.title) : (n.title || n.titleAr)}</p>
+                  <p className="text-xs truncate" style={{ color: tp(dark) }}>{ar ? (n.titleAr || n.title) : (n.title || n.titleAr)}</p>
                   {(n.body || n.bodyAr) && <p className="text-[10px] text-slate-500 truncate">{ar ? (n.bodyAr || n.body) : (n.body || n.bodyAr)}</p>}
                 </div>
                 <span className="text-[9px] text-slate-600 flex-shrink-0">{fmtDT(n.createdAt)}</span>

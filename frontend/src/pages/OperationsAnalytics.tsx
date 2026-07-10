@@ -6,6 +6,14 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
+import { tp, ts as tsColor } from '@/components/ds';
+
+// Theme-aware neutral tokens (semantic status colors stay hardcoded — same meaning in every theme)
+const neutralT = (dark: boolean) => ({
+  panel: dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  bdr:   dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.10)',
+  faint: dark ? '#475569'                : '#94a3b8',
+});
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface Batch {
@@ -52,16 +60,18 @@ const FIELD_LABELS: Record<string, { ar: string; en: string }> = {
 function KpiCard({ icon: Icon, label, value, sub, color = '#6366f1' }: {
   icon: any; label: string; value: string | number; sub?: string; color?: string;
 }) {
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   return (
     <div className="flex items-center gap-3 p-4 rounded-2xl"
-      style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+      style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
       <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
         style={{ background: `${color}22`, color }}>
         <Icon size={18} />
       </div>
       <div className="min-w-0">
         <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wide">{label}</p>
-        <p className="text-xl font-bold text-white leading-tight">{value}</p>
+        <p className="text-xl font-bold leading-tight" style={{ color: tp(dark) }}>{value}</p>
         {sub && <p className="text-[10px] text-slate-500">{sub}</p>}
       </div>
     </div>
@@ -73,23 +83,26 @@ function HBar({ label, value, max, color = '#6366f1', suffix = '' }: {
   label: string; value: number; max: number; color?: string; suffix?: string;
 }) {
   const pct = max ? Math.round(100 * value / max) : 0;
+  const { dark } = useUiStore();
+  const T = neutralT(dark);
   return (
     <div className="flex items-center gap-3">
       <span className="text-xs text-slate-400 w-40 truncate text-start" title={label}>{label}</span>
-      <div className="flex-1 h-5 rounded-lg overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)' }}>
+      <div className="flex-1 h-5 rounded-lg overflow-hidden" style={{ background: T.panel }}>
         <div className="h-full rounded-lg transition-all flex items-center px-2"
           style={{ width: `${Math.max(pct, 3)}%`, background: `linear-gradient(90deg, ${color}cc, ${color}77)` }}>
         </div>
       </div>
-      <span className="text-xs font-bold text-white w-16 text-end">{value.toLocaleString()}{suffix}</span>
+      <span className="text-xs font-bold w-16 text-end" style={{ color: tp(dark) }}>{value.toLocaleString()}{suffix}</span>
     </div>
   );
 }
 
 /* ─── Main Page ─────────────────────────────────────────────────────────── */
 export default function OperationsAnalyticsPage() {
-  const { lang } = useUiStore();
+  const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
+  const T = neutralT(dark);
 
   const [batches, setBatches]       = useState<Batch[]>([]);
   const [activeBatch, setActiveBatch] = useState<Batch | null>(null);
@@ -217,7 +230,7 @@ export default function OperationsAnalyticsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white">{ar ? 'تحليلات العمليات' : 'Operations Analytics'}</h1>
+          <h1 className="text-xl font-bold" style={{ color: tp(dark) }}>{ar ? 'تحليلات العمليات' : 'Operations Analytics'}</h1>
           <p className="text-xs text-slate-500 mt-0.5">
             {ar ? 'تحليل بيانات التواصل: الحجم بالساعة، الأسباب، الدفع، السيرفي، وترتيب الموظفين' : 'Contact data analysis: hourly volume, reasons, payments, surveys, agent ranking'}
           </p>
@@ -227,10 +240,10 @@ export default function OperationsAnalyticsPage() {
             <select
               value={activeBatch?.id ?? ''}
               onChange={e => setActiveBatch(batches.find(b => b.id === e.target.value) ?? null)}
-              className="px-3 py-2 rounded-xl text-xs text-white outline-none cursor-pointer"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+              className="px-3 py-2 rounded-xl text-xs outline-none cursor-pointer"
+              style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }}>
               {batches.map(b => (
-                <option key={b.id} value={b.id} style={{ background: '#0f1527' }}>
+                <option key={b.id} value={b.id} style={{ background: 'var(--surface)' }}>
                   {b.file_name} ({fmtD(b.period_from)} → {fmtD(b.period_to)})
                 </option>
               ))}
@@ -239,13 +252,13 @@ export default function OperationsAnalyticsPage() {
           {activeBatch && (
             <>
               <button onClick={exportExcel}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-slate-300 hover:text-white hover:bg-white/10 transition-all"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs transition-all"
+                style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tsColor(dark) }}>
                 <Download size={13} /> {ar ? 'تصدير' : 'Export'}
               </button>
               <button onClick={() => deleteBatch(activeBatch.id)}
                 className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
-                style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+                style={{ border: `1px solid ${T.bdr}` }}>
                 <Trash2 size={13} />
               </button>
             </>
@@ -255,7 +268,7 @@ export default function OperationsAnalyticsPage() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 p-1 rounded-2xl w-fit"
-        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold transition-all
@@ -288,8 +301,8 @@ export default function OperationsAnalyticsPage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Top Reasons */}
                 <div className="p-5 rounded-2xl space-y-3"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+                  <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
                     <AlertCircle size={14} className="text-amber-400" />
                     {ar ? 'أهم 10 أسباب تواصل' : 'Top 10 Contact Reasons'}
                   </h3>
@@ -299,15 +312,15 @@ export default function OperationsAnalyticsPage() {
 
                 {/* Payments */}
                 <div className="p-5 rounded-2xl space-y-3"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+                  <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: tp(dark) }}>
                     <CreditCard size={14} className="text-emerald-400" />
                     {ar ? 'طرق الدفع' : 'Payment Methods'}
                   </h3>
                   {payments.length === 0 ? <p className="text-xs text-slate-600 py-4 text-center">{ar ? 'لا بيانات' : 'No data'}</p> :
                     payments.slice(0, 10).map(p => <HBar key={p.method} label={p.method} value={p.count} max={maxPayment} color="#22c55e" />)}
 
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2 pt-3">
+                  <h3 className="text-sm font-bold flex items-center gap-2 pt-3" style={{ color: tp(dark) }}>
                     <BarChart3 size={14} className="text-indigo-400" />
                     {ar ? 'القنوات' : 'Channels'}
                   </h3>
@@ -317,8 +330,8 @@ export default function OperationsAnalyticsPage() {
 
               {/* Hourly heatmap */}
               <div className="p-5 rounded-2xl"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-4">
+                style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+                <h3 className="text-sm font-bold flex items-center gap-2 mb-4" style={{ color: tp(dark) }}>
                   <Clock size={14} className="text-cyan-400" />
                   {ar ? 'حجم التواصل بالساعة' : 'Hourly Contact Volume'}
                 </h3>
@@ -332,7 +345,7 @@ export default function OperationsAnalyticsPage() {
                         <div className="w-full rounded-t-md transition-all relative"
                           style={{
                             height: `${Math.max(4, Math.round(96 * cnt / hourMax))}px`,
-                            background: cnt ? 'linear-gradient(180deg,#06b6d4,#0e7490)' : 'rgba(255,255,255,0.05)',
+                            background: cnt ? 'linear-gradient(180deg,#06b6d4,#0e7490)' : T.panel,
                           }}>
                           <span className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-cyan-300 opacity-0 group-hover:opacity-100 font-bold whitespace-nowrap">{cnt.toLocaleString()}</span>
                         </div>
@@ -365,8 +378,8 @@ export default function OperationsAnalyticsPage() {
                                 <td key={h} className="w-7 h-5 rounded text-center text-[8px] font-bold"
                                   title={`${d} ${h}:00 — ${cnt}`}
                                   style={{
-                                    background: cnt ? `rgba(99,102,241,${0.15 + intensity * 0.75})` : 'rgba(255,255,255,0.02)',
-                                    color: intensity > 0.5 ? '#fff' : '#64748b',
+                                    background: cnt ? `rgba(99,102,241,${0.15 + intensity * 0.75})` : T.panel,
+                                    color: intensity > 0.5 ? '#fff' : tsColor(dark),
                                   }}>
                                   {cnt || ''}
                                 </td>
@@ -385,17 +398,17 @@ export default function OperationsAnalyticsPage() {
           {/* ══ AGENTS ══ */}
           {tab === 'agents' && (
             <div className="rounded-2xl overflow-hidden"
-              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-              <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+              <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: `1px solid ${T.bdr}` }}>
                 <input value={agentQ} onChange={e => setAgentQ(e.target.value)}
                   placeholder={ar ? 'بحث عن موظف...' : 'Search agent...'}
                   className="flex-1 rounded-xl text-xs py-1.5 px-3 outline-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
-                <span className="text-[10px]" style={{ color: '#475569' }}>{agents.filter(a => !agentQ || (a.agent || '').toLowerCase().includes(agentQ.toLowerCase())).length} {ar ? 'موظف' : 'agents'}</span>
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}`, color: tp(dark) }} />
+                <span className="text-[10px]" style={{ color: T.faint }}>{agents.filter(a => !agentQ || (a.agent || '').toLowerCase().includes(agentQ.toLowerCase())).length} {ar ? 'موظف' : 'agents'}</span>
               </div>
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-slate-500 text-[10px] uppercase" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <tr className="text-slate-500 text-[10px] uppercase" style={{ background: T.panel }}>
                     <th className="px-4 py-3 text-start">#</th>
                     <th className="px-4 py-3 text-start">{ar ? 'الموظف' : 'Agent'}</th>
                     <th className="px-4 py-3 text-center">{ar ? 'التواصلات' : 'Contacts'}</th>
@@ -413,15 +426,15 @@ export default function OperationsAnalyticsPage() {
                       <td className="px-4 py-2.5">
                         <span className={`inline-flex w-6 h-6 rounded-lg items-center justify-center text-[10px] font-bold
                           ${a.rank <= 3 ? 'text-amber-300' : 'text-slate-500'}`}
-                          style={{ background: a.rank <= 3 ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.04)' }}>
+                          style={{ background: a.rank <= 3 ? 'rgba(245,158,11,0.15)' : T.panel }}>
                           {a.rank}
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <p className="text-white font-semibold">{a.agent}</p>
+                        <p className="font-semibold" style={{ color: tp(dark) }}>{a.agent}</p>
                         {a.agentLogin && <p className="text-[9px] text-slate-600">{a.agentLogin}</p>}
                       </td>
-                      <td className="px-4 py-2.5 text-center font-bold text-white">{a.contacts.toLocaleString()}</td>
+                      <td className="px-4 py-2.5 text-center font-bold" style={{ color: tp(dark) }}>{a.contacts.toLocaleString()}</td>
                       <td className="px-4 py-2.5 text-center text-slate-400">{a.activeDays}</td>
                       <td className="px-4 py-2.5 text-center text-slate-400">{a.avgPerDay ?? '—'}</td>
                       <td className="px-4 py-2.5 text-center text-slate-400">{a.surveySent}</td>
@@ -447,14 +460,14 @@ export default function OperationsAnalyticsPage() {
           {/* ══ TRENDS ══ */}
           {tab === 'trends' && (
             <div className="p-5 rounded-2xl space-y-4"
-              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
-              <h3 className="text-sm font-bold text-white">{ar ? 'الحجم الأسبوعي (أسبوع مقابل أسبوع)' : 'Weekly Volume (Week over Week)'}</h3>
+              style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
+              <h3 className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'الحجم الأسبوعي (أسبوع مقابل أسبوع)' : 'Weekly Volume (Week over Week)'}</h3>
               {trends.length === 0 ? <p className="text-xs text-slate-600 py-6 text-center">{ar ? 'لا بيانات' : 'No data'}</p> : (
                 <div className="space-y-2.5">
                   {trends.map(t => (
                     <div key={t.week} className="flex items-center gap-3">
                       <span className="text-[10px] text-slate-500 w-20 flex-shrink-0">{t.week}</span>
-                      <div className="flex-1 h-7 rounded-lg overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                      <div className="flex-1 h-7 rounded-lg overflow-hidden" style={{ background: T.panel }}>
                         <div className="h-full rounded-lg flex items-center px-2.5 gap-2"
                           style={{ width: `${Math.max(5, Math.round(100 * t.contacts / maxTrend))}%`,
                             background: 'linear-gradient(90deg,#4338ca,#6366f1aa)' }}>
@@ -493,7 +506,7 @@ export default function OperationsAnalyticsPage() {
                 ) : (
                   <>
                     <FileSpreadsheet size={36} className="text-indigo-400" />
-                    <p className="text-sm font-semibold text-white">{ar ? 'اسحب ملف Excel/CSV هنا أو اضغط للاختيار' : 'Drop Excel/CSV file here or click to browse'}</p>
+                    <p className="text-sm font-semibold" style={{ color: tp(dark) }}>{ar ? 'اسحب ملف Excel/CSV هنا أو اضغط للاختيار' : 'Drop Excel/CSV file here or click to browse'}</p>
                     <p className="text-[10px] text-slate-500">{ar ? 'حتى 50 ميجا — يتم اكتشاف الأعمدة تلقائياً' : 'Up to 50MB — columns auto-detected'}</p>
                   </>
                 )}
@@ -514,28 +527,28 @@ export default function OperationsAnalyticsPage() {
               {/* Preview */}
               {preview && (
                 <div className="p-5 rounded-2xl space-y-4"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-white">{ar ? 'معاينة قبل الحفظ' : 'Preview Before Commit'}</h3>
+                    <h3 className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'معاينة قبل الحفظ' : 'Preview Before Commit'}</h3>
                     <span className="text-[10px] text-slate-500">{preview.sheetName} · {preview.totalRows.toLocaleString()} {ar ? 'صف' : 'rows'}</span>
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
-                    <div className="p-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <div className="p-2 rounded-xl" style={{ background: T.panel }}>
                       <p className="text-[9px] text-slate-500">{ar ? 'الصفوف' : 'Rows'}</p>
-                      <p className="text-sm font-bold text-white">{preview.totalRows.toLocaleString()}</p>
+                      <p className="text-sm font-bold" style={{ color: tp(dark) }}>{preview.totalRows.toLocaleString()}</p>
                     </div>
-                    <div className="p-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <div className="p-2 rounded-xl" style={{ background: T.panel }}>
                       <p className="text-[9px] text-slate-500">{ar ? 'من' : 'From'}</p>
-                      <p className="text-sm font-bold text-white">{preview.periodFrom ? fmtD(preview.periodFrom) : '—'}</p>
+                      <p className="text-sm font-bold" style={{ color: tp(dark) }}>{preview.periodFrom ? fmtD(preview.periodFrom) : '—'}</p>
                     </div>
-                    <div className="p-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <div className="p-2 rounded-xl" style={{ background: T.panel }}>
                       <p className="text-[9px] text-slate-500">{ar ? 'إلى' : 'To'}</p>
-                      <p className="text-sm font-bold text-white">{preview.periodTo ? fmtD(preview.periodTo) : '—'}</p>
+                      <p className="text-sm font-bold" style={{ color: tp(dark) }}>{preview.periodTo ? fmtD(preview.periodTo) : '—'}</p>
                     </div>
-                    <div className="p-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                    <div className="p-2 rounded-xl" style={{ background: T.panel }}>
                       <p className="text-[9px] text-slate-500">{ar ? 'القنوات' : 'Channels'}</p>
-                      <p className="text-sm font-bold text-white">{preview.channels.length}</p>
+                      <p className="text-sm font-bold" style={{ color: tp(dark) }}>{preview.channels.length}</p>
                     </div>
                   </div>
 
@@ -578,14 +591,14 @@ export default function OperationsAnalyticsPage() {
               {/* Existing batches */}
               {batches.length > 0 && (
                 <div className="p-4 rounded-2xl space-y-1"
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  style={{ background: T.panel, border: `1px solid ${T.bdr}` }}>
                   <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">{ar ? 'الدفعات المحفوظة' : 'Saved Batches'}</p>
                   {batches.map(b => (
                     <div key={b.id} className="flex items-center justify-between px-3 py-2 rounded-xl hover:bg-white/[0.04] transition-all group">
                       <div className="flex items-center gap-2.5 min-w-0">
                         <FileSpreadsheet size={14} className="text-indigo-400 flex-shrink-0" />
                         <div className="min-w-0">
-                          <p className="text-xs text-white truncate">{b.file_name}</p>
+                          <p className="text-xs truncate" style={{ color: tp(dark) }}>{b.file_name}</p>
                           <p className="text-[9px] text-slate-600">
                             {fmtD(b.period_from)} → {fmtD(b.period_to)} · {b.total_rows?.toLocaleString()} {ar ? 'صف' : 'rows'} · {b.uploaded_by_name}
                           </p>
