@@ -46,16 +46,24 @@ Per-hub target ≤6 tabs via grouping, not deletion (every current URL keeps a r
 - **Analytics 8 → 5**: People360 · Workforce (workforce+insights+attrition) · Forecast · Fairness · Reports.
 - Kill cross-hub dupes: ONE "Changes", ONE forecast surface per audience (planner vs analyst).
 
-### R2 — Backend canonicalization (the duplication engine) ⚠ number-changing risk
-Method proven by the recon-controller split: parallel-run, byte-diff, then retire.
-1. **Coverage/hourly HC**: crown `interval-headcount` (schedule-ops) as THE computation; re-point
-   `coverage/hourly`, `coverage-intervals`, `week-forecast` internals to one shared service; byte-diff responses; retire dupes.
-2. **Forecasting**: `forecasting` module engine = the only Erlang/forecast math; staffing/event/
-   week-forecast/kpi-source consume it as a library (no re-implementations).
-3. **Scorecard**: `scorecard_monthly` = the one scored source; `roster-v2/scorecard` + `ops/scorecards`
-   re-pointed or explicitly re-labeled as raw operational views (never presented as "the scorecard").
-4. **360**: one Agent360/Team360 component + one endpoint pair; other copies become links.
-5. `attendance-recon` module rename/split into domain services so no future feature lands there by default.
+### R2 — Backend canonicalization ✅ EXECUTED 2026-07-10 (core scope)
+Byte-diff method held throughout — ZERO number changes shipped.
+1. ✅ **Coverage kernel** (64d3988): `coverage-core.ts` — 7 duplicate copies + 1 dead helper → 1 module,
+   9 endpoints delegate, 28/28 captures byte-identical. Inventory finding: full one-data-core
+   adapter-ization impossible without changing numbers (different spines/filters by design) —
+   the shared thing IS the bucketing kernel. **R2.1b remaining**: same kernel copies in
+   generator/analyst/requests/skills (write paths — need their own gates).
+2. ✅ **Erlang core** (f063e4c): `common/erlang.ts` — 3 private copies → 1 (capacity copy crowned
+   verbatim; forecasting keeps its historical edge guards via wrappers — edges genuinely differed).
+   measuredAht×3/cpoContacts×2 NOT merged (different SQL grains/roundings). 24/24 byte-identical.
+   Bonus: forecasting.engine.spec was silently not running (jest @common mapping) — fixed, 112 tests.
+   Inventory verdict: the 5 "forecasts" are mostly DIFFERENT concepts (volume vs staffing-requirement
+   vs CPO lever vs sprinklr-daily vs headcount-blend) — correctly NOT merged.
+3. ✅ **Scorecard** (c1d65ba): inventory PROVED one source of truth already (scorecard_monthly/entries,
+   3 views of it) — fixed the labeling collision only (official vs board-view vs operational-trend).
+4. ✅ **360** (b1e4449): shared agent360 kit (dur/confColor/Kpi360Card were byte-copies) + deep
+   cross-links carrying the person (?person=/?tl=); pages NOT force-merged (different engines).
+5. ⏳ `attendance-recon` domain rename/split — deferred (R2.1b companion).
 
 ### R3 — Queue-driven breaks + smartest roster
 1. **Break scheduler v2**: optimize break slots against `headcount_intervals` (15-min) + live queue
