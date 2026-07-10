@@ -1,0 +1,3 @@
+# Real secrets and database dumps must never enter git
+prod.env
+backups/
