@@ -281,6 +281,11 @@ module.exports = function build() {
       else if (c.kind === 'holiday' && !prevDayBleed) holidayOt = Math.min(plausibleOt, otNetCap); // worked the holiday ITSELF = holiday OT (net-capped)
       else if (computable) { const otRaw = otSystemMin || 0; otMin = Math.min(otRaw, OT_CEIL); otCappedFlag = otRaw > OT_CEIL; }  // #1: OT past shift on a working day — ceiling on EVERY basis incl. punch (pickWindow only capped the system path)
       else if ((c.kind === 'off' || c.kind === 'leave' || c.kind === 'comp') && !prevDayBleed) offdayOt = plausibleOt;  // OFF/leave worked SAME day = off-day OT (net-capped)
+      // BR-OT-006 (Director 2026-07-10): paid-OT rounding — a residual over 45 min rounds UP to the full
+      // hour; 45 min or less stays EXACT ("15 دقيقة بتضل متل ما هي، اكتر من 45 بتصير ساعة"). Applied to
+      // the 3 disjoint buckets AFTER every clamp (can never exceed OT_CEIL — 300 is a multiple of 60).
+      const roundOt45 = (m) => { m = Math.max(0, Math.round(m || 0)); const r = m % 60; return r > 45 ? m - r + 60 : m; };
+      otMin = roundOt45(otMin); offdayOt = roundOt45(offdayOt); holidayOt = roundOt45(holidayOt);
       // #9: OFF/holiday OT credited on login-only evidence (no biometric punch) → soft data-quality flag (never reverse).
       const otLoginOnly = (offdayOt > 0 || holidayOt > 0) && !hasPunch;
       const presenceLive = leaveOnHoliday ? 'holiday'
