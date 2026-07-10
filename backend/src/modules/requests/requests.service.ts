@@ -2,6 +2,7 @@
 import { DataSource } from 'typeorm';
 import { v4 as uuid } from 'uuid';
 import { LeaveBalancesService } from '@modules/leave-balances/leave-balances.service';
+import { BreakPolicyService } from '@modules/breaks/break-policy.service';
 import {
   CreateShiftSwapDto,
   CreateLeaveDto,
@@ -28,6 +29,7 @@ export class RequestsService {
   constructor(
     private readonly ds: DataSource,
     private readonly leaveBalances: LeaveBalancesService,
+    private readonly breakPolicy: BreakPolicyService,
   ) {}
 
   /* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1360,6 +1362,20 @@ export class RequestsService {
     const dur = eMin - sMin;
     if (dur <= 0) throw new BadRequestException('وقت النهاية يجب أن يكون بعد وقت البداية');
     if (dur < 5 || dur > 240) throw new BadRequestException('مدة البريك بين 5 و 240 دقيقة');
+
+    // ENTITLEMENT GATE (B1): max_sessions + total_daily_minutes from the resolved
+    // break policy (break_policies_v2). A manual exception may only pass with an
+    // explicit override flag — recorded in the audit trail.
+    const effDate = dto.breakDate
+      ?? (await this.ds.query(`SELECT (NOW() AT TIME ZONE 'Asia/Kuwait')::date::text AS d`))[0].d;
+    const ent = await this.breakPolicy.enforceEntitlement(tenantId, dto.employeeId, effDate, dur);
+    if (!ent.allowed) {
+      if (!dto.overrideEntitlement) {
+        throw new BadRequestException(`${ent.reasonAr} — ${ent.reason}`);
+      }
+      await this.breakPolicy.audit(tenantId, null, 'breaks.entitlement.override', 'request', null,
+        `manual break request: employee=${dto.employeeId} date=${effDate} requested=${dur}m over limit (${ent.reason})`);
+    }
 
     const requestId = uuid();
 

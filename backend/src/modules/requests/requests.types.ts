@@ -25,6 +25,7 @@ export interface CreateBreakDto {
   breakType?: 'manual' | 'lunch' | 'coffee' | 'prayer' | 'medical' | 'other';
   reason?: string;
   notes?: string;
+  overrideEntitlement?: boolean;   // explicit exception past the daily break entitlement — audited
 }
 
 export interface CreateOvertimeDto {

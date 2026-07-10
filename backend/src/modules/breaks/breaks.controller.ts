@@ -6,6 +6,7 @@ import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger'
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { BreaksService } from './breaks.service';
+import { BreakPolicyService } from './break-policy.service';
 
 @ApiTags('Breaks')
 @ApiBearerAuth()
@@ -13,7 +14,10 @@ import { BreaksService } from './breaks.service';
 @RequirePermissions('hc.view')   // WFM break planning by default; agent-facing methods relax below
 @Controller('breaks')
 export class BreaksController {
-  constructor(private readonly breaksService: BreaksService) {}
+  constructor(
+    private readonly breaksService: BreaksService,
+    private readonly policyService: BreakPolicyService,
+  ) {}
 
   // ── Auto-generate break schedule ─────────────────────────────────────────────
   @Post('generate')
@@ -22,7 +26,35 @@ export class BreaksController {
     @Request() req: any,
     @Body() body: { scheduleDate: string; functionId?: string },
   ) {
-    return this.breaksService.generate(req.user.tenantId, body.scheduleDate, body.functionId);
+    return this.breaksService.generate(
+      req.user.tenantId, body.scheduleDate, body.functionId,
+      { id: req.user.id, email: req.user.email },
+    );
+  }
+
+  // ── Break policies v2 (Smart Break Management policy matrix) ─────────────────
+  @Get('policies-v2')
+  @ApiOperation({ summary: 'List break policies v2 (entitlement/pattern/protected-hours matrix)' })
+  listPoliciesV2(@Request() req: any) {
+    return this.policyService.listPolicies(req.user.tenantId);
+  }
+
+  @Patch('policies-v2/:id')
+  @RequirePermissions('hc.edit')
+  @ApiOperation({ summary: 'Update a break policy v2 row (audited)' })
+  async updatePolicyV2(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const res = await this.policyService.updatePolicy(req.user.tenantId, id, body);
+    if (!res) throw new BadRequestException('Policy not found');
+    await this.policyService.audit(
+      req.user.tenantId, { id: req.user.id, email: req.user.email },
+      'breaks.policy.updated', 'break_policies_v2', id,
+      `changed: ${Object.keys(body).join(', ')}`,
+    );
+    return { success: true, policy: res.after };
   }
 
   // ── Daily break schedule ──────────────────────────────────────────────────────
@@ -116,9 +148,13 @@ export class BreaksController {
       requestedEnd: string;
       reason?: string;
       breakSlotId?: string;
+      overrideEntitlement?: boolean;
     },
   ) {
-    return this.breaksService.submitRequest(req.user.tenantId, req.user.employeeId, body);
+    return this.breaksService.submitRequest(
+      req.user.tenantId, req.user.employeeId, body,
+      { id: req.user.id, email: req.user.email },
+    );
   }
 
   // ── Break requests: list ──────────────────────────────────────────────────────

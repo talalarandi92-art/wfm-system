@@ -1,40 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-
-export interface ShiftWindow {
-  employeeId: string;
-  employeeNo: string;
-  employeeName: string;
-  gender: string;
-  functionId: string;
-  shiftStart: Date; // absolute datetime
-  shiftEnd: Date;
-  tenantId: string;
-}
+import { CoverageRebuildService } from '../coverage/coverage-rebuild.service';
+import { BreakPolicyService } from './break-policy.service';
+import {
+  BreakPolicyV2Row,
+  functionSimultaneousCap,
+  generationWindow,
+  pickMostSpecificPolicy,
+  plannedDateFor,
+  sessionPattern,
+  slotPositionBucket,
+  wallClockHHMM,
+} from './break-policy.logic';
 
 export interface BreakTypeRow {
   id: string;
   name: string;
-  name_ar: string;
   duration_minutes: number;
-  color: string;
-  icon: string;
-  is_mandatory: boolean;
   is_prayer: boolean;
-  applies_gender: string;
-  max_per_shift: number;
-  sort_order: number;
-}
-
-export interface BreakPolicyRow {
-  id: string;
-  break_type_id: string;
-  allowed_count: number;
-  earliest_start_offset: number;
-  latest_start_offset: number;
-  min_gap_between_breaks: number;
-  priority: number;
-  function_id: string | null;
+  is_active?: boolean;
 }
 
 export interface PrayerTimesRow {
@@ -43,50 +27,81 @@ export interface PrayerTimesRow {
   maghrib: string | null;
 }
 
-export interface CoverageInterval {
-  intervalStart: string; // HH:MM
-  intervalEnd: string;
-  functionId: string;
-  requiredHc: number;
-  scheduledHc: number;
-}
-
 export interface GeneratedSlot {
   employee_id: string;
-  schedule_date: string;
+  schedule_date: string;   // roster day
+  planned_date: string;    // calendar day planned_start belongs to (cross-midnight fix)
   break_type_id: string;
   slot_number: number;
-  planned_start: string; // HH:MM
+  planned_start: string;   // HH:MM wall-clock
   planned_end: string;
+  earliest_start: string;  // HH:MM — planned −30min bounded by protected window
+  latest_start: string;    // HH:MM — planned +30min bounded by protected window
+  generated_reason: string;
+  priority_score: number;
   generated_by: 'auto';
   tenant_id: string;
+}
+
+export interface EmployeeFairnessDelta {
+  delta: number;
+  early: number;
+  mid: number;
+  late: number;
 }
 
 export interface ScheduleResult {
   slots: GeneratedSlot[];
   warnings: string[];
-  fairnessMap: Map<string, number>; // employeeId → slot quality score
+  fairnessMap: Map<string, EmployeeFairnessDelta>;
+  coverageSource: 'headcount_intervals' | 'fallback';
 }
 
+type CoverageCell = { required: number; scheduled: number; onBreak: number };
+
+const BUCKET_MS = 15 * 60000;
+const DEFAULT_COVERAGE_RATIO = 0.7; // fallback floor when no policy threshold
+
+/**
+ * Optimizer v2 (B2) — policy-driven greedy staggering with fairness, real
+ * coverage floor and anti-clustering. Evolution of the v1 greedy scheduler:
+ *  - session count/durations come from break_policies_v2 (most-specific wins),
+ *    NOT from the break_types hardcode;
+ *  - protected first/last windows + min_work_before_first + min_gap enforced;
+ *  - coverage floor = required_hc from headcount_intervals (rebuilt in-process
+ *    from roster_days when the date has no rows); the old required=scheduled
+ *    live fallback survives ONLY when the rebuild yields nothing, and such
+ *    slots are marked generated_reason='fallback-coverage';
+ *  - anti-clustering: per-interval simultaneous-break caps per FUNCTION
+ *    (thresholds.max_simultaneous or computed) and per TEAM MANAGER
+ *    (thresholds.max_simultaneous_per_team, default 1);
+ *  - cross-midnight correct: slots carry planned_date; coverage keys are
+ *    absolute 15-min epoch buckets (no wall-clock collisions).
+ */
 @Injectable()
 export class BreakSchedulerService {
   private readonly logger = new Logger(BreakSchedulerService.name);
 
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly policyService: BreakPolicyService,
+    private readonly coverageRebuild: CoverageRebuildService,
+  ) {}
 
-  /**
-   * Core auto-scheduler: Greedy Staggering with fairness + coverage constraint.
-   *
-   * Algorithm:
-   * 1. Load break types + policies + prayer times for the date.
-   * 2. Sort employees by fairness score ascending (lowest score = most deprived → gets priority).
-   * 3. For each employee, per policy (sorted by priority desc):
-   *    a. Find all valid start-time candidates within the policy window.
-   *    b. For each candidate, check coverage: scheduled_hc - currently_breaking >= min_required.
-   *    c. Pick first valid candidate. If none, log warning.
-   * 4. Mark the time slot as occupied (update in-memory coverage map).
-   * 5. Return all generated slots + warnings.
-   */
+  private bucketKey(t: Date, fnId: string): string {
+    return `${Math.floor(t.getTime() / BUCKET_MS)}|${fnId}`;
+  }
+
+  /** Every aligned 15-min bucket a [start,end) span touches — a break starting
+   *  off-grid (e.g. 14:06–14:21) occupies BOTH the 14:00 and 14:15 buckets. */
+  private bucketsOf(start: Date, end: Date): Date[] {
+    const out: Date[] = [];
+    for (let tm = Math.floor(start.getTime() / BUCKET_MS) * BUCKET_MS; tm < end.getTime(); tm += BUCKET_MS) {
+      out.push(new Date(tm));
+    }
+    return out;
+  }
+
   async generateForDate(
     tenantId: string,
     scheduleDate: string,
@@ -94,26 +109,29 @@ export class BreakSchedulerService {
   ): Promise<ScheduleResult> {
     const warnings: string[] = [];
 
-    // ── 1. Load employees on shift for this date ─────────────────────────────
-    const shiftRows = await this.dataSource.query<
-      Array<{
-        employee_id: string;
-        employee_no: string;
-        employee_name: string;
-        gender: string;
-        function_id: string;
-        shift_start: string;
-        shift_end: string;
-        fairness_score: number;
-      }>
-    >(
+    // ── 1. Employees on shift (canonical function fold + team manager + employment type) ──
+    const shiftRows: Array<{
+      employee_id: string; employee_no: string; employee_name: string; gender: string;
+      function_id: string; function_name: string; employment_type: string | null;
+      shift_code: string | null; team_manager: string | null;
+      shift_start: string; shift_end: string; fairness_score: number;
+    }> = await this.dataSource.query(
       `
+      WITH fns AS (
+        SELECT canon_fn(name) AS cname,
+               (array_agg(id ORDER BY (canon_fn(name) = name) DESC, name))[1] AS fid
+        FROM functions WHERE tenant_id = $1 GROUP BY canon_fn(name)
+      )
       SELECT
         ar.employee_id,
         e.employee_no,
         (e.first_name_en || ' ' || COALESCE(e.last_name_en,'')) AS employee_name,
         e.gender,
-        e.function_id,
+        COALESCE(cf.fid, e.function_id) AS function_id,
+        canon_fn(COALESCE(f.name,'—'))  AS function_name,
+        e.employment_type::text         AS employment_type,
+        ss.code                         AS shift_code,
+        rd.team_manager                 AS team_manager,
         (ar.attendance_date::text || ' ' || ar.scheduled_start::text || '+03')::timestamptz AS shift_start,
         CASE WHEN ar.scheduled_end <= ar.scheduled_start THEN
           ((ar.attendance_date + 1)::text || ' ' || ar.scheduled_end::text || '+03')::timestamptz
@@ -123,7 +141,15 @@ export class BreakSchedulerService {
         COALESCE(bf.fairness_score, 0) AS fairness_score
       FROM attendance_records ar
       JOIN employees e ON e.id = ar.employee_id
+      LEFT JOIN functions f ON f.id = e.function_id
+      LEFT JOIN fns cf ON cf.cname = canon_fn(f.name)
       LEFT JOIN shift_codes ss ON ss.id = ar.scheduled_shift_code_id
+      LEFT JOIN LATERAL (
+        SELECT r.team_manager FROM roster_days r
+        WHERE r.tenant_id = ar.tenant_id AND r.person_no = e.employee_no
+          AND r.work_date = ar.attendance_date AND r.is_active
+        LIMIT 1
+      ) rd ON TRUE
       LEFT JOIN break_fairness bf ON bf.employee_id = ar.employee_id
         AND bf.tenant_id = ar.tenant_id
         AND bf.period_year  = EXTRACT(YEAR  FROM $2::date)
@@ -133,357 +159,297 @@ export class BreakSchedulerService {
         AND ar.scheduled_start IS NOT NULL AND ar.scheduled_end IS NOT NULL
         AND COALESCE(ss.is_working_shift, TRUE) = TRUE
         AND COALESCE(ss.is_leave_code, FALSE)  = FALSE
-        ${functionId ? 'AND e.function_id = $3' : ''}
+        ${functionId ? 'AND (e.function_id = $3 OR cf.fid = $3)' : ''}
       ORDER BY fairness_score ASC, ar.employee_id
       `,
-      functionId
-        ? [tenantId, scheduleDate, functionId]
-        : [tenantId, scheduleDate],
+      functionId ? [tenantId, scheduleDate, functionId] : [tenantId, scheduleDate],
     );
 
     if (shiftRows.length === 0) {
-      return { slots: [], warnings: ['No working employees found for this date.'], fairnessMap: new Map() };
+      return { slots: [], warnings: ['No working employees found for this date.'], fairnessMap: new Map(), coverageSource: 'fallback' };
     }
 
-    // ── 2. Load break types + policies ───────────────────────────────────────
-    const breakTypes = await this.dataSource.query<BreakTypeRow[]>(
-      `SELECT * FROM break_types WHERE tenant_id = $1 AND is_active = TRUE ORDER BY sort_order`,
+    // ── 2. Policy matrix (v2) — resolved per employee, most-specific wins ────
+    const policies = await this.policyService.loadActivePolicies(tenantId);
+    if (policies.length === 0) {
+      warnings.push('No active break_policies_v2 rows — nothing generated (seed the default policy).');
+      return { slots: [], warnings, fairnessMap: new Map(), coverageSource: 'fallback' };
+    }
+    const defaultPolicy = pickMostSpecificPolicy(policies, null, null, null) ?? policies[0];
+    const coverageRatio = Number((defaultPolicy.thresholds as any)?.coverage_ratio) || DEFAULT_COVERAGE_RATIO;
+
+    // ── 3. Break types (duration → type mapping; policy drives durations) ────
+    const breakTypes: BreakTypeRow[] = await this.dataSource.query(
+      `SELECT id, name, duration_minutes, is_prayer FROM break_types
+       WHERE tenant_id = $1 AND is_active = TRUE ORDER BY sort_order`,
       [tenantId],
     );
+    if (breakTypes.length === 0) {
+      return { slots: [], warnings: ['No active break types configured.'], fairnessMap: new Map(), coverageSource: 'fallback' };
+    }
+    const typeForDuration = (dur: number): BreakTypeRow =>
+      [...breakTypes].filter(bt => !bt.is_prayer)
+        .sort((a, b) => Math.abs(a.duration_minutes - dur) - Math.abs(b.duration_minutes - dur))[0]
+      ?? breakTypes[0];
 
-    const policies = await this.dataSource.query<BreakPolicyRow[]>(
-      `SELECT * FROM break_policies
-       WHERE tenant_id = $1 AND is_active = TRUE
-         ${functionId ? 'AND (function_id IS NULL OR function_id = $2)' : 'AND function_id IS NULL OR function_id IS NOT NULL'}
-       ORDER BY priority DESC`,
-      functionId ? [tenantId, functionId] : [tenantId],
-    );
-
-    // ── 3. Load prayer times for date ────────────────────────────────────────
-    const prayerRow = await this.dataSource.query<PrayerTimesRow[]>(
+    // ── 4. Prayer times (soft alignment: snap a session to a prayer if close) ─
+    const prayerRow: PrayerTimesRow[] = await this.dataSource.query(
       `SELECT dhuhr, asr, maghrib FROM prayer_times
        WHERE tenant_id = $1 AND prayer_date = $2::date LIMIT 1`,
       [tenantId, scheduleDate],
     );
-    const prayers = prayerRow[0] ?? null;
+    const prayerMinutes: number[] = prayerRow[0]
+      ? ([prayerRow[0].dhuhr, prayerRow[0].asr, prayerRow[0].maghrib].filter(Boolean) as string[])
+          .map(t => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); })
+      : [];
 
-    // ── 4. Load required HC by interval (from headcount_intervals or capacity snapshots) ──
-    const coverageRows = await this.dataSource.query<
-      Array<{ interval_start: string; interval_end: string; function_id: string; required_hc: number; scheduled_hc: number }>
-    >(
-      `SELECT
-        interval_start::text, interval_end::text,
-        function_id,
-        required_hc,
-        scheduled_hc
-       FROM headcount_intervals
-       WHERE tenant_id = $1 AND snapshot_date = $2::date
-       ${functionId ? 'AND function_id = $3' : ''}
-       ORDER BY interval_start`,
-      functionId ? [tenantId, scheduleDate, functionId] : [tenantId, scheduleDate],
-    );
-
-    // In-memory coverage map: key = "HH:MM|functionId" → { required, scheduled, onBreak }
-    type CoverageCell = { required: number; scheduled: number; onBreak: number };
-    const coverageMap = new Map<string, CoverageCell>();
-    for (const row of coverageRows) {
-      const key = `${row.interval_start.slice(0, 5)}|${row.function_id}`;
-      coverageMap.set(key, {
-        required: row.required_hc,
-        scheduled: row.scheduled_hc,
-        onBreak: 0,
-      });
+    // ── 5. Coverage floor from headcount_intervals (rebuild in-process if empty) ─
+    let coverageSource: 'headcount_intervals' | 'fallback' = 'headcount_intervals';
+    let intervalRows = await this.loadIntervals(tenantId, scheduleDate);
+    if (intervalRows.length === 0) {
+      this.logger.log(`headcount_intervals empty for ${scheduleDate} — invoking coverage rebuild in-process`);
+      try {
+        await this.coverageRebuild.rebuild(tenantId, scheduleDate, scheduleDate);
+        intervalRows = await this.loadIntervals(tenantId, scheduleDate);
+      } catch (e: any) {
+        this.logger.warn(`coverage rebuild failed: ${e.message}`);
+      }
     }
 
-    // ── FALLBACK: headcount_intervals has never been populated on this system —
-    // an empty map made checkCoverage() always pass (a no-op guard). When empty,
-    // rebuild coverage LIVE from the scheduled working agents (attendance_records,
-    // already loaded above): count per function per 15-min interval each shift covers
-    // (cross-midnight handled — shift_end was moved to the next day in SQL).
-    // required = scheduled, so the 70% rule caps simultaneous breaks at 30% of staff.
+    const coverageMap = new Map<string, CoverageCell>();
+    for (const row of intervalRows) {
+      const key = this.bucketKey(new Date(row.interval_start), row.function_id);
+      coverageMap.set(key, { required: +row.required_hc, scheduled: +row.scheduled_hc, onBreak: 0 });
+    }
+
     if (coverageMap.size === 0) {
+      // FALLBACK (kept from v1): build live from scheduled agents; required = scheduled,
+      // so the coverage-ratio rule caps simultaneous breaks. Slots get marked
+      // generated_reason='fallback-coverage'.
+      coverageSource = 'fallback';
       this.logger.warn(
-        `headcount_intervals is EMPTY for ${scheduleDate}${functionId ? ` (function ${functionId})` : ''} — ` +
-        `break coverage falling back to LIVE scheduled-HC from attendance_records (required = scheduled). ` +
-        `Populate headcount_intervals to enforce real required-HC coverage.`,
+        `headcount_intervals still EMPTY for ${scheduleDate} after rebuild — falling back to LIVE scheduled-HC (required = scheduled).`,
       );
-      const coverageKey = (t: Date, fnId: string) =>
-        `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}|${fnId}`;
       for (const emp of shiftRows) {
-        const s = new Date(emp.shift_start);
-        const e = new Date(emp.shift_end);
-        for (let t = new Date(s); t < e; t = new Date(t.getTime() + 15 * 60000)) {
-          const key = coverageKey(t, emp.function_id);
+        for (const t of this.bucketsOf(new Date(emp.shift_start), new Date(emp.shift_end))) {
+          const key = this.bucketKey(t, emp.function_id);
           const cell = coverageMap.get(key);
-          if (cell) {
-            cell.scheduled += 1;
-            cell.required += 1;
-          } else {
-            coverageMap.set(key, { required: 1, scheduled: 1, onBreak: 0 });
-          }
+          if (cell) { cell.scheduled += 1; cell.required += 1; }
+          else coverageMap.set(key, { required: 1, scheduled: 1, onBreak: 0 });
         }
       }
     }
 
-    const MIN_COVERAGE_RATIO = 0.7; // at least 70% of required HC must remain available
+    // ── 6. Pre-occupy coverage with KEPT slots (active/completed/manual — regen never touches them) ─
+    const keptSlots: Array<{
+      employee_id: string; planned_start: string; planned_end: string;
+      planned_date: string; slot_number: number; function_id: string;
+    }> = await this.dataSource.query(
+      `WITH fns AS (
+         SELECT canon_fn(name) AS cname,
+                (array_agg(id ORDER BY (canon_fn(name) = name) DESC, name))[1] AS fid
+         FROM functions WHERE tenant_id = $1 GROUP BY canon_fn(name)
+       )
+       SELECT bs.employee_id, bs.planned_start::text, bs.planned_end::text,
+              COALESCE(bs.planned_date, bs.schedule_date)::text AS planned_date,
+              bs.slot_number,
+              COALESCE(cf.fid, e.function_id) AS function_id
+       FROM break_slots bs
+       JOIN employees e ON e.id = bs.employee_id
+       LEFT JOIN functions f ON f.id = e.function_id
+       LEFT JOIN fns cf ON cf.cname = canon_fn(f.name)
+       WHERE bs.tenant_id = $1 AND bs.schedule_date = $2::date
+         AND NOT (bs.status = 'scheduled' AND bs.generated_by = 'auto')
+         AND bs.status NOT IN ('cancelled','missed')`,
+      [tenantId, scheduleDate],
+    );
 
-    // ── 5. Generate slots ─────────────────────────────────────────────────────
-    const slots: GeneratedSlot[] = [];
-    const fairnessMap = new Map<string, number>();
+    const teamOnBreak = new Map<string, number>(); // bucketEpoch|team_manager → count
+    const teamKey = (t: Date, team: string) => `${Math.floor(t.getTime() / BUCKET_MS)}|${team}`;
+    const teamOf = new Map(shiftRows.map(r => [r.employee_id, r.team_manager]));
 
-    const breakTypeMap = new Map(breakTypes.map(bt => [bt.id, bt]));
-    const policyByType = new Map<string, BreakPolicyRow[]>();
-    for (const p of policies) {
-      if (!policyByType.has(p.break_type_id)) policyByType.set(p.break_type_id, []);
-      policyByType.get(p.break_type_id)!.push(p);
+    const keptByEmployee = new Map<string, Array<{ startMs: number; endMs: number; maxSlot: number }>>();
+    for (const ks of keptSlots) {
+      const st = new Date(`${ks.planned_date}T${String(ks.planned_start).slice(0, 5)}:00+03:00`);
+      let en = new Date(`${ks.planned_date}T${String(ks.planned_end).slice(0, 5)}:00+03:00`);
+      if (en <= st) en = new Date(en.getTime() + 86400000);
+      for (const t of this.bucketsOf(st, en)) {
+        const cell = coverageMap.get(this.bucketKey(t, ks.function_id));
+        if (cell) cell.onBreak += 1;
+        const team = teamOf.get(ks.employee_id);
+        if (team) teamOnBreak.set(teamKey(t, team), (teamOnBreak.get(teamKey(t, team)) ?? 0) + 1);
+      }
+      const list = keptByEmployee.get(ks.employee_id) ?? [];
+      list.push({ startMs: st.getTime(), endMs: en.getTime(), maxSlot: ks.slot_number });
+      keptByEmployee.set(ks.employee_id, list);
     }
 
-    // Sort policies by priority desc for scheduling order (lunch first, then prayer, coffee, etc.)
-    const sortedTypes = [...breakTypes].sort((a, b) => {
-      // Prayer always first (mandatory), then lunch, coffee, bio
-      if (a.is_mandatory && !b.is_mandatory) return -1;
-      if (!a.is_mandatory && b.is_mandatory) return 1;
-      if (a.is_prayer && !b.is_prayer) return -1;
-      if (!a.is_prayer && b.is_prayer) return 1;
-      return a.sort_order - b.sort_order;
-    });
+    // ── 7. Placement feasibility: coverage ratio + anti-clustering caps ──────
+    const teamCap = Math.max(1, Number((defaultPolicy.thresholds as any)?.max_simultaneous_per_team) || 1);
+
+    const canPlace = (start: Date, end: Date, fnId: string, team: string | null, thresholds: Record<string, unknown>): boolean => {
+      for (const t of this.bucketsOf(start, end)) {
+        const cell = coverageMap.get(this.bucketKey(t, fnId));
+        if (cell) {
+          // real floor: available after this break must keep >= ratio × required
+          const available = cell.scheduled - (cell.onBreak + 1);
+          if (cell.required > 0 && available / cell.required < coverageRatio) return false;
+          // anti-clustering per function
+          const cap = functionSimultaneousCap(cell.scheduled, cell.required, thresholds, coverageRatio);
+          if (cell.onBreak + 1 > cap) return false;
+        }
+        // anti-clustering per team manager (max 1 simultaneous by default)
+        if (team && (teamOnBreak.get(teamKey(t, team)) ?? 0) + 1 > teamCap) return false;
+      }
+      return true;
+    };
+
+    const markPlace = (start: Date, end: Date, fnId: string, team: string | null): void => {
+      for (const t of this.bucketsOf(start, end)) {
+        const cell = coverageMap.get(this.bucketKey(t, fnId));
+        if (cell) cell.onBreak += 1;
+        if (team) teamOnBreak.set(teamKey(t, team), (teamOnBreak.get(teamKey(t, team)) ?? 0) + 1);
+      }
+    };
+
+    // ── 8. Generate — fairness-ordered employees, policy-driven sessions ─────
+    const slots: GeneratedSlot[] = [];
+    const fairnessMap = new Map<string, EmployeeFairnessDelta>();
 
     for (const emp of shiftRows) {
       const shiftStart = new Date(emp.shift_start);
       const shiftEnd = new Date(emp.shift_end);
-      const shiftDurationMin = (shiftEnd.getTime() - shiftStart.getTime()) / 60000;
+      const shiftDurationMin = Math.round((shiftEnd.getTime() - shiftStart.getTime()) / 60000);
+      const shiftStartMinOfDay = shiftStart.getHours() * 60 + shiftStart.getMinutes();
 
-      // DELTA for this run only — the ledger UPSERT adds it to the stored score.
-      // (pg returns numeric as a string; using emp.fairness_score directly here
-      //  caused string concatenation → numeric overflow.)
-      let empFairnessScore = 0;
-      let slotNumber = 0;
+      const policy = pickMostSpecificPolicy(policies, emp.function_name, emp.shift_code, emp.employment_type) ?? defaultPolicy;
+      const sessions = sessionPattern(policy);
+      if (!sessions.length) continue;
 
-      for (const bt of sortedTypes) {
-        const applicablePolicies = (policyByType.get(bt.id) ?? []).filter(
-          p => !p.function_id || p.function_id === emp.function_id,
-        );
-        if (applicablePolicies.length === 0) continue;
+      const fair: EmployeeFairnessDelta = { delta: 0, early: 0, mid: 0, late: 0 };
+      const kept = keptByEmployee.get(emp.employee_id) ?? [];
+      let slotNumber = kept.reduce((m, k) => Math.max(m, k.maxSlot), 0);
+      // min-gap seeding: last kept break end (offset minutes from shift start), else "far past"
+      let lastBreakEndMin = kept.length
+        ? Math.max(...kept.map(k => Math.round((k.endMs - shiftStart.getTime()) / 60000)))
+        : -100000;
 
-        // Merge: take most-specific policy (function-specific over global)
-        const policy =
-          applicablePolicies.find(p => p.function_id === emp.function_id) ??
-          applicablePolicies[0];
+      const minGap = policy.min_gap_between_breaks_min;
+      const nSessions = sessions.length;
 
-        // Skip if gender doesn't apply
-        if (bt.applies_gender !== 'all' && bt.applies_gender !== emp.gender) continue;
-
-        const allowedCount = policy.allowed_count;
-
-        // Special handling for prayer breaks
-        if (bt.is_prayer && prayers) {
-          const prayerTimes = [prayers.dhuhr, prayers.asr, prayers.maghrib].filter(Boolean) as string[];
-          let scheduled = 0;
-
-          for (const ptime of prayerTimes) {
-            if (scheduled >= allowedCount) break;
-
-            const [ph, pm] = ptime.split(':').map(Number);
-            const prayerMinOffset = ph * 60 + pm - (shiftStart.getHours() * 60 + shiftStart.getMinutes());
-
-            // Only if prayer falls within shift window (with 30-min buffer)
-            if (prayerMinOffset < policy.earliest_start_offset || prayerMinOffset > shiftDurationMin - policy.latest_start_offset) continue;
-
-            const breakStartMin = prayerMinOffset;
-            const breakEndMin = breakStartMin + bt.duration_minutes;
-            const breakStartTime = addMinutes(shiftStart, breakStartMin);
-            const breakEndTime = addMinutes(shiftStart, breakEndMin);
-
-            if (checkCoverage(breakStartTime, breakEndTime, emp.function_id, coverageMap, MIN_COVERAGE_RATIO)) {
-              slotNumber++;
-              markBreakOnCoverage(breakStartTime, breakEndTime, emp.function_id, coverageMap, true);
-              slots.push({
-                employee_id: emp.employee_id,
-                schedule_date: scheduleDate,
-                break_type_id: bt.id,
-                slot_number: slotNumber,
-                planned_start: formatTime(breakStartTime),
-                planned_end: formatTime(breakEndTime),
-                generated_by: 'auto',
-                tenant_id: tenantId,
-              });
-              scheduled++;
-              empFairnessScore += 1;
-            } else {
-              // Find nearest safe window (±15 min)
-              const shifted = findNearestSafeSlot(
-                breakStartMin, bt.duration_minutes, shiftStart,
-                policy.earliest_start_offset, shiftDurationMin - policy.latest_start_offset,
-                emp.function_id, coverageMap, MIN_COVERAGE_RATIO,
-              );
-              if (shifted !== null) {
-                slotNumber++;
-                const st = addMinutes(shiftStart, shifted);
-                const et = addMinutes(shiftStart, shifted + bt.duration_minutes);
-                markBreakOnCoverage(st, et, emp.function_id, coverageMap, true);
-                slots.push({
-                  employee_id: emp.employee_id,
-                  schedule_date: scheduleDate,
-                  break_type_id: bt.id,
-                  slot_number: slotNumber,
-                  planned_start: formatTime(st),
-                  planned_end: formatTime(et),
-                  generated_by: 'auto',
-                  tenant_id: tenantId,
-                });
-                scheduled++;
-                empFairnessScore += 0.5; // partial quality (shifted from prayer)
-                warnings.push(`${emp.employee_name}: prayer break shifted ±15min due to coverage.`);
-              } else {
-                warnings.push(`${emp.employee_name}: couldn't schedule prayer (${ptime}) — coverage too low.`);
-              }
-            }
-          }
-          continue; // prayer handled separately
+      for (let i = 0; i < nSessions; i++) {
+        const dur = sessions[i];
+        const window = generationWindow(shiftDurationMin, dur, policy);
+        if (!window) {
+          warnings.push(`${emp.employee_name}: shift too short (${shiftDurationMin}m) for break #${i + 1} outside protected hours.`);
+          break;
         }
+        const { earliestStartMin, latestStartMin } = window;
 
-        // Regular break scheduling (lunch, coffee, bio, etc.)
-        const earliestMin = policy.earliest_start_offset;
-        const latestMin = shiftDurationMin - policy.latest_start_offset - bt.duration_minutes;
-        const minGap = policy.min_gap_between_breaks;
+        // spread sessions across the shift midsection
+        const span = latestStartMin - earliestStartMin;
+        let candidate = Math.round(earliestStartMin + (span * (i + 0.5)) / nSessions);
 
-        let placed = 0;
-        let lastBreakEnd = earliestMin - minGap; // ensure first break respects gap from shift start
-        const step = 15; // try every 15 min
-
-        for (let attempt = 0; attempt < allowedCount && placed < allowedCount; attempt++) {
-          // Candidate: evenly distribute N breaks across window
-          const windowSize = latestMin - earliestMin;
-          const segmentSize = windowSize / allowedCount;
-          let candidate = Math.round(earliestMin + attempt * segmentSize + segmentSize / 2);
-          candidate = Math.max(earliestMin, Math.min(latestMin, candidate));
-
-          // Respect min gap
-          if (candidate < lastBreakEnd + minGap) candidate = lastBreakEnd + minGap;
-          if (candidate > latestMin) {
-            warnings.push(`${emp.employee_name}: can't fit ${bt.name} break #${attempt + 1} within window.`);
+        // soft prayer alignment: snap to a prayer time within ±45 min of the ideal spot
+        for (const pm of prayerMinutes) {
+          const offset = pm - shiftStartMinOfDay + (pm < shiftStartMinOfDay && shiftDurationMin + shiftStartMinOfDay > 1440 ? 1440 : 0);
+          if (offset >= earliestStartMin && offset <= latestStartMin && Math.abs(offset - candidate) <= 45) {
+            candidate = offset;
             break;
           }
-
-          // Try candidate, then scan forward/backward for coverage
-          const safeMin = findNearestSafeSlot(
-            candidate, bt.duration_minutes, shiftStart,
-            earliestMin, latestMin,
-            emp.function_id, coverageMap, MIN_COVERAGE_RATIO, minGap, lastBreakEnd,
-          );
-
-          if (safeMin !== null) {
-            slotNumber++;
-            const st = addMinutes(shiftStart, safeMin);
-            const et = addMinutes(shiftStart, safeMin + bt.duration_minutes);
-            markBreakOnCoverage(st, et, emp.function_id, coverageMap, true);
-            slots.push({
-              employee_id: emp.employee_id,
-              schedule_date: scheduleDate,
-              break_type_id: bt.id,
-              slot_number: slotNumber,
-              planned_start: formatTime(st),
-              planned_end: formatTime(et),
-              generated_by: 'auto',
-              tenant_id: tenantId,
-            });
-            lastBreakEnd = safeMin + bt.duration_minutes;
-            placed++;
-            empFairnessScore += attempt === 0 ? 1 : 0.5; // early slot = higher quality
-          } else {
-            warnings.push(`${emp.employee_name}: can't schedule ${bt.name} break #${attempt + 1} — no coverage-safe slot.`);
-          }
         }
+
+        if (candidate < lastBreakEndMin + minGap) candidate = lastBreakEndMin + minGap;
+        if (candidate > latestStartMin) {
+          warnings.push(`${emp.employee_name}: can't fit break #${i + 1} (${dur}m) — min-gap pushes past protected end window.`);
+          continue;
+        }
+
+        // nearest coverage-safe placement (±30 min, 15-min steps)
+        const safeMin = this.findNearestSafe(
+          candidate, dur, shiftStart, earliestStartMin, latestStartMin,
+          emp.function_id, emp.team_manager, policy.thresholds, canPlace, minGap, lastBreakEndMin,
+        );
+        if (safeMin == null) {
+          warnings.push(`${emp.employee_name}: no coverage-safe slot for break #${i + 1} (${dur}m).`);
+          continue;
+        }
+
+        const st = new Date(shiftStart.getTime() + safeMin * 60000);
+        const en = new Date(st.getTime() + dur * 60000);
+        markPlace(st, en, emp.function_id, emp.team_manager);
+
+        const bt = typeForDuration(dur);
+        const bucket = slotPositionBucket(safeMin, shiftDurationMin);
+        fair[bucket] += 1;
+        fair.delta += safeMin === candidate ? 1 : 0.5;
+
+        const earliestBound = Math.max(earliestStartMin, safeMin - 30);
+        const latestBound = Math.min(latestStartMin, safeMin + 30);
+        slotNumber += 1;
+        slots.push({
+          employee_id: emp.employee_id,
+          schedule_date: scheduleDate,
+          planned_date: plannedDateFor(scheduleDate, shiftStartMinOfDay, safeMin),
+          break_type_id: bt.id,
+          slot_number: slotNumber,
+          planned_start: wallClockHHMM(shiftStartMinOfDay, safeMin),
+          planned_end: wallClockHHMM(shiftStartMinOfDay, safeMin + dur),
+          earliest_start: wallClockHHMM(shiftStartMinOfDay, earliestBound),
+          latest_start: wallClockHHMM(shiftStartMinOfDay, latestBound),
+          generated_reason: coverageSource === 'fallback' ? 'fallback-coverage' : `policy:${policy.id}`,
+          priority_score: Number(emp.fairness_score) || 0,
+          generated_by: 'auto',
+          tenant_id: tenantId,
+        });
+        lastBreakEndMin = safeMin + dur;
       }
 
-      fairnessMap.set(emp.employee_id, empFairnessScore);
+      fairnessMap.set(emp.employee_id, fair);
     }
 
-    return { slots, warnings, fairnessMap };
+    return { slots, warnings, fairnessMap, coverageSource };
   }
-}
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+  /** headcount_intervals for the date AND the next day (cross-midnight spill). */
+  private async loadIntervals(tenantId: string, scheduleDate: string): Promise<Array<{
+    interval_start: string; function_id: string; required_hc: number; scheduled_hc: number;
+  }>> {
+    return this.dataSource.query(
+      `SELECT interval_start, function_id, required_hc, scheduled_hc
+       FROM headcount_intervals
+       WHERE tenant_id = $1 AND snapshot_date IN ($2::date, $2::date + 1)`,
+      [tenantId, scheduleDate],
+    );
+  }
 
-function addMinutes(base: Date, minutes: number): Date {
-  return new Date(base.getTime() + minutes * 60000);
-}
-
-function formatTime(d: Date): string {
-  return d.toTimeString().slice(0, 5);
-}
-
-function timeToMinutes(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + m;
-}
-
-/** Check every 15-min interval covered by [breakStart, breakEnd] for coverage safety. */
-function checkCoverage(
-  breakStart: Date,
-  breakEnd: Date,
-  functionId: string,
-  coverageMap: Map<string, { required: number; scheduled: number; onBreak: number }>,
-  minRatio: number,
-): boolean {
-  let t = new Date(breakStart);
-  while (t < breakEnd) {
-    const key = `${formatTime(t)}|${functionId}`;
-    const cell = coverageMap.get(key);
-    if (cell) {
-      const available = cell.scheduled - (cell.onBreak + 1); // +1 for this employee
-      if (cell.required > 0 && available / cell.required < minRatio) return false;
+  /** ±30 min search in 15-min steps for a placement passing coverage + caps. */
+  private findNearestSafe(
+    preferredOffset: number,
+    duration: number,
+    shiftStart: Date,
+    earliest: number,
+    latest: number,
+    fnId: string,
+    team: string | null,
+    thresholds: Record<string, unknown>,
+    canPlace: (s: Date, e: Date, fn: string, team: string | null, th: Record<string, unknown>) => boolean,
+    minGap = 0,
+    lastBreakEnd = -100000,
+  ): number | null {
+    const searchRadius = 30;
+    const step = 15;
+    for (let delta = 0; delta <= searchRadius; delta += step) {
+      for (const sign of [0, 1, -1]) {
+        if (delta === 0 && sign !== 0) continue;
+        const candidate = preferredOffset + sign * delta;
+        if (candidate < earliest || candidate > latest) continue;
+        if (candidate < lastBreakEnd + minGap) continue;
+        const st = new Date(shiftStart.getTime() + candidate * 60000);
+        const en = new Date(st.getTime() + duration * 60000);
+        if (canPlace(st, en, fnId, team, thresholds)) return candidate;
+      }
     }
-    t = new Date(t.getTime() + 15 * 60000);
+    return null;
   }
-  return true;
-}
-
-/** Mark/unmark break occupancy on the coverage map. */
-function markBreakOnCoverage(
-  breakStart: Date,
-  breakEnd: Date,
-  functionId: string,
-  coverageMap: Map<string, { required: number; scheduled: number; onBreak: number }>,
-  add: boolean,
-): void {
-  let t = new Date(breakStart);
-  while (t < breakEnd) {
-    const key = `${formatTime(t)}|${functionId}`;
-    const cell = coverageMap.get(key);
-    if (cell) cell.onBreak += add ? 1 : -1;
-    t = new Date(t.getTime() + 15 * 60000);
-  }
-}
-
-/**
- * Search ±30 min in steps of 15 min for a coverage-safe slot.
- * Returns the offset in minutes from shift start, or null if none found.
- */
-function findNearestSafeSlot(
-  preferredOffset: number,
-  duration: number,
-  shiftStart: Date,
-  earliest: number,
-  latest: number,
-  functionId: string,
-  coverageMap: Map<string, { required: number; scheduled: number; onBreak: number }>,
-  minRatio: number,
-  minGap = 0,
-  lastBreakEnd = 0,
-): number | null {
-  const searchRadius = 30;
-  const step = 15;
-  for (let delta = 0; delta <= searchRadius; delta += step) {
-    for (const sign of [0, 1, -1]) {
-      if (delta === 0 && sign !== 0) continue;
-      const candidate = preferredOffset + sign * delta;
-      if (candidate < earliest || candidate + duration > latest) continue;
-      if (candidate < lastBreakEnd + minGap) continue;
-      const st = addMinutes(shiftStart, candidate);
-      const et = addMinutes(shiftStart, candidate + duration);
-      if (checkCoverage(st, et, functionId, coverageMap, minRatio)) return candidate;
-    }
-  }
-  return null;
 }

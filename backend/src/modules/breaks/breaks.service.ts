@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { BreakSchedulerService } from './break-scheduler.service';
+import { BreakPolicyService } from './break-policy.service';
 
 @Injectable()
 export class BreaksService {
@@ -9,6 +10,7 @@ export class BreaksService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly scheduler: BreakSchedulerService,
+    private readonly policyService: BreakPolicyService,
   ) {}
 
   // ── Live queue state (Sprinklr bridge) — drives the auto-approve decision ──
@@ -125,62 +127,100 @@ export class BreaksService {
     }
   }
 
-  // ── Generate break schedule for a date ──────────────────────────────────────
-  async generate(tenantId: string, scheduleDate: string, functionId?: string) {
+  // ── Generate break schedule for a date (idempotent regenerate) ──────────────
+  // Replaces ONLY auto+'scheduled' slots for the date; active/completed/manual
+  // slots are never touched (the scheduler already numbered around them and
+  // pre-occupied their coverage).
+  async generate(
+    tenantId: string,
+    scheduleDate: string,
+    functionId?: string,
+    actor?: { id?: string | null; email?: string | null },
+  ) {
     const result = await this.scheduler.generateForDate(tenantId, scheduleDate, functionId);
 
-    if (result.slots.length === 0) {
-      return { inserted: 0, warnings: result.warnings, message: 'No break slots generated.' };
-    }
+    // optimization_version increments per regenerate of the date
+    const [ver] = await this.dataSource.query(
+      `SELECT COALESCE(MAX(optimization_version), 0) + 1 AS v
+       FROM break_slots WHERE tenant_id = $1 AND schedule_date = $2::date`,
+      [tenantId, scheduleDate],
+    );
+    const optimizationVersion = Number(ver?.v ?? 1);
 
-    // Upsert generated slots
-    const inserted: number[] = [];
-    for (const slot of result.slots) {
-      await this.dataSource.query(
-        `INSERT INTO break_slots
-           (tenant_id, employee_id, schedule_date, break_type_id, slot_number,
-            planned_start, planned_end, generated_by, status)
-         VALUES ($1,$2,$3::date,$4,$5,$6::time,$7::time,'auto','scheduled')
-         ON CONFLICT (tenant_id, employee_id, schedule_date, slot_number)
-         DO UPDATE SET
-           break_type_id = EXCLUDED.break_type_id,
-           planned_start = EXCLUDED.planned_start,
-           planned_end   = EXCLUDED.planned_end,
-           status        = 'scheduled',
-           updated_at    = NOW()`,
-        [
-          slot.tenant_id,
-          slot.employee_id,
-          slot.schedule_date,
-          slot.break_type_id,
-          slot.slot_number,
-          slot.planned_start,
-          slot.planned_end,
-        ],
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    await qr.startTransaction();
+    let inserted = 0;
+    try {
+      // Idempotent replace: drop previous auto-scheduled plan for the date only.
+      await qr.query(
+        `DELETE FROM break_slots
+         WHERE tenant_id = $1 AND schedule_date = $2::date
+           AND status = 'scheduled' AND generated_by = 'auto'`,
+        [tenantId, scheduleDate],
       );
-      inserted.push(1);
+
+      for (const slot of result.slots) {
+        await qr.query(
+          `INSERT INTO break_slots
+             (tenant_id, employee_id, schedule_date, break_type_id, slot_number,
+              planned_start, planned_end, planned_date, earliest_start, latest_start,
+              generated_reason, optimization_version, priority_score, generated_by, status)
+           VALUES ($1,$2,$3::date,$4,$5,$6::time,$7::time,$8::date,$9::time,$10::time,$11,$12,$13,'auto','scheduled')
+           ON CONFLICT (tenant_id, employee_id, schedule_date, slot_number) DO NOTHING`,
+          [
+            slot.tenant_id, slot.employee_id, slot.schedule_date, slot.break_type_id,
+            slot.slot_number, slot.planned_start, slot.planned_end, slot.planned_date,
+            slot.earliest_start, slot.latest_start, slot.generated_reason,
+            optimizationVersion, slot.priority_score,
+          ],
+        );
+        inserted += 1;
+      }
+      await qr.commitTransaction();
+    } catch (e) {
+      await qr.rollbackTransaction().catch(() => {});
+      throw e;
+    } finally {
+      await qr.release();
     }
 
-    // Update fairness ledger
-    for (const [empId, score] of result.fairnessMap.entries()) {
+    if (inserted === 0) {
+      await this.policyService.audit(tenantId, actor ?? null, 'breaks.generate', 'break_slots', null,
+        `${scheduleDate}: 0 slots (coverage=${result.coverageSource}, v${optimizationVersion}); warnings=${result.warnings.length}`);
+      return { inserted: 0, warnings: result.warnings, coverageSource: result.coverageSource, optimizationVersion, message: 'No break slots generated.' };
+    }
+
+    // Fairness ledger — including the early/mid/late slot-position counts
+    for (const [empId, fair] of result.fairnessMap.entries()) {
       const [year, month] = scheduleDate.split('-').map(Number);
       await this.dataSource.query(
         `INSERT INTO break_fairness
-           (tenant_id, employee_id, period_year, period_month, fairness_score, total_breaks, updated_at)
-         VALUES ($1,$2,$3,$4,$5,1,NOW())
+           (tenant_id, employee_id, period_year, period_month, fairness_score,
+            early_slot_count, mid_slot_count, late_slot_count, total_breaks, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
          ON CONFLICT (tenant_id, employee_id, period_year, period_month)
          DO UPDATE SET
-           fairness_score = break_fairness.fairness_score + $5,
-           total_breaks   = break_fairness.total_breaks + 1,
-           updated_at     = NOW()`,
-        [tenantId, empId, year, month, score],
+           fairness_score   = break_fairness.fairness_score   + $5,
+           early_slot_count = break_fairness.early_slot_count + $6,
+           mid_slot_count   = break_fairness.mid_slot_count   + $7,
+           late_slot_count  = break_fairness.late_slot_count  + $8,
+           total_breaks     = break_fairness.total_breaks     + $9,
+           updated_at       = NOW()`,
+        [tenantId, empId, year, month, fair.delta, fair.early, fair.mid, fair.late,
+         fair.early + fair.mid + fair.late],
       );
     }
 
+    await this.policyService.audit(tenantId, actor ?? null, 'breaks.generate', 'break_slots', null,
+      `${scheduleDate}: ${inserted} slots generated (coverage=${result.coverageSource}, v${optimizationVersion}, warnings=${result.warnings.length})`);
+
     return {
-      inserted: inserted.length,
+      inserted,
       warnings: result.warnings,
-      message: `Generated ${inserted.length} break slots.`,
+      coverageSource: result.coverageSource,
+      optimizationVersion,
+      message: `Generated ${inserted} break slots.`,
     };
   }
 
@@ -241,7 +281,23 @@ export class BreaksService {
     requestedEnd: string;
     reason?: string;
     breakSlotId?: string;
-  }) {
+    overrideEntitlement?: boolean;   // explicit manual exception — audited
+  }, actor?: { id?: string | null; email?: string | null }) {
+    // 0. ENTITLEMENT GATE (B1): max_sessions + total_daily_minutes from the
+    //    resolved break policy. Manual exception only via explicit override flag,
+    //    which is recorded in the audit trail.
+    const toMin = (t: string) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+    let reqMin = toMin(dto.requestedEnd) - toMin(dto.requestedStart);
+    if (reqMin <= 0) reqMin += 1440; // cross-midnight window
+    const ent = await this.policyService.enforceEntitlement(tenantId, employeeId, dto.scheduleDate, reqMin);
+    if (!ent.allowed) {
+      if (!dto.overrideEntitlement) {
+        throw new BadRequestException(`${ent.reasonAr} — ${ent.reason}`);
+      }
+      await this.policyService.audit(tenantId, actor ?? null, 'breaks.entitlement.override', 'break_request', null,
+        `employee=${employeeId} date=${dto.scheduleDate} requested=${reqMin}m over limit (${ent.reason})`);
+    }
+
     // 1. Scheduled coverage impact (from break slots / schedule)
     const coverageBefore = await this.getCoverageSnapshot(tenantId, dto.scheduleDate, dto.requestedStart, dto.requestedEnd);
 
@@ -548,13 +604,24 @@ export class BreaksService {
       ? await this.computeLateMinutes(tenantId, slotId, dto.actualStart)
       : 0;
 
+    // Load the slot BEFORE the update so a repeat 'completed' isn't double-posted
+    // into the daily balance ledger.
+    const [slot] = await this.dataSource.query(
+      `SELECT employee_id, schedule_date::text AS schedule_date,
+              COALESCE(planned_date, schedule_date)::text AS planned_date,
+              planned_start::text, planned_end::text, status AS prev_status
+       FROM break_slots WHERE id = $1 AND tenant_id = $2`,
+      [slotId, tenantId],
+    );
+    if (!slot) throw new NotFoundException('Break slot not found');
+
     await this.dataSource.query(
       `UPDATE break_slots
        SET actual_start = $1::time,
            actual_end   = $2::time,
-           status       = $3,
+           status       = $3::text,
            late_minutes = $4,
-           is_missed    = ($3 = 'missed'),
+           is_missed    = ($3::text = 'missed'),
            notes        = $5,
            updated_at   = NOW()
        WHERE id = $6 AND tenant_id = $7`,
@@ -568,6 +635,24 @@ export class BreaksService {
         tenantId,
       ],
     );
+
+    // B1: maintain break_daily_balance transactionally on slot COMPLETION.
+    if (dto.status === 'completed' && slot.prev_status !== 'completed') {
+      const toMin = (t?: string | null) => {
+        if (!t) return null;
+        const [h, m] = String(t).split(':').map(Number);
+        return isNaN(h) ? null : h * 60 + (m || 0);
+      };
+      const as = toMin(dto.actualStart), ae = toMin(dto.actualEnd);
+      const ps = toMin(slot.planned_start), pe = toMin(slot.planned_end);
+      let consumed = (as != null && ae != null) ? ae - as : (ps != null && pe != null ? pe - ps : 0);
+      if (consumed < 0) consumed += 1440; // cross-midnight break
+      const endHHMM = (dto.actualEnd ?? slot.planned_end ?? '').slice(0, 5);
+      const endAt = endHHMM ? new Date(`${slot.planned_date}T${endHHMM}:00+03:00`) : null;
+      await this.policyService.recordCompletion(
+        tenantId, slot.employee_id, slot.schedule_date, consumed, endAt,
+      ).catch((e) => this.logger.warn(`break_daily_balance update failed for slot ${slotId}: ${e.message}`));
+    }
 
     return { success: true };
   }
