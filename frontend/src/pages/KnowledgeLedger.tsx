@@ -62,8 +62,8 @@ export default function KnowledgeLedgerPage() {
 
           {/* Ledger entries */}
           <div className="space-y-2">
-            {entries.map(e => (
-              <div key={e.kind + e.id} className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            {entries.map((e, i) => (
+              <div key={`${e.kind}:${e.category}:${e.id}:${i}`} className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: e.kind === 'expertise' ? 'rgba(16,185,129,0.15)' : 'rgba(129,140,248,0.15)', color: e.kind === 'expertise' ? '#34d399' : '#a5b4fc' }}>{e.kind === 'expertise' ? (ar ? 'خبرة' : 'expertise') : (ar ? 'بحث' : 'research')}</span>
                   <span className="text-sm font-bold" style={{ color: tp(dark) }}>{e.title}</span>

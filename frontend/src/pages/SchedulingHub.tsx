@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router-dom';
-import { Calendar, Zap, Shuffle, Megaphone, CalendarCog, Clock, Wand2, Waves, Layers } from 'lucide-react';
-import HubTabs from '@/components/HubTabs';
+import { Calendar, Zap, Shuffle, Megaphone, CalendarCog, Clock, Wand2, Waves, Layers, Activity, Sparkles } from 'lucide-react';
+import GroupedTabs, { TabGroupDef, GroupedTabDef } from '@/components/GroupedTabs';
 import { useAuthStore } from '@/store/auth.store';
 import SchedulePage from '@/pages/Schedule';
 import ScheduleGeneratorPage from '@/pages/ScheduleGenerator';
@@ -14,39 +14,83 @@ import LadderRotationPage from '@/pages/LadderRotation';
 
 type HubTab = 'schedule' | 'generator' | 'ladder' | 'forecast' | 'hourly' | 'demand' | 'rotation' | 'campaigns' | 'changes';
 
-const TABS: { key: HubTab; icon: typeof Calendar; ar: string; en: string; permission: string }[] = [
-  { key: 'schedule',  icon: Calendar,    ar: 'الجدول',        en: 'Schedule',   permission: 'schedule.view' },
-  { key: 'generator', icon: Zap,         ar: 'توليد الجدول',  en: 'Generator',  permission: 'schedule.generate' },
-  { key: 'ladder',    icon: Layers,      ar: 'الدوران التدريجي', en: 'Laddered Rotation', permission: 'schedule.generate' },
-  // (Director 2026-07-03) everything schedule-related lives HERE — the live week forecast +
-  // hourly HC + demand/health moved in from AnalyticsHub so generate → forecast → schedule are ONE place.
-  { key: 'forecast',  icon: Waves,       ar: 'توقّع الأسبوع', en: 'Week Forecast', permission: 'attendance.view_team' },
-  { key: 'hourly',    icon: Clock,       ar: 'HC بالساعة',    en: 'Hourly HC',  permission: 'attendance.view_team' },
-  { key: 'demand',    icon: Wand2,       ar: 'الطلب والصحة',  en: 'Demand & Health', permission: 'schedule.generate' },
-  { key: 'rotation',  icon: Shuffle,     ar: 'الدوران',       en: 'Rotation',   permission: 'schedule.edit' },
-  { key: 'changes',   icon: CalendarCog, ar: 'تغيير الجدول',  en: 'Changes',    permission: 'schedule.view' },
-  { key: 'campaigns', icon: Megaphone,   ar: 'الحملات',       en: 'Campaigns',  permission: 'schedule.view' },
+type GatedTab = GroupedTabDef & { permission: string };
+type GatedGroup = Omit<TabGroupDef, 'tabs'> & { tabs: GatedTab[] };
+
+/**
+ * The 9 former flat tabs regrouped into 6 groups (R1 rollout).
+ * Tab KEYS are unchanged — every existing `?tab=` deep link and the
+ * App.tsx redirects keep working exactly as before. Each sub-tab keeps
+ * its own permission gate (an RTA with only schedule.view sees just the
+ * Schedule group); groups whose tabs are all gated away disappear.
+ */
+const GROUPS: GatedGroup[] = [
+  {
+    key: 'schedule', label: 'Schedule', labelAr: 'الجدول', icon: Calendar,
+    tabs: [
+      { key: 'schedule',  label: 'Schedule',  labelAr: 'الجدول',  icon: Calendar,  permission: 'schedule.view' },
+      { key: 'campaigns', label: 'Campaigns', labelAr: 'الحملات', icon: Megaphone, permission: 'schedule.view' },
+    ],
+  },
+  {
+    key: 'generate', label: 'Generate', labelAr: 'التوليد', icon: Sparkles,
+    tabs: [
+      { key: 'generator', label: 'Generator',         labelAr: 'توليد الجدول',    icon: Zap,    permission: 'schedule.generate' },
+      { key: 'ladder',    label: 'Laddered Rotation', labelAr: 'الدوران التدريجي', icon: Layers, permission: 'schedule.generate' },
+    ],
+  },
+  {
+    // (Director 2026-07-03) everything schedule-related lives HERE — the live week forecast +
+    // hourly HC + demand/health moved in from AnalyticsHub so generate → forecast → schedule are ONE place.
+    key: 'coverage', label: 'Coverage', labelAr: 'التغطية', icon: Activity,
+    tabs: [
+      { key: 'forecast', label: 'Week Forecast', labelAr: 'توقّع الأسبوع', icon: Waves, permission: 'attendance.view_team' },
+      { key: 'hourly',   label: 'Hourly HC',     labelAr: 'HC بالساعة',    icon: Clock, permission: 'attendance.view_team' },
+    ],
+  },
+  {
+    key: 'demand', label: 'Demand', labelAr: 'الطلب', icon: Wand2,
+    tabs: [
+      { key: 'demand', label: 'Demand & Health', labelAr: 'الطلب والصحة', icon: Wand2, permission: 'schedule.generate' },
+    ],
+  },
+  {
+    key: 'rotation', label: 'Rotation', labelAr: 'التدوير', icon: Shuffle,
+    tabs: [
+      { key: 'rotation', label: 'Rotation', labelAr: 'الدوران', icon: Shuffle, permission: 'schedule.edit' },
+    ],
+  },
+  {
+    key: 'changes', label: 'Changes', labelAr: 'التغييرات', icon: CalendarCog,
+    tabs: [
+      { key: 'changes', label: 'Changes', labelAr: 'تغيير الجدول', icon: CalendarCog, permission: 'schedule.view' },
+    ],
+  },
 ];
 
 /**
  * Merges Schedule, Generator, Hourly HC, Demand & Health, Rotation and Campaigns
- * behind one nav entry with tabs. Each tab is gated by its own permission (so an
- * RTA with only schedule.view sees just the Schedule tab). Active tab lives in
- * the URL (?tab=) so deep links and the old routes (which redirect here) land on
- * the right tab.
+ * behind one nav entry with grouped tabs. Each tab is gated by its own permission.
+ * Active tab lives in the URL (?tab=) so deep links and the old routes (which
+ * redirect here) land on the right tab.
  */
 export default function SchedulingHub() {
   const hasPermission = useAuthStore(s => s.hasPermission);
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
 
-  const visible = TABS.filter(t => hasPermission(t.permission));
+  // Permission-filter sub-tabs, then drop groups left empty.
+  const visibleGroups: TabGroupDef[] = GROUPS
+    .map(g => ({ ...g, tabs: g.tabs.filter(t => hasPermission(t.permission)) }))
+    .filter(g => g.tabs.length > 0);
+
+  const visible = visibleGroups.flatMap(g => g.tabs);
   const raw = params.get('tab') as HubTab | null;
-  const tab: HubTab = visible.some(t => t.key === raw) ? raw! : (visible[0]?.key ?? 'schedule');
+  const tab: HubTab = visible.some(t => t.key === raw) ? raw! : ((visible[0]?.key as HubTab) ?? 'schedule');
 
   return (
     <div className="page-enter">
       {visible.length > 1 && (
-        <HubTabs tabs={visible} active={tab} onChange={k => setParams({ tab: k }, { replace: true })} />
+        <GroupedTabs groups={visibleGroups} defaultTab={visible[0]?.key} />
       )}
 
       {tab === 'schedule'  && <SchedulePage />}
