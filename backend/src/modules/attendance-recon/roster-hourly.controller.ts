@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { MATERNITY_7H, TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
 import { RosterTtlCacheInterceptor } from '@common/ttl-cache.interceptor';
+import { covHourSql, covMinSql, covAbsSql, covHhSql, coversHourJs, STD_SHIFT_START_SQL, STD_SHIFT_END_SQL } from './coverage-core';
 
 /* Hourly analytics + live-week forecast + gap-remedy/cross-skill/OT-request
  * endpoints, split VERBATIM out of the monolithic ReconController (2026-07-07,
@@ -51,14 +52,7 @@ export class RosterHourlyController {
     // Shrinkage rows in some months carry NO shift timing (June suffix rows) — derive the window
     // from the BASE code's canonical times (BR-SHF-005; a suffix keeps the base shift + timing),
     // so sick/absence still land in their real hours instead of vanishing from the grid.
-    const stdStart = `CASE regexp_replace(upper(COALESCE(attendance_code,shift_code,'')),'([SA])$','')
-      WHEN 'M' THEN 420 WHEN 'AM' THEN 420 WHEN 'M20' THEN 480 WHEN 'B' THEN 540 WHEN 'B20' THEN 600
-      WHEN 'C' THEN 660 WHEN 'C20' THEN 720 WHEN 'N' THEN 780 WHEN 'N20' THEN 840 WHEN 'E' THEN 960
-      WHEN 'EE' THEN 1080 WHEN 'EE20' THEN 1080 WHEN 'MD' THEN 1320 WHEN 'MN' THEN 1380 END`;
-    const stdEnd = `CASE regexp_replace(upper(COALESCE(attendance_code,shift_code,'')),'([SA])$','')
-      WHEN 'M' THEN 960 WHEN 'AM' THEN 900 WHEN 'M20' THEN 960 WHEN 'B' THEN 1080 WHEN 'B20' THEN 1080
-      WHEN 'C' THEN 1200 WHEN 'C20' THEN 1200 WHEN 'N' THEN 1320 WHEN 'N20' THEN 1320 WHEN 'E' THEN 1500
-      WHEN 'EE' THEN 1560 WHEN 'EE20' THEN 1620 WHEN 'MD' THEN 1860 WHEN 'MN' THEN 1920 END`;
+    const stdStart = STD_SHIFT_START_SQL, stdEnd = STD_SHIFT_END_SQL;   // coverage-core (R2.1)
     const wR = `${wBase} AND (shift_start_min IS NOT NULL OR (presence IN ('sick','absent','leave') AND (${stdStart}) IS NOT NULL))`;
     const GRP = (level === 'agent' || agent)
       ? `COALESCE(clean_name,name) || ' · ' || COALESCE(person_no,employee_no)`
@@ -68,18 +62,8 @@ export class RosterHourlyController {
     // — normalized to minute-of-day, cross-midnight & negative aware — overlaps it. One
     // helper for EVERY window: the shift, the OT-before/after extensions, and the
     // late-arrival / early-departure gaps. So the headcount truly reflects who is at seat.
-    const cov = (start: string, len: string) => {
-      const a0 = `(((${start})%1440+1440)%1440)`, b0 = `(${a0}+(${len}))`;
-      return `((${a0} < h.hh*60+60 AND LEAST(${b0},1440) > h.hh*60) OR (${b0}>1440 AND (${b0}-1440) > h.hh*60))`;
-    };
-    // overlap MINUTES of a window [start,start+len) with hour h's bucket — exact "how many
-    // OT / permission minutes happened in this hour" (cross-midnight wrap handled as two segments).
-    const covMin = (start: string, len: string) => {
-      const a0 = `(((${start})%1440+1440)%1440)`, e = `(${a0}+(${len}))`, h0 = `h.hh*60`, h1 = `(h.hh*60+60)`;
-      const s1 = `GREATEST(0, LEAST(LEAST(${e},1440), ${h1}) - GREATEST(${a0}, ${h0}))`;
-      const s2 = `(CASE WHEN ${e}>1440 THEN GREATEST(0, LEAST(${e}-1440, ${h1}) - ${h0}) ELSE 0 END)`;
-      return `(${s1} + ${s2})`;
-    };
+    // Both kernels live in coverage-core (R2.1) — identical SQL text as before.
+    const cov = covHourSql, covMin = covMinSql;
     // shift length must be WRAP-CORRECTED: cross-midnight shifts store shift_end_min < shift_start_min
     // (MD 1320→420), so a naive r.se-r.ss is NEGATIVE and cov() then covers NOTHING → evening/night
     // headcount was undercounted ~4-16% (bug found 2026-07-03). Normalize to the real duration.
@@ -384,12 +368,7 @@ export class RosterHourlyController {
       otFnWhere = ` AND canon_fn(fo.name) = canon_fn($4)`;
     }
 
-    const cov = (start: string, len: string) => {
-      const a0 = `(((${start})%1440+1440)%1440)`, b0 = `(${a0}+(${len}))`;
-      return `((${a0} < h.hh*60+60 AND LEAST(${b0},1440) > h.hh*60) OR (${b0}>1440 AND (${b0}-1440) > h.hh*60))`;
-    };
-    const covWin = (ps: string, pe: string) => // an [start,end) minute window (no wrap) covers hour bucket
-      `(${ps} < h.hh*60+60 AND ${pe} > h.hh*60)`;
+    const cov = covHourSql;   // coverage-core (R2.1); unused covWin helper removed
     const pres = `r.presence IN ('office','wfh')`;
     const credL = `r.sys_late_min BETWEEN 7 AND 240`;
     const credE = `r.sys_early_min BETWEEN 7 AND 240 AND COALESCE(r.person_no,r.employee_no) NOT IN ${MATERNITY_7H}`;
@@ -401,7 +380,7 @@ export class RosterHourlyController {
     // [absStart, absStart+len) is matched against the 7×24 buckets and attributed to the bucket's
     // (day-offset bi, hour), so wrap tails land on the correct calendar day. se_c = canonical end
     // (raw wall-clock end <= start ⇒ +1440), handling both stored conventions.
-    const covAbs = (s: string, l: string) => `((${s}) < b.bi*1440 + b.hh*60 + 60 AND ((${s})+(${l})) > b.bi*1440 + b.hh*60)`;
+    const covAbs = covAbsSql;   // coverage-core (R2.1)
     const actual = await this.ds.query(`
       WITH b AS (SELECT bi, hh FROM generate_series(0,6) bi CROSS JOIN generate_series(0,23) hh),
       r AS (SELECT (work_date - $2::date) AS di, person_no, employee_no, shift_start_min ss,
@@ -562,9 +541,7 @@ export class RosterHourlyController {
     const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
     const ws = snapSat(weekStart || frontier || new Date().toISOString().slice(0, 10));
     const we = new Date(ws + 'T00:00:00Z'); we.setUTCDate(we.getUTCDate() + 6); const weekEnd = we.toISOString().slice(0, 10);
-    const covHh = (ss: string, seC: string) => { // wrap-corrected hour-of-day coverage (len = seC-ss)
-      const len = `(${seC}-${ss})`; return `((${ss} < h.hh*60+60 AND LEAST(${ss}+${len},1440) > h.hh*60) OR ((${ss}+${len})>1440 AND ((${ss}+${len})-1440) > h.hh*60))`;
-    };
+    const covHh = covHhSql;   // wrap-corrected hour-of-day coverage — coverage-core (R2.1)
     const SEC = '(CASE WHEN sc.end_time<=sc.start_time THEN EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time)+1440 ELSE EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time) END)';
     // SUPPLY: avg/day planned HC per (function, hour) from the latest non-archived schedule
     const planRows = await this.ds.query(`
@@ -647,7 +624,7 @@ export class RosterHourlyController {
     const t = req.user.tenantId; const h = Math.max(0, Math.min(23, parseInt(hour || '0', 10)));
     const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
     const isActual = frontier && date <= frontier;
-    const covJs = (ss: number, se: number) => { const len = (se <= ss ? se + 1440 - ss : se - ss); const b0 = ss + len; return (ss < h * 60 + 60 && Math.min(b0, 1440) > h * 60) || (b0 > 1440 && b0 - 1440 > h * 60); };
+    const covJs = (ss: number, se: number) => coversHourJs(ss, se, h);   // coverage-core (R2.1)
     const hhmm = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
     const p: any[] = [t, date]; let rows: any[] = [];   // function optional — omit for an all-functions seat list
     if (isActual) {
@@ -841,7 +818,7 @@ export class RosterHourlyController {
     const t = req.user.tenantId;
     if (!date || !fn) return { short: false, hours: [] };
     const s = Math.max(0, parseInt(sh || '0', 10)), e = Math.min(24, parseInt(eh || '24', 10));
-    const covHh = (ss: string, seC: string) => { const len = `(${seC}-${ss})`; return `((${ss} < h.hh*60+60 AND LEAST(${ss}+${len},1440) > h.hh*60) OR ((${ss}+${len})>1440 AND ((${ss}+${len})-1440) > h.hh*60))`; };
+    const covHh = covHhSql;   // coverage-core (R2.1)
     const SEC = '(CASE WHEN sc.end_time<=sc.start_time THEN EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time)+1440 ELSE EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time) END)';
     // planned HC per hour for this function ON that date; baseline = 28-day observed per hour
     const planRows = await this.ds.query(`

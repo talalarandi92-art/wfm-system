@@ -10,6 +10,7 @@ import { shiftCategoryFromCode } from '@common/shift-category';
 import { TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
 import { rosterCacheInvalidate } from '@common/ttl-cache.interceptor';
 import { RosterSharedService, SHIFT_CAT } from './roster-shared.service';
+import { coversIntervalOnDate, sampledHourlyMinutes } from './coverage-core';
 
 /* Schedule operations & analysis: soft-lock endpoints, OT & exceptions (+Excel),
  * schedule-analysis, interval-headcount, coverage-impact, and the manual
@@ -264,12 +265,8 @@ export class ScheduleOpsController {
 
     // hourly scheduled headcount (avg concurrent by clock-hour, cross-midnight aware)
     const shifts = await this.ds.query(`SELECT shift_start_min ss, shift_end_min se FROM roster_days WHERE ${w} AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL AND shift_end_min IS NOT NULL`, p);
-    const mins = new Array(24).fill(0);
-    for (const sh of shifts) {
-      // wrap-correct cross-midnight ends (legacy raw rows store se<ss) so the loop isn't empty.
-      const ss = Number(sh.ss); let se = Number(sh.se); if (se <= ss) se += 1440;
-      for (let m = ss; m < se; m += 30) { mins[Math.floor((((m % 1440) + 1440) % 1440)) / 60 | 0] += 30; }
-    }
+    // wrap-corrected 30-min sampling — canonical kernel in coverage-core (R2.1).
+    const mins = sampledHourlyMinutes(shifts);
     const days = s.days || 1;
     const hourly = mins.map((pm, h) => ({ hour: h, avgHC: Math.round(pm / 60 / days * 10) / 10 }));
 
@@ -329,14 +326,10 @@ export class ScheduleOpsController {
     // per interval: function → {scheduled, present}
     const grid: Record<string, { sched: Record<string, number>; pres: Record<string, number> }> = {};
     for (let i = 0; i < N; i++) grid[i] = { sched: {}, pres: {} };
-    const covers = (rowDate: string, lo: number, hi: number, i0: number) => {
-      // does an interval starting at minute i0 (on date d) fall in this agent's window?
-      // window [lo,hi) is on the row's own date; for a previous-day row, its tail [1440,hi) maps to [0,hi-1440) on d.
-      if (lo == null || hi == null) return false;
-      if (rowDate === d) return i0 >= lo && i0 < Math.min(hi, 1440);
-      // previous day: only the overnight tail (hi>1440) reaches date d
-      return hi > 1440 && i0 < (hi - 1440);
-    };
+    // does an interval starting at minute i0 (on date d) fall in this agent's window?
+    // window [lo,hi) is on the row's own date; a previous-day row reaches d only via its
+    // overnight tail (hi>1440). Canonical kernel: coverage-core.coversIntervalOnDate (R2.1).
+    const covers = (rowDate: string, lo: number, hi: number, i0: number) => coversIntervalOnDate(rowDate, d, lo, hi, i0);
     for (const r of rows) {
       const f = r.fn || '—'; fnSet.add(f);
       for (let k = 0; k < N; k++) { const i0 = k * stepMin;

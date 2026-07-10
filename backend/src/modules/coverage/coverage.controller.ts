@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { hoursCoveredHH } from '../attendance-recon/coverage-core';
 
 /**
  * Per-function hourly coverage for a date.
@@ -21,16 +22,9 @@ export class CoverageController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
   // Which hours [0..23] does a shift ss→se cover (handles cross-midnight)?
+  // Canonical kernel: coverage-core.hoursCoveredHH (R2.1 — dedup, behavior identical).
   private hoursCovered(ss?: string | null, se?: string | null): number[] {
-    if (!ss || !se) return [];
-    const a = parseInt(String(ss).slice(0, 2), 10);
-    let b = parseInt(String(se).slice(0, 2), 10);
-    if (isNaN(a) || isNaN(b)) return [];
-    const out: number[] = [];
-    if (b > a) { for (let h = a; h < b; h++) out.push(h); }
-    else if (b === a) { out.push(a); }
-    else { for (let h = a; h < 24; h++) out.push(h); for (let h = 0; h < b; h++) out.push(h); }
-    return out;
+    return hoursCoveredHH(ss, se);
   }
 
   @Get('hourly')
