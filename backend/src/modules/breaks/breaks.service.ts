@@ -18,8 +18,8 @@ export class BreaksService {
   // MIN_AVAILABLE agents remain AND no queue is at risk.
   private static readonly MIN_AVAILABLE_AFTER_BREAK = 3;
 
-  private async getLiveQueueState(tenantId: string): Promise<{
-    fresh: boolean; capturedAt: string | null;
+  async getLiveQueueState(tenantId: string): Promise<{
+    fresh: boolean; capturedAt: string | null; staleSec: number;
     availableNow: number; busyNow: number; onBreakNow: number;
     totalWaiting: number; atRiskQueues: { name: string; waiting: number; slaPct: number }[];
   } | null> {
@@ -40,6 +40,7 @@ export class BreaksService {
       return {
         fresh:        Date.now() - new Date(row.captured_at).getTime() < 5 * 60_000,
         capturedAt:   row.captured_at,
+        staleSec:     Math.round((Date.now() - new Date(row.captured_at).getTime()) / 1000),
         availableNow: agents.filter(a => a.status === 'available' || a.status === 'idle').length,
         busyNow:      agents.filter(a => a.status === 'busy').length,
         onBreakNow:   agents.filter(a => a.status === 'break' || a.status === 'away').length,
