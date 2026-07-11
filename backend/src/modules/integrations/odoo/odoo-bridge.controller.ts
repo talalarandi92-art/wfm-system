@@ -64,6 +64,29 @@ function mapOdooRequest(model: string, d: any) {
 }
 const tally = (arr: string[]) => arr.reduce((o: Record<string, number>, s) => { o[s] = (o[s] || 0) + 1; return o; }, {});
 
+// hr.attendance model matcher (biometric punches — NOT a Supervisor Request).
+const ATTENDANCE = /(^|\.)hr\.attendance$/i;
+/**
+ * Odoo hr.attendance → biometric-punch shape { code=employee_no, date, in, out }.
+ * Auto-Ingest wave A2: the recon-emit-odoo-fingerprint.js emitter reads odoo_staging
+ * model='hr.attendance' (staged generically by push(), it passes the NON_REQUEST filter)
+ * and writes the recon "Odoo Fingerprint" file. This mapper is the queryable/verifiable
+ * counterpart. check_in/check_out are Odoo UTC datetimes ("YYYY-MM-DD HH:mm:ss").
+ */
+function mapOdooAttendance(d: any) {
+  const empLabel = m2oLabel(d.employee_id ?? d.x_employee_id ?? d.employee);
+  const cin = d.check_in ? String(d.check_in) : null;
+  const cout = d.check_out ? String(d.check_out) : null;
+  return {
+    odooId: d.id,
+    code: personNoFrom(empLabel),                                   // employee_no
+    employeeName: empLabel ? String(empLabel).replace(/^\[\s*\d+\s*\]\s*/, '').trim() : null,
+    date: cin ? cin.slice(0, 10) : null,                            // UTC calendar date of check-in
+    checkIn: cin, checkOut: cout,                                   // raw UTC timestamps
+    workedHours: num(d.worked_hours),
+  };
+}
+
 // request model → excuse kind
 function kindOf(r: any): string {
   const m = String(r.model || '');
@@ -135,7 +158,7 @@ export class OdooBridgeController {
     if (model) { params.push(model); where += ` AND model=$${params.length}`; }
     const rows = await this.ds.query(
       `SELECT model, data FROM odoo_staging WHERE ${where} ORDER BY captured_at DESC LIMIT 3000`, params).catch(() => []);
-    let mapped = rows.filter((r: any) => !NON_REQUEST.test(r.model)).map((r: any) => mapOdooRequest(r.model, r.data));
+    let mapped = rows.filter((r: any) => !NON_REQUEST.test(r.model) && !ATTENDANCE.test(r.model)).map((r: any) => mapOdooRequest(r.model, r.data));
     if (status) mapped = mapped.filter((m) => m.status === status);
     return {
       total: mapped.length,
@@ -143,6 +166,22 @@ export class OdooBridgeController {
       byModel: tally(mapped.map((m) => m.model)),
       byStatus: tally(mapped.map((m) => m.status)),
       rows: mapped.slice(0, 500),
+    };
+  }
+
+  @Get('attendance')
+  @UseGuards(JwtAuthGuard)
+  @RequirePermissions('rta.view')
+  @ApiOperation({ summary: 'Staged Odoo hr.attendance biometric punches (code + date + check_in/out) — Auto-Ingest A2' })
+  async attendance(@Request() req: any) {
+    const rows = await this.ds.query(
+      `SELECT data FROM odoo_staging WHERE tenant_id=$1 AND model ~* '(^|\\.)hr\\.attendance$' ORDER BY captured_at DESC LIMIT 5000`,
+      [req.user.tenantId]).catch(() => []);
+    const mapped = rows.map((r: any) => mapOdooAttendance(r.data));
+    return {
+      total: mapped.length,
+      linkedToEmployee: mapped.filter((m: any) => m.code).length,
+      rows: mapped.slice(0, 1000),
     };
   }
 

@@ -17,6 +17,14 @@
  *  RESTORE:  node scripts/recon-ingest.js --restore     (reverts roster_days to the first backup)
  *
  *  PIPELINE:  foundation v2 (your exact shift times)  →  corrected engine  →  ingest → live roster_days.
+ *
+ *  AUTO-INGEST (opt-in, default OFF — 2026-07-11):  the recon SOURCE files can be
+ *  produced from LIVE captured staging instead of manual uploads:
+ *    AUTO_INGEST_SPRINKLR=1  → emit "Login and Logout sprinklr.xlsx" from sprinklr_report_staging
+ *    AUTO_INGEST_ODOO=1      → emit "Odoo Fingerprint June.xlsx" + "Permission & Compo June.xlsx" from odoo_staging
+ *  These run BEFORE recon-new-roster, overwriting the corresponding source file.
+ *  When unset (default) the pipeline is EXACTLY as before — it reads the manual files.
+ *  (Emitters are empty-safe: no live capture yet → header-only file, run continues.)
  * ============================================================================
  */
 const { execSync } = require('child_process');
@@ -35,6 +43,14 @@ try {
   // roster BEFORE the rebuild — later sheet re-exports flattened the Location column to
   // "Office", so without this every historical WFH day would misclassify as Office.
   step('recon-export-wfh-evidence.js', '1.5  carry forward per-day WFH evidence from live roster_days');
+  // Optional AUTO-INGEST emitters (default OFF) — produce recon source files from live staging.
+  if (process.env.AUTO_INGEST_SPRINKLR === '1') {
+    step('recon-emit-sprinklr-sessions.js', '1.6  AUTO-INGEST: emit Sprinklr sessions ← sprinklr_report_staging');
+  }
+  if (process.env.AUTO_INGEST_ODOO === '1') {
+    step('recon-emit-odoo-fingerprint.js', '1.7  AUTO-INGEST: emit Odoo fingerprint ← odoo_staging (hr.attendance)');
+    step('recon-emit-odoo-permissions.js', '1.8  AUTO-INGEST: emit Odoo permission/comp ← odoo_staging');
+  }
   step('recon-new-roster.js', '2/4  corrected reconciliation engine → ingest payload');
   step('recon-ingest.js', '3/4  ingest → LIVE roster_days (backed up first)');
   // Step 4 (2026-07-06, one-spine fix): resync attendance_records from the canonical
