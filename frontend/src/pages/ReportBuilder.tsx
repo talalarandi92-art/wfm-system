@@ -1,208 +1,549 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, FileSpreadsheet, Table2, LayoutList, Play, CalendarDays, Search, Wrench, Zap, Save, Bookmark, X } from 'lucide-react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import {
+  Wrench, Play, Search, Save, Bookmark, X, Plus, Filter, CalendarDays,
+  Table2, BarChart3, PieChart, LineChart, Download, Database, Trash2,
+  ChevronUp, ChevronDown, RefreshCw, Sparkles, Layers,
+} from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import {
+  useInjectDsStyles, card, tp, ts, NxCard, NxBtn, NxLoading, NxEmpty, NxError, NxPageHeader,
+} from '@/components/ds';
+import { BarRow, Donut } from '@/components/dazzle';
 
-type Cat = { key: string; label: string };
-const DEFAULT_FIELDS = ['date','agent','function','teamLeader','shiftCode','sysLogin','sysLogout','lateMin','otBefore','otAfter','attendanceStatus'];
-const DEFAULT_KPIS = ['scheduledDays','workedDays','sickDays','absenceDays','lateMin','otMin','conformance'];
+/* ── types mirroring the BLD-1 backend ──────────────────────────────────────── */
+type Source = { key: string; label_en: string; label_ar: string; group: string; permission?: string };
+type Field  = { key: string; label_en: string; label_ar: string; type: string; time?: boolean };
+type Metric = { key: string; label_en: string; label_ar: string; format: string };
+type SourceDetail = { key: string; label_en: string; label_ar: string; dateColumn?: string; personCol?: string; personScoped?: boolean; dimensions: Field[]; metrics: Metric[] };
+type Column = { key: string; label_en: string; label_ar: string; kind: 'dimension' | 'metric'; type?: string; format?: string; time?: boolean };
+type RunResult = { sourceKey: string; columns: Column[]; rowCount: number; rows: any[] };
+type FilterRow = { dim: string; op: FilterOp; value: string };
+type FilterOp = 'eq' | 'ne' | 'lt' | 'gt' | 'lte' | 'gte' | 'in' | 'like' | 'not_null' | 'is_null';
+type Viz = 'table' | 'bar' | 'line' | 'donut';
+type Gran = 'none' | 'day' | 'week' | 'month';
+type SavedReport = { id: string; name: string; description?: string; source_key: string; viz?: Viz; shared?: boolean; is_owner?: boolean; config?: any };
 
-// The 36 spec reports as one-click presets. Each sets mode + fields/KPIs + groupBy + filters.
-type Preset = { id:string; ar:string; en:string; grp:string; mode:'detail'|'summary'; fields?:string[]; kpis?:string[]; groupBy?:string; filters?:Record<string,string> };
-const PRESETS: Preset[] = [
-  // Attendance
-  { id:'att-d', ar:'الحضور — يومي', en:'Attendance — Daily', grp:'Attendance', mode:'detail', fields:['date','agent','function','teamLeader','shiftCode','attendanceStatus','sysLogin','sysLogout','lateMin','otAfter','conformance'] },
-  { id:'att-w', ar:'الحضور — أسبوعي', en:'Attendance — Weekly', grp:'Attendance', mode:'summary', groupBy:'week', kpis:['scheduledDays','workedDays','sickDays','absenceDays','lateDays','conformance'] },
-  { id:'att-m', ar:'الحضور — شهري', en:'Attendance — Monthly', grp:'Attendance', mode:'summary', groupBy:'month', kpis:['scheduledDays','workedDays','sickDays','absenceDays','lateDays','conformance'] },
-  // Tardiness
-  { id:'tar-d', ar:'التأخير — يومي', en:'Tardiness — Daily', grp:'Tardiness', mode:'summary', groupBy:'date', kpis:['lateDays','lateMin','avgLate','earlyMin'], filters:{ onlyTardiness:'1' } },
-  { id:'tar-w', ar:'التأخير — أسبوعي', en:'Tardiness — Weekly', grp:'Tardiness', mode:'summary', groupBy:'week', kpis:['lateDays','lateMin','avgLate','earlyMin'], filters:{ onlyTardiness:'1' } },
-  { id:'tar-m', ar:'التأخير — شهري', en:'Tardiness — Monthly', grp:'Tardiness', mode:'summary', groupBy:'month', kpis:['lateDays','lateMin','avgLate','earlyMin'], filters:{ onlyTardiness:'1' } },
-  { id:'tar-band', ar:'التأخير — حسب الفئة', en:'Tardiness — by Band', grp:'Tardiness', mode:'summary', groupBy:'lateCategory', kpis:['scheduledDays','agents'], filters:{ onlyTardiness:'1' } },
-  // Overtime
-  { id:'ot-d', ar:'OT — يومي', en:'Overtime — Daily', grp:'Overtime', mode:'summary', groupBy:'date', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
-  { id:'ot-w', ar:'OT — أسبوعي', en:'Overtime — Weekly', grp:'Overtime', mode:'summary', groupBy:'week', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
-  { id:'ot-m', ar:'OT — شهري', en:'Overtime — Monthly', grp:'Overtime', mode:'summary', groupBy:'month', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
-  { id:'ot-shift', ar:'OT — حسب الشفت', en:'Overtime — by Shift', grp:'Overtime', mode:'summary', groupBy:'shift', kpis:['otMin','otBefore','otAfter'] },
-  { id:'ot-agent', ar:'OT — حسب الموظف', en:'Overtime — by Agent', grp:'Overtime', mode:'summary', groupBy:'agent', kpis:['otMin','otBefore','otAfter','offdayOt','holidayOt'] },
-  { id:'ot-fn', ar:'OT — حسب الفنكشن', en:'Overtime — by Function', grp:'Overtime', mode:'summary', groupBy:'function', kpis:['otMin','otBefore','otAfter'] },
-  { id:'ot-tl', ar:'OT — حسب التيم ليدر', en:'Overtime — by Team Leader', grp:'Overtime', mode:'summary', groupBy:'teamLeader', kpis:['otMin','otBefore','otAfter'] },
-  { id:'ot-grp', ar:'OT — حسب الجروب', en:'Overtime — by Group', grp:'Overtime', mode:'summary', groupBy:'group', kpis:['otMin','otBefore','otAfter'] },
-  // HR Matrix
-  { id:'hr-d', ar:'HR Matrix — يومي', en:'HR Matrix — Daily', grp:'HR Matrix', mode:'summary', groupBy:'date', kpis:['workedDays','sickDays','absenceDays','leaveDays','offDays'] },
-  { id:'hr-w', ar:'HR Matrix — أسبوعي', en:'HR Matrix — Weekly', grp:'HR Matrix', mode:'summary', groupBy:'week', kpis:['workedDays','sickDays','absenceDays','leaveDays','offDays'] },
-  { id:'hr-m', ar:'HR Matrix — شهري', en:'HR Matrix — Monthly', grp:'HR Matrix', mode:'summary', groupBy:'month', kpis:['workedDays','sickDays','absenceDays','leaveDays','offDays'] },
-  { id:'hr-agent', ar:'HR Matrix — حسب الموظف', en:'HR Matrix — by Agent', grp:'HR Matrix', mode:'summary', groupBy:'agent', kpis:['workedDays','sickDays','absenceDays','lateMin','conformance'] },
-  { id:'hr-fn', ar:'HR Matrix — حسب الفنكشن', en:'HR Matrix — by Function', grp:'HR Matrix', mode:'summary', groupBy:'function', kpis:['workedDays','sickDays','absenceDays','conformance'] },
-  { id:'hr-tl', ar:'HR Matrix — حسب التيم ليدر', en:'HR Matrix — by Team Leader', grp:'HR Matrix', mode:'summary', groupBy:'teamLeader', kpis:['workedDays','sickDays','absenceDays','conformance'] },
-  { id:'hr-grp', ar:'HR Matrix — حسب الجروب', en:'HR Matrix — by Group', grp:'HR Matrix', mode:'summary', groupBy:'group', kpis:['workedDays','sickDays','absenceDays','conformance'] },
-  // Leave / WFH / permission / comp
-  { id:'sick', ar:'الإجازات المرضية', en:'Sick Leave', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','teamLeader','originalShift','attendanceStatus'], filters:{ sick:'1' } },
-  { id:'absence', ar:'الغياب', en:'Absence', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','teamLeader','originalShift','attendanceStatus'], filters:{ absent:'1' } },
-  { id:'wfh', ar:'العمل من المنزل', en:'WFH', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','shiftCode','sysLogin','sysLogout','conformance'], filters:{ wfh:'1' } },
-  { id:'perm', ar:'الاستئذانات', en:'Permissions', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','permission','permissionDuration','shiftCode'], filters:{ permission:'1' } },
-  { id:'comp', ar:'أيام COMP', en:'COMP', grp:'Leave & Status', mode:'detail', fields:['date','agent','function','shiftCode','attendanceStatus'], filters:{ comp:'1' } },
-  // Shift distribution
-  { id:'shiftdist', ar:'توزيع الشفتات', en:'Shift Distribution', grp:'Shift', mode:'summary', groupBy:'shift', kpis:['scheduledDays','agents','workedDays'] },
-  { id:'shiftrate', ar:'توزيع الشفتات حسب الموظف', en:'Shift Distribution by Agent', grp:'Shift', mode:'summary', groupBy:'agent', kpis:['scheduledDays','workedDays','otMin','conformance'] },
-  // Conformance
-  { id:'conf-fn', ar:'الكونفورمانس حسب الفنكشن', en:'Conformance by Function', grp:'Conformance', mode:'summary', groupBy:'function', kpis:['conformance','workedDays','lateMin','missingSystem'] },
-  { id:'conf-tl', ar:'الكونفورمانس حسب التيم ليدر', en:'Conformance by Team Leader', grp:'Conformance', mode:'summary', groupBy:'teamLeader', kpis:['conformance','workedDays','lateMin','mismatch'] },
-  // Data quality
-  { id:'dq', ar:'تقرير جودة البيانات', en:'Data Quality', grp:'Quality', mode:'detail', fields:['date','agent','function','shiftCode','attendanceStatus','dataQuality'] },
-  { id:'misspunch', ar:'بصمة ناقصة', en:'Missing Punch', grp:'Quality', mode:'detail', fields:['date','agent','function','shiftCode','sysLogin','sysLogout'], filters:{ dataQuality:'missing-punch' } },
+const CHART_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#38bdf8', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#a3e635', '#eab308', '#06b6d4'];
+
+/* operators available per dimension type */
+const OPS_BY_TYPE: Record<string, FilterOp[]> = {
+  string: ['eq', 'ne', 'in', 'like', 'not_null', 'is_null'],
+  date:   ['eq', 'ne', 'lt', 'gt', 'lte', 'gte', 'not_null', 'is_null'],
+  number: ['eq', 'ne', 'lt', 'gt', 'lte', 'gte', 'not_null', 'is_null'],
+};
+const OP_LABEL: Record<FilterOp, { en: string; ar: string }> = {
+  eq: { en: '=', ar: '=' }, ne: { en: '≠', ar: '≠' }, lt: { en: '<', ar: '<' }, gt: { en: '>', ar: '>' },
+  lte: { en: '≤', ar: '≤' }, gte: { en: '≥', ar: '≥' }, in: { en: 'in (a,b,c)', ar: 'ضمن (أ،ب،ج)' },
+  like: { en: 'contains', ar: 'يحتوي' }, not_null: { en: 'is set', ar: 'موجود' }, is_null: { en: 'is empty', ar: 'فارغ' },
+};
+const VALUELESS: FilterOp[] = ['not_null', 'is_null'];
+
+/* relative date presets → [from, to] */
+function presetRange(id: string): [string, string] {
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const today = new Date(); const t = iso(today);
+  const back = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
+  switch (id) {
+    case 'last7':  return [back(6), t];
+    case 'last28': return [back(27), t];
+    case 'last30': return [back(29), t];
+    case 'last90': return [back(89), t];
+    case 'thisMonth': { const d = new Date(today.getFullYear(), today.getMonth(), 1); return [iso(d), t]; }
+    case 'lastMonth': { const s = new Date(today.getFullYear(), today.getMonth() - 1, 1); const e = new Date(today.getFullYear(), today.getMonth(), 0); return [iso(s), iso(e)]; }
+    default: return [back(29), t];
+  }
+}
+const PRESETS: { id: string; en: string; ar: string }[] = [
+  { id: 'last7', en: 'Last 7 days', ar: 'آخر ٧ أيام' },
+  { id: 'last28', en: 'Last 28 days', ar: 'آخر ٢٨ يوم' },
+  { id: 'last30', en: 'Last 30 days', ar: 'آخر ٣٠ يوم' },
+  { id: 'last90', en: 'Last 90 days', ar: 'آخر ٩٠ يوم' },
+  { id: 'thisMonth', en: 'This month', ar: 'هذا الشهر' },
+  { id: 'lastMonth', en: 'Last month', ar: 'الشهر الماضي' },
+  { id: 'custom', en: 'Custom', ar: 'مخصّص' },
 ];
 
+/* value formatter honoring column.format */
+function fmtCell(v: any, col: Column): string {
+  if (v == null || v === '') return '—';
+  if (col.kind === 'dimension' || col.time) return String(v);
+  const n = Number(v);
+  if (Number.isNaN(n)) return String(v);
+  switch (col.format) {
+    case 'hours':   return `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })} h`;
+    case 'minutes': return `${n.toLocaleString()} m`;
+    case 'percent': return `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })}%`;
+    case 'count':
+    case 'number':  return n.toLocaleString();
+    default:        return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+}
+
 export default function ReportBuilderPage() {
-  const { lang } = useUiStore(); const ar = lang === 'ar';
-  const nav = useNavigate();
-  const [mode, setMode] = useState<'detail'|'summary'>('detail');
-  const [from, setFrom] = useState('2026-01-01'); const [to, setTo] = useState('2026-06-30');
-  const [filters, setFilters] = useState<Record<string,string>>({ search:'' });
-  const [fields, setFields] = useState<string[]>(DEFAULT_FIELDS);
-  const [kpis, setKpis] = useState<string[]>(DEFAULT_KPIS);
-  const [groupBy, setGroupBy] = useState('teamLeader');
-  const [catalog, setCatalog] = useState<{ fields:Cat[]; kpis:Cat[]; groups:Cat[] }|null>(null);
-  const [data, setData] = useState<any>(null); const [loading, setLoading] = useState(false);
+  useInjectDsStyles();
+  const { lang, dark } = useUiStore(); const ar = lang === 'ar';
+  const L = (en: string, arv: string) => (ar ? arv : en);
 
-  const qs = useCallback(() => {
-    const p = new URLSearchParams({ from, to });
-    Object.entries(filters).forEach(([k,v]) => { if (v) p.set(k, v); });
-    if (mode === 'summary') { p.set('groupBy', groupBy); p.set('kpis', kpis.join(',')); }
-    else p.set('fields', fields.join(','));
-    return p.toString();
-  }, [mode, from, to, filters, fields, kpis, groupBy]);
+  const [sources, setSources] = useState<Source[]>([]);
+  const [sourceKey, setSourceKey] = useState('');
+  const [detail, setDetail] = useState<SourceDetail | null>(null);
+  const [dims, setDims] = useState<string[]>([]);
+  const [metrics, setMetrics] = useState<string[]>([]);
+  const [filters, setFilters] = useState<FilterRow[]>([]);
+  const [preset, setPreset] = useState('last30');
+  const [[from, to], setRange] = useState<[string, string]>(presetRange('last30'));
+  const [gran, setGran] = useState<Gran>('none');
+  const [viz, setViz] = useState<Viz>('table');
+  const [libSearch, setLibSearch] = useState('');
 
-  const run = useCallback(() => {
-    setLoading(true);
-    apiClient.get(`/attendance-recon/report-builder?${qs()}`).then((r:any)=>{ setData(r.data); if(r.data.catalog) setCatalog(r.data.catalog); })
-      .catch(()=>setData(null)).finally(()=>setLoading(false));
-  }, [qs]);
-  useEffect(() => { run(); }, []); // eslint-disable-line
-  useEffect(() => { const t=setTimeout(run, 350); return ()=>clearTimeout(t); }, [mode, from, to, filters, groupBy]); // eslint-disable-line
+  const [result, setResult] = useState<RunResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  const exportXlsx = async () => {
-    try { const r:any = await apiClient.get(`/attendance-recon/report-builder?${qs()}&format=xlsx`, { responseType:'blob' });
-      const a=document.createElement('a'); a.href=URL.createObjectURL(r.data); a.download='custom-report.xlsx'; a.click(); } catch {/*­*/}
+  const [saved, setSaved] = useState<SavedReport[]>([]);
+  const [drawer, setDrawer] = useState(false);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+
+  /* ── initial loads ── */
+  useEffect(() => {
+    apiClient.get('/report-builder-v2/sources')
+      .then((r: any) => setSources(r.data?.sources ?? []))
+      .catch(() => setErr('sources'));
+    refreshSaved();
+  }, []); // eslint-disable-line
+
+  const refreshSaved = useCallback(() => {
+    apiClient.get('/report-builder-v2/saved-reports').then((r: any) => setSaved(r.data ?? [])).catch(() => {});
+  }, []);
+
+  /* ── on source change → fetch its schema ── */
+  const loadSource = useCallback((key: string, keep = false) => {
+    setSourceKey(key);
+    apiClient.get(`/report-builder-v2/sources/${key}`).then((r: any) => {
+      const d: SourceDetail = r.data;
+      setDetail(d);
+      if (!keep) { setDims([]); setMetrics([]); setFilters([]); setResult(null); }
+    }).catch(() => setErr('source'));
+  }, []);
+
+  /* ── run (debounced) ── */
+  const runNow = useCallback(() => {
+    if (!sourceKey || metrics.length === 0) { setResult(null); return; }
+    setLoading(true); setErr(null);
+    apiClient.post('/report-builder-v2/run', {
+      sourceKey, dimensions: dims, metrics,
+      filters: filters.filter(f => f.dim && (VALUELESS.includes(f.op) || f.value !== '')).map(f => ({
+        dim: f.dim, op: f.op,
+        ...(VALUELESS.includes(f.op) ? {} : { value: f.op === 'in' ? f.value.split(',').map(s => s.trim()).filter(Boolean) : f.value }),
+      })),
+      dateFrom: from, dateTo: to, granularity: gran, limit: 5000,
+    }).then((r: any) => setResult(r.data)).catch((e: any) => {
+      setErr(e?.response?.data?.message || 'run'); setResult(null);
+    }).finally(() => setLoading(false));
+  }, [sourceKey, dims, metrics, filters, from, to, gran]);
+
+  const firstRun = useRef(true);
+  useEffect(() => {
+    if (firstRun.current) { firstRun.current = false; return; }
+    const t = setTimeout(runNow, 400);
+    return () => clearTimeout(t);
+  }, [sourceKey, dims, metrics, filters, from, to, gran]); // eslint-disable-line
+
+  /* ── library helpers ── */
+  const toggle = (arr: string[], setArr: (v: string[]) => void, k: string) =>
+    setArr(arr.includes(k) ? arr.filter(x => x !== k) : [...arr, k]);
+  const move = (arr: string[], setArr: (v: string[]) => void, k: string, dir: -1 | 1) => {
+    const i = arr.indexOf(k); const j = i + dir; if (i < 0 || j < 0 || j >= arr.length) return;
+    const next = [...arr]; [next[i], next[j]] = [next[j], next[i]]; setArr(next);
   };
-  const toggle = (arr:string[], setArr:(v:string[])=>void, k:string) => setArr(arr.includes(k)?arr.filter(x=>x!==k):[...arr,k]);
-  const setFilt = (k:string,v:string) => setFilters(p=>({ ...p, [k]:v }));
-  const applyPreset = (p:Preset) => {
-    setMode(p.mode);
-    if (p.fields) setFields(p.fields);
-    if (p.groupBy) setGroupBy(p.groupBy);
-    if (p.kpis) setKpis(p.kpis);
-    setFilters({ search:'', ...(p.filters||{}) });   // clean slate + preset filters (triggers the debounced run)
+  const label = (o: { label_en: string; label_ar: string }) => (ar ? o.label_ar : o.label_en);
+  const dimByKey = useMemo(() => Object.fromEntries((detail?.dimensions ?? []).map(d => [d.key, d])), [detail]);
+  const metByKey = useMemo(() => Object.fromEntries((detail?.metrics ?? []).map(m => [m.key, m])), [detail]);
+
+  /* ── filters ── */
+  const addFilter = () => { const d = detail?.dimensions?.[0]; if (!d) return; setFilters(f => [...f, { dim: d.key, op: (OPS_BY_TYPE[d.type] ?? OPS_BY_TYPE.string)[0], value: '' }]); };
+  const setFilter = (i: number, patch: Partial<FilterRow>) => setFilters(f => f.map((r, ix) => ix === i ? { ...r, ...patch } : r));
+  const delFilter = (i: number) => setFilters(f => f.filter((_, ix) => ix !== i));
+
+  /* ── date presets ── */
+  const applyPreset = (id: string) => { setPreset(id); if (id !== 'custom') setRange(presetRange(id)); };
+
+  /* ── save / load / delete ── */
+  const doSave = async () => {
+    if (!sourceKey || metrics.length === 0) { alert(L('Pick a source and at least one metric first.', 'اختر مصدراً ومقياساً واحداً على الأقل.')); return; }
+    const name = window.prompt(L('Report name:', 'اسم التقرير:')); if (!name) return;
+    const sharedYes = window.confirm(L('Share this report with the team? (OK = shared, Cancel = private)', 'مشاركة التقرير مع الفريق؟ (موافق = مشترك، إلغاء = خاص)'));
+    const config = { dimensions: dims, metrics, filters, dateFrom: from, dateTo: to, granularity: gran, preset, viz };
+    try {
+      await apiClient.post('/report-builder-v2/saved-reports', { name, sourceKey, config, viz, shared: sharedYes });
+      refreshSaved();
+    } catch { alert(L('Save failed.', 'فشل الحفظ.')); }
   };
-  const PRESET_GROUPS = [...new Set(PRESETS.map(p=>p.grp))];
-  const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
+  const doLoad = async (id: string) => {
+    try {
+      const r: any = await apiClient.get(`/report-builder-v2/saved-reports/${id}`);
+      const rep = r.data; const cfg = rep.config ?? {};
+      setLoadedId(id); setDrawer(false);
+      // load the source schema first, then repopulate config
+      await new Promise<void>(res => { loadSource(rep.source_key, true); res(); });
+      setDims(cfg.dimensions ?? []); setMetrics(cfg.metrics ?? []); setFilters(cfg.filters ?? []);
+      setGran(cfg.granularity ?? 'none'); setViz(cfg.viz ?? rep.viz ?? 'table');
+      if (cfg.dateFrom && cfg.dateTo) { setRange([cfg.dateFrom, cfg.dateTo]); setPreset(cfg.preset ?? 'custom'); }
+      setTimeout(runNow, 500);
+    } catch { alert(L('Load failed.', 'فشل التحميل.')); }
+  };
+  const doDelete = async (id: string) => {
+    if (!window.confirm(L('Delete this report?', 'حذف هذا التقرير؟'))) return;
+    try { await apiClient.delete(`/report-builder-v2/saved-reports/${id}`); if (loadedId === id) setLoadedId(null); refreshSaved(); } catch {}
+  };
 
-  // user-saved report presets (localStorage) — "build a report your way and keep it"
-  const [views, setViews] = useState<Record<string,any>>(() => { try { return JSON.parse(localStorage.getItem('wfm.reportViews')||'{}'); } catch { return {}; } });
-  const persistViews = (v:Record<string,any>) => { setViews(v); localStorage.setItem('wfm.reportViews', JSON.stringify(v)); };
-  const saveView = () => { const name = window.prompt(ar?'اسم الريبورت:':'Report name:'); if (!name) return;
-    persistViews({ ...views, [name]: { mode, from, to, filters, fields, kpis, groupBy } }); };
-  const loadView = (name:string) => { const v = views[name]; if (!v) return;
-    setMode(v.mode); setFrom(v.from); setTo(v.to); setFields(v.fields||DEFAULT_FIELDS); setKpis(v.kpis||DEFAULT_KPIS); setGroupBy(v.groupBy||'teamLeader'); setFilters(v.filters||{ search:'' }); };
-  const delView = (name:string) => { const v = { ...views }; delete v[name]; persistViews(v); };
+  /* ── CSV export of current rows (no xlsx dep in this app) ── */
+  const exportCsv = () => {
+    if (!result?.rows?.length) return;
+    const cols = result.columns;
+    const esc = (s: any) => { const v = s == null ? '' : String(s); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+    const head = cols.map(c => esc(label(c))).join(',');
+    const body = result.rows.map(row => cols.map(c => esc(fmtCell(row[c.key], c) === '—' ? '' : row[c.key])).join(',')).join('\n');
+    const blob = new Blob(['﻿' + head + '\n' + body], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `${sourceKey || 'report'}_${from}_${to}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  };
 
-  const FILTERS: [string,string,string][] = [['function',ar?'الفنكشن':'Function','function_name'],['teamLeader',ar?'التيم ليدر':'Team leader','team_manager'],['group',ar?'الجروب':'Group','team_group'],['shift',ar?'الشفت':'Shift','shift_code'],['attendanceStatus',ar?'الحالة':'Status','attendance_status'],['lateCategory',ar?'فئة التأخير':'Late cat','late_category']];
+  /* ── grouped source list ── */
+  const grouped = useMemo(() => {
+    const g: Record<string, Source[]> = {};
+    for (const s of sources) (g[s.group] ??= []).push(s);
+    return g;
+  }, [sources]);
+
+  /* ── chart data: first dimension/period as label, first metric as value ── */
+  const chart = useMemo(() => {
+    if (!result) return null;
+    const dimCol = result.columns.find(c => c.kind === 'dimension');
+    const metCol = result.columns.find(c => c.kind === 'metric');
+    if (!dimCol || !metCol) return null;
+    const pts = result.rows.slice(0, 24).map((r, i) => ({
+      label: String(r[dimCol.key] ?? '—'), value: Number(r[metCol.key]) || 0, color: CHART_COLORS[i % CHART_COLORS.length],
+    }));
+    return { dimCol, metCol, pts, max: Math.max(1, ...pts.map(p => p.value)) };
+  }, [result]);
+
+  const inputStyle: React.CSSProperties = {
+    padding: '7px 10px', borderRadius: 9, fontSize: 12,
+    background: dark ? 'rgba(255,255,255,0.05)' : '#fff',
+    border: `1px solid ${dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+    color: tp(dark), outline: 'none',
+  };
+  const chip = (active: boolean, color = '#6366f1'): React.CSSProperties => ({
+    padding: '5px 10px', borderRadius: 9, fontSize: 11.5, fontWeight: 600, cursor: 'pointer',
+    border: `1px solid ${active ? color + '80' : (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)')}`,
+    background: active ? `${color}22` : (dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)'),
+    color: active ? color : ts(dark), display: 'inline-flex', alignItems: 'center', gap: 5, transition: 'all .15s',
+  });
+
+  const libDims = (detail?.dimensions ?? []).filter(d => !dims.includes(d.key) && label(d).toLowerCase().includes(libSearch.toLowerCase()));
+  const libMets = (detail?.metrics ?? []).filter(m => !metrics.includes(m.key) && label(m).toLowerCase().includes(libSearch.toLowerCase()));
 
   return (
-    <div className="space-y-4 page-enter">
-      <div className="flex items-center gap-3">
-        <button onClick={()=>nav('/roster')} className="p-2 rounded-xl" style={{ background:'rgba(255,255,255,0.06)' }}><ArrowLeft size={16} className="text-white"/></button>
-        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)' }}><Wrench size={19} className="text-white"/></div>
-        <div className="flex-1"><h1 className="text-lg font-bold text-white">{ar?'منشئ التقارير المخصّصة':'Custom Report Builder'}</h1>
-          <p className="text-xs text-slate-500">{ar?'اختر الأعمدة أو الـKPIs، فلتر، جمّع، وصدّر Excel':'Pick fields or KPIs, filter, group, export Excel'}</p></div>
-        <button onClick={saveView} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(99,102,241,0.18)', color:'#a5b4fc' }}><Save size={14}/>{ar?'احفظ':'Save'}</button>
-        <button onClick={exportXlsx} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold" style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}><FileSpreadsheet size={14}/>{ar?'تصدير Excel':'Export Excel'}</button>
-      </div>
+    <div style={{ animation: 'ds-fadein .4s ease' }}>
+      <NxPageHeader
+        title="Report Builder" titleAr="منشئ التقارير"
+        desc="Universal self-service builder — pick a source, dimensions & metrics, filter, visualize, save"
+        descAr="منشئ تقارير شامل — اختر مصدراً وأبعاداً ومقاييس، فلتر، اعرض، احفظ"
+        icon={Wrench} color="#8b5cf6" dark={dark} ar={ar}
+        actions={<>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 20, background: 'rgba(139,92,246,0.14)', color: '#a78bfa', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Sparkles size={11} /> Builder v2
+          </span>
+          <NxBtn icon={Bookmark} variant="outline" color="#6366f1" dark={dark} onClick={() => setDrawer(true)}>
+            {L('Saved', 'المحفوظة')} {saved.length ? `(${saved.length})` : ''}
+          </NxBtn>
+          <NxBtn icon={Save} color="#6366f1" dark={dark} onClick={doSave}>{L('Save', 'حفظ')}</NxBtn>
+        </>}
+      />
 
-      {/* my saved reports */}
-      {Object.keys(views).length>0 && (
-        <div className="flex items-center gap-1.5 flex-wrap text-[11px] px-1">
-          <span className="text-slate-500 flex items-center gap-1"><Bookmark size={12}/>{ar?'ريبوراتي:':'My reports:'}</span>
-          {Object.keys(views).map(n=>(
-            <span key={n} className="flex items-center gap-1 px-2 py-1 rounded-lg text-slate-200" style={{ background:'rgba(99,102,241,0.12)', border:'1px solid rgba(99,102,241,0.25)' }}>
-              <button onClick={()=>loadView(n)}>{n}</button>
-              <button onClick={()=>delView(n)} className="text-slate-500 hover:text-rose-400"><X size={11}/></button>
-            </span>
+      {err === 'sources' && <NxError onRetry={() => window.location.reload()} dark={dark} ar={ar} />}
+
+      {/* ── 1. SOURCE PICKER ── */}
+      <NxCard dark={dark} style={{ marginBottom: 14 }} pad="16px 18px">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Database size={14} style={{ color: '#8b5cf6' }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: tp(dark) }}>{L('Data source', 'مصدر البيانات')}</span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {Object.entries(grouped).map(([grp, list]) => (
+            <div key={grp} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark) }}>{grp}</span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {list.map(s => (
+                  <button key={s.key} onClick={() => loadSource(s.key)} style={{
+                    ...chip(sourceKey === s.key, '#8b5cf6'), padding: '8px 13px', fontSize: 12.5,
+                  }}>{label(s)}</button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
+      </NxCard>
+
+      {!detail && (
+        <NxEmpty icon={Database} ar={ar} dark={dark}
+          title="Choose a data source to start building" titleAr="اختر مصدر بيانات للبدء"
+          desc="7 sources available — overtime, login/logout, attendance, scorecard, permissions, breaks, coverage"
+          descAr="٧ مصادر متاحة — الإضافي، الدخول/الخروج، الحضور، بطاقة الأداء، الاستئذانات، الاستراحات، التغطية" />
       )}
 
-      {/* quick reports — the 36 spec reports as one-click presets */}
-      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.18)' }}>
-        <span className="text-[11px] text-indigo-300 font-bold flex items-center gap-1"><Zap size={13}/>{ar?'تقارير جاهزة':'Quick reports'}</span>
-        <select onChange={e=>{ const p=PRESETS.find(x=>x.id===e.target.value); if(p) applyPreset(p); e.target.value=''; }} defaultValue="" className={`${inputCls} min-w-[220px]`}>
-          <option value="">{ar?`اختر من ${PRESETS.length} تقريراً جاهزاً…`:`Pick from ${PRESETS.length} ready reports…`}</option>
-          {PRESET_GROUPS.map(g=>(
-            <optgroup key={g} label={g}>
-              {PRESETS.filter(p=>p.grp===g).map(p=><option key={p.id} value={p.id}>{ar?p.ar:p.en}</option>)}
-            </optgroup>
-          ))}
-        </select>
-        <span className="text-[10px] text-slate-500">{ar?'يضبط الأعمدة/الـKPIs/الفلاتر تلقائياً — عدّل بعدها كما تحب':'sets fields/KPIs/filters automatically — tweak afterwards'}</span>
-      </div>
+      {detail && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 340px) 1fr', gap: 14, alignItems: 'start' }}>
+          {/* ── LEFT: library + selected ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* library */}
+            <NxCard dark={dark} pad="14px 16px">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <Layers size={13} style={{ color: '#6366f1' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: tp(dark) }}>{L('Library', 'المكتبة')}</span>
+                <div style={{ position: 'relative', marginInlineStart: 'auto' }}>
+                  <Search size={12} style={{ position: 'absolute', insetInlineStart: 8, top: '50%', transform: 'translateY(-50%)', color: ts(dark) }} />
+                  <input value={libSearch} onChange={e => setLibSearch(e.target.value)} placeholder={L('search', 'بحث')}
+                    style={{ ...inputStyle, padding: '5px 8px 5px 26px', width: 120 }} />
+                </div>
+              </div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Dimensions', 'الأبعاد')}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 12 }}>
+                {libDims.length === 0 && <span style={{ fontSize: 11, color: ts(dark) }}>—</span>}
+                {libDims.map(d => (
+                  <button key={d.key} onClick={() => toggle(dims, setDims, d.key)} style={chip(false)}>
+                    <Plus size={10} /> {label(d)}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Metrics', 'المقاييس')}</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {libMets.length === 0 && <span style={{ fontSize: 11, color: ts(dark) }}>—</span>}
+                {libMets.map(m => (
+                  <button key={m.key} onClick={() => toggle(metrics, setMetrics, m.key)} style={chip(false, '#22c55e')}>
+                    <Plus size={10} /> {label(m)}
+                  </button>
+                ))}
+              </div>
+            </NxCard>
 
-      {/* mode + filters */}
-      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-        <div className="flex rounded-lg overflow-hidden border border-white/10">
-          <button onClick={()=>setMode('detail')} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold" style={mode==='detail'?{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff' }:{ color:'#94a3b8' }}><LayoutList size={13}/>{ar?'تفصيلي':'Detail'}</button>
-          <button onClick={()=>setMode('summary')} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold" style={mode==='summary'?{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)', color:'#fff' }:{ color:'#94a3b8' }}><Table2 size={13}/>{ar?'ملخّص':'Summary'}</button>
-        </div>
-        <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
-          <input type="date" value={from} onChange={e=>setFrom(e.target.value)} className={inputCls}/><span className="text-xs">→</span>
-          <input type="date" value={to} onChange={e=>setTo(e.target.value)} className={inputCls}/></div>
-        <div className="flex items-center gap-1.5"><Search size={14} className="text-slate-400"/>
-          <input value={filters.search||''} onChange={e=>setFilt('search',e.target.value)} onKeyDown={e=>e.key==='Enter'&&run()} placeholder={ar?'بحث':'Search'} className={inputCls}/></div>
-        {FILTERS.map(([k,label])=>(
-          <input key={k} value={filters[k]||''} onChange={e=>setFilt(k,e.target.value)} placeholder={label} className={`${inputCls} w-28`} list={`dl-${k}`}/>
-        ))}
-        {mode==='summary' && (
-          <select value={groupBy} onChange={e=>setGroupBy(e.target.value)} className={inputCls}>
-            {(catalog?.groups||[]).map(g=><option key={g.key} value={g.key}>{ar?'جمّع: ':'Group: '}{g.label}</option>)}
-          </select>
-        )}
-        <button onClick={run} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ms-auto" style={{ background:'rgba(99,102,241,0.2)', color:'#a5b4fc' }}><Play size={12}/>{ar?'تشغيل':'Run'}</button>
-      </div>
+            {/* selected (reorderable) */}
+            <NxCard dark={dark} pad="14px 16px">
+              <span style={{ fontSize: 12, fontWeight: 700, color: tp(dark), display: 'block', marginBottom: 10 }}>{L('Selected', 'المختارة')}</span>
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Group by', 'التجميع حسب')}</div>
+              {dims.length === 0 && <div style={{ fontSize: 11, color: ts(dark), marginBottom: 10 }}>{L('none — totals only', 'لا شيء — الإجمالي فقط')}</div>}
+              {dims.map(k => (
+                <SelChip key={k} label={label(dimByKey[k] ?? { label_en: k, label_ar: k })} color="#6366f1" dark={dark}
+                  onUp={() => move(dims, setDims, k, -1)} onDown={() => move(dims, setDims, k, 1)} onRemove={() => toggle(dims, setDims, k)} />
+              ))}
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), margin: '10px 0 6px' }}>{L('Metrics', 'المقاييس')} <span style={{ color: '#ef4444' }}>*</span></div>
+              {metrics.length === 0 && <div style={{ fontSize: 11, color: '#f59e0b' }}>{L('add at least one metric', 'أضف مقياساً واحداً على الأقل')}</div>}
+              {metrics.map(k => (
+                <SelChip key={k} label={label(metByKey[k] ?? { label_en: k, label_ar: k })} color="#22c55e" dark={dark}
+                  onUp={() => move(metrics, setMetrics, k, -1)} onDown={() => move(metrics, setMetrics, k, 1)} onRemove={() => toggle(metrics, setMetrics, k)} />
+              ))}
+            </NxCard>
+          </div>
 
-      {/* field / kpi picker */}
-      {catalog && (
-        <div className="p-3 rounded-2xl" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-          <p className="text-[10px] text-slate-500 uppercase font-semibold mb-2">{mode==='detail'?(ar?'اختر الأعمدة':'Select fields'):(ar?'اختر الـKPIs':'Select KPIs')}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {(mode==='detail'?catalog.fields:catalog.kpis).map(c=>{ const sel=(mode==='detail'?fields:kpis).includes(c.key);
-              return <button key={c.key} onClick={()=>{ mode==='detail'?toggle(fields,setFields,c.key):toggle(kpis,setKpis,c.key); }}
-                className="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors"
-                style={sel?{ background:'rgba(99,102,241,0.25)', color:'#c7d2fe', border:'1px solid rgba(99,102,241,0.5)' }:{ background:'rgba(255,255,255,0.04)', color:'#94a3b8', border:'1px solid rgba(255,255,255,0.08)' }}>{c.label}</button>;
-            })}
+          {/* ── RIGHT: controls + result ── */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* date + granularity + filters + viz */}
+            <NxCard dark={dark} pad="14px 16px">
+              {/* date presets */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+                <CalendarDays size={14} style={{ color: ts(dark) }} />
+                {PRESETS.map(p => (
+                  <button key={p.id} onClick={() => applyPreset(p.id)} style={chip(preset === p.id)}>{ar ? p.ar : p.en}</button>
+                ))}
+                <input type="date" value={from} onChange={e => { setRange([e.target.value, to]); setPreset('custom'); }} style={inputStyle} />
+                <span style={{ color: ts(dark) }}>→</span>
+                <input type="date" value={to} onChange={e => { setRange([from, e.target.value]); setPreset('custom'); }} style={inputStyle} />
+                <div style={{ marginInlineStart: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: ts(dark) }}>{L('Bucket', 'التقسيم')}</span>
+                  {(['none', 'day', 'week', 'month'] as Gran[]).map(g => (
+                    <button key={g} onClick={() => setGran(g)} style={chip(gran === g)}>{L(g, { none: 'بدون', day: 'يوم', week: 'أسبوع', month: 'شهر' }[g])}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* filters */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: filters.length ? 8 : 0 }}>
+                <Filter size={13} style={{ color: ts(dark) }} />
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: tp(dark) }}>{L('Filters', 'الفلاتر')}</span>
+                <button onClick={addFilter} style={{ ...chip(false), marginInlineStart: 'auto' }}><Plus size={10} /> {L('Add filter', 'إضافة فلتر')}</button>
+              </div>
+              {filters.map((f, i) => {
+                const dt = dimByKey[f.dim]?.type ?? 'string';
+                const ops = OPS_BY_TYPE[dt] ?? OPS_BY_TYPE.string;
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                    <select value={f.dim} onChange={e => { const nd = detail.dimensions.find(d => d.key === e.target.value)!; const nops = OPS_BY_TYPE[nd.type] ?? OPS_BY_TYPE.string; setFilter(i, { dim: e.target.value, op: nops.includes(f.op) ? f.op : nops[0] }); }} style={inputStyle}>
+                      {detail.dimensions.map(d => <option key={d.key} value={d.key}>{label(d)}</option>)}
+                    </select>
+                    <select value={f.op} onChange={e => setFilter(i, { op: e.target.value as FilterOp })} style={inputStyle}>
+                      {ops.map(op => <option key={op} value={op}>{ar ? OP_LABEL[op].ar : OP_LABEL[op].en}</option>)}
+                    </select>
+                    {!VALUELESS.includes(f.op) && (
+                      <input value={f.value} onChange={e => setFilter(i, { value: e.target.value })}
+                        placeholder={f.op === 'in' ? L('a, b, c', 'أ، ب، ج') : L('value', 'قيمة')}
+                        type={dt === 'date' ? 'date' : 'text'} style={{ ...inputStyle, minWidth: 140 }} />
+                    )}
+                    <button onClick={() => delFilter(i)} style={{ ...chip(false, '#ef4444'), padding: '6px' }}><X size={12} /></button>
+                  </div>
+                );
+              })}
+
+              {/* viz toggle + actions */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+                {([['table', Table2], ['bar', BarChart3], ['line', LineChart], ['donut', PieChart]] as [Viz, any][]).map(([v, Ic]) => (
+                  <button key={v} onClick={() => setViz(v)} style={{ ...chip(viz === v, '#8b5cf6'), padding: '7px 11px' }}><Ic size={13} /> {L(v[0].toUpperCase() + v.slice(1), { table: 'جدول', bar: 'أعمدة', line: 'خطي', donut: 'دائري' }[v])}</button>
+                ))}
+                <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 6 }}>
+                  <NxBtn icon={RefreshCw} variant="ghost" size="sm" dark={dark} onClick={runNow}>{L('Run', 'تشغيل')}</NxBtn>
+                  <NxBtn icon={Download} variant="outline" size="sm" color="#22c55e" dark={dark} onClick={exportCsv}>{L('Export CSV', 'تصدير CSV')}</NxBtn>
+                </div>
+              </div>
+            </NxCard>
+
+            {/* result */}
+            <NxCard dark={dark} pad="0" style={{ overflow: 'hidden' }}>
+              <div style={{ padding: '10px 16px', borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Play size={12} style={{ color: '#6366f1' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: tp(dark) }}>{L('Preview', 'المعاينة')}</span>
+                {result && <span style={{ fontSize: 11, color: ts(dark) }}>{result.rowCount.toLocaleString()} {L('rows', 'صف')} · {from} → {to}</span>}
+              </div>
+
+              {loading && <NxLoading dark={dark} ar={ar} />}
+              {!loading && err && err !== 'sources' && (
+                <div style={{ padding: 16 }}><NxError onRetry={runNow} dark={dark} ar={ar} /></div>
+              )}
+              {!loading && !err && metrics.length === 0 && (
+                <NxEmpty icon={Sparkles} ar={ar} dark={dark} title="Add a metric to see results" titleAr="أضف مقياساً لعرض النتائج"
+                  desc="Pick at least one metric from the library on the left." descAr="اختر مقياساً واحداً على الأقل من المكتبة." />
+              )}
+              {!loading && !err && metrics.length > 0 && result && result.rows.length === 0 && (
+                <NxEmpty ar={ar} dark={dark} title="No data for this range/filters" titleAr="لا توجد بيانات لهذا النطاق/الفلاتر"
+                  desc="Try widening the date range or removing filters." descAr="جرّب توسيع النطاق الزمني أو إزالة الفلاتر." />
+              )}
+
+              {!loading && !err && result && result.rows.length > 0 && (
+                <div style={{ padding: viz === 'table' ? 0 : 18 }}>
+                  {viz === 'table' && <ResultTable result={result} dark={dark} ar={ar} label={label} />}
+                  {(viz === 'bar' || viz === 'line') && chart && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ fontSize: 11, color: ts(dark), marginBottom: 4 }}>{label(chart.metCol)} {L('by', 'حسب')} {label(chart.dimCol)}</div>
+                      {viz === 'bar'
+                        ? chart.pts.map((p, i) => <BarRow key={i} label={p.label} value={p.value} max={chart.max} color={p.color} delay={i * 40} />)
+                        : <LineChartSvg pts={chart.pts} dark={dark} />}
+                    </div>
+                  )}
+                  {viz === 'donut' && chart && (
+                    <Donut segments={chart.pts} centerNum={chart.pts.reduce((a, p) => a + p.value, 0)} centerLabel={label(chart.metCol)} />
+                  )}
+                  {viz !== 'table' && !chart && (
+                    <div style={{ fontSize: 12, color: ts(dark), padding: 8 }}>{L('Add a dimension to chart this data.', 'أضف بُعداً لعرض هذه البيانات كرسم.')}</div>
+                  )}
+                </div>
+              )}
+            </NxCard>
           </div>
         </div>
       )}
 
-      {/* results */}
-      {loading && <p className="text-sm text-slate-500 py-6 text-center">{ar?'جارٍ التشغيل…':'Running…'}</p>}
-      {!loading && data && (
-        <div className="rounded-2xl overflow-auto" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)', maxHeight:'62vh' }}>
-          <div className="px-3 py-2 text-[11px] text-slate-500 border-b border-white/5">{data.count} {ar?'صف':'rows'} · {data.from} → {data.to} · {data.mode}</div>
-          <table className="w-full text-xs">
-            <thead className="sticky top-0 z-10" style={{ background:'#11162a' }}>
-              <tr className="text-slate-400">{(data.columns||[]).map((c:any,i:number)=><th key={c.key} className={`px-3 py-2 font-semibold whitespace-nowrap ${i===0?'text-start':'text-center'}`}>{c.label}</th>)}</tr>
-            </thead>
-            <tbody>
-              {(data.rows||[]).slice(0,500).map((r:any,ri:number)=>(
-                <tr key={ri} className="border-t border-white/5 hover:bg-white/[0.03]">
-                  {(data.columns||[]).map((c:any,ci:number)=><td key={c.key} className={`px-3 py-1.5 whitespace-nowrap ${ci===0?'text-start text-white font-medium':'text-center text-slate-300'}`}>{r[c.key]??'—'}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {(data.rows||[]).length>500 && <div className="px-3 py-2 text-[11px] text-slate-500">{ar?`عرض أول 500 — صدّر Excel للكل (${data.count})`:`Showing first 500 — export Excel for all (${data.count})`}</div>}
+      {/* ── SAVED DRAWER ── */}
+      {drawer && (
+        <div onClick={() => setDrawer(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 60, display: 'flex', justifyContent: 'flex-end' }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: 360, maxWidth: '90vw', height: '100%', overflowY: 'auto', ...card(dark), borderRadius: 0, padding: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <Bookmark size={16} style={{ color: '#6366f1' }} />
+              <span style={{ fontSize: 15, fontWeight: 800, color: tp(dark) }}>{L('Saved reports', 'التقارير المحفوظة')}</span>
+              <button onClick={() => setDrawer(false)} style={{ marginInlineStart: 'auto', ...chip(false, '#ef4444'), padding: 6 }}><X size={14} /></button>
+            </div>
+            {saved.length === 0 && <NxEmpty ar={ar} dark={dark} title="No saved reports yet" titleAr="لا توجد تقارير محفوظة" desc="Build a report and press Save." descAr="ابنِ تقريراً واضغط حفظ." />}
+            {saved.map(s => (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 12, marginBottom: 8, border: `1px solid ${dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`, background: loadedId === s.id ? 'rgba(99,102,241,0.1)' : 'transparent' }}>
+                <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => doLoad(s.id)}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: tp(dark), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
+                  <div style={{ fontSize: 10.5, color: ts(dark), display: 'flex', gap: 6 }}>
+                    <span>{s.source_key}</span>
+                    {s.shared && <span style={{ color: '#22c55e' }}>· {L('shared', 'مشترك')}</span>}
+                    {!s.is_owner && <span>· {L('by teammate', 'من زميل')}</span>}
+                  </div>
+                </div>
+                {s.is_owner && <button onClick={() => doDelete(s.id)} style={{ ...chip(false, '#ef4444'), padding: 6 }}><Trash2 size={12} /></button>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── selected chip with reorder ── */
+function SelChip({ label, color, dark, onUp, onDown, onRemove }: { label: string; color: string; dark: boolean; onUp: () => void; onDown: () => void; onRemove: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 9, marginBottom: 5, background: `${color}18`, border: `1px solid ${color}40` }}>
+      <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      <button onClick={onUp} style={{ background: 'none', border: 'none', cursor: 'pointer', color, padding: 0, display: 'flex' }}><ChevronUp size={13} /></button>
+      <button onClick={onDown} style={{ background: 'none', border: 'none', cursor: 'pointer', color, padding: 0, display: 'flex' }}><ChevronDown size={13} /></button>
+      <button onClick={onRemove} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', padding: 0, display: 'flex' }}><X size={13} /></button>
+    </div>
+  );
+}
+
+/* ── result table ── */
+function ResultTable({ result, dark, ar, label }: { result: RunResult; dark: boolean; ar: boolean; label: (o: any) => string }) {
+  return (
+    <div style={{ overflowX: 'auto', maxHeight: '58vh' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+        <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: dark ? '#11162a' : '#f8fafc' }}>
+          <tr>
+            {result.columns.map((c, i) => (
+              <th key={c.key} style={{ padding: '10px 16px', textAlign: i === 0 ? 'start' : 'end', fontSize: 10, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: c.kind === 'metric' ? '#22c55e' : ts(dark), whiteSpace: 'nowrap' }}>{label(c)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {result.rows.slice(0, 1000).map((r, ri) => (
+            <tr key={ri} style={{ borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}` }}>
+              {result.columns.map((c, ci) => (
+                <td key={c.key} style={{ padding: '9px 16px', textAlign: ci === 0 ? 'start' : 'end', color: ci === 0 ? tp(dark) : (c.kind === 'metric' ? tp(dark) : ts(dark)), fontWeight: ci === 0 ? 600 : (c.kind === 'metric' ? 700 : 400), fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  {fmtCell(r[c.key], c)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {result.rows.length > 1000 && (
+        <div style={{ padding: '8px 16px', fontSize: 11, color: ts(dark) }}>{ar ? `عرض أول ١٠٠٠ من ${result.rowCount} — صدّر CSV للكل` : `Showing first 1,000 of ${result.rowCount} — export CSV for all`}</div>
+      )}
+    </div>
+  );
+}
+
+/* ── minimal line chart (theme-aware SVG) ── */
+function LineChartSvg({ pts, dark }: { pts: { label: string; value: number; color: string }[]; dark: boolean }) {
+  const W = 640, H = 200, pad = 28;
+  const max = Math.max(1, ...pts.map(p => p.value));
+  const x = (i: number) => pad + (pts.length <= 1 ? 0 : (i * (W - pad * 2)) / (pts.length - 1));
+  const y = (v: number) => H - pad - (v / max) * (H - pad * 2);
+  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i)} ${y(p.value)}`).join(' ');
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <svg width={W} height={H} style={{ minWidth: W }}>
+        <line x1={pad} y1={H - pad} x2={W - pad} y2={H - pad} stroke={dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.1)'} />
+        <path d={d} fill="none" stroke="#6366f1" strokeWidth={2} />
+        {pts.map((p, i) => (
+          <g key={i}>
+            <circle cx={x(i)} cy={y(p.value)} r={3.5} fill="#6366f1" />
+            <text x={x(i)} y={H - pad + 14} textAnchor="middle" fontSize={9} fill={dark ? '#64748b' : '#94a3b8'}>{p.label.length > 8 ? p.label.slice(0, 8) : p.label}</text>
+          </g>
+        ))}
+      </svg>
     </div>
   );
 }
