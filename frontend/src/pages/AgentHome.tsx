@@ -10,6 +10,7 @@ import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
 import { conformanceGrade } from '@/utils/format';
 import { tp, ts as tsColor } from '@/components/ds';
+import BreakCard from '@/components/breaks/BreakCard';
 
 // Theme-aware neutral tokens (semantic status colors stay hardcoded — same meaning in every theme)
 const neutralT = (dark: boolean) => ({
@@ -228,6 +229,9 @@ export default function AgentHome() {
           <AlertCircle size={14} /> {ar ? 'حسابك غير مرتبط بسجل موظف — تواصل مع المشرف لعرض بيانات الحضور.' : 'Your account is not linked to an employee record — contact your supervisor.'}
         </div>
       )}
+
+      {/* ── MY BREAK TODAY (§14 live engine card — renders only when linked + slots exist) ── */}
+      {!noLink && <BreakCard onRequestException={() => navigate('/requests?tab=submit')} />}
 
       {/* ── MY LIVE PERFORMANCE (own Sprinklr stats, live) ── */}
       {(() => {

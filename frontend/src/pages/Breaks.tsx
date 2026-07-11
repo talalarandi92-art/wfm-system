@@ -4,9 +4,12 @@ import { useAuthStore } from '@/store/auth.store';
 import { apiClient } from '@/api/client';
 import { card as cardStyle, tp, ts, useInjectDsStyles } from '@/components/ds';
 import { fmtDuration } from '@/utils/format';
+import BreakCard from '@/components/breaks/BreakCard';
+import BreakCommandCenter from '@/components/breaks/CommandCenter';
 import {
   Coffee, Clock, AlertTriangle, CheckCircle, XCircle,
   Calendar, Users, BarChart3, RefreshCw, Plus, Loader2, TrendingDown, Zap,
+  Radar,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -85,7 +88,7 @@ interface BreakType {
   is_prayer: boolean;
 }
 
-type Tab = 'timeline' | 'coverage' | 'requests' | 'fairness' | 'mybreaks';
+type Tab = 'command' | 'timeline' | 'coverage' | 'requests' | 'fairness' | 'mybreaks';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -145,8 +148,10 @@ export default function BreaksPage() {
 
   const isAgent  = !!user && !hasPermission('schedule.view');
   const canManage = hasPermission('schedule.view');
+  const canCommand = hasPermission('hc.view');   // §16 — supervisor/RTA command center
 
-  const [tab, setTab]           = useState<Tab>(isAgent ? 'mybreaks' : 'timeline');
+  // Supervisors land on the Command Center; agents keep My Breaks.
+  const [tab, setTab]           = useState<Tab>(canCommand ? 'command' : isAgent ? 'mybreaks' : 'timeline');
   const [date, setDate]         = useState(today());
   const [functionId, setFunctionId] = useState('');
 
@@ -184,6 +189,7 @@ export default function BreaksPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
+    if (tab === 'command') return;   // the Command Center loads (and polls) itself
     setLoading(true);
     setError('');
     try {
@@ -311,6 +317,7 @@ export default function BreaksPage() {
   const hours = Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => SHIFT_START_H + i);
 
   const tabs: { key: Tab; label: string; labelAr: string; icon: React.ReactNode }[] = [
+    ...(canCommand ? [{ key: 'command' as Tab, label: 'Command Center', labelAr: 'مركز القيادة', icon: <Radar size={14} /> }] : []),
     ...(isAgent ? [{ key: 'mybreaks' as Tab, label: 'My Breaks',  labelAr: 'بريكاتي',        icon: <Coffee size={14} /> }] : []),
     ...(canManage ? [
       { key: 'timeline' as Tab, label: 'Timeline', labelAr: 'الجدول الزمني', icon: <Calendar size={14} /> },
@@ -420,6 +427,9 @@ export default function BreaksPage() {
 
       {!loading && (
         <>
+          {/* ══ COMMAND CENTER TAB (§16) ════════════════════════════════════ */}
+          {tab === 'command' && canCommand && <BreakCommandCenter date={date} />}
+
           {/* ══ TIMELINE TAB ════════════════════════════════════════════════ */}
           {tab === 'timeline' && (
             <div style={{ ...cardStyle(dark), overflow: 'hidden' }}>
@@ -720,6 +730,9 @@ export default function BreaksPage() {
           {/* ══ MY BREAKS TAB ═══════════════════════════════════════════════ */}
           {tab === 'mybreaks' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* §14 live employee break card — engine status, entitlement, start/return */}
+              <BreakCard onRequestException={() => { setReqSlot(null); setShowRequestModal(true); }} />
+
               <div style={{ ...cardStyle(dark), padding: 14 }}>
                 <p style={{ fontSize: 11, color: ts(dark) }}>{ar ? 'التاريخ' : 'Date'}</p>
                 <p style={{ fontSize: 14, fontWeight: 600, color: tp(dark), marginTop: 2 }}>{date}</p>

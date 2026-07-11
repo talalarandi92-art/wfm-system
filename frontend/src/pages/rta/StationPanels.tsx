@@ -218,6 +218,11 @@ export function SummaryPanel({ live, agAvail, agBusy, agBreak, agOffline, breakD
             <span className="text-xs font-semibold" style={{ color: '#a5b4fc' }}>
               {ar ? 'في الاستراحة الآن' : 'On Break Now'} ({breakData.onBreakNow.length})
             </span>
+            {/* B4 — jump to the live break release engine (waiting line / modes / risk) */}
+            <a href="/attendance?tab=breaks" className="text-[10px] font-semibold hover:underline"
+              style={{ color: '#a5b4fc', marginInlineStart: 'auto' }}>
+              {ar ? 'مركز قيادة البريكات ←' : 'Break Command Center →'}
+            </a>
           </div>
           <div>
             {breakData.onBreakNow.slice(0, 6).map(a => {
