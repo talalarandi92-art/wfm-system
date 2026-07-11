@@ -4,7 +4,7 @@ export {};
  * Proves the emitted AOA matches the POSITIONAL columns recon-new-roster.js reads
  * (col0=Code numeric, col1=Date serial, col3=In frac, col4=Out frac, col9=Status).
  */
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 const emit = require('../../../../scripts/recon-emit-odoo-fingerprint');
 
 describe('recon-emit-odoo-fingerprint', () => {

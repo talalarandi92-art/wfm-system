@@ -5,7 +5,7 @@ export {};
  * (col1=ID numeric, col2=Date serial, col3=Type, col4/5=From/To clock, col6=Hours,
  * col7=Status) and that Type/Status text hits recon's regexes (comp / approved).
  */
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 const emit = require('../../../../scripts/recon-emit-odoo-permissions');
 
 describe('recon-emit-odoo-permissions', () => {

@@ -5,7 +5,7 @@ export {};
  * recon-new-roster.js reads (ID/Login Date/Login Time/Logout Date/Logout Time),
  * with dates as Excel serials and times as day fractions, plus a normalized row.
  */
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+ 
 const emit = require('../../../../scripts/recon-emit-sprinklr-sessions');
 
 describe('recon-emit-sprinklr-sessions', () => {
