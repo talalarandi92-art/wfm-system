@@ -12,6 +12,7 @@ import {
   slotPositionBucket,
   wallClockHHMM,
 } from './break-policy.logic';
+import { BreakSimScenario, applyPolicyOverrides, isSimAbsent, normalizeScenario } from './break-simulation.logic';
 
 export interface BreakTypeRow {
   id: string;
@@ -55,6 +56,11 @@ export interface ScheduleResult {
   warnings: string[];
   fairnessMap: Map<string, EmployeeFairnessDelta>;
   coverageSource: 'headcount_intervals' | 'fallback';
+  /** Present ONLY when a scenario was applied (simulation dry-run). */
+  simulation?: {
+    absentEmployees: Array<{ employee_id: string; employee_name: string; function_name: string }>;
+    onShiftCount: number;
+  };
 }
 
 type CoverageCell = { required: number; scheduled: number; onBreak: number };
@@ -102,12 +108,20 @@ export class BreakSchedulerService {
     return out;
   }
 
+  /**
+   * Pure PLAN computation — reads the DB, WRITES NOTHING. The persist path is
+   * BreaksService.generate() (no scenario); BreakSimulationService calls this
+   * with a scenario for §28 dry-run what-ifs. Scenario application is additive:
+   * with rawScenario undefined the behavior is byte-identical to B2.
+   */
   async generateForDate(
     tenantId: string,
     scheduleDate: string,
     functionId?: string,
+    rawScenario?: BreakSimScenario | null,
   ): Promise<ScheduleResult> {
     const warnings: string[] = [];
+    const scenario = rawScenario ? normalizeScenario(rawScenario) : null;
 
     // ── 1. Employees on shift (canonical function fold + team manager + employment type) ──
     const shiftRows: Array<{
@@ -169,8 +183,21 @@ export class BreakSchedulerService {
       return { slots: [], warnings: ['No working employees found for this date.'], fairnessMap: new Map(), coverageSource: 'fallback' };
     }
 
+    // ── 1b. SIMULATION scenario: deterministic absence (hash of employee_id) ─
+    const simAbsent = scenario && scenario.absencePct > 0
+      ? shiftRows.filter(r => isSimAbsent(r.employee_id, scenario.absencePct))
+      : [];
+    const absentIds = new Set(simAbsent.map(r => r.employee_id));
+    const activeRows = absentIds.size ? shiftRows.filter(r => !absentIds.has(r.employee_id)) : shiftRows;
+    if (scenario && absentIds.size) {
+      warnings.push(`SIMULATION: ${absentIds.size} of ${shiftRows.length} employees marked absent (${scenario.absencePct}% scenario).`);
+    }
+
     // ── 2. Policy matrix (v2) — resolved per employee, most-specific wins ────
-    const policies = await this.policyService.loadActivePolicies(tenantId);
+    let policies = await this.policyService.loadActivePolicies(tenantId);
+    if (scenario && (scenario.policyOverrides || scenario.mode)) {
+      policies = applyPolicyOverrides(policies, scenario.policyOverrides, scenario.mode);
+    }
     if (policies.length === 0) {
       warnings.push('No active break_policies_v2 rows — nothing generated (seed the default policy).');
       return { slots: [], warnings, fairnessMap: new Map(), coverageSource: 'fallback' };
@@ -222,6 +249,17 @@ export class BreakSchedulerService {
       coverageMap.set(key, { required: +row.required_hc, scheduled: +row.scheduled_hc, onBreak: 0 });
     }
 
+    // SIMULATION: absent employees also vanish from scheduled coverage
+    // (headcount_intervals counted them when the snapshot was built).
+    if (coverageMap.size > 0 && simAbsent.length) {
+      for (const emp of simAbsent) {
+        for (const t of this.bucketsOf(new Date(emp.shift_start), new Date(emp.shift_end))) {
+          const cell = coverageMap.get(this.bucketKey(t, emp.function_id));
+          if (cell) cell.scheduled = Math.max(0, cell.scheduled - 1);
+        }
+      }
+    }
+
     if (coverageMap.size === 0) {
       // FALLBACK (kept from v1): build live from scheduled agents; required = scheduled,
       // so the coverage-ratio rule caps simultaneous breaks. Slots get marked
@@ -230,7 +268,7 @@ export class BreakSchedulerService {
       this.logger.warn(
         `headcount_intervals still EMPTY for ${scheduleDate} after rebuild — falling back to LIVE scheduled-HC (required = scheduled).`,
       );
-      for (const emp of shiftRows) {
+      for (const emp of activeRows) {
         for (const t of this.bucketsOf(new Date(emp.shift_start), new Date(emp.shift_end))) {
           const key = this.bucketKey(t, emp.function_id);
           const cell = coverageMap.get(key);
@@ -238,6 +276,11 @@ export class BreakSchedulerService {
           else coverageMap.set(key, { required: 1, scheduled: 1, onBreak: 0 });
         }
       }
+    }
+
+    // SIMULATION: virtual extra capacity in every bucket in scope
+    if (scenario && scenario.extraStaff > 0) {
+      for (const cell of coverageMap.values()) cell.scheduled += scenario.extraStaff;
     }
 
     // ── 6. Pre-occupy coverage with KEPT slots (active/completed/manual — regen never touches them) ─
@@ -266,7 +309,7 @@ export class BreakSchedulerService {
 
     const teamOnBreak = new Map<string, number>(); // bucketEpoch|team_manager → count
     const teamKey = (t: Date, team: string) => `${Math.floor(t.getTime() / BUCKET_MS)}|${team}`;
-    const teamOf = new Map(shiftRows.map(r => [r.employee_id, r.team_manager]));
+    const teamOf = new Map(activeRows.map(r => [r.employee_id, r.team_manager]));
 
     const keptByEmployee = new Map<string, Array<{ startMs: number; endMs: number; maxSlot: number }>>();
     for (const ks of keptSlots) {
@@ -316,7 +359,7 @@ export class BreakSchedulerService {
     const slots: GeneratedSlot[] = [];
     const fairnessMap = new Map<string, EmployeeFairnessDelta>();
 
-    for (const emp of shiftRows) {
+    for (const emp of activeRows) {
       const shiftStart = new Date(emp.shift_start);
       const shiftEnd = new Date(emp.shift_end);
       const shiftDurationMin = Math.round((shiftEnd.getTime() - shiftStart.getTime()) / 60000);
@@ -408,7 +451,17 @@ export class BreakSchedulerService {
       fairnessMap.set(emp.employee_id, fair);
     }
 
-    return { slots, warnings, fairnessMap, coverageSource };
+    return {
+      slots, warnings, fairnessMap, coverageSource,
+      ...(scenario ? {
+        simulation: {
+          absentEmployees: simAbsent.map(r => ({
+            employee_id: r.employee_id, employee_name: r.employee_name, function_name: r.function_name,
+          })),
+          onShiftCount: activeRows.length,
+        },
+      } : {}),
+    };
   }
 
   /** headcount_intervals for the date AND the next day (cross-midnight spill). */

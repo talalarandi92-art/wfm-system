@@ -1,6 +1,6 @@
 import {
   Controller, Get, Post, Patch, Body, Param, Query,
-  Request, UseGuards, HttpCode, HttpStatus, BadRequestException,
+  Request, Res, StreamableFile, UseGuards, HttpCode, HttpStatus, BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
@@ -8,7 +8,10 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { BreaksService } from './breaks.service';
 import { BreakPolicyService } from './break-policy.service';
 import { BreakReleaseService } from './break-release.service';
+import { BreakReportsService } from './break-reports.service';
+import { BreakSimulationService } from './break-simulation.service';
 import { ReleaseMode } from './break-release.logic';
+import { BreakSimScenario } from './break-simulation.logic';
 
 @ApiTags('Breaks')
 @ApiBearerAuth()
@@ -20,7 +23,54 @@ export class BreaksController {
     private readonly breaksService: BreaksService,
     private readonly policyService: BreakPolicyService,
     private readonly releaseService: BreakReleaseService,
+    private readonly reportsService: BreakReportsService,
+    private readonly simulationService: BreakSimulationService,
   ) {}
+
+  // ══ B5 — REPORTS (§25) + SIMULATION (§28) ══════════════════════════════════
+
+  // ── Consolidated break reports (read-only) ────────────────────────────────
+  @Get('reports')
+  @ApiOperation({ summary: 'Consolidated break reports — entitlement/delays/releases/late-returns/overdue/fairness/peak-hours' })
+  @ApiQuery({ name: 'from', required: true })
+  @ApiQuery({ name: 'to', required: true })
+  @ApiQuery({ name: 'function', required: false })
+  getReports(
+    @Request() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('function') functionName?: string,
+  ) {
+    return this.reportsService.getReports(req.user.tenantId, from, to, functionName);
+  }
+
+  // ── Excel export of the same report (one sheet per section + Summary) ─────
+  @Get('reports/export')
+  @ApiOperation({ summary: 'Excel export of the break reports (exceljs, one sheet per section)' })
+  async exportReports(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('function') functionName?: string,
+  ) {
+    const wb = await this.reportsService.buildWorkbook(req.user.tenantId, from, to, functionName);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="break-reports_${from}_${to}.xlsx"`,
+    });
+    return new StreamableFile(Buffer.from(await wb.xlsx.writeBuffer()));
+  }
+
+  // ── What-if simulation — DRY-RUN of the optimizer, zero writes ────────────
+  @Post('simulate')
+  @ApiOperation({ summary: 'Simulate a break plan for a date/scenario (absence %, queue spike, extra staff) — never persisted' })
+  simulate(
+    @Request() req: any,
+    @Body() body: { date: string; function?: string; scenario?: BreakSimScenario },
+  ) {
+    return this.simulationService.simulate(req.user.tenantId, body);
+  }
 
   // ══ B3 — LIVE RELEASE ENGINE ═══════════════════════════════════════════════
 

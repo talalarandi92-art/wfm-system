@@ -6,10 +6,12 @@ import { card as cardStyle, tp, ts, useInjectDsStyles } from '@/components/ds';
 import { fmtDuration } from '@/utils/format';
 import BreakCard from '@/components/breaks/BreakCard';
 import BreakCommandCenter from '@/components/breaks/CommandCenter';
+import BreakReports from '@/components/breaks/BreakReports';
+import BreakSimulation from '@/components/breaks/BreakSimulation';
 import {
   Coffee, Clock, AlertTriangle, CheckCircle, XCircle,
   Calendar, Users, BarChart3, RefreshCw, Plus, Loader2, TrendingDown, Zap,
-  Radar,
+  Radar, FileSpreadsheet, FlaskConical,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -88,7 +90,7 @@ interface BreakType {
   is_prayer: boolean;
 }
 
-type Tab = 'command' | 'timeline' | 'coverage' | 'requests' | 'fairness' | 'mybreaks';
+type Tab = 'command' | 'timeline' | 'coverage' | 'requests' | 'fairness' | 'mybreaks' | 'reports' | 'simulation';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -189,7 +191,7 @@ export default function BreaksPage() {
   // ── Load ──────────────────────────────────────────────────────────────────
 
   const load = useCallback(async () => {
-    if (tab === 'command') return;   // the Command Center loads (and polls) itself
+    if (tab === 'command' || tab === 'reports' || tab === 'simulation') return;   // these tabs load themselves
     setLoading(true);
     setError('');
     try {
@@ -317,7 +319,11 @@ export default function BreaksPage() {
   const hours = Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => SHIFT_START_H + i);
 
   const tabs: { key: Tab; label: string; labelAr: string; icon: React.ReactNode }[] = [
-    ...(canCommand ? [{ key: 'command' as Tab, label: 'Command Center', labelAr: 'مركز القيادة', icon: <Radar size={14} /> }] : []),
+    ...(canCommand ? [
+      { key: 'command' as Tab, label: 'Command Center', labelAr: 'مركز القيادة', icon: <Radar size={14} /> },
+      { key: 'reports' as Tab, label: 'Reports', labelAr: 'التقارير', icon: <FileSpreadsheet size={14} /> },
+      { key: 'simulation' as Tab, label: 'Simulation', labelAr: 'المحاكاة', icon: <FlaskConical size={14} /> },
+    ] : []),
     ...(isAgent ? [{ key: 'mybreaks' as Tab, label: 'My Breaks',  labelAr: 'بريكاتي',        icon: <Coffee size={14} /> }] : []),
     ...(canManage ? [
       { key: 'timeline' as Tab, label: 'Timeline', labelAr: 'الجدول الزمني', icon: <Calendar size={14} /> },
@@ -429,6 +435,12 @@ export default function BreaksPage() {
         <>
           {/* ══ COMMAND CENTER TAB (§16) ════════════════════════════════════ */}
           {tab === 'command' && canCommand && <BreakCommandCenter date={date} />}
+
+          {/* ══ REPORTS TAB (§25) ═══════════════════════════════════════════ */}
+          {tab === 'reports' && canCommand && <BreakReports />}
+
+          {/* ══ SIMULATION TAB (§28) ════════════════════════════════════════ */}
+          {tab === 'simulation' && canCommand && <BreakSimulation date={date} />}
 
           {/* ══ TIMELINE TAB ════════════════════════════════════════════════ */}
           {tab === 'timeline' && (

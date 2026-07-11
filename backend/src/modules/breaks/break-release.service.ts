@@ -720,6 +720,8 @@ export class BreakReleaseService implements OnModuleInit, OnModuleDestroy {
        WHERE id = $2 AND tenant_id = $3 AND status = 'released'`,
       [nowTime, slotId, tenantId],
     );
+    await this.policyService.audit(tenantId, null, 'breaks.start', 'break_slot', slotId,
+      `employee=${employeeId} started break at ${nowTime.slice(0, 5)}`);
     return { success: true, status: 'active', actualStart: nowTime.slice(0, 5) };
   }
 
@@ -755,6 +757,8 @@ export class BreakReleaseService implements OnModuleInit, OnModuleDestroy {
       status: 'completed',
       notes: lateReturnMin > 0 ? `late return +${lateReturnMin}min` : undefined,
     });
+    await this.policyService.audit(tenantId, null, 'breaks.return', 'break_slot', slotId,
+      `employee=${employeeId} returned at ${nowTime.slice(0, 5)} — consumed ${actualDur}min${lateReturnMin > 0 ? `, LATE RETURN +${lateReturnMin}min` : ''}`);
     return {
       success: true, status: 'completed',
       actualEnd: nowTime.slice(0, 5),

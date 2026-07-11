@@ -655,6 +655,10 @@ export class BreaksService {
       ).catch((e) => this.logger.warn(`break_daily_balance update failed for slot ${slotId}: ${e.message}`));
     }
 
+    // §26 audit: RTA/manual actual-time recording is a break mutation too
+    await this.policyService.audit(tenantId, null, 'breaks.actual.recorded', 'break_slot', slotId,
+      `status ${slot.prev_status} → ${dto.status}; actual ${dto.actualStart ?? '—'}–${dto.actualEnd ?? '—'}${lateMin ? `, late start ${lateMin}min` : ''}`);
+
     return { success: true };
   }
 
