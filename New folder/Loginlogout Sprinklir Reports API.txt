@@ -1,0 +1,86 @@
+{
+    "report": "USER_AVAILABILITY_SLA_REPORT_V2",
+    "reportingEngine": "SERVICE_ANALYTICS",
+    "timeField": null,
+    "startTime": 1782853200000,
+    "endTime": 1783803599999,
+    "timeZone": "Asia/Riyadh",
+    "page": 0,
+    "pageSize": 300,
+    "filters": null,
+    "groupBys": [
+        {
+            "heading": "REQUIRED_USER_EMAIL_ID_0",
+            "dimensionName": "REQUIRED_USER_EMAIL_ID",
+            "groupType": "FIELD",
+            "details": {},
+            "namedFilters": null
+        },
+        {
+            "heading": "loginStatusAssignTimeDimension_1",
+            "dimensionName": "loginStatusAssignTimeDimension",
+            "groupType": "FIELD",
+            "details": {
+                "isDateTypeDimension": true,
+                "interval": "1d"
+            },
+            "namedFilters": null
+        },
+        {
+            "heading": "loginStatusRemoveTime_2",
+            "dimensionName": "loginStatusRemoveTime",
+            "groupType": "FIELD",
+            "details": {
+                "isDateTypeDimension": true,
+                "interval": "1d"
+            },
+            "namedFilters": null
+        },
+        {
+            "heading": "LOGOUT_CAUSE_3",
+            "dimensionName": "LOGOUT_CAUSE",
+            "groupType": "FIELD",
+            "details": {},
+            "namedFilters": null
+        },
+        {
+            "heading": "DEVICE_TYPE_4",
+            "dimensionName": "DEVICE_TYPE",
+            "groupType": "FIELD",
+            "details": {},
+            "namedFilters": null
+        }
+    ],
+    "projections": [
+        {
+            "heading": "M_USER_AVAILABILITY_SLA_REPORT_V2_TOTAL_LOGGED_IN_TIME_0",
+            "measurementName": "TOTAL_LOGGED_IN_TIME",
+            "aggregateFunction": "SUM",
+            "details": {
+                "workingHours": {},
+                "holidayHours": []
+            }
+        }
+    ],
+    "projectionDecorations": [],
+    "projectionFilters": null,
+    "sorts": null,
+    "streamRequestInfo": null,
+    "additional": {
+        "Timezone": "Asia/Riyadh",
+        "translateResponse": "false",
+        "fetchUnhealthyAccounts": "false",
+        "widgetId": "6a017fa92c37b41c42a61547",
+        "exportInfo": "false",
+        "MARGIN": "false",
+        "engine": "SERVICE_ANALYTICS",
+        "dashboardId": "69e87d2c51f3b8793baec56a",
+        "showTotal": "false",
+        "chartType": "TABLE",
+        "showRolloverTrends": "false",
+        "ignoreEventBasedDataFilter": "true",
+        "TABULAR": "true"
+    },
+    "skipResolve": false,
+    "jsonResponse": false
+}
