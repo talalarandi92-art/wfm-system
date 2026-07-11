@@ -19,7 +19,7 @@ const MAP = {
   shift_code: 'shiftCode', shift_category: 'shiftCat', shift_start_min: 'schedStart', shift_end_min: 'schedEnd',
   punch_in_min: 'punchIn', punch_out_min: 'punchOut', sys_login_min: 'sysLogin', sys_logout_min: 'sysLogout', login_src: 'loginSrc',
   late_min: 'lateMin', early_min: 'earlyMin', sys_late_min: 'sysLate', sys_early_min: 'sysEarly',
-  ot_min: 'otMin', offday_ot_min: 'offdayOt', holiday_ot_min: 'holidayOt', worked_min: 'worked',
+  ot_min: 'otMin', offday_ot_min: 'offdayOt', holiday_ot_min: 'holidayOt', ot_record_only: 'otRecordOnly', worked_min: 'worked',
   adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_status: 'permissionStatus', permission_type: 'permType', permission_duration: 'permDur',
   comp_off: 'comp', sick: 'sick', hr_code: 'hrCode', attendance_code: 'attCode', mismatch: 'mismatch', data_quality: 'dq',
   username: 'username', total_work_sys_min: 'totalSysMin', daily_note: 'dailyNote', include_tardiness: 'includeTardiness',
@@ -35,6 +35,7 @@ const MAP = {
   await c.connect();
   try {
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS username text`); // User ID (a.wahab) — durable across re-ingest
+    await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS ot_record_only boolean NOT NULL DEFAULT false`); // migration 081 (Director rule 4) — self-heal like username
     // keep the editable holiday list (recon-config.json) mirrored into the `holidays` table so the leave-balance
     // calc can exclude holidays that fall inside annual leave (rule: a holiday during leave returns to the balance).
     try {

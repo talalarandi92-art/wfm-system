@@ -101,12 +101,19 @@ export class ScheduleOpsController {
     // late-in/early-out is bounded, so values >4h are excluded from the counts and
     // surfaced as `excludedDq` instead of being held against night agents (HR-safe;
     // mirrors the WFH report's ">3h short → data quality" rule).
+    // Rule 4 (Director 2026-07-11): rows flagged ot_record_only (excluded roles — TL/Senior/Resolution/
+    // RTA/WFM/Management) are NOT payable — excluded from every payable OT total below and surfaced in
+    // a separate record-only section instead.
+    const PAY = `NOT COALESCE(ot_record_only,false)`;
     const [s] = await this.ds.query(`
-      SELECT COALESCE(SUM(ot_min),0)::int ot, COALESCE(SUM(holiday_ot_min),0)::int "holOt",
-             COALESCE(SUM(offday_ot_min),0)::int "offOt", COALESCE(SUM(ot_before_min),0)::int "befOt",
-             COALESCE(SUM(ot_after_min),0)::int "aftOt",
-             COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays",
-             COUNT(DISTINCT person_no) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otAgents",
+      SELECT COALESCE(SUM(ot_min) FILTER (WHERE ${PAY}),0)::int ot, COALESCE(SUM(holiday_ot_min) FILTER (WHERE ${PAY}),0)::int "holOt",
+             COALESCE(SUM(offday_ot_min) FILTER (WHERE ${PAY}),0)::int "offOt", COALESCE(SUM(ot_before_min) FILTER (WHERE ${PAY}),0)::int "befOt",
+             COALESCE(SUM(ot_after_min) FILTER (WHERE ${PAY}),0)::int "aftOt",
+             COUNT(*) FILTER (WHERE ${PAY} AND (ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0))::int "otDays",
+             COUNT(DISTINCT person_no) FILTER (WHERE ${PAY} AND (ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0))::int "otAgents",
+             COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min) FILTER (WHERE NOT ${PAY}),0)::int "recOnlyMin",
+             COUNT(*) FILTER (WHERE NOT ${PAY} AND (ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0))::int "recOnlyDays",
+             COUNT(DISTINCT person_no) FILTER (WHERE NOT ${PAY} AND (ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0))::int "recOnlyAgents",
              COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL)::int "lateDays",
              COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL),0)::int "lateMin",
              COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL)::int "earlyDays",
@@ -119,9 +126,9 @@ export class ScheduleOpsController {
         FROM roster_days WHERE ${w}`, p);
     const byAgent = await this.ds.query(`
       SELECT person_no, mode() WITHIN GROUP (ORDER BY clean_name) name, mode() WITHIN GROUP (ORDER BY role_function) fn,
-             COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min),0)::int "otMin",
-             COALESCE(SUM(ot_min),0)::int "regOtMin", COALESCE(SUM(holiday_ot_min),0)::int "holOtMin", COALESCE(SUM(offday_ot_min),0)::int "offOtMin",
-             COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays",
+             COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min) FILTER (WHERE ${PAY}),0)::int "otMin",
+             COALESCE(SUM(ot_min) FILTER (WHERE ${PAY}),0)::int "regOtMin", COALESCE(SUM(holiday_ot_min) FILTER (WHERE ${PAY}),0)::int "holOtMin", COALESCE(SUM(offday_ot_min) FILTER (WHERE ${PAY}),0)::int "offOtMin",
+             COUNT(*) FILTER (WHERE ${PAY} AND (ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0))::int "otDays",
              COALESCE(SUM(COALESCE(expected_hours,9)*60) FILTER (WHERE presence IN ('office','wfh')),0)::int "workMin",
              COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL)::int "lateDays",
              COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL)::int "earlyDays",
@@ -129,14 +136,21 @@ export class ScheduleOpsController {
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int perms
         FROM roster_days WHERE ${w} GROUP BY person_no ORDER BY "otMin" DESC`, p);
     const byFn = await this.ds.query(`
-      SELECT canon_fn(role_function) fn, COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min),0)::int "otMin",
-             COALESCE(SUM(holiday_ot_min),0)::int "holOtMin", COALESCE(SUM(offday_ot_min),0)::int "offOtMin",
-             COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays",
+      SELECT canon_fn(role_function) fn, COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min) FILTER (WHERE ${PAY}),0)::int "otMin",
+             COALESCE(SUM(holiday_ot_min) FILTER (WHERE ${PAY}),0)::int "holOtMin", COALESCE(SUM(offday_ot_min) FILTER (WHERE ${PAY}),0)::int "offOtMin",
+             COUNT(*) FILTER (WHERE ${PAY} AND (ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0))::int "otDays",
              COUNT(DISTINCT person_no)::int people,
              COUNT(*) FILTER (WHERE ${CRED_LATE} AND permission_type IS NULL)::int "lateDays",
              COUNT(*) FILTER (WHERE ${CRED_EARLY} AND permission_type IS NULL)::int "earlyDays",
              COUNT(*) FILTER (WHERE presence='absent')::int "absentDays", COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int perms
         FROM roster_days WHERE ${w} GROUP BY canon_fn(role_function) ORDER BY "otMin" DESC`, p);
+    // record-only OT (excluded roles) — listed separately, never in payable totals
+    const recordOnlyRows = await this.ds.query(`
+      SELECT person_no, mode() WITHIN GROUP (ORDER BY clean_name) name, mode() WITHIN GROUP (ORDER BY role_function) fn,
+             COALESCE(SUM(ot_min+holiday_ot_min+offday_ot_min),0)::int "otMin",
+             COALESCE(SUM(ot_min),0)::int "regOtMin", COALESCE(SUM(holiday_ot_min),0)::int "holOtMin", COALESCE(SUM(offday_ot_min),0)::int "offOtMin",
+             COUNT(*) FILTER (WHERE ot_min>0 OR holiday_ot_min>0 OR offday_ot_min>0)::int "otDays"
+        FROM roster_days WHERE ${w} AND NOT ${PAY} GROUP BY person_no ORDER BY "otMin" DESC`, p);
     const permByType = await this.ds.query(`SELECT permission_type k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY permission_type ORDER BY n DESC`, p);
     const permByShift = await this.ds.query(`SELECT COALESCE(shift_code,'—') k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY shift_code ORDER BY n DESC LIMIT 12`, p);
     const permByDate = await this.ds.query(`SELECT work_date::text k, COUNT(*)::int n FROM roster_days WHERE ${w} AND permission_type IS NOT NULL GROUP BY work_date ORDER BY n DESC LIMIT 12`, p);
@@ -160,6 +174,9 @@ export class ScheduleOpsController {
             holidayPct: totalOt > 0 ? r1(100 * s.holOt / totalOt) : 0, nonHolidayPct: totalOt > 0 ? r1(100 * nonHolOt / totalOt) : 0,
             beforeShiftHrs: r1(s.befOt / 60), afterShiftHrs: r1(s.aftOt / 60),
             days: s.otDays, agents: s.otAgents },
+      // excluded-role OT — computed & stored but NOT payable (Director rule 4, 2026-07-11)
+      otRecordOnly: { totalHrs: r1(s.recOnlyMin / 60), days: s.recOnlyDays, agents: s.recOnlyAgents,
+        byAgent: recordOnlyRows.map((a: any) => ({ ...a, otHrs: r1(a.otMin / 60), regOtHrs: r1(a.regOtMin / 60), holOtHrs: r1(a.holOtMin / 60), offOtHrs: r1(a.offOtMin / 60) })) },
       tardiness: { lateDays: s.lateDays, lateHrs: r1(s.lateMin / 60), earlyDays: s.earlyDays, earlyHrs: r1(s.earlyMin / 60), lateExcused: s.lateExcused, earlyExcused: s.earlyExcused, excludedDq: s.excludedDq, cap: 240 },
       permissions: { count: s.permissions, hrs: r1(permMin / 60), avgHrs: s.permissions > 0 ? r1(permMin / 60 / s.permissions) : 0, byType: permByType, byShift: permByShift, byDate: permByDate },
       absence: { days: s.absentDays, byDate: absByDate },

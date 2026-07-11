@@ -345,6 +345,36 @@ function pickWindow(sessions, Dabs, schedStartMin, schedEndMin) {
   return { loginMin: login - Dabs, logoutMin: logout - Dabs, sessions: use.length, capped, droppedBleed: inWin.length - clean.length };
 }
 
+// BR-OT (Director 2026-07-11, rule 2 — multi-session OFF-day/holiday OT): people open OT in
+// STAGES (multiple login/logout the same day; a stage that starts before midnight and ends after
+// belongs to its START day per BR-TIM-003). Aggregate ALL of the person's sessions that START on
+// the given day across BOTH systems, merging overlapping intervals so a double-logged
+// Ameyo+Sprinklr window never double-counts. A single session spanning > 16h is a never-closed
+// bleed and is skipped (same guard the Sprinklr loader applies). Returns merged worked minutes
+// (capped at a sane 16h/day) + the first-login/last-logout envelope.
+function sumDaySessions(pools, Dabs) {
+  const ivs = [];
+  for (const sessions of pools) {
+    if (!sessions) continue;
+    for (const s of sessions) {
+      if (s.aLogin < Dabs || s.aLogin >= Dabs + 1440) continue;   // owned by its START day only
+      const span = s.aLogout - s.aLogin;
+      if (span <= 0 || span > 16 * 60) continue;                  // degenerate / never-closed bleed
+      ivs.push([s.aLogin, s.aLogout]);
+    }
+  }
+  if (!ivs.length) return null;
+  ivs.sort((a, b) => a[0] - b[0]);
+  let total = 0, curS = ivs[0][0], curE = ivs[0][1];
+  for (let i = 1; i < ivs.length; i++) {
+    const [s2, e2] = ivs[i];
+    if (s2 <= curE) { curE = Math.max(curE, e2); } else { total += curE - curS; curS = s2; curE = e2; }
+  }
+  total += curE - curS;
+  const last = Math.max(...ivs.map(v => v[1]));
+  return { totalMin: Math.min(total, 960), sessions: ivs.length, loginMin: ivs[0][0] - Dabs, logoutMin: last - Dabs };
+}
+
 // data horizon = last date where a MEANINGFUL number of employees have attendance evidence
 let horizon = '0000';
 {
@@ -361,7 +391,7 @@ let horizon = '0000';
 }
 console.log('data horizon (>=10 employees with punch or system evidence): ' + horizon);
 
-module.exports = { classifyCode, isExcludedRole, F, odoo, perms, ameyoSessions, sprinkSessions, sheetEvidenceDates, pickWindow, dayOffset, absToDM, horizon, serialToISO, parseClock, hhmm, hhmmss, minToHHMMSS, dayName, OUT_XLSX, SCRATCH };
+module.exports = { classifyCode, isExcludedRole, F, odoo, perms, ameyoSessions, sprinkSessions, sheetEvidenceDates, pickWindow, sumDaySessions, dayOffset, absToDM, horizon, serialToISO, parseClock, hhmm, hhmmss, minToHHMMSS, dayName, OUT_XLSX, SCRATCH };
 
 // run the build if invoked directly
 if (require.main === module) require('./recon-build')();
