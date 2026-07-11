@@ -26,6 +26,7 @@ import { RtaModule }               from '@modules/rta/rta.module';
 import { OutagesMgmtModule }       from '@modules/outages-mgmt/outages.module';
 import { ScorecardModule }         from '@modules/scorecard/scorecard.module';
 import { KpiSourceModule }         from '@modules/kpi-source/kpi-source.module';
+import { KpiRegistryModule }       from '@modules/kpi-registry/kpi-registry.module';
 import { ReportsModule }           from '@modules/reports/reports.module';
 import { SettingsModule }          from '@modules/settings/settings.module';
 import { TechnicalIssuesModule }  from '@modules/technical-issues/technical-issues.module';
@@ -140,6 +141,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     OutagesMgmtModule,
     ScorecardModule,
     KpiSourceModule,
+    KpiRegistryModule,
     ReportsModule,
     SettingsModule,
     TechnicalIssuesModule,
