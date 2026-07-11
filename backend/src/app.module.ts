@@ -27,7 +27,9 @@ import { OutagesMgmtModule }       from '@modules/outages-mgmt/outages.module';
 import { ScorecardModule }         from '@modules/scorecard/scorecard.module';
 import { KpiSourceModule }         from '@modules/kpi-source/kpi-source.module';
 import { KpiRegistryModule }       from '@modules/kpi-registry/kpi-registry.module';
+import { EmployeeIdentityModule }  from '@modules/employee-identity/employee-identity.module';
 import { ReportsModule }           from '@modules/reports/reports.module';
+import { ReportBuilderV2Module }   from '@modules/report-builder-v2/report-builder-v2.module';
 import { SettingsModule }          from '@modules/settings/settings.module';
 import { TechnicalIssuesModule }  from '@modules/technical-issues/technical-issues.module';
 import { BreaksModule }           from '@modules/breaks/breaks.module';
@@ -142,6 +144,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     ScorecardModule,
     KpiSourceModule,
     KpiRegistryModule,
+    EmployeeIdentityModule,
     ReportsModule,
     SettingsModule,
     TechnicalIssuesModule,
@@ -181,6 +184,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     AutoModeModule,
     ChiefModule,
     BotsModule,
+    ReportBuilderV2Module,
   ],
   providers: [
     // Guard order (2026-07-06, risk #15): JWT FIRST so the throttler can key by USER —
