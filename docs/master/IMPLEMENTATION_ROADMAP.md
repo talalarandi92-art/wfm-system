@@ -53,7 +53,14 @@ live Boutiqaat contact-center data in local PostgreSQL `wfm_db`. Everything belo
 - **Scheduling:** Schedule grid (overlays corrected `roster_days`; WFH 🏠 icon, holiday gold ribbon — RULES §18),
   auto **Schedule Generator** (fairness/gender/rest, save-as-draft fixed), **demand→schedule chain**
   (`roster-v2/generate` → `generate-week` → save → atomic reversible `publish`/`unpublish`, RULES §10,
-  migrations 065/066), rotation groups, breaks planner (midnight-clip fixed), soft-lock on upload + Unlock.
+  migrations 065/066), rotation groups, soft-lock on upload + Unlock.
+- **Smart Break engine (R3 B0–B5 DONE 2026-07-10/11 — Director spec `SMART_DYNAMIC_BREAK_MANAGEMENT_PROMPT.md`,
+  commit 3d1d82e; RULES §23, BR-BRK-001..014, D-078):** policy matrix m079 + daily balance 4×60 + optimizer v2
+  with real coverage floor (commit 1801344) · live 45s release engine — explainable priority, risk
+  green→critical + stale fail-safe, modes auto/supervisor/hybrid/freeze (9cf3c0e) · BreakCard + Break Command
+  Center UI (033f373) · reports + 9-sheet Excel + zero-write simulation (0f5fa44). Supersedes the old breaks
+  planner (midnight-clip fixed). **Remaining:** hybrid-mode pilot on one function → threshold/weight tuning →
+  accounts provisioning (deliberately LAST, pre-rollout — D-078) → expand function by function.
 - **Roster reporting suite** (~18 pages over `roster_days`): Roster grid, Roster Dashboard, Schedule Analysis,
   OT & Exceptions (disjoint OT buckets + Excel), Hourly Analytics, Interval Headcount, Hourly Coverage,
   Agent 360 (period compare), Team 360, WFH HR Report (holiday-aware since commit b6bfcf4), Data Quality,

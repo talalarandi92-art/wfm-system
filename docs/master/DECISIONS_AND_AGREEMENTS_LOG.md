@@ -466,6 +466,14 @@
 - **UI completion (same date):** ScheduleGenerator page gained the engine-mode switch (Demand ★ default, classic for comparison), the demand options, a coverage-vs-demand day table, the per-function proposed grid, and Save-as-Draft via `POST /schedule-generator/generate-demand/save` (normal draft version → existing publish path; live round-trip verified then cleaned). Staffing Engine hiring card shows the schedulable-view columns.
 - **Source:** session 2026-07-08 (commit in repo); memory `staffing_requirement_engine`, `generators_behavioral_merge`; EXECUTION_BRIEF Phase-1 consolidate note.
 
+### D-078 — Smart Break engine: Director's 32-section spec EXECUTED (B0–B5); accounts provisioning deferred to LAST
+- **Status:** Confirmed (spec dictated 2026-07-10; executed 2026-07-10/11)
+- **Decision:** The Director's Smart Dynamic Break Management spec (`SMART_DYNAMIC_BREAK_MANAGEMENT_PROMPT.md`, repo root, commit 3d1d82e) is the R3 source of truth and was executed end-to-end: **B0** audit (root causes of the manual bottleneck = `headcount_intervals` never auto-populated + no live release loop) → **B1+B2** policy matrix m079 + daily balance (4×60, most-specific-wins) + optimizer v2 with real coverage floor (commit 1801344) → **B3** live release engine (45s loop, explainable priority, risk green→critical + §30 stale fail-safe, modes auto/supervisor/hybrid/freeze — commit 9cf3c0e) → **B4** BreakCard + Break Command Center UI (commit 033f373) → **B5** reports + 9-sheet Excel export + zero-write simulation (commit 0f5fa44). Rules registered as RULES §23 + BR-BRK-001..014.
+- **Accounts provisioning deliberately DEFERRED TO LAST (Director 2026-07-11):** live agents have NO user accounts (`users.employee_id` unlinked → BreakCard cannot populate); the ready dry-run-clean provisioning script (116 accounts from the schedule sheet's Email column) is a pre-rollout step to run only on the Director's explicit go — mass account+role creation was correctly held back as bigger than the literal ask.
+- **Recommended rollout (needs the Director's go):** hybrid-mode pilot on ONE function → threshold/weight tuning from real data → provision accounts (LAST) → expand function by function.
+- **Deferred honestly (as-built limits):** occupancy/AHT/backlog risk inputs, skill/language clusters, carry-forward fairness, websocket push, per-function live HC.
+- **Source:** sessions 2026-07-10/11; memory `smart_break_engine_r3`; MODULE_SPECIFICATIONS §25; WFM_RULES_AND_DECISIONS §23.
+
 ---
 
 ## Open Items Register (as of 2026-07-02)

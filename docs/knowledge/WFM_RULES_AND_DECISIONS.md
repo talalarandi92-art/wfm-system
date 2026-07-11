@@ -368,3 +368,54 @@ OFF exactly 2 per employee (118×2), females on E/EE/MD/MN = 0, coverage 86% →
   Saad (13827) etc. The corrected Jul-2 ingest (3084 rows) was later replaced by a rebuild from the older 103-person
   foundation. FIX = re-run the engine on the ORIGINAL workbook + full-June system sources (the SRCDIR June-named files
   currently hold the 28–30 test slices — restore/rename before refresh). Requires the Director per the test-first plan.
+
+## 23. 2026-07-10/11 — Smart Break Management (Director's 32-section spec, EXECUTED)
+Source of truth: **`SMART_DYNAMIC_BREAK_MANAGEMENT_PROMPT.md`** (repo root, commit 3d1d82e) — the Director's full
+spec, executed R3 waves B1–B5 (commits 1801344 · 9cf3c0e · 033f373 · 0f5fa44). All rules below are **CONFIRMED**
+(Director spec 2026-07-10) and live in `backend/src/modules/breaks/` + migration `database/migrations/079_break_policies_v2.sql`.
+- **Daily entitlement = 4 sessions / 60 minutes**, CONFIGURABLE per function / shift type / employment type via the
+  `break_policies_v2` matrix (NULL selector = wildcard; **most-specific-wins**: function=4 + shift=2 + employment=1
+  score, `pickMostSpecificPolicy`). The default distribution ([15,15,15,15]) is a policy pattern, never hardcoded.
+  Entitlement is enforced in BOTH request paths (breaks module + requests-module bridge) with a bilingual reject;
+  an authorized override is possible but ALWAYS audited (`breaks.entitlement.override`) — **never silently exceeded**.
+- **Protected first + last shift hour:** no AUTO break may start in the first 60 min or end within the last 60 min
+  of the shift (`generationWindow`; both windows policy-configurable). A break inside a protected window requires a
+  **manual exception request** with reason + coverage impact + authorized approval — and even manual approval must
+  not exceed the daily entitlement without the separate audited override.
+- **Function-level calculation:** every coverage/capacity/risk number is computed PER FUNCTION (canon_fn), never one
+  global contact-center pool. Coverage floor source = `headcount_intervals` (auto-rebuilt in-process via
+  `CoverageRebuildService` when empty for the date); when still empty the engine FALLS BACK to required=scheduled and
+  **discloses** `coverageSource:'fallback'` — never a silent assumption.
+- **Queue-aware release:** a break is released only when releasing ONE more employee keeps the function safe —
+  current state (scheduled−onBreak vs required, live Sprinklr availability, queue waiting, SLA-risk queues) **plus the
+  near-term forecast** (next-30-min required vs scheduled). Never the current queue count alone.
+- **Explainable fair priority (§7/§22):** transparent score with a per-factor AR/EN breakdown
+  (`{points, reason, reasonAr}`) shown to supervisor AND agent; weights configurable per policy
+  (`thresholds.priority_weights`). **Penalties look at TODAY only** (recently-returned, above-median-sessions) —
+  no permanent punishment; delayed employees gain priority (+1/min waited, capped) and keep it.
+- **Anti-clustering (§9):** per-function per-15-min simultaneous-break cap (explicit `max_simultaneous` or computed
+  scheduled−required−buffer) + per-`team_manager` cap (default 1) enforced at BOTH generation and live release
+  (`antiClusterOk`). AS-BUILT honest scope: function + team caps only — skill/language/seniority clusters deferred.
+- **Release modes (§13):** `auto` / `supervisor` / `hybrid` (auto for normal, supervisor-recommend for protected-window,
+  entitlement-override or orange risk) / `freeze` (emergency — nothing releases). Red/critical risk = HOLD in every
+  non-frozen mode. Mode changes go through `POST /breaks/engine/mode` and are **audited** (`breaks.engine.mode`).
+- **Risk ladder (§23) + fail-safe (§30):** green → yellow → orange → red → critical with REASONS shown for every level
+  (`riskAssess` simulates one more release). **Stale data never assumed safe:** snapshot >5 min old degrades the level
+  one step (worse only, never better); >15 min or NO snapshot enforces an orange floor = supervisor-confirmation.
+- **Delay transparency (§11):** a delayed break is never silently pending — status + delay reason + updated ETA are
+  shown to the employee; the configurable escalation ladder (default 10/20/30/max-delay min, `delay_ladder`) notifies →
+  raises priority → alerts the supervisor, restart-safe (stage dedup), audited (`breaks.delay.escalated`).
+- **Start gated on release:** the agent's START button/endpoint returns 400 until the system releases the slot —
+  an employee can never self-start an automatic break.
+- **Return monitoring (§19):** reminder at end−5 min, `overdue` at end+5 min grace, actual minutes posted to
+  `break_daily_balance` on return. Late returns are reportable; **future breaks are NEVER auto-extended to compensate**.
+- **Cross-midnight dating:** a slot whose wall-clock start crosses midnight belongs to the NEXT calendar day
+  (`planned_date`, `plannedDateFor` — fixed the date-loss bug, 4,985 slots backfilled).
+- **Simulation never writes (§28):** `POST /breaks/simulate` dry-runs the SAME optimizer + the SAME `riskAssess`
+  with scenario overlays (deterministic FNV-1a absence, queue spike, extra staff) — zero persistence proven
+  (identical slot counts on double-run). UI badges every result "SIMULATION — not applied".
+- **Deferred honestly (spec items not built):** occupancy/AHT/backlog risk inputs (no reliable feed), skill/language
+  clusters, multi-day carry-forward fairness weighting, websocket push (45s engine tick + 30s UI poll instead),
+  per-function live HC (Sprinklr agents not function-mapped — schedule spine + global live layer).
+- **⚠ Rollout gap:** live `users.employee_id` links are missing (agents have no accounts) — accounts provisioning is
+  deliberately the LAST pre-rollout step (Director 2026-07-11); see D-078.

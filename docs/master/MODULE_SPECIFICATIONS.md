@@ -753,7 +753,97 @@ inflates attrition.
 
 ---
 
-## 25. Module Status Summary
+## 25. Smart Break Management (Dynamic Break Engine — R3, SHIPPED)
+
+**Purpose.** Automatically generate, prioritize, release, delay and monitor breaks from live operational
+conditions — replacing the manual approval bottleneck. Source of truth: the Director's 32-section spec
+**`SMART_DYNAMIC_BREAK_MANAGEMENT_PROMPT.md`** (repo root, commit 3d1d82e). Users: agents (BreakCard),
+TL/RTA/WFM (Command Center), WFM (policy + reports + simulation).
+
+**AS-BUILT (Confirmed — commits 1801344 B1+B2 · 9cf3c0e B3 · 033f373 B4 · 0f5fa44 B5; rules RULES §23,
+BR-BRK-001..014).**
+
+- **Architecture** (`backend/src/modules/breaks/`, pure-logic-first):
+  - `break-policy.logic.ts` + `break-policy.service.ts` — policy matrix resolution (most-specific-wins,
+    fn=4+shift=2+emp=1), entitlement math, protected windows, cross-midnight slot dating, anti-cluster caps.
+  - `break-scheduler.service.ts` — **optimizer v2** `generateForDate`: policy-driven sessions, protected
+    first/last windows + min-gap + min-work-before-first, REAL coverage floor from `headcount_intervals`
+    (auto-rebuilt in-process via the extracted `CoverageRebuildService`; disclosed `fallback` when empty),
+    per-function 15-min + per-team anti-cluster caps, idempotent regenerate (replaces auto+scheduled only —
+    never active/completed/manual), fairness early/mid/late ledger written.
+  - `break-release.logic.ts` (pure, zero I/O) + `break-release.service.ts` — **live release engine**: 45s
+    background loop (`BREAK_ENGINE_INTERVAL_MS`, service:111-117; manual `tick` :158), `riskAssess`
+    green→critical with reasons + §30 stale fail-safe, `priorityScore` explainable AR/EN breakdown with
+    configurable weights and today-only penalties, `decideRelease` mode matrix, `antiClusterOk`, delay
+    escalation ladder (restart-safe stage dedup), return monitoring (reminder end−5, overdue end+5 grace).
+  - `break-reports.service.ts` (B5 reports + 9-sheet exceljs export) · `break-simulation.logic.ts`/`.service.ts`
+    (deterministic dry-run — ZERO writes proven) · `breaks.service.ts` (v1 schedule/coverage/adherence/fairness/
+    requests/types/prayer-times, retained) · `breaks.controller.ts` (all routes).
+- **Data model (m079 `database/migrations/079_break_policies_v2.sql`):** `break_policies_v2` (selectors
+  function/shift/employment NULL=wildcard; 60min/4-session caps with CHECKs; duration_pattern JSONB;
+  protected 60/60; min-gap 90; max_delay 45; release_mode auto|supervisor|hybrid|freeze; thresholds JSONB incl.
+  coverage_ratio 0.7 / queue_waiting_max 50 / min_available_hc 3 / max_simultaneous(_per_team) / delay_ladder /
+  priority_weights) · `break_daily_balance` (TIMESTAMPTZ window — cross-midnight safe; balance =
+  MAX(ledger, live slots)) · `break_slots` extensions (planned_date [4,985 backfilled], earliest/latest,
+  priority_score, released_at, release_source, delay columns, additive statuses).
+- **State machine:** scheduled → eligible → (waiting_capacity | delayed) → released → active → completed,
+  with active → overdue on late return; plus cancelled/missed and the v1 manual/exception request path.
+  Agent START is 400-gated until released.
+
+**Endpoints** (class default perm `hc.view`; overrides noted — breaks.controller.ts):
+
+| Route | Purpose | Perm |
+|---|---|---|
+| `GET /breaks/reports` · `GET /breaks/reports/export` | B5 consolidated reports (entitlement vs used, delays, releases by source, late returns, overdue, fairness, peak hours) + 9-sheet Excel | hc.view |
+| `POST /breaks/simulate` | B5 what-if dry-run (absence % / queue spike / extra staff) — never persisted | hc.view |
+| `GET /breaks/live-queue` | B3 waiting line: score + §22 breakdown + risk + ETA | hc.view |
+| `GET /breaks/my-break-status` | B3 agent card feed (balance, next slot, line position, ETA, button states) | attendance.view_own |
+| `POST /breaks/slots/:id/release` | Manual supervisor release — reason REQUIRED at risk ≥ orange, audited | hc.view |
+| `POST /breaks/slots/:id/start` · `/return` | Agent start (400 until released) / return (posts balance) | attendance.view_own |
+| `POST /breaks/engine/mode` | Mode switch incl. emergency FREEZE — audited | hc.view |
+| `GET /breaks/engine/status` · `POST /breaks/engine/tick` | Engine heartbeat / manual tick | hc.view / hc.edit |
+| `POST /breaks/generate` | Optimizer v2 generation for a date (+function) | hc.view |
+| `GET /breaks/policies-v2` · `PATCH /breaks/policies-v2/:id` | Policy matrix list / audited update | hc.view / hc.edit |
+| `GET /breaks/schedule` · `/schedule/employee/:id` · `/my-breaks` | Daily plan views | hc.view / hc.view / attendance.view_own |
+| `GET /breaks/coverage` · `/adherence` · `/fairness` | Coverage-with-break-impact, adherence, monthly fairness ledger | hc.view |
+| `POST /breaks/requests` · `GET /breaks/requests` · `PATCH …/approve` · `…/reject` | Manual exception path (entitlement-enforced; override audited) | requests.create / hc.view |
+| `PATCH /breaks/slots/:id/actual` | RTA records actual times (audited `breaks.actual.recorded`) | hc.view |
+| `GET /breaks/types` · `GET/POST /breaks/prayer-times` | Reference lists | schedule.view (GETs) / hc.view |
+
+**UI (B4/B5):** `components/breaks/BreakCard.tsx` (AgentHome + mybreaks tab — entitlement ring + session dots,
+countdowns, 10-state chip, delay reason + ETA, employees-ahead, gated START, RETURN with overdue colors, 30s
+poll) · `components/breaks/CommandCenter.tsx` (FIRST tab of Breaks.tsx for `hc.view` — heartbeat + staleness
+banners, per-function risk chips with live reasons, mode selector + FREEZE dialog with mandatory reason, 6
+provenance KPIs, coverage minis, waiting line with expandable AR/EN score breakdown, release dialog enforcing
+reason ≥ orange, on-break due-back table) · Reports + Simulation tabs ("SIMULATION — not applied" badges) ·
+RTA StationPanels link.
+
+**Integration points.** `headcount_intervals` auto-rebuild (CoverageRebuildService, byte-identical to the
+coverage controller path) · Sprinklr live snapshot gates release risk (agent availability, queue waiting,
+SLA-risk queues; staleness-aware) · requests-module bridge (`applyBreakToPlan`, generated_by='manual') enforces
+the same entitlement · audit trail (10 event types, BR-BRK-014) · notifications (polled in-app rows).
+
+**Test coverage.** 89 module unit specs (30 policy logic · 41 release logic · 5 scheduler dry-run · 13
+simulation logic); live smokes: optimizer 2026-07-01 (174 slots, 0 violations, 37 cross-midnight correctly
+dated), release engine 14/14 incl. full cycle + freeze-blocks-everything, B5 range report (3,990 slots / 159
+employees) + simulation zero-write proof (identical double-run).
+
+**Deferred (honest — spec items not built).** Occupancy/AHT/backlog risk inputs (no reliable live feed);
+skill/language/seniority anti-cluster dimensions (function + team caps only); multi-day carry-forward fairness
+weighting; websocket push (45s tick + 30s UI poll instead); per-function live HC (Sprinklr agents not
+function-mapped — schedule spine + global live layer).
+
+**Rollout gap / next.** Live `users.employee_id` links missing (agents have no accounts) → BreakCard cannot
+populate for anyone yet; accounts provisioning is deliberately the LAST pre-rollout step (D-078). Recommended
+rollout: hybrid-mode pilot on ONE function → threshold tuning → provision accounts → expand.
+
+**Acceptance.** Generate a day → 0 entitlement/protected/cluster violations; engine tick releases only
+green/yellow under the mode matrix; freeze blocks everything; agent card start is 400 until release; simulation
+double-run is byte-identical; every manual action carries a reason in audit_logs.
+
+---
+
+## 26. Module Status Summary
 
 | Module | Status | Canonical source |
 |---|---|---|
@@ -780,10 +870,11 @@ inflates attrition.
 | Integrations | Sprinklr deep-live; Ameyo discovery; Odoo done; KB ingested | RULES §12 |
 | Identity & Attrition | LIVE | RULES §1 |
 | Campaign calendar | LIVE (warn-only) | migration 024 |
+| Smart Break engine | LIVE (B0–B5 shipped; pilot rollout + accounts provisioning pending) | RULES §23; spec SMART_DYNAMIC_BREAK_MANAGEMENT_PROMPT.md; §25 above |
 
 ---
 
-## 26. Open Risks Register (cross-module, most material first)
+## 27. Open Risks Register (cross-module, most material first)
 
 | ID | Risk | Status |
 |---|---|---|
