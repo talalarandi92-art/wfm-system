@@ -299,6 +299,128 @@ function harvestReportingQuery(payloadData) {
   }
 }
 
+// ── A0: reporting-TABLE harvester (login/logout · survey · agent-perf) ────────
+// DISTINCT from the live agent-STATUS capture above. The extension already harvests
+// reportingQuery for live presence (→ snapshot push). A0 adds a SECOND channel: when a
+// reportingQuery response is a reporting TABLE (rows of dimensions + measures), forward those
+// ROWS to the backend staging endpoint (POST /integrations/sprinklr/report-push). This is the
+// enabler that ends manual Sprinklr Excel uploads. Defensive: keys off the RESPONSE shape,
+// throttled + deduped so the continuous poll never floods staging. Never breaks live capture.
+//
+// ⚠ CONFIRM-WITH-DIRECTOR: the exact reportingQuery JSON for the login/logout report was NOT
+// captured live. Field detection (which value is login vs logout vs cause vs device, in
+// ORIGINAL_EXPANDED_KEY) is inferred from the documented columns — the backend parser re-maps
+// once the Director opens the real report. rawSample ships the raw shape for that confirmation.
+const reportHashSeen = new Map(); // hash → ts
+const REPORT_TTL_MS  = 10 * 60_000;
+
+const _emailRe    = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const _dateOnlyRe = /^\d{4}-\d{2}-\d{2}$/;
+const _dtRe       = /\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/;
+const _clockRe    = /^\s*\d{1,2}:\d{2}(?::\d{2})?\s*(AM|PM)?\s*$/i;
+const _yesnoRe    = /^(yes|no|true|false)$/i;
+const _channelRe  = /\b(whatsapp|whats app|chat|email|voice|call|sms|social|instagram|facebook|twitter|messenger|line|telegram)\b/i;
+function _tsish(v) {
+  if (typeof v === 'number') return v > 1e11;
+  if (typeof v !== 'string') return false;
+  const s = v.trim();
+  return _dtRe.test(s) || _clockRe.test(s);
+}
+
+function flattenReportRows(rq) {
+  const out = [];
+  const take = (item) => {
+    if (!item || typeof item !== 'object') return;
+    const dims = {}, measures = {};
+    if (item.groupDetails && item.groupDetails.name != null) dims.groupName = item.groupDetails.name;
+    if (item.key != null) dims.key = item.key;
+    const addl = item.additional || {};
+    for (const [k, v] of Object.entries(addl)) {
+      if (k === 'ORIGINAL_EXPANDED_KEY') continue;
+      if (typeof v === 'string' || typeof v === 'number') dims[k] = v;
+    }
+    for (const src of [item.projections, item.measurements]) {
+      if (src && typeof src === 'object') for (const [k, v] of Object.entries(src)) if (typeof v === 'number') measures[k] = v;
+    }
+    out.push({ dims, measures, expandedKey: Array.isArray(addl.ORIGINAL_EXPANDED_KEY) ? addl.ORIGINAL_EXPANDED_KEY : undefined });
+  };
+  for (const resp of (rq.responses || [])) {
+    for (const g of (resp.groupedData || [])) for (const it of (g.responses || [])) take(it);
+    for (const h of (resp.hits || [])) take(h);
+    for (const r of (resp.rows || [])) take(r);
+  }
+  return out;
+}
+
+function _rowVals(it) {
+  const a = [];
+  if (Array.isArray(it.expandedKey)) a.push(...it.expandedKey);
+  for (const v of Object.values(it.dims || {})) Array.isArray(v) ? a.push(...v) : a.push(v);
+  return a;
+}
+
+function classifyReportRows(rows) {
+  let email = false, yesno = false, ts = false, dateOnly = false, loginMeasure = false;
+  for (const it of rows.slice(0, 50)) {
+    for (const v of _rowVals(it)) {
+      if (typeof v === 'string' && _emailRe.test(v.trim())) email = true;
+      else if (typeof v === 'string' && _yesnoRe.test(v.trim())) yesno = true;
+      if (typeof v === 'string' && _dateOnlyRe.test(v.trim())) dateOnly = true;
+      else if (_tsish(v)) ts = true;
+    }
+    for (const k of Object.keys(it.measures || {})) if (/LOGGED?_?IN|LOGIN|LOGOUT|AVAILABILITY|ONLINE_?TIME/i.test(k)) loginMeasure = true;
+  }
+  if (email && yesno) return 'survey';
+  if (ts && (loginMeasure || email)) return 'login_logout';
+  if (email || dateOnly) return 'agent_perf';
+  return 'unknown';
+}
+
+// The live agent-status poll's rows are [id, statusLabel, loginStatusLabel] — no email/date/
+// timestamp/Yes-No, no report measures. Those are already handled by the snapshot push; skip them.
+function looksLikeLiveStatusOnly(rows) {
+  if (!rows.length) return true;
+  for (const it of rows.slice(0, 50)) {
+    for (const v of _rowVals(it)) {
+      if (typeof v === 'string' && (_emailRe.test(v.trim()) || _yesnoRe.test(v.trim()) || _dateOnlyRe.test(v.trim()))) return false;
+      if (_tsish(v)) return false;
+    }
+    if (Object.keys(it.measures || {}).some(k => /LOGGED?_?IN|LOGOUT|SURVEY|AHT|FRT|HANDLE|CASE|RESPONSE/i.test(k))) return false;
+  }
+  return true;
+}
+
+function harvestAndForwardReport(payloadData, opName, url) {
+  try {
+    const rq = payloadData && (payloadData.reportingQuery || (payloadData.data && payloadData.data.reportingQuery));
+    if (!rq || !rq.responses) return;
+    const rows = flattenReportRows(rq);
+    if (rows.length === 0 || looksLikeLiveStatusOnly(rows)) return;
+    const reportType = classifyReportRows(rows);
+    if (reportType === 'unknown') return;
+
+    // throttle + dedup by a lightweight content signature
+    let hash = `${reportType}:${rows.length}:`;
+    try { hash += JSON.stringify(rows[0] || {}).slice(0, 240); } catch (e) {}
+    const now = Date.now();
+    if (reportHashSeen.get(hash) && now - reportHashSeen.get(hash) < REPORT_TTL_MS) return;
+    reportHashSeen.set(hash, now);
+
+    const colKeys = new Set();
+    for (const r of rows.slice(0, 20)) { for (const k of Object.keys(r.dims || {})) colKeys.add(k); for (const k of Object.keys(r.measures || {})) colKeys.add(k); }
+    const columns = [...colKeys].map(k => ({ key: k, label: null })); // labels unknown until real capture
+    let rawSample = ''; try { rawSample = JSON.stringify(rq).slice(0, 40000); } catch (e) {}
+
+    const report = {
+      source: 'sprinklr', reportType, sourceOp: opName || 'reportingQuery',
+      url: (url || '').split('?')[0], capturedAt: new Date().toISOString(),
+      columns, rows: rows.slice(0, 2000), rawSample,
+    };
+    chrome.runtime.sendMessage({ type: 'SPRINKLR_REPORT', report });
+    console.log(`[WFM Bridge] 🧾 report harvested: ${reportType}, ${rows.length} rows → report-push`);
+  } catch (e) { /* shape varies — never break live capture */ }
+}
+
 // ── Persistent queue cache ────────────────────────────────────────────────────
 // queueId → full queue object + lastSeen. Survives page refreshes so queues
 // keep flowing to WFM even when entityFeed hasn't fired yet in this session.
@@ -370,6 +492,9 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
       // data.reportingQuery body, measurements live in `projections` as M_* keys.
       if (opName === 'reportingQuery' || opName === 'queries') {
         try { harvestReportingQuery(payload.data); } catch (e) { /* shape varies */ }
+        // A0: also forward reporting-TABLE rows (login/logout · survey · agent-perf) to staging.
+        // Independent of the live-status harvest above — never affects the snapshot push.
+        try { harvestAndForwardReport(payload.data, opName, payload.url); } catch (e) { /* shape varies */ }
         // Diagnostic: keep the latest raw payload so the backend can inspect the
         // agents-table structure (Case Count / FRT / Handle Time columns) until
         // the metrics parser is tuned to the real shape. Removed once confirmed.

@@ -148,6 +148,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
 
+  // A0: captured reporting-TABLE rows → separate staging endpoint (report-push).
+  if (msg.type === 'SPRINKLR_REPORT') {
+    pushReportToWfm(msg.report);
+    sendResponse({ ok: true });
+  }
+
   if (msg.type === 'SPRINKLR_HEARTBEAT') {
     chrome.storage.local.set({
       lastHeartbeat: Date.now(),
@@ -261,6 +267,52 @@ async function pushToWfm(snapshot, isRetryAfterLogin = false) {
   } catch (e) {
     await chrome.storage.local.set({ lastPushStatus: 'Network error', pendingSnapshot: snapshot });
     setBadge('NET', '#f59e0b');
+    return { ok: false, error: e.message };
+  }
+}
+
+// ── A0: push captured reporting-TABLE rows to the staging endpoint ─────────────
+// Separate from pushToWfm (live snapshots). Same JWT + auto re-login on 401; does not touch
+// the snapshot badge/status so live capture health remains the primary signal.
+async function pushReportToWfm(report, isRetryAfterLogin = false) {
+  if (!report || !Array.isArray(report.rows) || report.rows.length === 0) return { ok: false, error: 'empty' };
+  const { config = DEFAULT_CONFIG } = await chrome.storage.local.get('config');
+  if (!config.enabled) return { ok: false, error: 'Disabled' };
+
+  if (!config.wfmApiToken) {
+    const token = await wfmLogin(config);
+    if (!token) return { ok: false, error: 'Not configured' };
+    config.wfmApiToken = token;
+  }
+
+  const url = `${config.wfmApiUrl}/integrations/sprinklr/report-push`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.wfmApiToken}` },
+      body: JSON.stringify(report),
+    });
+
+    if (res.ok) {
+      const j = await res.json().catch(() => ({}));
+      await chrome.storage.local.set({
+        lastReportPushAt: Date.now(),
+        lastReportPushStatus: 'ok',
+        lastReportType: report.reportType || '',
+        lastReportStaged: j.staged ?? 0,
+      });
+      console.log('[WFM Bridge] 🧾 report-push ok:', report.reportType, 'staged=', j.staged ?? '?');
+      return { ok: true };
+    }
+
+    if (res.status === 401 && !isRetryAfterLogin) {
+      const token = await wfmLogin(config);
+      if (token) return pushReportToWfm(report, true);
+    }
+    await chrome.storage.local.set({ lastReportPushStatus: `HTTP ${res.status}` });
+    return { ok: false, error: `HTTP ${res.status}` };
+  } catch (e) {
+    await chrome.storage.local.set({ lastReportPushStatus: 'Network error' });
     return { ok: false, error: e.message };
   }
 }
