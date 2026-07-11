@@ -2,7 +2,7 @@ import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/com
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { compile, getSource, listCatalog, CompileInput, EnforcedFilter, BuilderValidationError } from './query-compiler';
-import { DATA_SOURCES } from './data-sources';
+import { DATA_SOURCES, dimensionBadge, metricBadge, contractFormat, contractType } from './data-sources';
 
 /**
  * BUILDER v2 service — universal self-service report engine (BLD-1).
@@ -43,9 +43,24 @@ export class ReportBuilderV2Service {
     if (!this.has(perms, src.permission)) throw new ForbiddenException('Not permitted to read this data source');
     return {
       key: src.key, label_en: src.label_en, label_ar: src.label_ar, group: src.group,
-      dateColumn: src.dateCol, personScoped: !!src.personCol,
-      dimensions: src.dimensions.map(d => ({ key: d.key, label_en: d.label_en, label_ar: d.label_ar, type: d.type, time: !!d.time })),
-      metrics: src.metrics.map(m => ({ key: m.key, label_en: m.label_en, label_ar: m.label_ar, format: m.format })),
+      category: src.category ?? src.group,
+      description_en: src.description_en ?? '', description_ar: src.description_ar ?? '',
+      dateColumn: src.dateCol, personScoped: !!src.personCol, personCol: src.personCol ?? null,
+      dimensions: src.dimensions.map(d => ({
+        key: d.key, label_en: d.label_en, label_ar: d.label_ar,
+        type: contractType(d.type), time: !!d.time,
+        ...(d.time ? { format: 'time' as const } : {}),
+        kind: 'dimension' as const, badge: dimensionBadge(d),
+        category: d.category ?? 'General',
+        description_en: d.description_en ?? '', description_ar: d.description_ar ?? '',
+      })),
+      metrics: src.metrics.map(m => ({
+        key: m.key, label_en: m.label_en, label_ar: m.label_ar,
+        type: 'number' as const, kind: 'metric' as const, badge: metricBadge(m),
+        format: contractFormat(m),
+        category: m.category ?? 'Metrics',
+        description_en: m.description_en ?? '', description_ar: m.description_ar ?? '',
+      })),
     };
   }
 

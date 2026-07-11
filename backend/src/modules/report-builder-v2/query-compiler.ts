@@ -145,10 +145,14 @@ function buildCond(col: string, op: FilterOp, value: any, params: any[]): string
   return `${col} ${OPS[op]} $${params.length}`;
 }
 
-/** Public catalog listing (labels + dims + metrics), optionally filtered by the
- *  permission codes a user holds. */
+/** Public catalog listing (labels + category + descriptions), optionally filtered
+ *  by the permission codes a user holds. Additive to the BLD-1 shape. */
 export function listCatalog(userPermissions?: string[]) {
   return DATA_SOURCES
     .filter(s => !userPermissions || userPermissions.includes(s.permission))
-    .map(s => ({ key: s.key, label_en: s.label_en, label_ar: s.label_ar, group: s.group, permission: s.permission }));
+    .map(s => ({
+      key: s.key, label_en: s.label_en, label_ar: s.label_ar, group: s.group,
+      category: s.category ?? s.group, permission: s.permission,
+      description_en: s.description_en ?? '', description_ar: s.description_ar ?? '',
+    }));
 }
