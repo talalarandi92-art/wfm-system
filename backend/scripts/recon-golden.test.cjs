@@ -89,6 +89,10 @@ for (const p of [B + '/.env', B + '/../.env']) if (fs.existsSync(p)) for (const 
   await one('OT buckets disjoint (all history)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND ((COALESCE(ot_min,0)>0 AND COALESCE(offday_ot_min,0)>0) OR (COALESCE(ot_min,0)>0 AND COALESCE(holiday_ot_min,0)>0) OR (COALESCE(offday_ot_min,0)>0 AND COALESCE(holiday_ot_min,0)>0))`);
   await one('no negative pay minutes (all history)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND (COALESCE(ot_min,0)<0 OR COALESCE(offday_ot_min,0)<0 OR COALESCE(holiday_ot_min,0)<0 OR COALESCE(sys_late_min,0)<0 OR COALESCE(sys_early_min,0)<0)`);
   await one('absence/sick rows carry no OT (era)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND ${ERA} AND presence IN ('absent','sick') AND (COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0)) > 0`);
+  // Director decision 1 (2026-07-11): a scheduled OFF day worked stays OFF — its hours are parked in
+  // off_worked_min (non-payable) and must NEVER also sit in payable offday_ot_min. (skipped pre-migration)
+  const hasOffWorked = (await c.query(`SELECT 1 FROM information_schema.columns WHERE table_name='roster_days' AND column_name='off_worked_hr_review' LIMIT 1`)).rows.length > 0;
+  if (hasOffWorked) await one('OFF-worked (HR review) carries no payable off-day OT (era)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND ${ERA} AND COALESCE(off_worked_hr_review,false) AND COALESCE(offday_ot_min,0) > 0`);
   await c.end();
   console.log(failures ? `\n❌ GOLDEN MASTER FAILED — ${failures} assertion(s). A pay rule changed or a rebuild violated a clamp.` : '\n✅ GOLDEN MASTER PASS — the pay rules hold.');
   process.exit(failures ? 1 : 0);

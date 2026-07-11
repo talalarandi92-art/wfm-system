@@ -260,7 +260,7 @@ module.exports = function build() {
       // RULE A (2026-06-30): an official holiday falling on an ANNUAL-LEAVE (L) day counts as the HOLIDAY, NOT a consumed
       // leave day — it returns to the leave balance. Treated as holiday (presence/hr_code) below; original L kept raw.
       const leaveOnHoliday = isHolidayDate && c.kind === 'leave' && !['DL', 'UPL'].includes(String(raw || '').toUpperCase());
-      let otMin = 0, offdayOt = 0, holidayOt = 0;
+      let otMin = 0, offdayOt = 0, holidayOt = 0, offWorkedMin = 0, offWorkedHrReview = false;
       // ── OT crediting — Director's 4 CONFIRMED rules (2026-07-11), replacing the 2026-07-05 net-caps
       //    for the OFF-day/holiday buckets ONLY. Regular working-day OT keeps the BR-OT-004 5h ceiling.
       //    Rule 1: OFF-day/holiday OT = FULL net worked hours ("worked 8h + stayed 2h = 10h"), NO otNetCap.
@@ -300,7 +300,13 @@ module.exports = function build() {
         if (otRaw >= 120 && !corrob && crossedIntoNight && !laterSession) { otSuspectForgot = true; otMin = 0; }
         else { otMin = Math.min(otRaw, OT_CEIL); otCappedFlag = otRaw > OT_CEIL; }  // #1: regular-day OT keeps the 5h ceiling on EVERY basis
       }
-      else if (c.kind === 'off' || c.kind === 'leave' || c.kind === 'comp') offdayOt = offdayEvidence;  // OFF/leave worked SAME day = FULL net worked (rules 1+2)
+      else if (c.kind === 'off' || c.kind === 'leave' || c.kind === 'comp') {
+        // Director decision 1 (2026-07-11): a scheduled OFF day worked (also COMP/LEAVE worked-same-day)
+        // STAYS an OFF day. Do NOT auto-credit payable off-day OT — park the computed net hours in the
+        // NON-payable off_worked_min column and flag the row for HR to clarify ("scheduled OFF but worked
+        // this day"). Payable TRUE_OT excludes it until HR reviews. offdayOt stays 0.
+        offWorkedMin = offdayEvidence; offWorkedHrReview = offdayEvidence > 0;
+      }
       // BR-OT-006 (Director 2026-07-10): paid-OT rounding — a residual over 45 min rounds UP to the full
       // hour; 45 min or less stays EXACT ("15 دقيقة بتضل متل ما هي، اكتر من 45 بتصير ساعة"). Applied to
       // the 3 disjoint buckets AFTER every clamp (can never exceed OT_CEIL — 300 is a multiple of 60).
@@ -353,13 +359,13 @@ module.exports = function build() {
         punchIn: hasPunch ? od.punchIn : null, punchOut: (od && od.punchOut != null) ? od.punchOut : null,
         sysLogin: (prevDayBleed || sysLogin == null) ? null : ((sysLogin % 1440) + 1440) % 1440, sysLogout: (prevDayBleed || sysLogout == null) ? null : ((sysLogout % 1440) + 1440) % 1440, loginSrc: prevDayBleed ? null : (sysSource || null),
         lateMin: punchLateMin || 0, earlyMin: punchEarlyMin || 0, sysLate: sysLateStore, sysEarly: sysEarlyStore,
-        otMin, offdayOt, holidayOt, otRecordOnly,
+        otMin, offdayOt, holidayOt, otRecordOnly, offWorkedMin, offWorkedHrReview,
         // worked_min: a WORKED day = the gov session (capped at a sane 16h to kill never-logged-out bleed);
         // a non-working day (OFF/leave/holiday-off/absence/sick) has NO scheduled shift, so its raw system
         // bleed must NOT read as worked hours — credit only the validated OT session (else 0).
         // worked = PROVEN system/punch span (capped 16h). NO evidence (no system AND no punch) => 0, NOT the
         // scheduled net — we must never show "worked 8h" for a day we can't prove (it carries the no-evidence flag).
-        worked: isWorkingKind ? (govDur != null ? Math.min(Math.max(0, govDur), 960) : 0) : (offdayOt || holidayOt || 0),
+        worked: isWorkingKind ? (govDur != null ? Math.min(Math.max(0, govDur), 960) : 0) : (offWorkedMin || offdayOt || holidayOt || 0),
         adherence: conf === '' ? null : conf, conforming: conf !== '' && conf >= 90,
         permission: permStatus || null, permissionStatus: permStatus || null,   // #11: also populate the permission_status column (was unmapped → left blank)
         permType: (pm.find(p => p.kind === 'perm') || {}).type || null,
@@ -375,6 +381,7 @@ module.exports = function build() {
           if (otCappedFlag) extra.push('OT capped at 5h ceiling — raw system/punch span longer (verify; logout may be un-closed)');
           if (otSuspectForgot) extra.push('ot-suspect-forgot-logout — system tail ' + hhmm(otSystemMin || 0) + ' past shift end (raw span ' + hhmm(govDur || 0) + '), no punch corroboration, logout after midnight on a non-midnight shift; OT tail NOT credited');
           if (otRecordOnly) extra.push('OT record-only (excluded role — not payable, future-counted)');
+          if (offWorkedHrReview) extra.push('Scheduled OFF but worked this day (' + hhmm(offWorkedMin) + ') — HR clarify, NOT auto-paid as off-day OT');
           if (otLoginOnly) extra.push('OFF/holiday OT on system-login only (no biometric punch) — verify');
           if (tardyBleedFlag) extra.push('Cross-midnight late/early >4h = logout bleed — credited tardiness capped at 240m');
           return [base, ...extra].filter(Boolean).join(' | ') || null;

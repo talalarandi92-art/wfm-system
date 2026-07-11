@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Clock, CalendarDays, Download, Sparkles, AlertTriangle, Coffee, UserX, TimerReset, CalendarClock } from 'lucide-react';
+import { ArrowLeft, Clock, CalendarDays, Download, Sparkles, AlertTriangle, Coffee, UserX, TimerReset, CalendarClock, CheckCircle2, XCircle, CalendarOff } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile, Donut, BarRow, useCountUp } from '@/components/dazzle';
@@ -20,7 +20,9 @@ export default function OtExceptionsPage() {
   const nav = useNavigate();
   const [f, setF] = useState({ from: '2026-01-01', to: '2026-06-30', function: '', teamLeader: '' });
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'agents' | 'functions' | 'permissions' | 'absence'>('agents');
+  const [tab, setTab] = useState<'agents' | 'functions' | 'permissions' | 'absence' | 'review' | 'offworked'>('agents');
+  const [review, setReview] = useState<any>(null);
+  const [acting, setActing] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState('otHrs'); const [dir, setDir] = useState(-1);
   const [q, setQ] = useState('');
   const h = ar ? 'س' : 'h';
@@ -30,8 +32,24 @@ export default function OtExceptionsPage() {
     const qs = new URLSearchParams(); Object.entries(f).forEach(([k, v]) => { if (v) qs.set(k, v); });
     apiClient.get(`/attendance-recon/roster-v2/ot-exceptions?${qs}`).then((r: any) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
   }, [f]);
-  useEffect(() => { const t = setTimeout(load, 250); return () => clearTimeout(t); }, [load]);
+  const loadReview = useCallback(() => {
+    const qs = new URLSearchParams(); if (f.from) qs.set('from', f.from); if (f.to) qs.set('to', f.to);
+    if (f.function) qs.set('function', f.function); if (f.teamLeader) qs.set('teamLeader', f.teamLeader);
+    apiClient.get(`/attendance-recon/roster-v2/ot-review?${qs}`).then((r: any) => setReview(r.data)).catch(() => setReview(null));
+  }, [f]);
+  useEffect(() => { const t = setTimeout(() => { load(); loadReview(); }, 250); return () => clearTimeout(t); }, [load, loadReview]);
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
+
+  const actReview = (id: number, action: 'acknowledge' | 'ignore') => {
+    setActing(id);
+    apiClient.post(`/attendance-recon/roster-v2/ot-review/${id}/${action}`, {})
+      .then(() => { loadReview(); load(); })
+      .finally(() => setActing(null));
+  };
+  // minutes-of-day → "HH:MM" (evidence times), handles cross-midnight (>1440)
+  const hm = (m: number | null | undefined) => { if (m == null) return '—'; const v = ((Math.round(m) % 1440) + 1440) % 1440; return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`; };
+  // person_no set with a pending before/after-OT review → badge next to the name
+  const pendingSet = useMemo(() => new Set<string>((d?.otReview?.pendingPersons || []).map(String)), [d]);
 
   const exportXlsx = () => {
     const qs = new URLSearchParams(); Object.entries(f).forEach(([k, v]) => { if (v) qs.set(k, v); });
@@ -100,6 +118,24 @@ export default function OtExceptionsPage() {
         <button onClick={exportXlsx} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white" style={{ background: 'linear-gradient(135deg,#10b981,#059669)', boxShadow: '0 4px 14px rgba(16,185,129,0.35)' }}><Download size={13} />{ar ? 'إكسل' : 'Excel'}</button>
       </div>
 
+      {/* pending-review chip (Director decision 2) */}
+      {(d?.otReview?.pending > 0 || d?.offWorked?.days > 0) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {d?.otReview?.pending > 0 && (
+            <button onClick={() => setTab('review')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
+              style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#f59e0b' }}>
+              <AlertTriangle size={13} />{d.otReview.pending} {ar ? 'مراجعة أوفر تايم معلّقة (قبل/بعد الشفت)' : 'pending OT reviews (before/after shift)'}
+            </button>
+          )}
+          {d?.offWorked?.days > 0 && (
+            <button onClick={() => setTab('offworked')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold"
+              style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.4)', color: '#a855f7' }}>
+              <CalendarOff size={13} />{d.offWorked.days} {ar ? 'يوم OFF اشتغل فيه — مراجعة HR' : 'OFF-day worked — HR review'}
+            </button>
+          )}
+        </div>
+      )}
+
       {loading && <p className="text-sm py-8 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'جارٍ التحليل…' : 'Analyzing…'}</p>}
       {!loading && O && (<>
         {/* KPI tiles — count-up */}
@@ -139,6 +175,8 @@ export default function OtExceptionsPage() {
           {tabBtn('functions', ar ? 'بالفنكشن' : 'By function')}
           {tabBtn('permissions', ar ? 'أيام الاستئذانات' : 'Permission days')}
           {tabBtn('absence', ar ? 'الغيابات' : 'Absences')}
+          {tabBtn('review', `${ar ? 'مراجعة OT' : 'OT review'}${d?.otReview?.pending ? ' (' + d.otReview.pending + ')' : ''}`)}
+          {tabBtn('offworked', `${ar ? 'OFF اشتغل' : 'OFF worked'}${d?.offWorked?.days ? ' (' + d.offWorked.days + ')' : ''}`)}
           {tab === 'agents' && <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'بحث بالاسم/الفنكشن…' : 'search name/function…'} className={`${inputCls} ml-auto w-48`} style={inputStyle} />}
         </div>
 
@@ -152,7 +190,16 @@ export default function OtExceptionsPage() {
               </tr></thead>
               <tbody>{agents.map((r: any, i: number) => (
                 <tr key={i} className="hover:bg-black/[0.03] dark:hover:bg-white/[0.03] transition-colors" style={{ borderTop: '1px solid var(--border)' }}>
-                  <td className="px-2 py-1.5 font-medium whitespace-nowrap" style={{ color: 'var(--text-1)' }}>{r.name || '—'}</td>
+                  <td className="px-2 py-1.5 font-medium whitespace-nowrap" style={{ color: 'var(--text-1)' }}>
+                    <span className="inline-flex items-center gap-1.5">
+                      {pendingSet.has(String(r.person_no)) && (
+                        <button onClick={() => setTab('review')} title={ar ? 'مراجعة أوفر تايم قبل/بعد الشفت معلّقة' : 'pending before/after-shift OT review'}>
+                          <AlertTriangle size={12} style={{ color: '#f59e0b' }} />
+                        </button>
+                      )}
+                      {r.name || '—'}
+                    </span>
+                  </td>
                   <td className="px-2 py-1.5 whitespace-nowrap" style={{ color: 'var(--text-2)' }}>{r.fn || '—'}</td>
                   <td className="px-2 py-1.5 text-center font-semibold" style={{ color: '#f59e0b' }}>{r.otHrs.toLocaleString()}</td>
                   <td className="px-2 py-1.5 text-center" style={{ color: r.offOtHrs > 0 ? '#a78bfa' : 'var(--text-3)' }}>{r.offOtHrs || ''}</td>
@@ -207,6 +254,76 @@ export default function OtExceptionsPage() {
             <div className="rounded-2xl p-4 flex items-center gap-3" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
               <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(239,68,68,0.12)' }}><UserX size={26} className="text-red-400" /></div>
               <div><p className="text-2xl font-bold leading-none" style={{ color: 'var(--text-1)', fontVariantNumeric: 'tabular-nums' }}><CountVal n={d.absence.days} /></p><p className="text-[11px] mt-1" style={{ color: 'var(--text-2)' }}>{ar ? 'إجمالي أيام الغياب بالفترة' : 'total absence days in period'}</p></div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'review' && (
+          <div className="rounded-2xl overflow-hidden" style={panel}>
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              <h3 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'مراجعة أوفر تايم قبل/بعد الشفت' : 'Before/after-shift OT review'}</h3>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-3)' }}>{ar ? 'فترة محجوزة/غير مؤكدة — اعتمد (يُحسب أوفر تايم) أو تجاهل (فتح بدري فقط). لا يُدفع حتى تُعتمد.' : 'reserved / uncertain period — Acknowledge (counts as OT) or Ignore (just opened early). Not paid until acknowledged.'}</p>
+              {review?.counts && <p className="text-[11px] mt-1" style={{ color: 'var(--text-2)' }}>{ar ? 'معلّق' : 'Pending'}: <b style={{ color: '#f59e0b' }}>{review.counts.pending}</b> · {ar ? 'معتمد' : 'Acknowledged'}: <b style={{ color: '#22c55e' }}>{review.counts.acknowledged}</b> · {ar ? 'متجاهَل' : 'Ignored'}: <b style={{ color: 'var(--text-3)' }}>{review.counts.ignored}</b></p>}
+            </div>
+            <div className="overflow-auto">
+              <table className="w-full text-[11px]">
+                <thead style={{ background: 'var(--surface-2)' }}><tr>
+                  {[ar ? 'الموظف' : 'Employee', ar ? 'الفنكشن' : 'Function', ar ? 'التاريخ' : 'Date', ar ? 'النوع' : 'Type', ar ? 'الدقائق' : 'Minutes', ar ? 'الشفت' : 'Shift', ar ? 'دخول/خروج النظام' : 'System in/out', ar ? 'الحالة' : 'Status', ''].map((l, i) => <Th key={i} label={l} al={i === 0 ? 'start' : 'center'} />)}
+                </tr></thead>
+                <tbody>{(review?.items || []).map((r: any) => (
+                  <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td className="px-2 py-1.5 font-medium whitespace-nowrap" style={{ color: 'var(--text-1)' }}>{r.name || r.personNo}</td>
+                    <td className="px-2 py-1.5 whitespace-nowrap text-center" style={{ color: 'var(--text-2)' }}>{r.fn || '—'}</td>
+                    <td className="px-2 py-1.5 text-center whitespace-nowrap" style={{ color: 'var(--text-2)' }}>{r.date}</td>
+                    <td className="px-2 py-1.5 text-center" style={{ color: r.kind === 'before' ? '#22d3ee' : '#a78bfa' }}>{r.kind === 'before' ? (ar ? 'قبل' : 'before') : (ar ? 'بعد' : 'after')}</td>
+                    <td className="px-2 py-1.5 text-center font-semibold" style={{ color: '#f59e0b' }}>{r.minutes}m</td>
+                    <td className="px-2 py-1.5 text-center" style={{ color: 'var(--text-2)' }}>{r.shiftCode || '—'}</td>
+                    <td className="px-2 py-1.5 text-center whitespace-nowrap" style={{ color: 'var(--text-3)' }}>{hm(r.sysLogin)} → {hm(r.sysLogout)}</td>
+                    <td className="px-2 py-1.5 text-center">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold" style={r.status === 'pending' ? { background: 'rgba(245,158,11,0.14)', color: '#f59e0b' } : r.status === 'acknowledged' ? { background: 'rgba(34,197,94,0.14)', color: '#22c55e' } : { background: 'var(--surface-2)', color: 'var(--text-3)' }}>
+                        {r.status === 'pending' ? (ar ? 'معلّق' : 'pending') : r.status === 'acknowledged' ? (ar ? 'معتمد' : 'acknowledged') : (ar ? 'متجاهَل' : 'ignored')}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5 text-center whitespace-nowrap">
+                      {r.status === 'pending' ? (
+                        <span className="inline-flex gap-1.5">
+                          <button disabled={acting === r.id} onClick={() => actReview(r.id, 'acknowledge')} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold text-white disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#10b981,#059669)' }}><CheckCircle2 size={12} />{ar ? 'اعتماد' : 'Acknowledge'}</button>
+                          <button disabled={acting === r.id} onClick={() => actReview(r.id, 'ignore')} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold disabled:opacity-50" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)' }}><XCircle size={12} />{ar ? 'تجاهل' : 'Ignore'}</button>
+                        </span>
+                      ) : <span className="text-[10px]" style={{ color: 'var(--text-3)' }}>{r.reviewedBy || ''}</span>}
+                    </td>
+                  </tr>
+                ))}</tbody>
+              </table>
+              {(!review || (review.items || []).length === 0) && <p className="text-[11px] p-4 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'لا يوجد مراجعات' : 'No reviews'}</p>}
+            </div>
+          </div>
+        )}
+
+        {tab === 'offworked' && (
+          <div className="rounded-2xl overflow-hidden" style={panel}>
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              <h3 className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'يوم OFF اشتغل فيه — مراجعة HR' : 'OFF-day worked — HR review'}</h3>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-3)' }}>{ar ? 'ضل يوم OFF؛ الساعات ظاهرة للـHR للتوضيح ولا تُدفع أوفر تايم تلقائياً حتى المراجعة.' : 'stays an OFF day; hours are surfaced to HR for clarification and are NOT auto-paid as off-day OT until reviewed.'}</p>
+              <p className="text-[11px] mt-1" style={{ color: 'var(--text-2)' }}>{d.offWorked.days} {ar ? 'يوم' : 'days'} · {d.offWorked.hrs}{h} · {d.offWorked.agents} {ar ? 'موظف' : 'agents'}</p>
+            </div>
+            <div className="overflow-auto">
+              <table className="w-full text-[11px]">
+                <thead style={{ background: 'var(--surface-2)' }}><tr>
+                  {[ar ? 'الموظف' : 'Employee', ar ? 'الفنكشن' : 'Function', ar ? 'التاريخ' : 'Date', ar ? 'الكود' : 'Code', ar ? 'ساعات (غير مدفوعة)' : 'Hrs (not paid)', ar ? 'دخول/خروج النظام' : 'System in/out'].map((l, i) => <Th key={i} label={l} al={i === 0 ? 'start' : 'center'} />)}
+                </tr></thead>
+                <tbody>{(d.offWorked.rows || []).map((r: any, i: number) => (
+                  <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td className="px-2 py-1.5 font-medium whitespace-nowrap" style={{ color: 'var(--text-1)' }}>{r.name || r.person_no}</td>
+                    <td className="px-2 py-1.5 text-center whitespace-nowrap" style={{ color: 'var(--text-2)' }}>{r.fn || '—'}</td>
+                    <td className="px-2 py-1.5 text-center whitespace-nowrap" style={{ color: 'var(--text-2)' }}>{r.date}</td>
+                    <td className="px-2 py-1.5 text-center" style={{ color: 'var(--text-2)' }}>{r.shiftCode || 'OFF'}</td>
+                    <td className="px-2 py-1.5 text-center font-semibold" style={{ color: '#a855f7' }}>{r.hrs}{h}</td>
+                    <td className="px-2 py-1.5 text-center whitespace-nowrap" style={{ color: 'var(--text-3)' }}>{hm(r.sysLogin)} → {hm(r.sysLogout)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+              {(d.offWorked.rows || []).length === 0 && <p className="text-[11px] p-4 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'لا يوجد' : 'None'}</p>}
             </div>
           </div>
         )}

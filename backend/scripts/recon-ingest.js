@@ -20,6 +20,7 @@ const MAP = {
   punch_in_min: 'punchIn', punch_out_min: 'punchOut', sys_login_min: 'sysLogin', sys_logout_min: 'sysLogout', login_src: 'loginSrc',
   late_min: 'lateMin', early_min: 'earlyMin', sys_late_min: 'sysLate', sys_early_min: 'sysEarly',
   ot_min: 'otMin', offday_ot_min: 'offdayOt', holiday_ot_min: 'holidayOt', ot_record_only: 'otRecordOnly', worked_min: 'worked',
+  off_worked_min: 'offWorkedMin', off_worked_hr_review: 'offWorkedHrReview',   // migration 082 (Director decision 1)
   adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_status: 'permissionStatus', permission_type: 'permType', permission_duration: 'permDur',
   comp_off: 'comp', sick: 'sick', hr_code: 'hrCode', attendance_code: 'attCode', mismatch: 'mismatch', data_quality: 'dq',
   username: 'username', total_work_sys_min: 'totalSysMin', daily_note: 'dailyNote', include_tardiness: 'includeTardiness',
@@ -36,6 +37,17 @@ const MAP = {
   try {
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS username text`); // User ID (a.wahab) — durable across re-ingest
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS ot_record_only boolean NOT NULL DEFAULT false`); // migration 081 (Director rule 4) — self-heal like username
+    // migration 082 (Director decision 1) — OFF-worked → HR clarify, NOT auto-OT; self-heal so a refresh never NULLs
+    await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS off_worked_min integer NOT NULL DEFAULT 0`);
+    await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS off_worked_hr_review boolean NOT NULL DEFAULT false`);
+    // migration 083 (Director decision 2) — before/after-shift OT review flags (preserve-on-rebuild)
+    await c.query(`CREATE TABLE IF NOT EXISTS ot_review_flags (
+      id bigserial PRIMARY KEY, tenant_id uuid NOT NULL, person_no text NOT NULL, work_date date NOT NULL,
+      kind text NOT NULL, minutes integer NOT NULL DEFAULT 0, status text NOT NULL DEFAULT 'pending',
+      employee_name text, function_name text, reviewed_by text, reviewed_at timestamptz, note text,
+      created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())`);
+    await c.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_ot_review ON ot_review_flags (tenant_id, person_no, work_date, kind)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_ot_review_status ON ot_review_flags (tenant_id, status, work_date)`);
     // keep the editable holiday list (recon-config.json) mirrored into the `holidays` table so the leave-balance
     // calc can exclude holidays that fall inside annual leave (rule: a holiday during leave returns to the balance).
     try {
@@ -86,8 +98,29 @@ const MAP = {
       await c.query(`INSERT INTO roster_days (${allCols.join(',')}) VALUES (${ph})`, vals);
       inserted++;
     }
+    // ── Director decision 2 (2026-07-11): populate before/after-shift OT REVIEW FLAGS.
+    //    PRESERVE-ON-REBUILD (mirrors src/common/ot-review.ts mergePendingFlags + attendance_excuses):
+    //    only refresh 'pending' rows for the ingested range; never touch an acknowledged/ignored decision.
+    //    A pending flag is raised whenever ot_before_min OR ot_after_min ≥ 15 min.
+    const REVIEW_THRESHOLD = 15;
+    let flagsInserted = 0;
+    // drop only STALE pending flags in range (resolved decisions survive), then re-raise from current evidence
+    await c.query(`DELETE FROM ot_review_flags WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND status='pending'`, [TENANT, rFrom, rTo]);
+    for (const r of ing) {
+      for (const kind of ['before', 'after']) {
+        const mins = Math.round(Number(kind === 'before' ? r.otBefore : r.otAfter) || 0);
+        if (mins < REVIEW_THRESHOLD) continue;
+        // ON CONFLICT DO NOTHING → a resolved (acknowledged/ignored) row for this person/date/kind is preserved.
+        const res = await c.query(
+          `INSERT INTO ot_review_flags (tenant_id, person_no, work_date, kind, minutes, status, employee_name, function_name)
+           VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)
+           ON CONFLICT (tenant_id, person_no, work_date, kind) DO NOTHING`,
+          [TENANT, String(r.person), r.date, kind, mins, r.name || null, r.fn || null]);
+        if (res.rowCount > 0) flagsInserted++;
+      }
+    }
     await c.query('COMMIT');
-    console.log('INGEST OK — backed up ' + bakN + ' rows → roster_days_recon_bak; replaced June with ' + inserted + ' corrected rows (cols=' + cols.length + ')');
+    console.log('INGEST OK — backed up ' + bakN + ' rows → roster_days_recon_bak; replaced June with ' + inserted + ' corrected rows (cols=' + cols.length + '); raised ' + flagsInserted + ' pending OT-review flag(s)');
   } catch (e) {
     await c.query('ROLLBACK').catch(() => {});
     console.log('INGEST FAILED (rolled back): ' + e.message);

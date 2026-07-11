@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { shiftCategoryFromCode } from '@common/shift-category';
 import { TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
+import { payableOtMin } from '@common/ot-review';
 import { rosterCacheInvalidate } from '@common/ttl-cache.interceptor';
 import { RosterSharedService, SHIFT_CAT } from './roster-shared.service';
 import { coversIntervalOnDate, sampledHourlyMinutes } from './coverage-core';
@@ -158,6 +159,35 @@ export class ScheduleOpsController {
     // permission hours (parse the TEXT time-window)
     const perms = await this.ds.query(`SELECT permission_duration d FROM roster_days WHERE ${w} AND permission_type IS NOT NULL AND permission_duration IS NOT NULL`, p);
     const permMin = perms.reduce((a: number, r: any) => a + this.parsePermMin(r.d), 0);
+
+    // ── Director decision 1 (2026-07-11): scheduled OFF days worked → HR clarify, NOT payable off-day OT.
+    //    These rows carry off_worked_hr_review=true with the net hours parked in off_worked_min (non-payable).
+    const offWorkedRows = await this.ds.query(`
+      SELECT person_no, clean_name name, role_function fn, work_date::text date, shift_code "shiftCode",
+             COALESCE(off_worked_min,0)::int mins, sys_login_min "sysLogin", sys_logout_min "sysLogout",
+             punch_in_min "punchIn", punch_out_min "punchOut", data_quality dq
+        FROM roster_days WHERE ${w} AND COALESCE(off_worked_hr_review,false) ORDER BY off_worked_min DESC, work_date`, p);
+    const [offW] = await this.ds.query(`
+      SELECT COALESCE(SUM(off_worked_min),0)::int mins, COUNT(*)::int days, COUNT(DISTINCT person_no)::int agents
+        FROM roster_days WHERE ${w} AND COALESCE(off_worked_hr_review,false)`, p);
+
+    // ── Director decision 2 (2026-07-11): before/after-shift OT review flags. Payable ADDS only
+    //    ACKNOWLEDGED minutes; pending/ignored contribute nothing. roster_days.ot_min is never mutated.
+    //    Filters (function/team) are applied via the joined roster_days row for the same person/date.
+    const rvW = w.replace(/\btenant_id=\$1\b/, 'rd.tenant_id=$1').replace(/\bwork_date BETWEEN\b/, 'rd.work_date BETWEEN')
+      .replace(/\bis_active\b/, 'rd.is_active').replace(/canon_fn\(role_function\)/g, 'canon_fn(rd.role_function)').replace(/\bteam_manager=/g, 'rd.team_manager=');
+    const rvJoin = `FROM ot_review_flags orf JOIN roster_days rd
+        ON rd.tenant_id=orf.tenant_id AND rd.person_no=orf.person_no AND rd.work_date=orf.work_date AND rd.is_active
+       WHERE ${rvW}`;
+    const [rv] = await this.ds.query(`
+      SELECT COALESCE(SUM(orf.minutes) FILTER (WHERE orf.status='acknowledged'),0)::int "ackMin",
+             COUNT(*) FILTER (WHERE orf.status='pending')::int pending,
+             COUNT(*) FILTER (WHERE orf.status='acknowledged')::int acknowledged,
+             COUNT(*) FILTER (WHERE orf.status='ignored')::int ignored,
+             COUNT(DISTINCT orf.person_no) FILTER (WHERE orf.status='pending')::int "pendingAgents"
+        ${rvJoin}`, p);
+    const pendingPersonRows = await this.ds.query(`SELECT DISTINCT orf.person_no ${rvJoin} AND orf.status='pending'`, p);
+
     const fnOpts = await this.ds.query(`SELECT DISTINCT canon_fn(role_function) v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]);
     const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);
 
@@ -165,15 +195,25 @@ export class ScheduleOpsController {
     // OT buckets are DISJOINT in roster_days: ot_min = regular workday OT, offday_ot_min
     // = OT on the agent's OFF day, holiday_ot_min = OT on a public holiday (each row sits
     // in exactly one bucket). True total = sum of all three. Non-holiday = regular + off-day.
-    const totalOt = s.ot + s.offOt + s.holOt;
-    const nonHolOt = s.ot + s.offOt;
+    // payable OT = regular + off-day + holiday + ACKNOWLEDGED before/after review minutes (decision 2).
+    const ackMin = rv?.ackMin || 0;
+    const totalOt = payableOtMin({ regularMin: s.ot, offdayMin: s.offOt, holidayMin: s.holOt, ackReviewMin: ackMin });
+    const nonHolOt = s.ot + s.offOt + ackMin;
+    const pendingPersons: string[] = pendingPersonRows.map((r: any) => r.person_no);
     return {
       from: dFrom, to: dTo, function: fn || null, teamLeader: tl || null,
       ot: { totalHrs: r1(totalOt / 60), regularHrs: r1(s.ot / 60), offdayHrs: r1(s.offOt / 60), holidayHrs: r1(s.holOt / 60),
             nonHolidayHrs: r1(nonHolOt / 60),
             holidayPct: totalOt > 0 ? r1(100 * s.holOt / totalOt) : 0, nonHolidayPct: totalOt > 0 ? r1(100 * nonHolOt / totalOt) : 0,
             beforeShiftHrs: r1(s.befOt / 60), afterShiftHrs: r1(s.aftOt / 60),
+            acknowledgedReviewHrs: r1(ackMin / 60),
             days: s.otDays, agents: s.otAgents },
+      // before/after-shift OT review (Director decision 2, 2026-07-11) — pending needs Acknowledge/Ignore
+      otReview: { pending: rv?.pending || 0, acknowledged: rv?.acknowledged || 0, ignored: rv?.ignored || 0,
+        pendingAgents: rv?.pendingAgents || 0, acknowledgedHrs: r1(ackMin / 60), pendingPersons },
+      // scheduled OFF days worked → HR clarify, NOT payable off-day OT (Director decision 1, 2026-07-11)
+      offWorked: { hrs: r1((offW?.mins || 0) / 60), days: offW?.days || 0, agents: offW?.agents || 0,
+        rows: offWorkedRows.map((r: any) => ({ ...r, hrs: r1(r.mins / 60) })) },
       // excluded-role OT — computed & stored but NOT payable (Director rule 4, 2026-07-11)
       otRecordOnly: { totalHrs: r1(s.recOnlyMin / 60), days: s.recOnlyDays, agents: s.recOnlyAgents,
         byAgent: recordOnlyRows.map((a: any) => ({ ...a, otHrs: r1(a.otMin / 60), regOtHrs: r1(a.regOtMin / 60), holOtHrs: r1(a.holOtMin / 60), offOtHrs: r1(a.offOtMin / 60) })) },
@@ -203,7 +243,10 @@ export class ScheduleOpsController {
      ['Off-day OT (hrs)', d.ot.offdayHrs], ['Public-holiday OT (hrs)', d.ot.holidayHrs],
      ['Public-holiday OT %', `${d.ot.holidayPct}%`], ['Non-holiday OT %', `${d.ot.nonHolidayPct}%`],
      ['Before-shift OT (hrs)', d.ot.beforeShiftHrs], ['After-shift OT (hrs)', d.ot.afterShiftHrs],
+     ['Acknowledged before/after OT in payable (hrs)', d.ot.acknowledgedReviewHrs],
      ['OT days', d.ot.days], ['Agents with OT', d.ot.agents],
+     ['— OT REVIEW (before/after shift) —', ''], ['Pending review', d.otReview.pending], ['Acknowledged', d.otReview.acknowledged], ['Ignored', d.otReview.ignored],
+     ['— OFF WORKED (HR clarify, not auto-paid) —', ''], ['OFF-worked hours', d.offWorked.hrs], ['OFF-worked days', d.offWorked.days], ['Agents', d.offWorked.agents],
      ['— TARDINESS (no permission) —', ''], ['Late-in days', d.tardiness.lateDays], ['Late-in (hrs)', d.tardiness.lateHrs],
      ['Early-out days', d.tardiness.earlyDays], ['Early-out (hrs)', d.tardiness.earlyHrs],
      ['Late excused by permission', d.tardiness.lateExcused], ['Early excused by permission', d.tardiness.earlyExcused],
@@ -236,8 +279,83 @@ export class ScheduleOpsController {
     const ab = wb.addWorksheet('Absences_By_Date');
     ab.columns = [{ header: 'Date', key: 'k', width: 16 }, { header: 'Absent count', key: 'n' }];
     d.absence.byDate.forEach((r: any) => ab.addRow(r)); bold(ab);
+    // OFF worked — HR review (decision 1): scheduled OFF but worked; NOT auto-paid as off-day OT
+    const ow = wb.addWorksheet('OFF_Worked_HR_Review');
+    ow.columns = [{ header: 'Employee', key: 'name', width: 22 }, { header: 'Function', key: 'fn', width: 16 },
+      { header: 'Date', key: 'date', width: 14 }, { header: 'Shift', key: 'shiftCode', width: 10 },
+      { header: 'Worked hrs (not paid)', key: 'hrs', width: 18 }, { header: 'Note', key: 'dq', width: 40 }];
+    (d.offWorked.rows || []).forEach((r: any) => ow.addRow(r)); bold(ow);
     res.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="OT_Exceptions_${d.from}_${d.to}.xlsx"` });
     res.end(Buffer.from(await wb.xlsx.writeBuffer()));
+  }
+
+  /* ── Director decision 2 (2026-07-11): before/after-shift OT REVIEW queue.
+   *  Each pending flag = an "uncertain / reserved period" alert next to a name with two
+   *  actions: Acknowledge (it IS overtime → its minutes become payable in the OT report) or
+   *  Ignore (they just opened early / stayed logged in → does not count). Until acted on it
+   *  stays 'pending' — never silently paid. roster_days.ot_min is never mutated by these
+   *  actions; the OT report ADDS acknowledged minutes so the engine stays the source of truth. */
+  @Get('roster-v2/ot-review')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Before/after-shift OT review queue (pending / acknowledged / ignored) with evidence' })
+  async otReviewList(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string,
+    @Query('status') status?: string, @Query('function') fn?: string, @Query('teamLeader') tl?: string) {
+    const t = req.user.tenantId;
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = to || range?.b;
+    const p: any[] = [t, dFrom, dTo];
+    let w = `orf.tenant_id=$1 AND orf.work_date BETWEEN $2 AND $3`;
+    if (status && ['pending', 'acknowledged', 'ignored'].includes(status)) { p.push(status); w += ` AND orf.status=$${p.length}`; }
+    if (fn) { p.push(fn); w += ` AND canon_fn(rd.role_function)=canon_fn($${p.length})`; }
+    if (tl) { p.push(tl); w += ` AND rd.team_manager=$${p.length}`; }
+    const rows = await this.ds.query(`
+      SELECT orf.id, orf.person_no "personNo", orf.work_date::text date, orf.kind, orf.minutes,
+             orf.status, orf.note, orf.reviewed_by "reviewedBy", orf.reviewed_at "reviewedAt",
+             COALESCE(orf.employee_name, rd.clean_name) name, COALESCE(orf.function_name, rd.role_function) fn,
+             rd.shift_code "shiftCode", rd.shift_start_min "schedStart", rd.shift_end_min "schedEnd",
+             rd.sys_login_min "sysLogin", rd.sys_logout_min "sysLogout", rd.punch_in_min "punchIn", rd.punch_out_min "punchOut"
+        FROM ot_review_flags orf LEFT JOIN roster_days rd
+          ON rd.tenant_id=orf.tenant_id AND rd.person_no=orf.person_no AND rd.work_date=orf.work_date AND rd.is_active
+       WHERE ${w} ORDER BY (orf.status='pending') DESC, orf.work_date DESC, orf.minutes DESC LIMIT 500`, p);
+    const [c] = await this.ds.query(`
+      SELECT COUNT(*) FILTER (WHERE status='pending')::int pending,
+             COUNT(*) FILTER (WHERE status='acknowledged')::int acknowledged,
+             COUNT(*) FILTER (WHERE status='ignored')::int ignored
+        FROM ot_review_flags WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [t, dFrom, dTo]);
+    return { from: dFrom, to: dTo, counts: c, items: rows };
+  }
+
+  private async resolveOtReview(req: any, id: string, status: 'acknowledged' | 'ignored', note?: string) {
+    const t = req.user.tenantId;
+    const [flag] = await this.ds.query(`SELECT * FROM ot_review_flags WHERE tenant_id=$1 AND id=$2`, [t, id]);
+    if (!flag) throw new BadRequestException('OT review flag not found');
+    const actor = req.user.email || req.user.id || req.user.sub || 'unknown';
+    await this.ds.query(
+      `UPDATE ot_review_flags SET status=$3, note=$4, reviewed_by=$5, reviewed_at=NOW(), updated_at=NOW() WHERE tenant_id=$1 AND id=$2`,
+      [t, id, status, note ?? null, actor]);
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_id, actor_email, action, module, entity_type, entity_id, new_value, notes)
+       VALUES ($1,$2,$3,$4,'attendance-recon','ot_review_flag',$5,$6::jsonb,$7)`,
+      [t, req.user.id || req.user.sub || null, req.user.email || null,
+       status === 'acknowledged' ? 'ot_review.acknowledge' : 'ot_review.ignore', String(id),
+       JSON.stringify({ personNo: flag.person_no, date: flag.work_date, kind: flag.kind, minutes: flag.minutes, status }),
+       `${status === 'acknowledged' ? 'Acknowledged' : 'Ignored'} ${flag.kind}-shift OT ${flag.minutes}m for ${flag.person_no} on ${flag.work_date}${note ? ' — ' + note : ''}`]).catch(() => {});
+    rosterCacheInvalidate();
+    return { ok: true, id: Number(id), status, minutes: flag.minutes, kind: flag.kind };
+  }
+
+  @Post('roster-v2/ot-review/:id/acknowledge')
+  @RequirePermissions('schedule.edit')
+  @ApiOperation({ summary: 'Acknowledge a before/after-shift OT flag → its minutes become payable' })
+  async otReviewAck(@Req() req: any, @Param('id') id: string, @Body() b: { note?: string }) {
+    return this.resolveOtReview(req, id, 'acknowledged', b?.note);
+  }
+
+  @Post('roster-v2/ot-review/:id/ignore')
+  @RequirePermissions('schedule.edit')
+  @ApiOperation({ summary: 'Ignore a before/after-shift OT flag → does NOT count as overtime' })
+  async otReviewIgnore(@Req() req: any, @Param('id') id: string, @Body() b: { note?: string }) {
+    return this.resolveOtReview(req, id, 'ignored', b?.note);
   }
 
   @Get('roster-v2/schedule-analysis')
