@@ -20,6 +20,18 @@ const band = (code: string): KpiBand => {
   return k.band;
 };
 
+/** Per-function band (functionOverrides), same resolution the re-scorer uses. */
+const fnBand = (code: string, fn: string): KpiBand => {
+  const k = SEED_KPIS.find((s) => s.code === code);
+  const ov = k?.functionOverrides?.find((o) => o.functionName.toLowerCase() === fn.toLowerCase());
+  const b = ov?.band ?? k?.band;
+  if (!b) throw new Error(`no band for ${code}/${fn}`);
+  return b;
+};
+
+/** m:ss (or h) → Excel day-fraction, the raw format of SC!P / SC!AF. */
+const dayfrac = (seconds: number) => seconds / 86400;
+
 describe('KPI Registry — scoring reproduces the skill 1:1', () => {
   // skill: Math.round(v*100) — 89.5→90 up, 89.4→89
   it('round-half-up', () => {
@@ -28,7 +40,7 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
     expect(roundHalfUpPct(0.8969)).toBe(90);
   });
 
-  it('QUALITY: ≥95→30 · 90–94→20 · 80–89→10 · 65–79→−10 · <65→−20', () => {
+  it('QUALITY: ≥95→30 · 90–94→20 · 80–89→10 · 65–79→−10 · 1–64→−20 · blank/0 → NOT EVALUATED (null)', () => {
     const b = band('QUALITY');
     expect(scoreBand(b, 0.95)).toBe(30);
     expect(scoreBand(b, 0.945)).toBe(30);   // 94.5 → 95 (half-up boundary)
@@ -40,6 +52,21 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
     expect(scoreBand(b, 0.79)).toBe(-10);
     expect(scoreBand(b, 0.65)).toBe(-10);
     expect(scoreBand(b, 0.64)).toBe(-20);
+    expect(scoreBand(b, 0.01)).toBe(-20);   // 1% still the −20 band
+    // DIRECTOR RULE 2026-07-11: blank/zero QA = not evaluated → null (never −20)
+    expect(scoreBand(b, 0)).toBeNull();
+    expect(scoreBand(b, 0.004)).toBeNull(); // rounds to 0% → not evaluated
+    expect(scoreBand(b, NaN)).toBeNull();   // blank raw
+  });
+
+  it('QUALITY not applicable to Support/Offline/Team Leader/administrative/Customer Care (Director rule 2026-07-11)', () => {
+    for (const fn of ['Support', 'Offline', 'Internship Offline', 'Team Leader', 'Customer Care', 'Administrative', 'إداري']) {
+      expect(scoreBand(fnBand('QUALITY', fn), 0.99)).toBeNull(); // even a perfect QA value scores null — no QA evaluation
+      const ov = SEED_KPIS.find((k) => k.code === 'QUALITY')!.functionOverrides!.find((o) => o.functionName === fn)!;
+      expect(ov.weight).toBe(0); // their Net max excludes Quality's 30
+    }
+    // other functions untouched
+    expect(scoreBand(fnBand('QUALITY', 'CH - WA'), 0.95)).toBe(30);
   });
 
   it('FCR: ≥85→20 · 80–84→10 · 75–79→5 · <75→−10', () => {
@@ -82,11 +109,64 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
     expect(scoreBand(b, 0.89)).toBe(-10);
   });
 
-  it('AHT: total hours ≤48 → 10 else −10 (day-fraction input)', () => {
+  it('AHT default (NULL-function fallback): total hours ≤48 → 10 else −10 (day-fraction input)', () => {
     const b = band('AHT');
     expect(scoreBand(b, 48 / 24)).toBe(10);   // exactly 48h
     expect(scoreBand(b, 47 / 24)).toBe(10);
     expect(scoreBand(b, 48.5 / 24)).toBe(-10);
+  });
+
+  it('AHT CH-WA chat band ($N$4..$N$7 = 9:00/9:30/10:00): ≤9:00→15 · <9:30→10 · <10:00→5 · =10:00→blank(0) · >10:00→−5', () => {
+    for (const fn of ['CH - WA', 'Internship CH - WA']) {
+      const b = fnBand('AHT', fn);
+      expect(scoreBand(b, dayfrac(8 * 60))).toBe(15);       // 8:00
+      expect(scoreBand(b, dayfrac(540))).toBe(15);          // exactly 9:00
+      expect(scoreBand(b, dayfrac(555))).toBe(10);          // 9:15
+      expect(scoreBand(b, dayfrac(570))).toBe(5);           // exactly 9:30 → sheet's ≥$N$5 & <$N$4 branch
+      expect(scoreBand(b, dayfrac(590))).toBe(5);           // 9:50
+      expect(scoreBand(b, dayfrac(600))).toBe(0);           // exactly 10:00 → sheet blank ⇒ 0
+      expect(scoreBand(b, dayfrac(601))).toBe(-5);          // > 10:00
+    }
+  });
+
+  it('AHT Inbound 6-band ($O$2..$O$8 = 2:30/3:00/4:00/4:30/5:00): <2:30→−10 · <3:00→5 · 3:00–4:00→15 · ≤4:30→10 · <5:00→0 · ≥5:00→blank(0)', () => {
+    for (const fn of ['Inbound', 'Internship Inbound']) { // Internship Inbound = MAJORITY band (Jan+June); May-26 email-shaped block flagged as outlier
+      const b = fnBand('AHT', fn);
+      expect(scoreBand(b, dayfrac(149))).toBe(-10);         // 2:29
+      expect(scoreBand(b, dayfrac(150))).toBe(5);           // exactly 2:30
+      expect(scoreBand(b, dayfrac(179))).toBe(5);           // 2:59
+      expect(scoreBand(b, dayfrac(180))).toBe(15);          // exactly 3:00
+      expect(scoreBand(b, dayfrac(240))).toBe(15);          // exactly 4:00
+      expect(scoreBand(b, dayfrac(241))).toBe(10);          // 4:01
+      expect(scoreBand(b, dayfrac(270))).toBe(10);          // exactly 4:30
+      expect(scoreBand(b, dayfrac(280))).toBe(0);           // 4:40
+      expect(scoreBand(b, dayfrac(300))).toBe(0);           // 5:00 → sheet blank ⇒ 0
+      expect(scoreBand(b, dayfrac(600))).toBe(0);           // ≥5:00 → sheet blank ⇒ 0
+    }
+  });
+
+  it('AHT OMT 3-band ($O$5/$O$3 = 2:00/3:00): <2:00→10 · 2:00–3:00→5 · >3:00→−5 (max 10)', () => {
+    const b = fnBand('AHT', 'OMT');
+    expect(scoreBand(b, dayfrac(119))).toBe(10);
+    expect(scoreBand(b, dayfrac(120))).toBe(5);             // exactly 2:00
+    expect(scoreBand(b, dayfrac(180))).toBe(5);             // exactly 3:00
+    expect(scoreBand(b, dayfrac(181))).toBe(-5);
+    expect(SEED_KPIS.find((k) => k.code === 'AHT')!.functionOverrides!.find((o) => o.functionName === 'OMT')!.weight).toBe(10);
+  });
+
+  it('AHT email-shaped 48h SLA (Mail & NPS, SM&Email, Offline, Internship OMT/Offline): ≤48h→10 else −10, max 10', () => {
+    const aht = SEED_KPIS.find((k) => k.code === 'AHT')!;
+    for (const fn of ['Mail & NPS', 'Social Media & Email', 'Offline', 'Internship Offline', 'Internship OMT']) {
+      const b = fnBand('AHT', fn);
+      expect(scoreBand(b, 48 / 24)).toBe(10);
+      expect(scoreBand(b, 49 / 24)).toBe(-10);
+      expect(aht.functionOverrides!.find((o) => o.functionName === fn)!.weight).toBe(10);
+    }
+  });
+
+  it('AHT not scored for Refund and the Jan-26 Social Media block (info overrides → null)', () => {
+    expect(scoreBand(fnBand('AHT', 'Refund'), dayfrac(200))).toBeNull();
+    expect(scoreBand(fnBand('AHT', 'Social Media'), dayfrac(200))).toBeNull();
   });
 
   it('PRR gate: 2.5 per cell iff BRR≥80% AND RES≥10% (RES=responses÷contacts gate, half-up)', () => {
@@ -109,12 +189,42 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
     expect(scoreBand(b, 4)).toBe(-5);
   });
 
-  it('RESPONSE_TIME: ≤1h→15 · ≤2h→10 · ≤4h→5 · else −15 (day-fraction input)', () => {
+  it('RESPONSE_TIME default (email shape, = Mail & NPS / SM&Email sheet blocks): ≤1h→15 · ≤2h→10 · ≤4h→5 · else −15', () => {
     const b = band('RESPONSE_TIME');
     expect(scoreBand(b, 1 / 24)).toBe(15);
     expect(scoreBand(b, 2 / 24)).toBe(10);
     expect(scoreBand(b, 3 / 24)).toBe(5);
     expect(scoreBand(b, 5 / 24)).toBe(-15);
+    // email-shaped functions use the default (no override needed)
+    expect(scoreBand(fnBand('RESPONSE_TIME', 'Mail & NPS'), 1 / 24)).toBe(15);
+    expect(scoreBand(fnBand('RESPONSE_TIME', 'Social Media & Email'), 5 / 24)).toBe(-15);
+  });
+
+  it('RESPONSE_TIME chat band ($AF$3/$AF$4 = 0:35/0:40): ≤35s→10 · <40s→5 · =40s→blank(0) · >40s→−10 (max 10)', () => {
+    for (const fn of ['CH - WA', 'Internship CH - WA']) {
+      const b = fnBand('RESPONSE_TIME', fn);
+      expect(scoreBand(b, dayfrac(30))).toBe(10);
+      expect(scoreBand(b, dayfrac(35))).toBe(10);           // exactly 0:35
+      expect(scoreBand(b, dayfrac(38))).toBe(5);
+      expect(scoreBand(b, dayfrac(40))).toBe(0);            // exactly 0:40 → sheet blank ⇒ 0
+      expect(scoreBand(b, dayfrac(41))).toBe(-10);
+      expect(SEED_KPIS.find((k) => k.code === 'RESPONSE_TIME')!.functionOverrides!.find((o) => o.functionName === fn)!.weight).toBe(10);
+    }
+  });
+
+  it('RESPONSE_TIME Social Media 5-band ($AF$5..$AF$8 = 10/15/20/30 min): ≤10m→15 · ≤15m→10 · ≤20m→5 · ≤30m→−5 · else −15', () => {
+    const b = fnBand('RESPONSE_TIME', 'Social Media');
+    expect(scoreBand(b, dayfrac(600))).toBe(15);
+    expect(scoreBand(b, dayfrac(900))).toBe(10);
+    expect(scoreBand(b, dayfrac(1200))).toBe(5);
+    expect(scoreBand(b, dayfrac(1800))).toBe(-5);
+    expect(scoreBand(b, dayfrac(1801))).toBe(-15);
+  });
+
+  it('RESPONSE_TIME not scored for Inbound/Internship Inbound/OMT/Refund (info overrides → null)', () => {
+    for (const fn of ['Inbound', 'Internship Inbound', 'OMT', 'Refund']) {
+      expect(scoreBand(fnBand('RESPONSE_TIME', fn), dayfrac(60))).toBeNull();
+    }
   });
 
   it('COMMITMENT deduction: −5 when present-but-missed, 0 otherwise', () => {
@@ -147,12 +257,14 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
     for (const c of ['SURVEY_RR', 'COMMITMENT', 'CSAT', 'NPS', 'INCIDENTS', 'ATTENDANCE']) expect(w(c)).toBe(0);
   });
 
-  it('Email (Mail & NPS) AHT max = 10, other-function AHT max = 15 (only AHT/RT differ by function)', () => {
+  it('Email (Mail & NPS) AHT max = 10, chat/inbound AHT max = 15 (AHT/RT/QUALITY-applicability differ by function)', () => {
     const aht = SEED_KPIS.find((k) => k.code === 'AHT')!;
     expect(aht.weight).toBe(15);                       // default (voice/chat)
     const email = aht.functionOverrides?.find((o) => o.functionName === 'Mail & NPS');
     expect(email).toBeDefined();
     expect(email!.weight).toBe(10);                    // Email case-SLA cap
+    expect(aht.functionOverrides!.find((o) => o.functionName === 'CH - WA')!.weight).toBe(15);
+    expect(aht.functionOverrides!.find((o) => o.functionName === 'Inbound')!.weight).toBe(15);
   });
 
   it('Net Points ceiling = 135 (perfect agent), summed from the decoded max-points weights', () => {
@@ -183,50 +295,65 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
   });
 });
 
-describe('KPI Registry — migration 088 (authoritative re-seed) deep-equals kpi-seed.ts (what the live DB got is what we tested)', () => {
-  // 088 is machine-generated from kpi-seed.ts and is the seed actually applied to
-  // the live DB (via direct pg). It supersedes the ambiguous 080 seed. Parity here
-  // guarantees the corrections proven above are exactly what production received.
-  const sql = fs.readFileSync(
+describe('KPI Registry — migrations 088 + 089 deep-equal kpi-seed.ts (what the live DB got is what we tested)', () => {
+  // 088 (authoritative weights re-seed) and 089 (per-function AHT/RT bands +
+  // QUALITY not-evaluated rule) are machine-generated from kpi-seed.ts and are
+  // the seeds actually applied to the live DB (via direct pg). 089 OVERLAYS 088
+  // for the QUALITY / AHT / RESPONSE_TIME codes (idempotent ON CONFLICT UPDATE),
+  // so parity is asserted against 088-with-089-overlaid.
+  const sql088 = fs.readFileSync(
     path.join(__dirname, '../../../../database/migrations/088_kpi_registry_weights.sql'),
     'utf8',
   );
+  const sql089 = fs.readFileSync(
+    path.join(__dirname, '../../../../database/migrations/089_kpi_aht_rt_function_bands.sql'),
+    'utf8',
+  );
 
-  const extract = (marker: string): Record<string, any> => {
+  const extract = (sql: string, marker: string): Record<string, any> => {
     const out: Record<string, any> = {};
     const re = new RegExp(`-- ${marker} (\\w+)\\s*\\n\\s*'((?:[^']|'')*)'::jsonb`, 'g');
     let m: RegExpExecArray | null;
     while ((m = re.exec(sql))) out[m[1]] = JSON.parse(m[2].replace(/''/g, "'"));
     return out;
   };
+  /** 088 map with 089 rows overlaid (what the DB holds after both applied). */
+  const overlaid = (marker: string) => ({ ...extract(sql088, marker), ...extract(sql089, marker) });
 
-  it('every NULL-function band in SQL deep-equals the TS constant', () => {
-    const sqlBands = extract('BAND');
+  it('every NULL-function band in SQL (088 overlaid by 089) deep-equals the TS constant', () => {
+    const sqlBands = overlaid('BAND');
     const withBands = SEED_KPIS.filter((k) => k.band !== null);
     expect(Object.keys(sqlBands).sort()).toEqual(withBands.map((k) => k.code).sort());
     for (const k of withBands) expect(sqlBands[k.code]).toEqual(k.band);
   });
 
-  it('every seeded definition in SQL deep-equals the TS constant', () => {
-    const sqlDefs = extract('DEF');
+  it('every seeded definition in SQL (088 overlaid by 089) deep-equals the TS constant', () => {
+    const sqlDefs = overlaid('DEF');
     expect(Object.keys(sqlDefs).sort()).toEqual(SEED_KPIS.map((k) => k.code).sort());
     for (const k of SEED_KPIS) expect(sqlDefs[k.code]).toEqual(k.definition);
   });
 
   it('every KPI weight (max-points) in SQL equals the TS weight', () => {
-    const re = /-- WT (\w+) ([\d.]+)/g;
     const out: Record<string, number> = {};
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(sql))) out[m[1]] = Number(m[2]);
+    for (const sql of [sql088, sql089]) {
+      const re = /-- WT (\w+) ([\d.]+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sql))) out[m[1]] = Number(m[2]);
+    }
     expect(Object.keys(out).sort()).toEqual(SEED_KPIS.map((k) => k.code).sort());
     for (const k of SEED_KPIS) expect(out[k.code]).toBe(k.weight);
   });
 
-  it('AHT Email (Mail & NPS) function override present in SQL: weight 10 + band', () => {
-    expect(sql).toMatch(/-- OV AHT Mail & NPS 10/);
-    const ovBand = /-- OVBAND AHT\s*\n\s*'((?:[^']|'')*)'::jsonb/.exec(sql);
-    expect(ovBand).toBeTruthy();
-    const email = SEED_KPIS.find((k) => k.code === 'AHT')!.functionOverrides![0];
-    expect(JSON.parse(ovBand![1].replace(/''/g, "'"))).toEqual(email.band);
+  it('089 carries EVERY functionOverride of QUALITY/AHT/RESPONSE_TIME with byte-equal band JSON + weight', () => {
+    for (const code of ['QUALITY', 'AHT', 'RESPONSE_TIME']) {
+      const kpi = SEED_KPIS.find((k) => k.code === code)!;
+      for (const ov of kpi.functionOverrides!) {
+        const escFn = ov.functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        expect(sql089).toMatch(new RegExp(`-- OV ${code} ${escFn} ${ov.weight}`));
+        const m = new RegExp(`-- OVBAND ${code} ${escFn}\\s*\\n\\s*'((?:[^']|'')*)'::jsonb`).exec(sql089);
+        expect(m).toBeTruthy();
+        expect(JSON.parse(m![1].replace(/''/g, "'"))).toEqual(ov.band);
+      }
+    }
   });
 });
