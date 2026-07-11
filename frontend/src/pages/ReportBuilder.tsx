@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
-  Wrench, Play, Search, Save, Bookmark, X, Plus, Filter, CalendarDays,
+  Wrench, Play, Save, Bookmark, X, Plus, Filter,
   Table2, BarChart3, PieChart, LineChart, Download, Database, Trash2,
   ChevronUp, ChevronDown, RefreshCw, Sparkles, Layers,
 } from 'lucide-react';
@@ -10,11 +10,14 @@ import {
   useInjectDsStyles, card, tp, ts, NxCard, NxBtn, NxLoading, NxEmpty, NxError, NxPageHeader,
 } from '@/components/ds';
 import { BarRow, Donut } from '@/components/dazzle';
+import { FieldPicker, PickerField } from '@/components/report-builder/FieldPicker';
+import { DateRangePicker, DateRangeValue, presetById } from '@/components/report-builder/DateRangePicker';
 
-/* ── types mirroring the BLD-1 backend ──────────────────────────────────────── */
-type Source = { key: string; label_en: string; label_ar: string; group: string; permission?: string };
-type Field  = { key: string; label_en: string; label_ar: string; type: string; time?: boolean };
-type Metric = { key: string; label_en: string; label_ar: string; format: string };
+/* ── types mirroring the BLD-1/BLD-2 backend (category/description/badge are
+      optional — the picker falls back gracefully on today's payload) ───────── */
+type Source = { key: string; label_en: string; label_ar: string; group: string; category?: string; permission?: string; description_en?: string; description_ar?: string };
+type Field  = { key: string; label_en: string; label_ar: string; type: string; time?: boolean; badge?: PickerField['badge']; category?: string; description_en?: string; description_ar?: string };
+type Metric = { key: string; label_en: string; label_ar: string; format: string; badge?: PickerField['badge']; category?: string; description_en?: string; description_ar?: string };
 type SourceDetail = { key: string; label_en: string; label_ar: string; dateColumn?: string; personCol?: string; personScoped?: boolean; dimensions: Field[]; metrics: Metric[] };
 type Column = { key: string; label_en: string; label_ar: string; kind: 'dimension' | 'metric'; type?: string; format?: string; time?: boolean };
 type RunResult = { sourceKey: string; columns: Column[]; rowCount: number; rows: any[] };
@@ -39,30 +42,11 @@ const OP_LABEL: Record<FilterOp, { en: string; ar: string }> = {
 };
 const VALUELESS: FilterOp[] = ['not_null', 'is_null'];
 
-/* relative date presets → [from, to] */
-function presetRange(id: string): [string, string] {
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const today = new Date(); const t = iso(today);
-  const back = (n: number) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
-  switch (id) {
-    case 'last7':  return [back(6), t];
-    case 'last28': return [back(27), t];
-    case 'last30': return [back(29), t];
-    case 'last90': return [back(89), t];
-    case 'thisMonth': { const d = new Date(today.getFullYear(), today.getMonth(), 1); return [iso(d), t]; }
-    case 'lastMonth': { const s = new Date(today.getFullYear(), today.getMonth() - 1, 1); const e = new Date(today.getFullYear(), today.getMonth(), 0); return [iso(s), iso(e)]; }
-    default: return [back(29), t];
-  }
+/* default range = rolling Last 30 Days */
+function defaultRange(): DateRangeValue {
+  const [f, t] = presetById('last30')!.range();
+  return { dateFrom: f, dateTo: t, timeFrom: '00:00', timeTo: '23:59', rolling: { preset: 'last30' } };
 }
-const PRESETS: { id: string; en: string; ar: string }[] = [
-  { id: 'last7', en: 'Last 7 days', ar: 'آخر ٧ أيام' },
-  { id: 'last28', en: 'Last 28 days', ar: 'آخر ٢٨ يوم' },
-  { id: 'last30', en: 'Last 30 days', ar: 'آخر ٣٠ يوم' },
-  { id: 'last90', en: 'Last 90 days', ar: 'آخر ٩٠ يوم' },
-  { id: 'thisMonth', en: 'This month', ar: 'هذا الشهر' },
-  { id: 'lastMonth', en: 'Last month', ar: 'الشهر الماضي' },
-  { id: 'custom', en: 'Custom', ar: 'مخصّص' },
-];
 
 /* value formatter honoring column.format */
 function fmtCell(v: any, col: Column): string {
@@ -91,11 +75,11 @@ export default function ReportBuilderPage() {
   const [dims, setDims] = useState<string[]>([]);
   const [metrics, setMetrics] = useState<string[]>([]);
   const [filters, setFilters] = useState<FilterRow[]>([]);
-  const [preset, setPreset] = useState('last30');
-  const [[from, to], setRange] = useState<[string, string]>(presetRange('last30'));
+  const [dateVal, setDateVal] = useState<DateRangeValue>(defaultRange);
+  const from = dateVal.dateFrom, to = dateVal.dateTo;
   const [gran, setGran] = useState<Gran>('none');
   const [viz, setViz] = useState<Viz>('table');
-  const [libSearch, setLibSearch] = useState('');
+  const [picker, setPicker] = useState<null | 'dimension' | 'metric'>(null);
 
   const [result, setResult] = useState<RunResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -166,15 +150,13 @@ export default function ReportBuilderPage() {
   const setFilter = (i: number, patch: Partial<FilterRow>) => setFilters(f => f.map((r, ix) => ix === i ? { ...r, ...patch } : r));
   const delFilter = (i: number) => setFilters(f => f.filter((_, ix) => ix !== i));
 
-  /* ── date presets ── */
-  const applyPreset = (id: string) => { setPreset(id); if (id !== 'custom') setRange(presetRange(id)); };
-
   /* ── save / load / delete ── */
   const doSave = async () => {
     if (!sourceKey || metrics.length === 0) { alert(L('Pick a source and at least one metric first.', 'اختر مصدراً ومقياساً واحداً على الأقل.')); return; }
     const name = window.prompt(L('Report name:', 'اسم التقرير:')); if (!name) return;
     const sharedYes = window.confirm(L('Share this report with the team? (OK = shared, Cancel = private)', 'مشاركة التقرير مع الفريق؟ (موافق = مشترك، إلغاء = خاص)'));
-    const config = { dimensions: dims, metrics, filters, dateFrom: from, dateTo: to, granularity: gran, preset, viz };
+    /* timeFrom/timeTo/rolling are stored for forward-compat — /run consumes dateFrom/dateTo today */
+    const config = { dimensions: dims, metrics, filters, dateFrom: from, dateTo: to, timeFrom: dateVal.timeFrom, timeTo: dateVal.timeTo, rolling: dateVal.rolling ?? null, granularity: gran, viz };
     try {
       await apiClient.post('/report-builder-v2/saved-reports', { name, sourceKey, config, viz, shared: sharedYes });
       refreshSaved();
@@ -189,7 +171,15 @@ export default function ReportBuilderPage() {
       await new Promise<void>(res => { loadSource(rep.source_key, true); res(); });
       setDims(cfg.dimensions ?? []); setMetrics(cfg.metrics ?? []); setFilters(cfg.filters ?? []);
       setGran(cfg.granularity ?? 'none'); setViz(cfg.viz ?? rep.viz ?? 'table');
-      if (cfg.dateFrom && cfg.dateTo) { setRange([cfg.dateFrom, cfg.dateTo]); setPreset(cfg.preset ?? 'custom'); }
+      /* rolling preset re-evaluates on load; legacy cfg.preset supported */
+      const rollId = cfg.rolling?.preset ?? (cfg.preset && cfg.preset !== 'custom' ? cfg.preset : null);
+      const rp = rollId ? presetById(rollId) : null;
+      if (rp) {
+        const [f, t] = rp.range();
+        setDateVal({ dateFrom: f, dateTo: t, timeFrom: cfg.timeFrom ?? '00:00', timeTo: cfg.timeTo ?? '23:59', rolling: { preset: rollId } });
+      } else if (cfg.dateFrom && cfg.dateTo) {
+        setDateVal({ dateFrom: cfg.dateFrom, dateTo: cfg.dateTo, timeFrom: cfg.timeFrom ?? '00:00', timeTo: cfg.timeTo ?? '23:59', rolling: null });
+      }
       setTimeout(runNow, 500);
     } catch { alert(L('Load failed.', 'فشل التحميل.')); }
   };
@@ -242,8 +232,11 @@ export default function ReportBuilderPage() {
     color: active ? color : ts(dark), display: 'inline-flex', alignItems: 'center', gap: 5, transition: 'all .15s',
   });
 
-  const libDims = (detail?.dimensions ?? []).filter(d => !dims.includes(d.key) && label(d).toLowerCase().includes(libSearch.toLowerCase()));
-  const libMets = (detail?.metrics ?? []).filter(m => !metrics.includes(m.key) && label(m).toLowerCase().includes(libSearch.toLowerCase()));
+  /* unified picker catalog — badge inferred from kind when the backend doesn't send one */
+  const pickerFields = useMemo<PickerField[]>(() => [
+    ...(detail?.dimensions ?? []).map(d => ({ ...d, kind: 'dimension' as const, badge: d.badge ?? 'dimension' as const })),
+    ...(detail?.metrics ?? []).map(m => ({ ...m, kind: 'metric' as const, badge: m.badge ?? 'metric' as const })),
+  ], [detail]);
 
   return (
     <div style={{ animation: 'ds-fadein .4s ease' }}>
@@ -296,54 +289,34 @@ export default function ReportBuilderPage() {
 
       {detail && (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 340px) 1fr', gap: 14, alignItems: 'start' }}>
-          {/* ── LEFT: library + selected ── */}
+          {/* ── LEFT: fields (picker-driven, reorderable) ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* library */}
             <NxCard dark={dark} pad="14px 16px">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <Layers size={13} style={{ color: '#6366f1' }} />
-                <span style={{ fontSize: 12, fontWeight: 700, color: tp(dark) }}>{L('Library', 'المكتبة')}</span>
-                <div style={{ position: 'relative', marginInlineStart: 'auto' }}>
-                  <Search size={12} style={{ position: 'absolute', insetInlineStart: 8, top: '50%', transform: 'translateY(-50%)', color: ts(dark) }} />
-                  <input value={libSearch} onChange={e => setLibSearch(e.target.value)} placeholder={L('search', 'بحث')}
-                    style={{ ...inputStyle, padding: '5px 8px 5px 26px', width: 120 }} />
-                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: tp(dark) }}>{L('Fields', 'الحقول')}</span>
+                <span style={{ marginInlineStart: 'auto', fontSize: 10.5, color: ts(dark) }}>{pickerFields.length} {L('available', 'متاح')}</span>
               </div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Dimensions', 'الأبعاد')}</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 12 }}>
-                {libDims.length === 0 && <span style={{ fontSize: 11, color: ts(dark) }}>—</span>}
-                {libDims.map(d => (
-                  <button key={d.key} onClick={() => toggle(dims, setDims, d.key)} style={chip(false)}>
-                    <Plus size={10} /> {label(d)}
-                  </button>
-                ))}
-              </div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Metrics', 'المقاييس')}</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {libMets.length === 0 && <span style={{ fontSize: 11, color: ts(dark) }}>—</span>}
-                {libMets.map(m => (
-                  <button key={m.key} onClick={() => toggle(metrics, setMetrics, m.key)} style={chip(false, '#22c55e')}>
-                    <Plus size={10} /> {label(m)}
-                  </button>
-                ))}
-              </div>
-            </NxCard>
 
-            {/* selected (reorderable) */}
-            <NxCard dark={dark} pad="14px 16px">
-              <span style={{ fontSize: 12, fontWeight: 700, color: tp(dark), display: 'block', marginBottom: 10 }}>{L('Selected', 'المختارة')}</span>
-              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Group by', 'التجميع حسب')}</div>
-              {dims.length === 0 && <div style={{ fontSize: 11, color: ts(dark), marginBottom: 10 }}>{L('none — totals only', 'لا شيء — الإجمالي فقط')}</div>}
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Group by (dimensions)', 'التجميع (الأبعاد)')}</div>
+              {dims.length === 0 && <div style={{ fontSize: 11, color: ts(dark), marginBottom: 8 }}>{L('none — totals only', 'لا شيء — الإجمالي فقط')}</div>}
               {dims.map(k => (
                 <SelChip key={k} label={label(dimByKey[k] ?? { label_en: k, label_ar: k })} color="#6366f1" dark={dark}
                   onUp={() => move(dims, setDims, k, -1)} onDown={() => move(dims, setDims, k, 1)} onRemove={() => toggle(dims, setDims, k)} />
               ))}
-              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), margin: '10px 0 6px' }}>{L('Metrics', 'المقاييس')} <span style={{ color: '#ef4444' }}>*</span></div>
-              {metrics.length === 0 && <div style={{ fontSize: 11, color: '#f59e0b' }}>{L('add at least one metric', 'أضف مقياساً واحداً على الأقل')}</div>}
+              <button onClick={() => setPicker('dimension')} style={{ ...chip(false), width: '100%', justifyContent: 'center', padding: '8px 10px', marginBottom: 12, borderStyle: 'dashed' }}>
+                <Plus size={11} /> {L('Add dimension', 'إضافة بُعد')}
+              </button>
+
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: ts(dark), marginBottom: 6 }}>{L('Metrics', 'المقاييس')} <span style={{ color: '#ef4444' }}>*</span></div>
+              {metrics.length === 0 && <div style={{ fontSize: 11, color: '#f59e0b', marginBottom: 8 }}>{L('add at least one metric', 'أضف مقياساً واحداً على الأقل')}</div>}
               {metrics.map(k => (
                 <SelChip key={k} label={label(metByKey[k] ?? { label_en: k, label_ar: k })} color="#22c55e" dark={dark}
                   onUp={() => move(metrics, setMetrics, k, -1)} onDown={() => move(metrics, setMetrics, k, 1)} onRemove={() => toggle(metrics, setMetrics, k)} />
               ))}
+              <button onClick={() => setPicker('metric')} style={{ ...chip(false, '#22c55e'), width: '100%', justifyContent: 'center', padding: '8px 10px', borderStyle: 'dashed' }}>
+                <Plus size={11} /> {L('Add metric', 'إضافة مقياس')}
+              </button>
             </NxCard>
           </div>
 
@@ -351,15 +324,9 @@ export default function ReportBuilderPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* date + granularity + filters + viz */}
             <NxCard dark={dark} pad="14px 16px">
-              {/* date presets */}
+              {/* date range pill (Sprinklr-style) */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-                <CalendarDays size={14} style={{ color: ts(dark) }} />
-                {PRESETS.map(p => (
-                  <button key={p.id} onClick={() => applyPreset(p.id)} style={chip(preset === p.id)}>{ar ? p.ar : p.en}</button>
-                ))}
-                <input type="date" value={from} onChange={e => { setRange([e.target.value, to]); setPreset('custom'); }} style={inputStyle} />
-                <span style={{ color: ts(dark) }}>→</span>
-                <input type="date" value={to} onChange={e => { setRange([from, e.target.value]); setPreset('custom'); }} style={inputStyle} />
+                <DateRangePicker value={dateVal} dark={dark} ar={ar} onApply={setDateVal} />
                 <div style={{ marginInlineStart: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ fontSize: 11, color: ts(dark) }}>{L('Bucket', 'التقسيم')}</span>
                   {(['none', 'day', 'week', 'month'] as Gran[]).map(g => (
@@ -450,6 +417,32 @@ export default function ReportBuilderPage() {
             </NxCard>
           </div>
         </div>
+      )}
+
+      {/* ── FIELD PICKER MODAL ── */}
+      {picker && detail && (
+        <FieldPicker
+          fields={pickerFields}
+          kindDefault={picker}
+          initial={picker === 'dimension' ? dims : metrics}
+          dark={dark} ar={ar}
+          onCancel={() => setPicker(null)}
+          onDone={(selected) => {
+            /* the picker can select across kinds — route each key to its list */
+            const dimKeys = new Set((detail.dimensions ?? []).map(d => d.key));
+            const metKeys = new Set((detail.metrics ?? []).map(m => m.key));
+            const pickedDims = selected.filter(k => dimKeys.has(k));
+            const pickedMets = selected.filter(k => metKeys.has(k) && !dimKeys.has(k));
+            if (picker === 'dimension') {
+              setDims(pickedDims);
+              if (pickedMets.length) setMetrics(prev => [...prev, ...pickedMets.filter(k => !prev.includes(k))]);
+            } else {
+              setMetrics(pickedMets);
+              if (pickedDims.length) setDims(prev => [...prev, ...pickedDims.filter(k => !prev.includes(k))]);
+            }
+            setPicker(null);
+          }}
+        />
       )}
 
       {/* ── SAVED DRAWER ── */}
