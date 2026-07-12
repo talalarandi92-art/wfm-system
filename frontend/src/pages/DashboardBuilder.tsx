@@ -9,7 +9,8 @@
  * Compose in Edit mode, hand a clean read-only board to a TL in View mode.
  * Save / load / share via /saved-dashboards CRUD.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   LayoutGrid, Plus, Save, Bookmark, X, Pencil, Trash2, Eye, Edit3, Sparkles, Filter, FolderOpen, Copy, PanelsTopLeft,
 } from 'lucide-react';
@@ -58,6 +59,8 @@ export default function DashboardBuilderPage() {
   const [savedReports, setSavedReports] = useState<SavedReportLite[]>([]);
 
   const [editor, setEditor] = useState<{ sectionId: string; widget: WidgetConfig | null } | null>(null);
+  const [searchParams] = useSearchParams();
+  const didAutoLoad = useRef(false);
 
   const markDirty = () => setDirty(true);
 
@@ -157,6 +160,17 @@ export default function DashboardBuilderPage() {
     setSections([s]); setActiveSec(s.id); setDashId(null); setDashName(L('Untitled dashboard', 'لوحة جديدة'));
     setShared(false); setIsOwner(true); setFuncFilter(''); setDateVal(defaultRange()); setDirty(false);
   };
+
+  /* ── auto-open a dashboard handed in from the Library (?load=<id>&view=1) ── */
+  useEffect(() => {
+    const id = searchParams.get('load');
+    if (!id || didAutoLoad.current || savedList.length === 0) return;
+    const item = savedList.find(s => s.id === id);
+    if (!item) return;
+    didAutoLoad.current = true;
+    const wantView = searchParams.get('view') === '1';
+    doLoad(item).then(() => { if (wantView) setMode('view'); });
+  }, [searchParams, savedList]); // eslint-disable-line
 
   const duplicateWidget = (sectionId: string, w: WidgetConfig) => upsertWidget(sectionId, { ...w, id: uid(), title: `${w.title} (copy)` });
 

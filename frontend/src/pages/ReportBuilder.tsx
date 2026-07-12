@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Wrench, Play, Save, Bookmark, X, Plus, Filter,
   Table2, BarChart3, PieChart, LineChart, Download, Database, Trash2,
@@ -90,6 +91,8 @@ export default function ReportBuilderPage() {
   const [drawer, setDrawer] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [drill, setDrill] = useState<DrillRequest | null>(null);
+  const [searchParams] = useSearchParams();
+  const didAutoLoad = useRef(false);
 
   /* ── initial loads ── */
   useEffect(() => {
@@ -201,6 +204,12 @@ export default function ReportBuilderPage() {
     if (!window.confirm(L('Delete this report?', 'حذف هذا التقرير؟'))) return;
     try { await apiClient.delete(`/report-builder-v2/saved-reports/${id}`); if (loadedId === id) setLoadedId(null); refreshSaved(); } catch {}
   };
+
+  /* ── auto-load a report handed in from the Library (?load=<id>) ── */
+  useEffect(() => {
+    const id = searchParams.get('load');
+    if (id && !didAutoLoad.current) { didAutoLoad.current = true; doLoad(id); }
+  }, [searchParams]); // eslint-disable-line
 
   /* ── CSV export of current rows (no xlsx dep in this app) ── */
   const exportCsv = () => {

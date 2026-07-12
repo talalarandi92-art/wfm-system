@@ -19,6 +19,7 @@ import AnalyticsHub            from '@/pages/AnalyticsHub';
 // Consolidated hubs (2026-07-02): the roster-reports / scorecard / capacity page
 // families are now ?tab= tabs inside three hubs; their old routes redirect below.
 import RosterHub               from '@/pages/RosterHub';
+import ReportLibraryPage       from '@/pages/ReportLibrary';
 import ScorecardHub            from '@/pages/ScorecardHub';
 import CapacityHub             from '@/pages/CapacityHub';
 import SettingsPage            from '@/pages/Settings';
@@ -120,6 +121,7 @@ export default function App() {
           <Route path="schedule-change-log" element={<Navigate to="/roster?tab=changes" replace />} />
           <Route path="report-builder"      element={<Navigate to="/roster?tab=report-builder" replace />} />
           <Route path="dashboard-builder"   element={<Navigate to="/roster?tab=dashboard-builder" replace />} />
+          <Route path="report-library"      element={<ReportLibraryPage />} />
           <Route path="campaigns" element={<Navigate to="/schedule?tab=campaigns" replace />} />
           <Route path="attendance-corrections" element={<Navigate to="/attendance?tab=corrections" replace />} />
           <Route path="schedule-changes" element={<Navigate to="/schedule?tab=changes" replace />} />

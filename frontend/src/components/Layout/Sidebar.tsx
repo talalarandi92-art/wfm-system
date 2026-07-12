@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Calendar, ClockIcon, FileText, BarChart3,
   Radio, AlertTriangle, Users, Settings, UserCog, Award,
   Upload, ChevronLeft, ChevronRight, Activity, Zap, Shuffle,
-  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit, MessageCircle, BookOpen, UserCircle, Plug, Megaphone, ClipboardCheck, CalendarCog, GraduationCap, ShieldCheck, Bot, FileBarChart, Sparkles, ShieldAlert, Crown, Gauge, ArrowRightLeft,
+  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit, MessageCircle, BookOpen, UserCircle, Plug, Megaphone, ClipboardCheck, CalendarCog, GraduationCap, ShieldCheck, Bot, FileBarChart, Sparkles, ShieldAlert, Crown, Gauge, ArrowRightLeft, Library,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
@@ -51,6 +51,8 @@ const NAV_SECTIONS = [
       // Scorecard hub (overview + board + leaderboard + trends + agent/team 360 + coaching + productivity).
       { key: 'scorecard', icon: Award,     path: '/scorecard', permission: 'scorecard.view_own', agentHidden: true },
       { key: 'analyticsHub', icon: Activity, path: '/analytics', permission: 'reports.view' },
+      // Saved Library (Builder v2 · BLD-5) — the gallery of saved reports + dashboards.
+      { key: 'reportLibrary', icon: Library, path: '/report-library', permission: 'reports.view', agentHidden: true },
     ],
   },
   // (2026-07-02) The former "Reports & Analytics" section is gone: its 7 pages are now

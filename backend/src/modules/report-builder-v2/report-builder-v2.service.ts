@@ -151,10 +151,29 @@ export class ReportBuilderV2Service {
 
   /* ── SAVED REPORTS ───────────────────────────────────────────────────────── */
   async listReports(tid: string, userId: string) {
+    // library shape: owner display name + is_owner flag alongside the saved config.
     return this.ds.query(
-      `SELECT id, name, description, source_key, viz, shared, owner_user, created_at, updated_at,
-              (owner_user=$2) AS is_owner
-         FROM rb_saved_reports WHERE tenant_id=$1 AND (owner_user=$2 OR shared) ORDER BY updated_at DESC`, [tid, userId]);
+      `SELECT r.id, r.name, r.description, r.source_key, r.viz, r.shared, r.owner_user,
+              r.created_at, r.updated_at, (r.owner_user=$2) AS is_owner,
+              COALESCE(NULLIF(TRIM(CONCAT(u.first_name,' ',u.last_name)),''), u.email) AS owner_name
+         FROM rb_saved_reports r
+         LEFT JOIN users u ON u.id = r.owner_user AND u.tenant_id = r.tenant_id
+        WHERE r.tenant_id=$1 AND (r.owner_user=$2 OR r.shared)
+        ORDER BY r.updated_at DESC`, [tid, userId]);
+  }
+  /** Duplicate a report the user can see (own OR shared) into a fresh, private copy owned by them. */
+  async duplicateReport(user: any, id: string) {
+    const [r] = await this.ds.query(
+      `SELECT name, description, source_key, config, viz FROM rb_saved_reports
+        WHERE tenant_id=$1 AND id=$2 AND (owner_user=$3 OR shared)`, [user.tenantId, id, user.id]);
+    if (!r) throw new BadRequestException('Report not found');
+    const [n] = await this.ds.query(
+      `INSERT INTO rb_saved_reports (tenant_id, owner_user, name, description, source_key, config, viz, shared)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,false) RETURNING id`,
+      [user.tenantId, user.id, `${r.name} (copy)`, r.description ?? null, r.source_key,
+       JSON.stringify(r.config ?? {}), r.viz ?? 'table']);
+    await this.audit(user, 'report_builder.report.duplicated', 'rb_saved_reports', n.id, { from: id, name: `${r.name} (copy)` });
+    return { id: n.id };
   }
   async getReport(tid: string, userId: string, id: string) {
     const [r] = await this.ds.query(
@@ -195,9 +214,32 @@ export class ReportBuilderV2Service {
 
   /* ── SAVED DASHBOARDS ────────────────────────────────────────────────────── */
   async listDashboards(tid: string, userId: string) {
+    // library shape: owner name + is_owner + section/widget counts (for the card summary).
     return this.ds.query(
-      `SELECT id, name, description, shared, owner_user, created_at, updated_at, (owner_user=$2) AS is_owner
-         FROM rb_saved_dashboards WHERE tenant_id=$1 AND (owner_user=$2 OR shared) ORDER BY updated_at DESC`, [tid, userId]);
+      `SELECT d.id, d.name, d.description, d.shared, d.owner_user, d.created_at, d.updated_at,
+              (d.owner_user=$2) AS is_owner,
+              COALESCE(NULLIF(TRIM(CONCAT(u.first_name,' ',u.last_name)),''), u.email) AS owner_name,
+              COALESCE(jsonb_array_length(d.sections),0) AS section_count,
+              COALESCE((SELECT SUM(jsonb_array_length(COALESCE(s->'widgets','[]'::jsonb)))
+                          FROM jsonb_array_elements(d.sections) s),0) AS widget_count
+         FROM rb_saved_dashboards d
+         LEFT JOIN users u ON u.id = d.owner_user AND u.tenant_id = d.tenant_id
+        WHERE d.tenant_id=$1 AND (d.owner_user=$2 OR d.shared)
+        ORDER BY d.updated_at DESC`, [tid, userId]);
+  }
+  /** Duplicate a dashboard the user can see (own OR shared) into a fresh, private copy owned by them. */
+  async duplicateDashboard(user: any, id: string) {
+    const [d] = await this.ds.query(
+      `SELECT name, description, sections, date_range, filters FROM rb_saved_dashboards
+        WHERE tenant_id=$1 AND id=$2 AND (owner_user=$3 OR shared)`, [user.tenantId, id, user.id]);
+    if (!d) throw new BadRequestException('Dashboard not found');
+    const [n] = await this.ds.query(
+      `INSERT INTO rb_saved_dashboards (tenant_id, owner_user, name, description, sections, date_range, filters, shared)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,false) RETURNING id`,
+      [user.tenantId, user.id, `${d.name} (copy)`, d.description ?? null, JSON.stringify(d.sections ?? []),
+       d.date_range ? JSON.stringify(d.date_range) : null, JSON.stringify(d.filters ?? [])]);
+    await this.audit(user, 'report_builder.dashboard.duplicated', 'rb_saved_dashboards', n.id, { from: id, name: `${d.name} (copy)` });
+    return { id: n.id };
   }
   async getDashboard(tid: string, userId: string, id: string) {
     const [d] = await this.ds.query(

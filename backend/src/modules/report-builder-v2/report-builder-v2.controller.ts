@@ -55,6 +55,11 @@ export class ReportBuilderV2Controller {
   @RequirePermissions('reports.view')
   saveReport(@Req() req: any, @Body() b: any) { return this.svc.saveReport(req.user, b); }
 
+  @Post('saved-reports/:id/duplicate')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Duplicate a report (own or shared) into a fresh private copy' })
+  duplicateReport(@Req() req: any, @Param('id') id: string) { return this.svc.duplicateReport(req.user, id); }
+
   @Put('saved-reports/:id')
   @RequirePermissions('reports.view')
   updateReport(@Req() req: any, @Param('id') id: string, @Body() b: any) { return this.svc.updateReport(req.user, id, b); }
@@ -75,6 +80,11 @@ export class ReportBuilderV2Controller {
   @Post('saved-dashboards')
   @RequirePermissions('reports.view')
   saveDashboard(@Req() req: any, @Body() b: any) { return this.svc.saveDashboard(req.user, b); }
+
+  @Post('saved-dashboards/:id/duplicate')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Duplicate a dashboard (own or shared) into a fresh private copy' })
+  duplicateDashboard(@Req() req: any, @Param('id') id: string) { return this.svc.duplicateDashboard(req.user, id); }
 
   @Put('saved-dashboards/:id')
   @RequirePermissions('reports.view')
