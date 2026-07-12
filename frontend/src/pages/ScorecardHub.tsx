@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { Award, ClipboardCheck, Trophy, Activity, UserCircle, Users, GraduationCap, Gauge, LayoutDashboard, Orbit } from 'lucide-react';
+import { Award, ClipboardCheck, Trophy, Activity, UserCircle, Users, GraduationCap, Gauge, LayoutDashboard, Orbit, Scale } from 'lucide-react';
 import GroupedTabs, { TabGroupDef } from '@/components/GroupedTabs';
 import ScorecardPage from '@/pages/Scorecard';
 import ScorecardBoardPage from '@/pages/ScorecardBoard';
@@ -9,8 +9,9 @@ import Agent360Page from '@/pages/Agent360';
 import Team360Page from '@/pages/Team360';
 import CoachingPage from '@/pages/Coaching';
 import ProductivityPage from '@/pages/Productivity';
+import ScoringRulesPage from '@/pages/ScoringRules';
 
-type HubTab = 'overview' | 'board' | 'leaderboard' | 'trends' | 'agent360' | 'team360' | 'coaching' | 'productivity';
+type HubTab = 'overview' | 'board' | 'leaderboard' | 'trends' | 'agent360' | 'team360' | 'coaching' | 'productivity' | 'rules';
 
 /**
  * The 8 former flat tabs regrouped into 5 groups (R1 rollout).
@@ -51,6 +52,12 @@ const GROUPS: TabGroupDef[] = [
       { key: 'productivity', label: 'Productivity', labelAr: 'الإنتاجية', icon: Gauge },
     ],
   },
+  {
+    key: 'rules', label: 'Scoring Rules', labelAr: 'قواعد الاحتساب', icon: Scale,
+    tabs: [
+      { key: 'rules', label: 'Scoring Rules', labelAr: 'قواعد الاحتساب', icon: Scale },
+    ],
+  },
 ];
 
 const ALL_KEYS = GROUPS.flatMap(g => g.tabs.map(t => t.key));
@@ -80,6 +87,7 @@ export default function ScorecardHub() {
       {tab === 'team360'      && <Team360Page />}
       {tab === 'coaching'     && <CoachingPage />}
       {tab === 'productivity' && <ProductivityPage />}
+      {tab === 'rules'        && <ScoringRulesPage />}
     </div>
   );
 }

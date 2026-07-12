@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { ScorecardUploadService } from './scorecard-upload.service';
+import { ScorecardScoringService } from './scorecard-scoring.service';
 
 /* ─── incentive tiers per function (KD) ─────────────────────────────────── */
 const INCENTIVE_TIERS = [
@@ -33,6 +34,7 @@ export class ScorecardController {
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly uploadSvc: ScorecardUploadService,
+    private readonly scoringSvc: ScorecardScoringService,
   ) {}
 
   /**
@@ -819,6 +821,129 @@ export class ScorecardController {
     const safeName = periodName.replace(/[^a-zA-Z0-9_\- ]/g, '') + ` ${weekLabel}`;
     res?.set('Content-Disposition', `attachment; filename="${safeName}.xlsx"`);
     return new StreamableFile(Readable.from(buf));
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     VALIDATED-ENGINE ALIGNMENT (read-only) — the live module ingests the
+     Director's already-scored workbook; these two endpoints let it compute /
+     verify Net Points with the SAME kpi-registry engine the historical harness
+     proved at 98.47%. Neither mutates data nor auto-scores a month — AUTO-scoring
+     activation stays the Director's call.
+  ════════════════════════════════════════════════════════════════════════ */
+
+  /** Read-only rulebook for the Scoring-Rules transparency viewer. */
+  @Get('scoring-rules')
+  @ApiOperation({ summary: 'The scoring rulebook (per-KPI weights + per-function bands + QA not-evaluated rule) from the validated kpi-registry' })
+  async scoringRules(@CurrentUser() user: any) {
+    return this.scoringSvc.getRulebook(user.tenantId);
+  }
+
+  /**
+   * Recompute a committed batch's Net Points from its stored actuals through the
+   * validated engine and reconcile against the Director's workbook scores.
+   * READ-ONLY — proves the live path reproduces the 98.47%-validated output.
+   */
+  @Get('batches/:id/verify')
+  @ApiOperation({ summary: 'Reconcile stored workbook scores vs the validated-engine recompute (read-only, never writes)' })
+  async verifyBatch(
+    @Param('id') batchId: string,
+    @CurrentUser() user: any,
+    @Query('week') week?: string,
+    @Query('function') fn?: string,
+  ) {
+    const tid = user.tenantId;
+    const weekLabel = week ?? 'Final';
+    const [batch] = await this.ds.query(
+      `SELECT id, period_name, period_year, period_month FROM scorecard_batches WHERE id=$1 AND tenant_id=$2`,
+      [batchId, tid],
+    );
+    if (!batch) return { batch: null, summary: null, rows: [] };
+
+    const params: any[] = [tid, batchId, weekLabel];
+    let fnFilter = '';
+    if (fn) { params.push(fn); fnFilter = `AND se.function_name = $${params.length}`; }
+    const scope = await this.resolveScope(user);
+    let scopeFilter = '';
+    if (!scope.all) { params.push(scope.empNos); scopeFilter = `AND se.employee_no = ANY($${params.length}::text[])`; }
+
+    const entries = await this.ds.query(
+      `SELECT se.employee_name, se.employee_no, se.user_id_login, se.function_name,
+              se.net_points,
+              se.quality_actual, se.quality_score,
+              se.prr_rate, se.response_rate, se.prr_points, se.prr_bonus,
+              se.aht_actual, se.aht_score,
+              se.fcr_actual, se.fcr_score,
+              se.productivity_actual, se.productivity_score,
+              se.ctr_actual, se.ctr_score,
+              se.quiz_actual, se.quiz_score,
+              se.mistakes_actual, se.mistakes_score,
+              se.response_time_actual, se.response_time_score
+         FROM scorecard_entries se
+        WHERE se.tenant_id=$1 AND se.batch_id=$2 AND se.week_label=$3 ${fnFilter} ${scopeFilter}
+        ORDER BY se.function_name, se.net_points DESC NULLS LAST`,
+      params,
+    );
+
+    const toF = (v: any) => (v === null || v === undefined ? null : parseFloat(v));
+    const toN = (v: any) => (v === null || v === undefined ? null : parseInt(v, 10));
+    // Sheet Net sums blank score cells as 0 — normalise a stored NULL Net the same way.
+    const wbNet = (v: any) => (v === null || v === undefined ? 0 : parseInt(v, 10));
+
+    const rows = entries.map((e: any) => {
+      const computed = this.scoringSvc.computeScores({
+        functionName: e.function_name,
+        qualityActual: toF(e.quality_actual),
+        prrRate: toF(e.prr_rate),
+        responseRate: toF(e.response_rate),
+        ahtActual: toF(e.aht_actual),
+        fcrActual: toF(e.fcr_actual),
+        productivityActual: toF(e.productivity_actual),
+        ctrActual: toF(e.ctr_actual),
+        quizActual: toF(e.quiz_actual),
+        mistakesActual: toF(e.mistakes_actual),
+        responseTimeActual: toF(e.response_time_actual),
+      });
+      const workbookNet = wbNet(e.net_points);
+      const engineNet = computed.netPoints;
+      // per-cell workbook vs engine (workbook prr = points + bonus for a fair compare)
+      const cells = {
+        quality:      { workbook: toN(e.quality_score),      engine: computed.points.quality },
+        prr:          { workbook: (toN(e.prr_points) ?? 0) + (toN(e.prr_bonus) ?? 0), engine: (computed.points.prrPoints ?? 0) + (computed.points.prrBonus ?? 0) },
+        aht:          { workbook: toN(e.aht_score),           engine: computed.points.aht },
+        fcr:          { workbook: toN(e.fcr_score),           engine: computed.points.fcr },
+        productivity: { workbook: toN(e.productivity_score),  engine: computed.points.productivity },
+        ctr:          { workbook: toN(e.ctr_score),           engine: computed.points.ctr },
+        quiz:         { workbook: toN(e.quiz_score),          engine: computed.points.quiz },
+        mistakes:     { workbook: toN(e.mistakes_score),      engine: computed.points.mistakes },
+        responseTime: { workbook: toN(e.response_time_score), engine: computed.points.responseTime },
+      };
+      return {
+        employeeName: e.employee_name,
+        employeeNo:   e.employee_no,
+        loginId:      e.user_id_login,
+        functionName: e.function_name,
+        workbookNet,
+        engineNet,
+        netMatch:     workbookNet === engineNet,
+        netDelta:     engineNet - workbookNet,
+        cells,
+      };
+    });
+
+    const matching = rows.filter((r: any) => r.netMatch).length;
+    return {
+      batch: { id: batch.id, periodName: batch.period_name, year: batch.period_year, month: batch.period_month },
+      readOnly: true,
+      engine: 'kpi-registry score-band (validated 98.47%)',
+      summary: {
+        week: weekLabel,
+        totalRows: rows.length,
+        netMatching: matching,
+        netMismatched: rows.length - matching,
+        matchRatePct: rows.length ? Math.round((matching / rows.length) * 1000) / 10 : null,
+      },
+      rows,
+    };
   }
 
   /* ── private ─────────────────────────────────────────────────────────── */

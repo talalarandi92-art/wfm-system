@@ -95,6 +95,7 @@ export default function App() {
           <Route path="team-360"        element={<Navigate to="/scorecard?tab=team360" replace />} />
           <Route path="coaching"        element={<Navigate to="/scorecard?tab=coaching" replace />} />
           <Route path="productivity"    element={<Navigate to="/scorecard?tab=productivity" replace />} />
+          <Route path="scoring-rules"   element={<Navigate to="/scorecard?tab=rules" replace />} />
           <Route path="employees"  element={<EmployeesHub />} />
           <Route path="employee-merge" element={<Navigate to="/employees?tab=merge" replace />} />
           <Route path="users"      element={<UserManagementPage />} />
