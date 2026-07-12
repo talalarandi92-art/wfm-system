@@ -448,31 +448,46 @@ const DEBUG_RAW_OPS = new Set([
   'queries', 'reportingQuery',                                   // the report ROWS (opaque M_* measures)
   'fetchTargetMetric', 'getSortedDimensionValues', 'fetchSortDimensions', // the M_*→label metadata
 ]);
-const debugRawSeen = new Map();        // opName → last-forwarded ts (per-op throttle)
-const DEBUG_RAW_THROTTLE_MS = 30_000;  // ≤1 raw capture per op per 30s
+const DEBUG_RAW_QUERY_OPS = new Set(['queries', 'reportingQuery']); // the report DATA ops
+const debugRawSeen   = new Map();      // opName → last-forwarded ts (metadata ops throttle)
+const debugRawHashes = new Set();      // content-hash dedup for query DATA responses
+let   debugRawQueryCount = 0;
+const DEBUG_RAW_THROTTLE_MS = 30_000;  // metadata ops: ≤1 per op per 30s
 const DEBUG_RAW_CAP_BYTES   = 180_000; // cap the raw JSON we ship (~180KB)
+const DEBUG_RAW_MAX_QUERY   = 40;      // capture up to N DISTINCT query responses (the table is among many)
+
+function _dbgHash(s) { let h = 0; for (let i = 0; i < s.length; i += 97) h = (h * 31 + s.charCodeAt(i)) | 0; return h + ':' + s.length; }
 
 function forwardDebugRaw(opName, payloadData, url) {
   try {
     if (!opName || !DEBUG_RAW_OPS.has(opName)) return;
-    const now  = Date.now();
-    const last = debugRawSeen.get(opName) || 0;
-    if (now - last < DEBUG_RAW_THROTTLE_MS) return;   // throttle: one per op per 30s
-
     let raw = '';
     try { raw = JSON.stringify(payloadData); } catch (e) { return; }
     if (!raw) return;
+
+    // Query DATA ops (queries/reportingQuery): the dashboard fires MANY — most are small scalar
+    // tiles; the Agent Summary TABLE is one big response among them. Capture every DISTINCT response
+    // (content-hash dedup, capped) instead of a time-throttle that grabs only the first small one.
+    if (DEBUG_RAW_QUERY_OPS.has(opName)) {
+      const h = _dbgHash(raw);
+      if (debugRawHashes.has(h)) return;
+      if (debugRawQueryCount >= DEBUG_RAW_MAX_QUERY) return;
+      debugRawHashes.add(h); debugRawQueryCount++;
+    } else {
+      const now = Date.now();
+      if (now - (debugRawSeen.get(opName) || 0) < DEBUG_RAW_THROTTLE_MS) return;
+      debugRawSeen.set(opName, now);
+    }
+
     const truncated = raw.length > DEBUG_RAW_CAP_BYTES;
     if (truncated) raw = raw.slice(0, DEBUG_RAW_CAP_BYTES);
-
-    debugRawSeen.set(opName, now);
     const report = {
       source: 'sprinklr', reportType: 'debug_raw', sourceOp: opName,
       url: (url || '').split('?')[0], capturedAt: new Date().toISOString(),
       rawPayload: raw, truncated,
     };
     chrome.runtime.sendMessage({ type: 'SPRINKLR_REPORT', report });
-    console.log(`[WFM Bridge] 🐞 debug_raw forwarded: op=${opName} (${raw.length} bytes${truncated ? ', truncated' : ''}) → report-push`);
+    console.log(`[WFM Bridge] 🐞 debug_raw forwarded: op=${opName} (${raw.length} bytes${truncated ? ', truncated' : ''})`);
   } catch (e) { /* never break live capture */ }
 }
 
