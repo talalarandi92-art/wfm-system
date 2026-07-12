@@ -81,9 +81,13 @@ export function compile(input: CompileInput): CompiledQuery {
   const params: any[] = [input.tenantId];
   const where: string[] = [`${src.tenantCol} = $1`];
 
-  // date range on the source's date column
-  if (input.dateFrom) { params.push(input.dateFrom); where.push(`${src.dateCol} >= $${params.length}`); }
-  if (input.dateTo)   { params.push(input.dateTo);   where.push(`${src.dateCol} <= $${params.length}`); }
+  // date range on the source's date column.
+  // Upper bound is HALF-OPEN and date-normalized so the WHOLE end day is included even when
+  // dateCol is a timestamp/timestamptz (e.g. requests_sla.submitted_at): `<= 'YYYY-MM-DD'` would
+  // coerce to local midnight and silently drop every row after 00:00 on the final day. For a plain
+  // DATE column `< (d::date + 1)` is equivalent to `<= d`; for a timestamp column it spans the day.
+  if (input.dateFrom) { params.push(input.dateFrom); where.push(`${src.dateCol} >= $${params.length}::date`); }
+  if (input.dateTo)   { params.push(input.dateTo);   where.push(`${src.dateCol} < ($${params.length}::date + 1)`); }
 
   // client filters — dim must be allowlisted, op allowlisted, value bound
   for (const f of input.filters ?? []) {
