@@ -59,6 +59,16 @@ export class RequestsController {
     return canSeeAll ? undefined : (user?.employeeId ?? '00000000-0000-0000-0000-000000000000');
   }
 
+  /** Anti-forgery for create handlers: the subject/requester employee is ALWAYS the
+   *  authenticated employee. A body-supplied employee id is honoured ONLY for approvers
+   *  (requests.approve_l1) filing on an employee's behalf. Mirrors asPeer(). */
+  private asRequesterId(user: any, bodyEmployeeId?: string): string {
+    const canOverride = this.perms(user).includes('requests.approve_l1');
+    return (canOverride && bodyEmployeeId)
+      ? bodyEmployeeId
+      : (user?.employeeId ?? '00000000-0000-0000-0000-000000000000');
+  }
+
   /* ── Stats ─────────────────────────────────────────────────────────── */
   @Get('stats')
   @RequirePermissions('requests.view_team')
@@ -127,31 +137,46 @@ export class RequestsController {
   }
 
   /* ── Shift swap ─────────────────────────────────────────────────────── */
+  // IDOR fix: requesterEmployeeId is FORCED to the caller (asRequesterId); only an
+  // approver may file on another employee's behalf. targetEmployeeId is the swap
+  // counterparty (peer) who must still accept via peer-accept — left as supplied.
   @Post('shift-swap')
   @RequirePermissions('requests.create')
   createSwap(@CurrentUser() user: any, @Body() dto: CreateShiftSwapDto) {
-    return this.svc.createShiftSwap(this.tid(user), dto);
+    return this.svc.createShiftSwap(this.tid(user), {
+      ...dto,
+      requesterEmployeeId: this.asRequesterId(user, dto.requesterEmployeeId),
+    });
   }
 
   /* ── Leave request ──────────────────────────────────────────────────── */
   @Post('leave')
   @RequirePermissions('requests.create')
   createLeave(@CurrentUser() user: any, @Body() dto: CreateLeaveDto) {
-    return this.svc.createLeave(this.tid(user), dto);
+    return this.svc.createLeave(this.tid(user), {
+      ...dto,
+      employeeId: this.asRequesterId(user, dto.employeeId),
+    });
   }
 
   /* ── Overtime request ───────────────────────────────────────────────── */
   @Post('overtime')
   @RequirePermissions('requests.create')
   createOvertime(@CurrentUser() user: any, @Body() dto: CreateOvertimeDto) {
-    return this.svc.createOvertime(this.tid(user), dto);
+    return this.svc.createOvertime(this.tid(user), {
+      ...dto,
+      employeeId: this.asRequesterId(user, dto.employeeId),
+    });
   }
 
   /* ── Manual break request ───────────────────────────────────────────── */
   @Post('break')
   @RequirePermissions('requests.create')
   createBreak(@CurrentUser() user: any, @Body() dto: CreateBreakDto) {
-    return this.svc.createBreak(this.tid(user), dto);
+    return this.svc.createBreak(this.tid(user), {
+      ...dto,
+      employeeId: this.asRequesterId(user, dto.employeeId),
+    });
   }
 
   /* ── Attachments (schedule/appointment image, certificate) ──────────── */

@@ -761,6 +761,13 @@ export class ScorecardController {
     );
     const periodName = batch?.period_name ?? 'Scorecard';
 
+    // Row-level visibility — mirror rankings/verify: agents/TLs may only export
+    // their own scope; scorecard.view_all (WFM/HR/admin) exports everyone.
+    const params: any[] = [tid, batchId, weekLabel];
+    const scope = await this.resolveScope(user);
+    let scopeFilter = '';
+    if (!scope.all) { params.push(scope.empNos); scopeFilter = `AND se.employee_no = ANY($${params.length}::text[])`; }
+
     const rows = await this.ds.query(
       `SELECT se.function_name, se.employee_name, se.employee_no, se.user_id_login,
               se.team_leader, se.week_label, se.function_rank, se.net_points,
@@ -776,9 +783,9 @@ export class ScorecardController {
               se.response_time_actual, se.response_time_score,
               se.prr_rate, se.prr_points, se.prr_bonus
        FROM scorecard_entries se
-       WHERE se.tenant_id=$1 AND se.batch_id=$2 AND se.week_label=$3
+       WHERE se.tenant_id=$1 AND se.batch_id=$2 AND se.week_label=$3 ${scopeFilter}
        ORDER BY se.function_name, COALESCE(se.function_rank, 9999), se.net_points DESC NULLS LAST`,
-      [tid, batchId, weekLabel],
+      params,
     );
 
     const pct  = (v: any) => v == null ? '' : `${Math.round(parseFloat(v) * 100)}%`;
