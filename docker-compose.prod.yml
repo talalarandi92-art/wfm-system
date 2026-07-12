@@ -1,5 +1,17 @@
 # ============================================================
-# WFM PLATFORM — Docker Compose (Production)
+# ⚠️ DEPRECATED — DO NOT DEPLOY THIS FILE
+# ------------------------------------------------------------
+# Superseded by the single-origin deploy/ pack. Use instead:
+#   deploy/docker-compose.prod.yml   (compose)
+#   deploy/DEPLOY_RUNBOOK.md         (step-by-step runbook)
+#   deploy/prod.env.example          (env template)
+# This root stack uses a SEPARATE nginx frontend container + an auto-migrate
+# service and binds host ports 80/443 — it conflicts with the deploy/ pack
+# (which also binds 80/443), so only one may run on a host. Kept for history.
+# ============================================================
+#
+# ============================================================
+# WFM PLATFORM — Docker Compose (Production)  [DEPRECATED]
 # ============================================================
 # Single-server deployment behind a domain with TLS.
 #

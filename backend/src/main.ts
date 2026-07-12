@@ -11,7 +11,40 @@ import * as fs from 'fs';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './common/adapters/redis-io.adapter';
 
+// ── Production secret guard (2026-07-12, risk study finding #16) ──────────────
+// Refuse to boot in PRODUCTION with a placeholder / weak JWT signing secret. The
+// dev .env ships secrets ending "_change_in_production"; if one of those ever
+// reaches a real server the token-signing key is effectively public and anyone
+// can forge a valid session. This ONLY fires when NODE_ENV==='production' —
+// development (NODE_ENV=development or unset) is never affected, so the current
+// local run is untouched. It reads process.env directly and runs before
+// NestFactory/DB init, so a misconfigured prod fails fast and loud instead of
+// coming up silently insecure.
+function assertProductionSecrets(): void {
+  if (process.env.NODE_ENV !== 'production') return; // dev/test: never blocks boot
+  const problems: string[] = [];
+  const check = (name: string) => {
+    const v = process.env[name];
+    if (!v || v.trim() === '') problems.push(`${name} is missing / empty`);
+    else if (v.includes('change_in_production')) problems.push(`${name} still holds the placeholder value (contains "change_in_production")`);
+    else if (v.length < 32) problems.push(`${name} is too short (${v.length} chars; use >= 32 random chars)`);
+  };
+  check('JWT_ACCESS_SECRET');
+  check('JWT_REFRESH_SECRET');
+  if (problems.length) {
+    throw new Error(
+      'Refusing to start: production requires strong JWT secrets.\n  - ' +
+        problems.join('\n  - ') +
+        '\nGenerate values with `openssl rand -hex 64` (a different one per secret) and set them ' +
+        'in the environment before deploying. See deploy/prod.env.example.',
+    );
+  }
+}
+
 async function bootstrap() {
+  // Fail fast BEFORE any Nest/DB init if prod is configured with weak secrets.
+  assertProductionSecrets();
+
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log'],
   });

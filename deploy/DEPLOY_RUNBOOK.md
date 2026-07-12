@@ -15,7 +15,7 @@ internet ──▶ nginx :80/:443 ──▶ backend :3000 (NestJS, serves API + 
 - API prefix: `/api/v1` (global prefix `api` + URI versioning v1 — `backend/src/main.ts:75-76`)
 - SPA served by the backend itself from `FRONTEND_DIST` (`backend/src/main.ts:117-131`) — there is **no separate frontend container**; nginx only proxies `:3000`.
 - Health endpoint: `GET /api/v1/health` — public, pings the DB (`backend/src/modules/health/health.controller.ts:9,16-23`).
-- Migrations are **manual** — plain SQL files in `database/migrations/` (79 files, `001_initial_schema.sql` → latest) applied by `backend/scripts/migrate.js` into a `schema_migrations` ledger. TypeORM runs with `synchronize: false` and never applies them (`backend/src/app.module.ts:94`). **Nothing auto-migrates on boot.**
+- Migrations are **manual** — plain SQL files in `database/migrations/` (90 files, `001_initial_schema.sql` → latest) applied by `backend/scripts/migrate.js` into a `schema_migrations` ledger. TypeORM runs with `synchronize: false` and never applies them (`backend/src/app.module.ts:94`). **Nothing auto-migrates on boot.**
 
 ---
 
@@ -91,7 +91,7 @@ docker compose --env-file ./prod.env -f docker-compose.prod.yml logs backend | t
 The migration runner and all SQL files are baked into the backend image (`/app/backend/scripts/migrate.js` + `/app/database/migrations` — layout matches `migrate.js:39` which resolves `<backend>/../database/migrations`):
 
 ```bash
-# see what's pending (fresh DB: all 79 pending)
+# see what's pending (fresh DB: all 90 pending)
 docker compose --env-file ./prod.env -f docker-compose.prod.yml exec backend \
   node scripts/migrate.js --status
 

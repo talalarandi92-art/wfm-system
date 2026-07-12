@@ -16,8 +16,12 @@ import { ReconService } from './recon.service';
 import { RosterIngestionService } from './roster-ingestion.service';
 import { RosterSharedService } from './roster-shared.service';
 
-// Source files live server-side (Ameyo export alone is ~72MB). Configure via env;
-// falls back to the analyst's working folder for local verification.
+// Source files live server-side (Ameyo export alone is ~72MB). EVERY path is
+// env-driven so nothing Windows-specific is baked in for a server deploy; the
+// defaults below resolve to the analyst's local working folders so the current
+// local run is unaffected. Override on a server via (documented in
+// deploy/prod.env.example): RECON_SOURCE_DIR, RECON_SCHEDULE_FILE, RECON_NEW_DIR.
+// assertSources() below fails clean (400) if a configured path is absent.
 const SRC_DIR = process.env.RECON_SOURCE_DIR || 'C:/Users/t.bassam/Desktop/WFM System/My work/Oddo Ameyo Sprinkler';
 const SCHEDULE = process.env.RECON_SCHEDULE_FILE || 'C:/Users/t.bassam/Desktop/WFM System/My work/WFM/CC Schedule 26 V3.0 (24).xlsx';
 // The CORRECTED engine (recon-refresh.js) reads its 5 monthly sources from here. In-system

@@ -1,3 +1,22 @@
+> # ⚠️ DEPRECATED — do not deploy this stack
+>
+> This root deploy stack — `DEPLOYMENT.md` + `docker-compose.prod.yml` +
+> `.env.production.example` — describes a **two-container** topology (a separate
+> nginx *frontend* container plus an auto-`migrate` service). It has been
+> **superseded** by the reviewed, single-origin **`deploy/` pack**, where the
+> backend serves the SPA itself and nginx only reverse-proxies `:3000`:
+>
+> | Use this (canonical)                 | Not this (deprecated)         |
+> |--------------------------------------|-------------------------------|
+> | `deploy/DEPLOY_RUNBOOK.md`           | `DEPLOYMENT.md`               |
+> | `deploy/docker-compose.prod.yml`     | `docker-compose.prod.yml`     |
+> | `deploy/prod.env.example`            | `.env.production.example`     |
+>
+> Both compose files bind host ports 80/443, so only **one** may run on a host.
+> Deploy the `deploy/` pack. This file is kept for history only.
+
+---
+
 # WFM Platform — Production Deployment
 
 Single-server deployment behind a domain with HTTPS. Everything runs in Docker:
