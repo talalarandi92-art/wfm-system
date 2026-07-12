@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Info } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
+import { Sparkline } from '@/components/dazzle';
 
 export interface KpiSource {
   /** e.g. "GET /api/v1/control-dashboard" */
@@ -74,7 +75,7 @@ function SourcePopover({ source, ar, onClose }: { source: KpiSource; ar: boolean
 }
 
 /* ── Kpi tile ─────────────────────────────────────────────────────────────── */
-export function Kpi({ label, value, source, drill, accent = '#6366f1', sub, icon }: {
+export function Kpi({ label, value, source, drill, accent = '#6366f1', sub, icon, spark, sparkColor }: {
   label: string;
   value: React.ReactNode;
   source: KpiSource;            // REQUIRED — provenance is the whole point
@@ -82,6 +83,10 @@ export function Kpi({ label, value, source, drill, accent = '#6366f1', sub, icon
   accent?: string;              // semantic accent color
   sub?: string;
   icon?: React.ReactNode;
+  /** Optional mini trend series rendered as an inline sparkline under the value. */
+  spark?: number[];
+  /** Sparkline stroke color — defaults to the tile accent. */
+  sparkColor?: string;
 }) {
   const { lang } = useUiStore();
   const ar = lang === 'ar';
@@ -151,6 +156,11 @@ export function Kpi({ label, value, source, drill, accent = '#6366f1', sub, icon
         {value}
       </div>
       {sub != null && <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
+      {spark && spark.length >= 2 && (
+        <div style={{ marginTop: 8, marginInline: -2 }}>
+          <Sparkline data={spark} color={sparkColor || accent} height={24} />
+        </div>
+      )}
     </div>
   );
 }

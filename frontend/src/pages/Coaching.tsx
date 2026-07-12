@@ -78,6 +78,20 @@ export default function CoachingPage() {
     (!functionName || f.function === functionName) &&
     (!q || `${f.employeeName} ${f.employeeNo} ${f.function ?? ''}`.toLowerCase().includes(q.toLowerCase())));
 
+  /* theme-aware neutral tokens — dark keeps the original explicit values; light mirrors them.
+     Semantic (purple/severity) + mid-gray muted text (#475569/#64748b/#94a3b8) stay as-is. */
+  const T = {
+    cardBg:  dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)',
+    fieldBg: dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
+    panelBg: dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+    bdr:     dark ? 'rgba(255,255,255,0.1)'  : 'rgba(15,23,42,0.12)',
+    bdrSoft: dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)',
+    bdrRow:  dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.06)',
+    headBg:  dark ? 'rgba(0,0,0,0.25)'       : 'rgba(15,23,42,0.05)',
+    text:    tp(dark),
+    text2:   dark ? '#cbd5e1' : '#334155',
+  };
+
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
       {/* Header */}
@@ -96,7 +110,7 @@ export default function CoachingPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <FunctionFilter />
-          <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div className="flex rounded-xl overflow-hidden" style={{ border: `1px solid ${T.bdr}` }}>
             {(['flags', 'sessions'] as const).map(v => (
               <button key={v} onClick={() => setView(v)} className="px-3 py-1.5 text-xs font-medium"
                 style={{ background: view === v ? 'rgba(168,85,247,0.18)' : 'transparent', color: view === v ? '#a855f7' : '#64748b' }}>
@@ -106,7 +120,7 @@ export default function CoachingPage() {
           </div>
           {view === 'flags' && (
             <>
-              <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div className="flex rounded-xl overflow-hidden" style={{ border: `1px solid ${T.bdr}` }}>
                 {(['open', 'all'] as const).map(s => (
                   <button key={s} onClick={() => setStatus(s)} className="px-3 py-1.5 text-xs font-medium"
                     style={{ background: status === s ? 'rgba(168,85,247,0.18)' : 'transparent', color: status === s ? '#a855f7' : '#64748b' }}>
@@ -134,10 +148,10 @@ export default function CoachingPage() {
             <p className="text-sm">{ar ? 'لا توجد جلسات كوتشينج' : 'No coaching sessions yet'}</p>
           </div>
         ) : (
-          <div className="rounded-2xl overflow-x-auto" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="rounded-2xl overflow-x-auto" style={{ background: T.cardBg, border: `1px solid ${T.bdrSoft}` }}>
             <table className="w-full border-collapse">
               <thead>
-                <tr style={{ background: 'rgba(0,0,0,0.25)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <tr style={{ background: T.headBg, borderBottom: `1px solid ${T.bdrSoft}` }}>
                   {[ar ? 'الموظف' : 'Employee', ar ? 'الموعد' : 'When', ar ? 'المدة' : 'Duration', ar ? 'التركيز' : 'Focus', ar ? 'المدرّب' : 'Coach', ar ? 'الحالة' : 'Status'].map((h, i) => (
                     <th key={i} className="text-[10px] font-semibold uppercase tracking-wider text-start px-4 py-2.5" style={{ color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
@@ -145,14 +159,14 @@ export default function CoachingPage() {
               </thead>
               <tbody>
                 {sessions.map(s => (
-                  <tr key={s.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                  <tr key={s.id} style={{ borderBottom: `1px solid ${T.bdrRow}` }}>
                     <td className="px-4 py-2.5">
-                      <div className="text-xs font-medium" style={{ color: '#e2e8f0' }}>{s.employeeName}</div>
+                      <div className="text-xs font-medium" style={{ color: T.text }}>{s.employeeName}</div>
                       <div className="text-[10px]" style={{ color: '#475569' }}>#{s.employeeNo}</div>
                     </td>
                     <td className="px-4 py-2.5 text-xs tabular-nums" style={{ color: '#94a3b8' }}>{s.scheduledAt ? new Date(s.scheduledAt).toLocaleString(ar ? 'ar-KW' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
                     <td className="px-4 py-2.5 text-xs" style={{ color: '#64748b' }}>{s.durationMinutes}m</td>
-                    <td className="px-4 py-2.5 text-[11px]" style={{ color: '#cbd5e1' }}>{(s.focusAreas ?? []).map((fa: string) => (ar ? TRIGGER_META[fa]?.ar : TRIGGER_META[fa]?.en) ?? fa).join(', ')}</td>
+                    <td className="px-4 py-2.5 text-[11px]" style={{ color: T.text2 }}>{(s.focusAreas ?? []).map((fa: string) => (ar ? TRIGGER_META[fa]?.ar : TRIGGER_META[fa]?.en) ?? fa).join(', ')}</td>
                     <td className="px-4 py-2.5 text-[11px]" style={{ color: '#64748b' }}>{s.coach ?? '—'}</td>
                     <td className="px-4 py-2.5"><span className="px-2 py-0.5 rounded-md text-[10px] font-bold" style={{ background: 'rgba(168,85,247,0.15)', color: '#a855f7' }}>{s.status}</span></td>
                   </tr>
@@ -173,13 +187,13 @@ export default function CoachingPage() {
           </div>
           {/* Filters: search + trigger type */}
           <div className="flex gap-2 mb-4 flex-wrap items-center">
-            <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5" style={{ background: T.fieldBg, border: `1px solid ${T.bdrSoft}` }}>
               <Search size={13} style={{ color: '#475569' }} />
               <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'بحث: اسم / رقم / قسم' : 'Search: name / no / function'}
-                className="text-xs outline-none bg-transparent" style={{ color: '#e2e8f0', minWidth: 150 }} />
+                className="text-xs outline-none bg-transparent" style={{ color: T.text, minWidth: 150 }} />
             </div>
             <button onClick={() => setTrig('all')} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
-              style={{ background: trig === 'all' ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)', color: trig === 'all' ? '#c4b5fd' : '#64748b', border: `1px solid ${trig === 'all' ? 'rgba(168,85,247,0.3)' : 'transparent'}` }}>
+              style={{ background: trig === 'all' ? 'rgba(168,85,247,0.18)' : T.panelBg, color: trig === 'all' ? '#c4b5fd' : '#64748b', border: `1px solid ${trig === 'all' ? 'rgba(168,85,247,0.3)' : 'transparent'}` }}>
               {ar ? 'كل الأنواع' : 'All types'} {flags.length}
             </button>
             {trigTypes.map(t => {
@@ -187,7 +201,7 @@ export default function CoachingPage() {
               const n = flags.filter(f => f.triggerType === t).length;
               return (
                 <button key={t} onClick={() => setTrig(t)} className="text-[11px] font-semibold px-2.5 py-1 rounded-lg"
-                  style={{ background: trig === t ? 'rgba(168,85,247,0.18)' : 'rgba(255,255,255,0.03)', color: trig === t ? '#c4b5fd' : '#64748b', border: `1px solid ${trig === t ? 'rgba(168,85,247,0.3)' : 'transparent'}` }}>
+                  style={{ background: trig === t ? 'rgba(168,85,247,0.18)' : T.panelBg, color: trig === t ? '#c4b5fd' : '#64748b', border: `1px solid ${trig === t ? 'rgba(168,85,247,0.3)' : 'transparent'}` }}>
                   {ar ? tm.ar : tm.en} {n}
                 </button>
               );
@@ -205,7 +219,7 @@ export default function CoachingPage() {
                 const sv = SEV[f.severity] ?? SEV.low;
                 const Icon = tm.icon;
                 return (
-                  <div key={f.id} style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${sv.color}33`, borderRadius: 16, padding: 16, borderInlineStart: `3px solid ${sv.color}` }}>
+                  <div key={f.id} style={{ background: T.cardBg, border: `1px solid ${sv.color}33`, borderRadius: 16, padding: 16, borderInlineStart: `3px solid ${sv.color}` }}>
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="min-w-0">
                         <div className="text-sm font-bold truncate" style={{ color: tp(dark) }}>{f.employeeName}</div>
@@ -217,19 +231,19 @@ export default function CoachingPage() {
                     </div>
                     <div className="flex items-center gap-1.5 mb-1">
                       <Icon size={13} style={{ color: sv.color }} />
-                      <span className="text-xs font-semibold" style={{ color: '#cbd5e1' }}>{ar ? tm.ar : tm.en}</span>
+                      <span className="text-xs font-semibold" style={{ color: T.text2 }}>{ar ? tm.ar : tm.en}</span>
                     </div>
                     <div className="text-[11px] mb-3" style={{ color: '#94a3b8' }}>
                       <span className="font-bold" style={{ color: sv.color }}>{f.occurrences}</span> {ar ? `مرة خلال ${f.periodDays} يوم` : `times in ${f.periodDays} days`}
                     </div>
                     {f.status === 'open' ? (
-                      <div className="flex items-center gap-2 pt-2 flex-wrap" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div className="flex items-center gap-2 pt-2 flex-wrap" style={{ borderTop: `1px solid ${T.bdrSoft}` }}>
                         <button onClick={() => schedule(f.id)} className="flex items-center gap-1 text-[11px] hover:opacity-80" style={{ color: '#a855f7' }}><CalendarPlus size={12} /> {ar ? 'جدولة 1:1' : 'Schedule 1:1'}</button>
                         <button onClick={() => address(f.id)} className="flex items-center gap-1 text-[11px] hover:opacity-80" style={{ color: '#22c55e' }}><Check size={12} /> {ar ? 'تمّت' : 'Done'}</button>
                         <button onClick={() => dismiss(f.id)} className="flex items-center gap-1 text-[11px] hover:opacity-80 ms-auto" style={{ color: '#64748b' }}><X size={12} /> {ar ? 'تجاهل' : 'Dismiss'}</button>
                       </div>
                     ) : (
-                      <div className="text-[10px] pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)', color: '#475569' }}>
+                      <div className="text-[10px] pt-2" style={{ borderTop: `1px solid ${T.bdrSoft}`, color: '#475569' }}>
                         {f.status === 'addressed' ? (ar ? '✓ تمّت المعالجة' : '✓ Addressed') : (ar ? 'تم التجاهل' : 'Dismissed')}
                       </div>
                     )}

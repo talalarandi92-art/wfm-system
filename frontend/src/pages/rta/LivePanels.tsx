@@ -125,11 +125,17 @@ export function useCountUpOnce(target: number) {
   return done ? target : v;
 }
 
-/* Self-contained SVG donut for the agent-state mix (explicit colors → safe on
-   the dark Wallboard regardless of theme). Center shows total agents.
-   KEEP-DARK (theme-token sweep): embedded in the full-screen TV Wallboard whose
-   surface is hardcoded dark, so its neutrals stay explicit — do not tokenize. */
-export function AgentDonut({ avail, busy, brk, off, ar, size = 150, thickness = 16 }: { avail: number; busy: number; brk: number; off: number; ar: boolean; size?: number; thickness?: number }) {
+/* Self-contained SVG donut for the agent-state mix. Center shows total agents.
+   Dual-used → threads keepDark:
+   - keepDark (Wallboard TV, hardcoded #060912 surface): explicit dark neutrals.
+   - in-page (ExecutiveOverview card): theme-aware via tok(). Segment colors stay fixed. */
+export function AgentDonut({ avail, busy, brk, off, ar, size = 150, thickness = 16, keepDark }: { avail: number; busy: number; brk: number; off: number; ar: boolean; size?: number; thickness?: number; keepDark?: boolean }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
+  const kd = keepDark ?? false;
+  const D = kd
+    ? { track: 'rgba(255,255,255,0.06)', total: '#e8edf7', label: '#64748b', legL: '#94a3b8', legV: '#e2e8f0', legP: '#475569' }
+    : { track: dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)', total: tp(dark), label: tsColor(dark), legL: tsColor(dark), legV: tp(dark), legP: T.faint };
   const segs = [
     { v: avail, c: '#22c55e', l: ar ? 'متاح' : 'Available' },
     { v: busy, c: '#f59e0b', l: ar ? 'مشغول' : 'Busy' },
@@ -142,7 +148,7 @@ export function AgentDonut({ avail, busy, brk, off, ar, size = 150, thickness = 
     <div className="flex items-center gap-4">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
         <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={thickness} />
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={D.track} strokeWidth={thickness} />
           {segs.filter(s => s.v > 0).map((s, i) => {
             const len = (s.v / total) * C; const o = acc; acc += len;
             return <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.c} strokeWidth={thickness}
@@ -150,16 +156,16 @@ export function AgentDonut({ avail, busy, brk, off, ar, size = 150, thickness = 
               style={{ transition: 'stroke-dasharray .6s ease, stroke-dashoffset .6s ease' }} />;
           })}
         </g>
-        <text x="50%" y="45%" textAnchor="middle" dominantBaseline="middle" fill="#e8edf7" fontSize={size * 0.26} fontWeight="800">{total}</text>
-        <text x="50%" y="63%" textAnchor="middle" dominantBaseline="middle" fill="#64748b" fontSize={size * 0.085}>{ar ? 'موظف' : 'agents'}</text>
+        <text x="50%" y="45%" textAnchor="middle" dominantBaseline="middle" fill={D.total} fontSize={size * 0.26} fontWeight="800">{total}</text>
+        <text x="50%" y="63%" textAnchor="middle" dominantBaseline="middle" fill={D.label} fontSize={size * 0.085}>{ar ? 'موظف' : 'agents'}</text>
       </svg>
       <div className="space-y-1.5">
         {segs.map(s => (
           <div key={s.l} className="flex items-center gap-2" style={{ fontSize: 12 }}>
             <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.c }} />
-            <span style={{ color: '#94a3b8', minWidth: 64 }}>{s.l}</span>
-            <b className="tabular-nums" style={{ color: '#e2e8f0' }}>{s.v}</b>
-            <span className="tabular-nums" style={{ color: '#475569' }}>{Math.round((s.v / total) * 100)}%</span>
+            <span style={{ color: D.legL, minWidth: 64 }}>{s.l}</span>
+            <b className="tabular-nums" style={{ color: D.legV }}>{s.v}</b>
+            <span className="tabular-nums" style={{ color: D.legP }}>{Math.round((s.v / total) * 100)}%</span>
           </div>
         ))}
       </div>
@@ -168,9 +174,10 @@ export function AgentDonut({ avail, busy, brk, off, ar, size = 150, thickness = 
 }
 
 /* ── Agent Board — rich live roster: status + duration + today's stats ──────── */
-/* KEEP-DARK (theme-token sweep): AgentBoard is rendered INSIDE the full-screen
-   TV Wallboard (big) whose surface is hardcoded #060912 regardless of theme —
-   theming its neutrals would break the wallboard, so they stay explicit. */
+/* DUAL-USE (theme-token sweep): threads keepDark.
+   - Wallboard (big + keepDark): rendered on the hardcoded #060912 TV surface → neutrals stay explicit.
+   - Live→Agents tab (in-page): keepDark omitted → neutrals follow the theme via rta/shared tok().
+   Semantic status colors (m.c / f.c / pctColor) are fixed in both modes. */
 interface BoardRow {
   agentId: string; name: string; email: string | null; employeeNo: string | null; functionName: string | null;
   status: string; statusRaw: string | null; statusSec: number | null;
@@ -185,7 +192,15 @@ const BOARD_FILTERS: { key: string; ar: string; en: string; c: string; match: (s
   { key: 'break', ar: 'بريك', en: 'Break', c: '#fb923c', match: s => s === 'break' || s === 'away' },
   { key: 'offline', ar: 'غير متصل', en: 'Offline', c: '#64748b', match: s => s === 'offline' || s === 'unknown' },
 ];
-export function AgentBoard({ ar, big, onSelectAgent }: { ar: boolean; big?: boolean; onSelectAgent?: (id: string) => void }) {
+export function AgentBoard({ ar, big, keepDark, onSelectAgent }: { ar: boolean; big?: boolean; keepDark?: boolean; onSelectAgent?: (id: string) => void }) {
+  const { dark } = useUiStore();
+  const T = tok(dark);
+  const kd = keepDark ?? false;
+  /* keep-dark (Wallboard TV, hardcoded #060912): explicit dark neutrals.
+     in-page (Live→Agents tab): theme-aware via rta/shared tok(). Semantic status colors untouched. */
+  const C = kd
+    ? { bdr: 'rgba(255,255,255,0.07)', bdr2: 'rgba(255,255,255,0.06)', bdrRow: 'rgba(255,255,255,0.03)', panel: 'rgba(255,255,255,0.03)', wrapBg: 'rgba(255,255,255,0.02)', inputBg: 'rgba(255,255,255,0.05)', inputBdr: 'rgba(255,255,255,0.08)', text: '#e2e8f0', name: '#e8edf7', func: '#64748b', faint: '#475569', fainter: '#334155', statBg: 'rgba(0,0,0,0.18)', confTrack: 'rgba(255,255,255,0.08)', toggleActFg: '#a5b4fc' }
+    : { bdr: T.bdr, bdr2: T.bdr, bdrRow: T.bdr, panel: T.panel, wrapBg: T.panel, inputBg: T.panel, inputBdr: T.bdr, text: tp(dark), name: tp(dark), func: tsColor(dark), faint: T.faint, fainter: T.faint, statBg: dark ? 'rgba(0,0,0,0.18)' : 'rgba(15,23,42,0.04)', confTrack: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)', toggleActFg: dark ? '#a5b4fc' : '#6366f1' };
   const [rows, setRows] = useState<BoardRow[]>([]);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
@@ -204,35 +219,35 @@ export function AgentBoard({ ar, big, onSelectAgent }: { ar: boolean; big?: bool
   const cols = '1.7fr 1.2fr 0.7fr 0.8fr 0.7fr 0.7fr 0.9fr';
   const fz = big ? 13 : 11;
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.07)', background: big ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
-      <div className="flex items-center gap-2 p-2 flex-wrap" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+    <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.bdr}`, background: big ? C.wrapBg : 'transparent' }}>
+      <div className="flex items-center gap-2 p-2 flex-wrap" style={{ borderBottom: `1px solid ${C.bdr2}` }}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'بحث عن إيجنت...' : 'Search agent...'}
-          className="rounded-lg text-xs py-1.5 px-3 outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0', minWidth: 150 }} />
+          className="rounded-lg text-xs py-1.5 px-3 outline-none" style={{ background: C.inputBg, border: `1px solid ${C.inputBdr}`, color: C.text, minWidth: 150 }} />
         {BOARD_FILTERS.map(f => (
           <button key={f.key} onClick={() => setFilter(f.key)} className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-xl"
-            style={{ background: filter === f.key ? `${f.c}22` : 'rgba(255,255,255,0.03)', border: `1px solid ${filter === f.key ? f.c + '55' : 'rgba(255,255,255,0.06)'}`, color: f.c }}>
+            style={{ background: filter === f.key ? `${f.c}22` : C.panel, border: `1px solid ${filter === f.key ? f.c + '55' : C.bdr2}`, color: f.c }}>
             <span className="w-2 h-2 rounded-full" style={{ background: f.c }} />{ar ? f.ar : f.en} <b className="tabular-nums">{counts[f.key]}</b>
           </button>
         ))}
         {/* View toggle: table ⇄ cards */}
-        <div className="flex items-center gap-0.5 rounded-lg p-0.5 ms-auto" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <div className="flex items-center gap-0.5 rounded-lg p-0.5 ms-auto" style={{ background: C.panel, border: `1px solid ${C.bdr}` }}>
           {([['table', '☰'], ['cards', '▦']] as const).map(([v, ic]) => (
             <button key={v} onClick={() => setView(v)} title={v}
               style={{ padding: '3px 9px', borderRadius: 7, fontSize: 13, cursor: 'pointer', border: 'none',
-                background: view === v ? 'rgba(99,102,241,0.25)' : 'transparent', color: view === v ? '#a5b4fc' : '#64748b' }}>{ic}</button>
+                background: view === v ? 'rgba(99,102,241,0.25)' : 'transparent', color: view === v ? C.toggleActFg : C.faint }}>{ic}</button>
           ))}
         </div>
-        <span className="text-[10px]" style={{ color: '#475569' }}>{list.length} {ar ? 'موظف' : 'agents'}</span>
+        <span className="text-[10px]" style={{ color: C.faint }}>{list.length} {ar ? 'موظف' : 'agents'}</span>
       </div>
       {view === 'table' && (
       <div className="grid items-center gap-2 px-3 py-2 text-[9px] font-bold uppercase tracking-wide"
-        style={{ gridTemplateColumns: cols, background: 'rgba(255,255,255,0.03)', color: '#475569', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        style={{ gridTemplateColumns: cols, background: C.panel, color: C.faint, borderBottom: `1px solid ${C.bdr2}` }}>
         <span>{ar ? 'الإيجنت' : 'Agent'}</span><span>{ar ? 'الحالة' : 'Status'}</span><span>{ar ? 'كونتاكت' : 'Contacts'}</span><span>AHT</span><span>{ar ? 'هولد' : 'Hold'}</span><span>{ar ? 'خامل' : 'Idle'}</span><span>{ar ? 'كونفورمانس' : 'Conf'}</span>
       </div>
       )}
       <div className="overflow-y-auto" style={{ maxHeight: big ? 'calc(100vh - 380px)' : 'calc(100vh - 430px)', scrollbarWidth: 'thin' }}>
-        {loading && rows.length === 0 ? <p className="text-xs text-center py-6" style={{ color: '#334155' }}>{ar ? 'جاري التحميل...' : 'Loading...'}</p>
-          : list.length === 0 ? <p className="text-xs text-center py-6" style={{ color: '#334155' }}>{ar ? 'لا إيجنتات' : 'No agents'}</p>
+        {loading && rows.length === 0 ? <p className="text-xs text-center py-6" style={{ color: C.fainter }}>{ar ? 'جاري التحميل...' : 'Loading...'}</p>
+          : list.length === 0 ? <p className="text-xs text-center py-6" style={{ color: C.fainter }}>{ar ? 'لا إيجنتات' : 'No agents'}</p>
             : view === 'cards' ? (
               <div className="grid gap-2.5 p-2.5" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${big ? 240 : 208}px, 1fr))` }}>
                 {list.map(r => {
@@ -250,8 +265,8 @@ export function AgentBoard({ ar, big, onSelectAgent }: { ar: boolean; big?: bool
                         <div className="flex items-center justify-center rounded-full flex-shrink-0 font-bold"
                           style={{ width: 42, height: 42, fontSize: 15, color: '#fff', background: `linear-gradient(135deg, ${m.c}, ${m.c}aa)`, boxShadow: `0 0 0 2px ${m.c}40, 0 0 14px ${m.c}55` }}>{initials}</div>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate font-bold" style={{ color: '#e8edf7', fontSize: 13 }}>{r.name}</div>
-                          {r.functionName && r.functionName !== '—' && <div className="truncate text-[10px]" style={{ color: '#64748b' }}>{r.functionName}</div>}
+                          <div className="truncate font-bold" style={{ color: C.name, fontSize: 13 }}>{r.name}</div>
+                          {r.functionName && r.functionName !== '—' && <div className="truncate text-[10px]" style={{ color: C.func }}>{r.functionName}</div>}
                         </div>
                       </div>
                       <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 mb-2.5 text-[11px]" style={{ background: `${m.c}1f`, border: `1px solid ${m.c}3a`, color: m.c, fontWeight: 600 }}>
@@ -259,16 +274,16 @@ export function AgentBoard({ ar, big, onSelectAgent }: { ar: boolean; big?: bool
                       </span>
                       <div className="grid grid-cols-3 gap-1.5 text-center">
                         {[
-                          { l: ar ? 'كونتاكت' : 'Contacts', v: r.contacts ?? '—', c: r.contacts ? '#34d399' : '#475569' },
-                          { l: 'AHT', v: fmtSecHM(r.ahtSec), c: r.ahtSec ? '#a5b4fc' : '#475569' },
-                          { l: ar ? 'كونف' : 'Conf', v: conf != null ? `${Math.round(conf)}%` : '—', c: conf != null ? pctColor(conf) : '#475569' },
-                        ].map(k => (<div key={k.l} className="rounded-lg py-1.5" style={{ background: 'rgba(0,0,0,0.18)' }}><div className="font-bold tabular-nums" style={{ color: k.c, fontSize: 14 }}>{k.v}</div><div className="text-[9px] mt-0.5" style={{ color: '#475569' }}>{k.l}</div></div>))}
+                          { l: ar ? 'كونتاكت' : 'Contacts', v: r.contacts ?? '—', c: r.contacts ? '#34d399' : C.faint },
+                          { l: 'AHT', v: fmtSecHM(r.ahtSec), c: r.ahtSec ? '#a5b4fc' : C.faint },
+                          { l: ar ? 'كونف' : 'Conf', v: conf != null ? `${Math.round(conf)}%` : '—', c: conf != null ? pctColor(conf) : C.faint },
+                        ].map(k => (<div key={k.l} className="rounded-lg py-1.5" style={{ background: C.statBg }}><div className="font-bold tabular-nums" style={{ color: k.c, fontSize: 14 }}>{k.v}</div><div className="text-[9px] mt-0.5" style={{ color: C.faint }}>{k.l}</div></div>))}
                       </div>
                       <div className="grid grid-cols-2 gap-1.5 text-center mt-1.5">
                         {[
-                          { l: ar ? 'هولد' : 'Hold', v: mm(r.holdMin), c: r.holdMin ? '#22d3ee' : '#475569' },
-                          { l: ar ? 'خامل' : 'Idle', v: mm(r.idleMin), c: r.idleMin ? '#fbbf24' : '#475569' },
-                        ].map(k => (<div key={k.l} className="rounded-lg py-1.5" style={{ background: 'rgba(0,0,0,0.18)' }}><div className="font-bold tabular-nums" style={{ color: k.c, fontSize: 13 }}>{k.v}</div><div className="text-[9px] mt-0.5" style={{ color: '#475569' }}>{k.l}</div></div>))}
+                          { l: ar ? 'هولد' : 'Hold', v: mm(r.holdMin), c: r.holdMin ? '#22d3ee' : C.faint },
+                          { l: ar ? 'خامل' : 'Idle', v: mm(r.idleMin), c: r.idleMin ? '#fbbf24' : C.faint },
+                        ].map(k => (<div key={k.l} className="rounded-lg py-1.5" style={{ background: C.statBg }}><div className="font-bold tabular-nums" style={{ color: k.c, fontSize: 13 }}>{k.v}</div><div className="text-[9px] mt-0.5" style={{ color: C.faint }}>{k.l}</div></div>))}
                       </div>
                     </div>
                   );
@@ -285,7 +300,7 @@ export function AgentBoard({ ar, big, onSelectAgent }: { ar: boolean; big?: bool
                 <div key={r.agentId} onClick={() => onSelectAgent?.(r.agentId)}
                   className="grid items-center gap-2 transition-all"
                   style={{ gridTemplateColumns: cols, fontSize: fz, padding: big ? '10px 14px' : '7px 12px',
-                    borderBottom: '1px solid rgba(255,255,255,0.03)', borderInlineStart: `2px solid ${off ? 'transparent' : m.c}`,
+                    borderBottom: `1px solid ${C.bdrRow}`, borderInlineStart: `2px solid ${off ? 'transparent' : m.c}`,
                     cursor: onSelectAgent ? 'pointer' : 'default', opacity: off ? 0.55 : 1, background: off ? 'transparent' : `${m.c}0a` }}
                   onMouseEnter={e => { e.currentTarget.style.background = `${m.c}24`; }}
                   onMouseLeave={e => { e.currentTarget.style.background = off ? 'transparent' : `${m.c}0a`; }}>
@@ -294,8 +309,8 @@ export function AgentBoard({ ar, big, onSelectAgent }: { ar: boolean; big?: bool
                     <div className="flex items-center justify-center rounded-full flex-shrink-0 font-bold"
                       style={{ width: av, height: av, fontSize: big ? 14 : 11, color: '#fff', background: `linear-gradient(135deg, ${m.c}, ${m.c}aa)`, boxShadow: `0 0 0 2px ${m.c}33` }}>{initials}</div>
                     <div className="min-w-0">
-                      <div className="truncate font-semibold" style={{ color: '#e8edf7' }}>{r.name}</div>
-                      {r.functionName && r.functionName !== '—' && <div className="truncate" style={{ color: '#64748b', fontSize: big ? 11 : 9 }}>{r.functionName}</div>}
+                      <div className="truncate font-semibold" style={{ color: C.name }}>{r.name}</div>
+                      {r.functionName && r.functionName !== '—' && <div className="truncate" style={{ color: C.func, fontSize: big ? 11 : 9 }}>{r.functionName}</div>}
                     </div>
                   </div>
                   {/* Status pill */}
@@ -305,18 +320,18 @@ export function AgentBoard({ ar, big, onSelectAgent }: { ar: boolean; big?: bool
                       {ar ? m.ar : m.en}{r.statusSec != null && r.statusSec > 0 ? <span className="tabular-nums" style={{ opacity: 0.7 }}> · {fmtSince(r.statusSec, ar)}</span> : null}
                     </span>
                   </div>
-                  <span className="tabular-nums font-semibold" style={{ color: r.contacts ? '#34d399' : '#475569' }}>{r.contacts ?? '—'}</span>
-                  <span className="tabular-nums" style={{ color: r.ahtSec ? '#a5b4fc' : '#475569' }}>{fmtSecHM(r.ahtSec)}</span>
-                  <span className="tabular-nums" style={{ color: r.holdMin ? '#22d3ee' : '#475569' }}>{mm(r.holdMin)}</span>
-                  <span className="tabular-nums" style={{ color: r.idleMin ? '#fbbf24' : '#475569' }}>{mm(r.idleMin)}</span>
+                  <span className="tabular-nums font-semibold" style={{ color: r.contacts ? '#34d399' : C.faint }}>{r.contacts ?? '—'}</span>
+                  <span className="tabular-nums" style={{ color: r.ahtSec ? '#a5b4fc' : C.faint }}>{fmtSecHM(r.ahtSec)}</span>
+                  <span className="tabular-nums" style={{ color: r.holdMin ? '#22d3ee' : C.faint }}>{mm(r.holdMin)}</span>
+                  <span className="tabular-nums" style={{ color: r.idleMin ? '#fbbf24' : C.faint }}>{mm(r.idleMin)}</span>
                   {/* Conformance mini-bar + % */}
                   <span className="flex items-center gap-1.5">
                     {conf != null ? (<>
-                      <span className="rounded-full overflow-hidden" style={{ flex: 1, height: 5, background: 'rgba(255,255,255,0.08)', maxWidth: 46 }}>
+                      <span className="rounded-full overflow-hidden" style={{ flex: 1, height: 5, background: C.confTrack, maxWidth: 46 }}>
                         <span className="block h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, conf))}%`, background: pctColor(conf) }} />
                       </span>
                       <span className="tabular-nums font-semibold" style={{ color: pctColor(conf), minWidth: 30, textAlign: 'end' }}>{Math.round(conf)}%</span>
-                    </>) : <span style={{ color: '#475569' }}>—</span>}
+                    </>) : <span style={{ color: C.faint }}>—</span>}
                   </span>
                 </div>
               );

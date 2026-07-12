@@ -201,10 +201,10 @@ export function Wallboard({ live, breakData, fc, coverage, ar, onClose }: { live
           ))}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0' }}>
-          <AgentDonut avail={avail} busy={busy} brk={brk} off={off} ar={ar} size={168} thickness={18} />
+          <AgentDonut avail={avail} busy={busy} brk={brk} off={off} ar={ar} size={168} thickness={18} keepDark />
         </div>
         {/* Rich per-agent roster: contacts / AHT / hold / idle / conformance */}
-        <div style={{ flex: 1, minHeight: 0 }}><AgentBoard ar={ar} big /></div>
+        <div style={{ flex: 1, minHeight: 0 }}><AgentBoard ar={ar} big keepDark /></div>
       </div>
       )}
 

@@ -57,6 +57,11 @@ export default function CommandCenter() {
   const leave = d.ros?.summary?.leave ?? null;
   const absent = d.ros?.summary?.absent ?? null;
   const attrRate = d.attr?.summary?.attritionRateAnnualized ?? null;
+  // mini-trend series pulled from the SAME payload already fetched (no extra calls):
+  //   presentTrend — 14-day present count from /dashboard/summary → trend[].present
+  //   attrTrend    — monthly separations from /attrition → byMonth[].total (chronological)
+  const presentTrend = (d.sum?.trend ?? []).map((x: any) => Number(x.present)).filter((n: number) => !Number.isNaN(n));
+  const attrTrend = [...(d.attr?.byMonth ?? [])].sort((a: any, b: any) => String(a.key).localeCompare(String(b.key))).map((m: any) => Number(m.total));
   const riskRows = [...(d.cov?.rows ?? [])].filter((r: any) => r.coverage != null).sort((a: any, b: any) => a.coverage - b.coverage);
   const maxPlanned = Math.max(1, ...riskRows.map((r: any) => r.planned || 0));
   const posture = d.chief ? (sev[d.chief.posture] || sev.info) : null;
@@ -123,6 +128,7 @@ export default function CommandCenter() {
             definitionAr: "عدد الموظفين بحالة 'active' في جدول الموظفين (لحظي — يشمل المتدربين)",
             period: ar ? 'الآن' : 'now' } satisfies KpiSource} />
         <Kpi label={ar ? 'حاضرون اليوم' : 'Present today'} value={present ?? '—'} accent="#22c55e" icon={<CheckCircle2 size={15} />} drill="/attendance?tab=dashboard" sub={ar ? 'لايف · اليوم' : 'live · today'}
+          spark={presentTrend.length > 1 ? presentTrend : undefined}
           source={{ endpoint: 'GET /api/v1/dashboard/summary', table: 'attendance_records',
             definition: "COUNT of records with attendance_marker = 'present' on the reference date (today if attendance exists, else the latest date ≤ today) — live attendance spine, not the corrected roster",
             definitionAr: "عدد سجلات الحضور بعلامة 'present' في تاريخ المرجع (اليوم إن وُجد حضور، وإلا آخر تاريخ ≤ اليوم) — من سجل الحضور اللحظي وليس الروستر المُصحّح",
@@ -138,6 +144,7 @@ export default function CommandCenter() {
             definitionAr: "عدد الطلبات بحالة 'pending' (حالة peer_pending تُعاد منفصلة وغير مشمولة هنا)",
             period: ar ? 'الآن' : 'now' } satisfies KpiSource} />
         <Kpi label={ar ? 'التسرّب السنوي' : 'Annual attrition'} value={attrRate != null ? `${attrRate}%` : '—'} accent={attrRate != null && attrRate >= 35 ? '#ef4444' : attrRate != null && attrRate >= 20 ? '#f59e0b' : '#22c55e'} icon={<UserMinus size={15} />} drill="/analytics?tab=attrition" sub={ar ? 'من علامات RES/TER' : 'from RES/TER markers'}
+          spark={attrTrend.length > 1 ? attrTrend : undefined}
           source={{ endpoint: 'GET /api/v1/attrition', table: 'roster_days',
             definition: 'Distinct canonical persons with a RES/TER marker ÷ average monthly headcount × (12 / months in window), annualized — internal TRANSFERs excluded',
             definitionAr: 'عدد الأشخاص (بعد توحيد الهوية) بعلامة RES/TER ÷ متوسط الهيدكاونت الشهري × (12 ÷ عدد الأشهر) — التنقلات الداخلية TRANSFER مستثناة',
