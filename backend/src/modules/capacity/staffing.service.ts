@@ -39,6 +39,19 @@ import { computeShiftMix } from '../schedule-generator/demand.engine';
 //    identical (same recursion, same guards), so results are bit-identical.
 import { serviceLevel, findMinAgents, effectiveServersPerAgent } from '@common/erlang';
 
+/**
+ * Defensive ceiling on the LEARNED floor (2026-07-12). Belt-and-suspenders atop the
+ * real fix (floor = P90 of concurrent `erlangs` only, ≥5 samples): no single measured
+ * cell may ever demand more concurrent servers than this — a hard stop against ANY future
+ * data glitch (real center loads are ~1–50 Erlangs per function-hour). Env-overridable for
+ * growth. Pure + unit-tested so the guard can't silently regress.
+ */
+export const LEARNED_ERL_CEIL = Math.max(50, +(process.env.STAFFING_LEARNED_ERL_CEIL ?? 1000));
+export function cappedLearnedFloor(learnedErl: number, ordersScale: number, ceil = LEARNED_ERL_CEIL): number {
+  const v = Math.max(0, Number.isFinite(learnedErl) ? learnedErl : 0) * Math.max(0, ordersScale);
+  return Math.min(v, ceil);
+}
+
 export interface StaffingParams {
   functionKey: string;
   channelMix: Record<string, number>;
@@ -291,8 +304,9 @@ export class StaffingService implements OnModuleInit {
             }
           }
           const estimated = (volume * ahtEff) / 3600;
-          const learnedApplied = learnedErl * ordersScale > estimated + 0.05;
-          const erlangs = Math.max(estimated, learnedErl * ordersScale);
+          const learnedFloor = cappedLearnedFloor(learnedErl, ordersScale);
+          const learnedApplied = learnedFloor > estimated + 0.05;
+          const erlangs = Math.max(estimated, learnedFloor);
           let agents = 0, serverCapacity = 0;   // capacity = agents × effective servers/agent
           if (erlangs > 0) {
             if (p.model === 'throughput') {
@@ -803,7 +817,9 @@ export class StaffingService implements OnModuleInit {
          ON CONFLICT (tenant_id, obs_hour, channel, source) DO UPDATE
            SET erlangs = EXCLUDED.erlangs, waiting_avg = EXCLUDED.waiting_avg,
                samples = EXCLUDED.samples, computed_at = NOW()`,
-        [tenantId, hour, channel, avg(a.erl).toFixed(3), avg(a.wait).toFixed(3), a.erl.length],
+        // anti-garbage: winsorize the stored averages at the same ceiling so a grossly
+        // corrupt snapshot can never poison the store (the floor already ignores waiting).
+        [tenantId, hour, channel, Math.min(avg(a.erl), LEARNED_ERL_CEIL).toFixed(3), Math.min(avg(a.wait), LEARNED_ERL_CEIL).toFixed(3), a.erl.length],
       );
       upserts++;
     }
