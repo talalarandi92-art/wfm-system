@@ -1,234 +1,309 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+/**
+ * Dashboard Composer (Builder v2 · BLD-3)
+ *
+ * A Sprinklr-style composable dashboard: tabbed SECTIONS, each a responsive
+ * grid of WIDGETS. Every widget runs its own /report-builder-v2/run (isolated
+ * loading/empty/error). A dashboard-level DateRangePicker pill cascades to all
+ * widgets (a widget may pin its own dates to opt out); a dashboard-level
+ * function chip cascades to every widget whose source carries a `function` dim.
+ * Compose in Edit mode, hand a clean read-only board to a TL in View mode.
+ * Save / load / share via /saved-dashboards CRUD.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, LayoutDashboard, Save, RotateCcw, Download, Plus, X, CalendarDays, Search,
-  Users, ShieldCheck, Clock, LogOut, TimerReset, Timer, Coffee, UserX, ListChecks, Building2, BarChart3,
+  LayoutGrid, Plus, Save, Bookmark, X, Pencil, Trash2, Eye, Edit3, Sparkles, Filter, FolderOpen, Copy, PanelsTopLeft,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { useInjectDsStyles, card, tp, ts, NxBtn, NxEmpty } from '@/components/ds';
+import { DateRangePicker, DateRangeValue, presetById } from '@/components/report-builder/DateRangePicker';
+import { WidgetCard } from '@/components/report-builder/dashboard/WidgetCard';
+import { WidgetEditor } from '@/components/report-builder/dashboard/WidgetEditor';
+import { loadSources } from '@/components/report-builder/dashboard/sourceCatalog';
+import {
+  SectionConfig, WidgetConfig, SavedDashboard, SavedReportLite, DashFilter,
+  newSection, newWidget, defaultRange, uid,
+} from '@/components/report-builder/dashboard/types';
 
-const dur = (m:number)=>{ if(!m) return '0'; const h=Math.floor(m/60),mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
-const adhC = (v:number)=> v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
-
-// KPI cards available from the /roster-dashboard summary
-const KPI_CARDS: { key:string; ar:string; en:string; ic:any; c:string; fmt?:(v:any)=>string; sub?:(s:any)=>string }[] = [
-  { key:'agents', ar:'موظفين', en:'Agents', ic:Users, c:'#6366f1' },
-  { key:'conformance', ar:'كونفورمانس', en:'Conformance', ic:ShieldCheck, c:'#06b6d4', fmt:(v)=>v!=null?v+'%':'—' },
-  { key:'late_days', ar:'أيام تأخير', en:'Late days', ic:Clock, c:'#f59e0b', sub:(s)=>dur(s.late_min) },
-  { key:'early_days', ar:'خروج مبكر', en:'Early out', ic:LogOut, c:'#f59e0b', sub:(s)=>dur(s.early_min) },
-  { key:'ot_before', ar:'OT قبل', en:'OT before', ic:TimerReset, c:'#10b981', fmt:dur },
-  { key:'ot_after', ar:'OT بعد', en:'OT after', ic:Timer, c:'#10b981', fmt:dur },
-  { key:'sick', ar:'سيك', en:'Sick', ic:Coffee, c:'#f59e0b' },
-  { key:'absent', ar:'غياب', en:'Absent', ic:UserX, c:'#f43f5e' },
-  { key:'permissions', ar:'استئذانات', en:'Permissions', ic:ListChecks, c:'#8b5cf6' },
-  { key:'office', ar:'مكتب', en:'Office', ic:Building2, c:'#22c55e' },
-  { key:'wfh', ar:'WFH', en:'WFH', ic:Building2, c:'#06b6d4' },
-  { key:'worked', ar:'أيام عمل', en:'Worked', ic:CalendarDays, c:'#6366f1' },
-];
-const DIMS: { key:string; ar:string; en:string }[] = [
-  { key:'role', ar:'الدور', en:'Role' }, { key:'function', ar:'الفنكشن', en:'Function' }, { key:'shift', ar:'الشفت', en:'Shift' },
-  { key:'teamLeader', ar:'التيم ليدر', en:'Team Leader' }, { key:'group', ar:'الجروب', en:'Group' }, { key:'day', ar:'اليوم', en:'Day' },
-  { key:'week', ar:'الأسبوع', en:'Week' }, { key:'month', ar:'الشهر', en:'Month' }, { key:'status', ar:'الحالة', en:'Status' }, { key:'lateCategory', ar:'فئة التأخير', en:'Late band' },
-  { key:'shiftStartHour', ar:'ساعة بداية الشفت', en:'Shift Start Hour' },
-];
-const METRICS: { key:string; ar:string; en:string; time?:boolean; pct?:boolean }[] = [
-  { key:'scheduledDays', ar:'أيام مجدولة', en:'Scheduled' }, { key:'workedDays', ar:'أيام عمل', en:'Worked' },
-  { key:'lateMin', ar:'دقائق تأخير', en:'Late min', time:true }, { key:'otMin', ar:'OT', en:'OT min', time:true },
-  { key:'otBefore', ar:'OT قبل', en:'OT before', time:true }, { key:'otAfter', ar:'OT بعد', en:'OT after', time:true },
-  { key:'conformance', ar:'كونفورمانس', en:'Conformance', pct:true }, { key:'absenceDays', ar:'غياب', en:'Absence' },
-  { key:'sickDays', ar:'سيك', en:'Sick' }, { key:'permissionCount', ar:'استئذانات', en:'Permissions' }, { key:'agents', ar:'موظفين', en:'Agents' },
-  { key:'coveragePct', ar:'التغطية %', en:'Coverage %', pct:true }, { key:'shrinkagePct', ar:'الشرينكج %', en:'Shrinkage %', pct:true },
-  { key:'shrinkageDays', ar:'أيام شرينكج', en:'Shrinkage' }, { key:'lateDays', ar:'أيام تأخير', en:'Late days' }, { key:'earlyDays', ar:'أيام خروج مبكر', en:'Early-out days' },
-  // official scorecard (joined per-person)
-  { key:'netPoints', ar:'Net Points', en:'Net Points' }, { key:'scQuality', ar:'جودة (نقاط)', en:'Quality (pts)' }, { key:'scAht', ar:'AHT (نقاط)', en:'AHT (pts)' },
-  { key:'scFcr', ar:'FCR (نقاط)', en:'FCR (pts)' }, { key:'scProductivity', ar:'إنتاجية (نقاط)', en:'Productivity (pts)' }, { key:'scCtr', ar:'CTR (نقاط)', en:'CTR (pts)' }, { key:'scQuiz', ar:'كويز (نقاط)', en:'Quiz (pts)' },
-  { key:'scPrr', ar:'PRR (نقاط)', en:'PRR (pts)' }, { key:'scRes', ar:'RES %', en:'RES %', pct:true }, { key:'scResponseTime', ar:'وقت الرد (نقاط)', en:'Resp Time (pts)' },
-  { key:'scMistakes', ar:'أخطاء (نقاط)', en:'Mistakes (pts)' }, { key:'scIncidents', ar:'حوادث (نقاط)', en:'Incidents (pts)' }, { key:'scAttendance', ar:'حضور (نقاط)', en:'Attendance (pts)' },
-];
-
-type ChartCfg = { dim:string; metric:string };
-const DEFAULT = {
-  cards: ['agents','conformance','late_days','ot_after','sick','absent'],
-  charts: [{ dim:'role', metric:'scheduledDays' }, { dim:'shift', metric:'otMin' }, { dim:'teamLeader', metric:'conformance' }] as ChartCfg[],
-};
+/* re-evaluate a stored date_range (rolling presets recompute on load) */
+function hydrateRange(dr: any): DateRangeValue {
+  if (!dr) return defaultRange();
+  const rollId = dr.rolling?.preset;
+  const rp = rollId ? presetById(rollId) : null;
+  if (rp) { const [f, t] = rp.range(); return { dateFrom: f, dateTo: t, timeFrom: dr.timeFrom ?? '00:00', timeTo: dr.timeTo ?? '23:59', rolling: { preset: rollId } }; }
+  if (dr.dateFrom && dr.dateTo) return { dateFrom: dr.dateFrom, dateTo: dr.dateTo, timeFrom: dr.timeFrom ?? '00:00', timeTo: dr.timeTo ?? '23:59', rolling: null };
+  return defaultRange();
+}
 
 export default function DashboardBuilderPage() {
-  const { lang } = useUiStore(); const ar = lang === 'ar';
-  const nav = useNavigate();
-  const [f, setF] = useState({ from:'2026-06-01', to:'2026-06-29', function:'', role:'', shift:'', teamLeader:'', group:'', presence:'', search:'' });
-  const [tog, setTog] = useState({ includeInactive:false, includeExcludedRoles:false });
-  const [cards, setCards] = useState<string[]>(DEFAULT.cards);
-  const [charts, setCharts] = useState<ChartCfg[]>(DEFAULT.charts);
-  const [summary, setSummary] = useState<any>(null); const [opt, setOpt] = useState<any>(null);
-  const [chartData, setChartData] = useState<Record<string, any[]>>({});
-  const [views, setViews] = useState<Record<string, any>>(() => { try { return JSON.parse(localStorage.getItem('wfm.dashViews')||'{}'); } catch { return {}; } });
-  const [picker, setPicker] = useState(false);
+  useInjectDsStyles();
+  const { lang, dark } = useUiStore(); const ar = lang === 'ar';
+  const L = (en: string, arv: string) => (ar ? arv : en);
 
-  const baseQ = useCallback(() => {
-    const q = new URLSearchParams();
-    q.set('from', f.from); q.set('to', f.to);
-    for (const k of ['function','role','shift','teamLeader','group','search'] as const) if ((f as any)[k]) q.set(k, (f as any)[k]);
-    if (f.presence) q.set('presence', f.presence);
-    if (tog.includeInactive) q.set('includeInactive','1');
-    return q;
-  }, [f, tog]);
+  const [mode, setMode] = useState<'edit' | 'view'>('edit');
+  const [sections, setSections] = useState<SectionConfig[]>([newSection(ar ? 'نظرة عامة' : 'Overview')]);
+  const [activeSec, setActiveSec] = useState<string>(() => sections[0].id);
+  const [dateVal, setDateVal] = useState<DateRangeValue>(defaultRange);
+  const [funcFilter, setFuncFilter] = useState('');
+  const [functions, setFunctions] = useState<string[]>([]);
 
-  // summary + filter options from the roster dashboard
-  const loadSummary = useCallback(() => {
-    const q = new URLSearchParams();
-    q.set('from', f.from); q.set('to', f.to);
-    if (f.function) q.set('functionName', f.function);
-    for (const k of ['role','shift','presence','search'] as const) if ((f as any)[k]) q.set(k, (f as any)[k]);
-    if (f.teamLeader) q.set('teamManager', f.teamLeader);
-    if (f.group) q.set('team', f.group);
-    if (tog.includeInactive) q.set('includeInactive','1');
-    if (tog.includeExcludedRoles) q.set('includeExcludedRoles','1');
-    apiClient.get(`/attendance-recon/roster-dashboard?${q}`).then((r:any)=>{ setSummary(r.data.summary); setOpt(r.data.filterOptions); }).catch(()=>setSummary(null));
-  }, [f, tog]);
+  const [dashId, setDashId] = useState<string | null>(null);
+  const [dashName, setDashName] = useState(ar ? 'لوحة جديدة' : 'Untitled dashboard');
+  const [shared, setShared] = useState(false);
+  const [isOwner, setIsOwner] = useState(true);
+  const [dirty, setDirty] = useState(false);
 
-  // each chart panel = a report-builder summary call (groupBy dim + one metric)
-  const loadCharts = useCallback(() => {
-    charts.forEach((ch, idx) => {
-      const q = baseQ(); q.set('groupBy', ch.dim); q.set('kpis', ch.metric);
-      if (tog.includeExcludedRoles) q.set('includeExcludedRoles','1');
-      apiClient.get(`/attendance-recon/report-builder?${q}`).then((r:any)=>{
-        setChartData(prev => ({ ...prev, [idx]: r.data.rows || [] }));
-      }).catch(()=>setChartData(prev=>({ ...prev, [idx]: [] })));
-    });
-  }, [charts, baseQ, tog]);
+  const [savedList, setSavedList] = useState<SavedDashboard[]>([]);
+  const [drawer, setDrawer] = useState(false);
+  const [savedReports, setSavedReports] = useState<SavedReportLite[]>([]);
 
-  useEffect(() => { const t = setTimeout(()=>{ loadSummary(); loadCharts(); }, 300); return ()=>clearTimeout(t); }, [loadSummary, loadCharts]);
+  const [editor, setEditor] = useState<{ sectionId: string; widget: WidgetConfig | null } | null>(null);
 
-  const set = (k:string,v:string)=>setF(p=>({ ...p, [k]:v }));
-  const toggleCard = (k:string)=>setCards(p=>p.includes(k)?p.filter(x=>x!==k):[...p,k]);
-  const addChart = ()=>setCharts(p=>[...p, { dim:'function', metric:'workedDays' }]);
-  const setChart = (i:number, patch:Partial<ChartCfg>)=>setCharts(p=>p.map((c,j)=>j===i?{ ...c, ...patch }:c));
-  const rmChart = (i:number)=>{ setCharts(p=>p.filter((_,j)=>j!==i)); setChartData(p=>{ const n={...p}; delete n[i]; return n; }); };
+  const markDirty = () => setDirty(true);
 
-  const saveView = () => {
-    const name = window.prompt(ar?'اسم العرض:':'View name:'); if (!name) return;
-    const v = { ...views, [name]: { f, tog, cards, charts } };
-    setViews(v); localStorage.setItem('wfm.dashViews', JSON.stringify(v));
+  /* ── initial loads ── */
+  useEffect(() => {
+    loadSources().catch(() => {});
+    refreshSaved();
+    apiClient.get('/report-builder-v2/saved-reports').then((r: any) => setSavedReports(r.data ?? [])).catch(() => {});
+    // function list for the cascade chip (attendance carries every function)
+    apiClient.post('/report-builder-v2/run', { sourceKey: 'attendance', dimensions: ['function'], metrics: ['workedDays'], dateFrom: '2020-01-01', dateTo: new Date().toISOString().slice(0, 10), granularity: 'none', limit: 200 })
+      .then((r: any) => setFunctions((r.data?.rows ?? []).map((x: any) => x.function).filter(Boolean).sort()))
+      .catch(() => {});
+  }, []); // eslint-disable-line
+
+  const refreshSaved = useCallback(() => {
+    apiClient.get('/report-builder-v2/saved-dashboards').then((r: any) => setSavedList(r.data ?? [])).catch(() => {});
+  }, []);
+
+  const dashDate = useMemo(() => ({ dateFrom: dateVal.dateFrom, dateTo: dateVal.dateTo }), [dateVal.dateFrom, dateVal.dateTo]);
+  const section = sections.find(s => s.id === activeSec) ?? sections[0];
+
+  /* ── section ops ── */
+  const addSection = () => {
+    const name = window.prompt(L('Section name:', 'اسم القسم:'), L(`Section ${sections.length + 1}`, `قسم ${sections.length + 1}`));
+    if (!name) return;
+    const s = newSection(name); setSections(p => [...p, s]); setActiveSec(s.id); markDirty();
   };
-  const loadView = (name:string) => { const v = views[name]; if (!v) return; setF(v.f); setTog(v.tog); setCards(v.cards); setCharts(v.charts); };
-  const reset = () => { setF({ from:'2026-06-01', to:'2026-06-29', function:'', role:'', shift:'', teamLeader:'', group:'', presence:'', search:'' }); setTog({ includeInactive:false, includeExcludedRoles:false }); setCards(DEFAULT.cards); setCharts(DEFAULT.charts); };
-  const exportXlsx = async () => {
-    const q = baseQ();
-    if (tog.includeExcludedRoles) q.set('includeExcludedRoles','1');
-    q.set('format','xlsx'); q.set('fields','date,agent,role,function,teamLeader,shiftCode,attendanceStatus,lateMin,otBefore,otAfter,conformance');
+  const renameSection = (id: string) => {
+    const cur = sections.find(s => s.id === id); if (!cur) return;
+    const name = window.prompt(L('Rename section:', 'إعادة تسمية القسم:'), cur.name);
+    if (!name) return; setSections(p => p.map(s => s.id === id ? { ...s, name } : s)); markDirty();
+  };
+  const deleteSection = (id: string) => {
+    if (sections.length <= 1) { window.alert(L('A dashboard needs at least one section.', 'يجب أن تحتوي اللوحة على قسم واحد على الأقل.')); return; }
+    if (!window.confirm(L('Delete this section and its widgets?', 'حذف هذا القسم وأدواته؟'))) return;
+    setSections(p => { const next = p.filter(s => s.id !== id); if (id === activeSec) setActiveSec(next[0].id); return next; }); markDirty();
+  };
+
+  /* ── widget ops ── */
+  const upsertWidget = (sectionId: string, w: WidgetConfig) => {
+    setSections(p => p.map(s => {
+      if (s.id !== sectionId) return s;
+      const exists = s.widgets.some(x => x.id === w.id);
+      return { ...s, widgets: exists ? s.widgets.map(x => x.id === w.id ? w : x) : [...s.widgets, w] };
+    })); markDirty();
+  };
+  const patchWidget = (sectionId: string, wid: string, patch: Partial<WidgetConfig>) => {
+    setSections(p => p.map(s => s.id === sectionId ? { ...s, widgets: s.widgets.map(x => x.id === wid ? { ...x, ...patch } : x) } : s)); markDirty();
+  };
+  const removeWidget = (sectionId: string, wid: string) => {
+    setSections(p => p.map(s => s.id === sectionId ? { ...s, widgets: s.widgets.filter(x => x.id !== wid) } : s)); markDirty();
+  };
+
+  /* ── save / load ── */
+  const buildFilters = (): DashFilter[] => (funcFilter ? [{ dim: 'function', value: funcFilter }] : []);
+
+  const doSave = async () => {
+    let name = dashName;
+    let sh = shared;
+    if (!dashId || !isOwner) {
+      const n = window.prompt(L('Dashboard name:', 'اسم اللوحة:'), dashName); if (!n) return; name = n;
+      sh = window.confirm(L('Share with the team? (OK = shared, Cancel = private)', 'مشاركة مع الفريق؟ (موافق = مشترك، إلغاء = خاص)'));
+    }
+    const body = { name, description: null, sections, dateRange: dateVal, filters: buildFilters(), shared: sh };
     try {
-      const r:any = await apiClient.get(`/attendance-recon/report-builder?${q}`, { responseType:'blob' });
-      const u=URL.createObjectURL(r.data); const a=document.createElement('a'); a.href=u; a.download='custom-dashboard.xlsx'; a.click(); URL.revokeObjectURL(u);
-    } catch { /* */ }
+      if (dashId && isOwner) {
+        await apiClient.put(`/report-builder-v2/saved-dashboards/${dashId}`, body);
+      } else {
+        const r: any = await apiClient.post('/report-builder-v2/saved-dashboards', body);
+        setDashId(r.data?.id ?? null); setIsOwner(true);
+      }
+      setDashName(name); setShared(sh); setDirty(false); refreshSaved();
+    } catch { window.alert(L('Save failed.', 'فشل الحفظ.')); }
   };
 
-  const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
-  const activeCards = useMemo(()=>KPI_CARDS.filter(c=>cards.includes(c.key)), [cards]);
+  const doLoad = async (item: SavedDashboard) => {
+    try {
+      const r: any = await apiClient.get(`/report-builder-v2/saved-dashboards/${item.id}`);
+      const d = r.data;
+      const secs: SectionConfig[] = (Array.isArray(d.sections) && d.sections.length ? d.sections : [newSection(L('Overview', 'نظرة عامة'))]);
+      setSections(secs); setActiveSec(secs[0].id);
+      setDateVal(hydrateRange(d.date_range));
+      const fn = (Array.isArray(d.filters) ? d.filters : []).find((f: any) => f.dim === 'function');
+      setFuncFilter(fn?.value ?? '');
+      setDashId(d.id); setDashName(d.name); setShared(!!d.shared); setIsOwner(item.is_owner !== false);
+      setDirty(false); setDrawer(false); setMode('edit');
+    } catch { window.alert(L('Load failed.', 'فشل التحميل.')); }
+  };
+
+  const doDelete = async (id: string) => {
+    if (!window.confirm(L('Delete this dashboard?', 'حذف هذه اللوحة؟'))) return;
+    try { await apiClient.delete(`/report-builder-v2/saved-dashboards/${id}`); if (dashId === id) newDashboard(); refreshSaved(); } catch {}
+  };
+
+  const newDashboard = () => {
+    const s = newSection(L('Overview', 'نظرة عامة'));
+    setSections([s]); setActiveSec(s.id); setDashId(null); setDashName(L('Untitled dashboard', 'لوحة جديدة'));
+    setShared(false); setIsOwner(true); setFuncFilter(''); setDateVal(defaultRange()); setDirty(false);
+  };
+
+  const duplicateWidget = (sectionId: string, w: WidgetConfig) => upsertWidget(sectionId, { ...w, id: uid(), title: `${w.title} (copy)` });
+
+  const border = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
+  const chip = (active: boolean, color = '#6366f1'): React.CSSProperties => ({
+    padding: '6px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+    border: `1px solid ${active ? color + '80' : border}`, background: active ? `${color}20` : (dark ? 'rgba(255,255,255,0.03)' : '#fff'), color: active ? color : ts(dark),
+  });
 
   return (
-    <div className="space-y-4 page-enter">
-      <div className="flex items-center gap-3 flex-wrap">
-        <button onClick={()=>nav('/roster-dashboard')} className="p-2 rounded-xl" style={{ background:'rgba(255,255,255,0.06)' }}><ArrowLeft size={16} className="text-white"/></button>
-        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)' }}><LayoutDashboard size={20} className="text-white"/></div>
-        <div className="flex-1 min-w-[200px]"><h1 className="text-lg font-bold text-white">{ar?'باني الداشبورد المخصّص':'Custom Dashboard Builder'}</h1>
-          <p className="text-xs text-slate-500">{ar?'اختر الكروت والرسوم والفلاتر — احفظ عرضك — صدّر':'Choose KPI cards, charts & filters — save your view — export'}</p></div>
-        <div className="flex items-center gap-1.5">
-          <button onClick={saveView} className="text-[11px] text-emerald-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background:'rgba(16,185,129,0.12)', border:'1px solid rgba(16,185,129,0.25)' }}><Save size={13}/>{ar?'احفظ':'Save'}</button>
-          <button onClick={exportXlsx} className="text-[11px] text-indigo-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background:'rgba(99,102,241,0.12)', border:'1px solid rgba(99,102,241,0.25)' }}><Download size={13}/>Excel</button>
-          <button onClick={reset} className="text-[11px] text-slate-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1" style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)' }}><RotateCcw size={13}/>{ar?'تصفير':'Reset'}</button>
+    <div dir={ar ? 'rtl' : 'ltr'} style={{ animation: 'ds-fadein .4s ease' }}>
+      {/* ── header ── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+          <LayoutGrid size={20} color="#fff" />
+        </div>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          {mode === 'edit' ? (
+            <input value={dashName} onChange={e => { setDashName(e.target.value); markDirty(); }}
+              style={{ fontSize: 19, fontWeight: 800, letterSpacing: '-.02em', color: tp(dark), background: 'transparent', border: 'none', borderBottom: `1px dashed ${border}`, outline: 'none', padding: '2px 0', width: '100%', maxWidth: 420 }} />
+          ) : (
+            <h1 style={{ fontSize: 19, fontWeight: 800, letterSpacing: '-.02em', color: tp(dark), margin: 0 }}>{dashName}</h1>
+          )}
+          <p style={{ margin: '3px 0 0', fontSize: 12, color: ts(dark), display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: 'rgba(139,92,246,0.14)', color: '#a78bfa' }}><Sparkles size={10} /> Builder v2</span>
+            {shared && <span style={{ color: '#22c55e' }}>· {L('shared', 'مشترك')}</span>}
+            {dirty && <span style={{ color: '#f59e0b' }}>· {L('unsaved', 'غير محفوظ')}</span>}
+            {!isOwner && dashId && <span>· {L('read-only (teammate’s)', 'للعرض (لزميل)')}</span>}
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* mode toggle */}
+          <div style={{ display: 'inline-flex', borderRadius: 10, border: `1px solid ${border}`, overflow: 'hidden' }}>
+            <button onClick={() => setMode('edit')} style={{ ...chip(mode === 'edit', '#8b5cf6'), borderRadius: 0, border: 'none' }}><Edit3 size={13} /> {L('Edit', 'تعديل')}</button>
+            <button onClick={() => setMode('view')} style={{ ...chip(mode === 'view', '#22c55e'), borderRadius: 0, border: 'none' }}><Eye size={13} /> {L('View', 'عرض')}</button>
+          </div>
+          <NxBtn icon={FolderOpen} variant="outline" color="#6366f1" dark={dark} onClick={() => setDrawer(true)}>{L('Open', 'فتح')} {savedList.length ? `(${savedList.length})` : ''}</NxBtn>
+          {mode === 'edit' && <NxBtn icon={PanelsTopLeft} variant="ghost" dark={dark} onClick={newDashboard}>{L('New', 'جديد')}</NxBtn>}
+          {mode === 'edit' && <NxBtn icon={Save} color="#6366f1" dark={dark} onClick={doSave}>{L('Save', 'حفظ')}</NxBtn>}
         </div>
       </div>
 
-      {/* saved views */}
-      {Object.keys(views).length>0 && (
-        <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-          <span className="text-slate-500">{ar?'عروض محفوظة:':'Saved views:'}</span>
-          {Object.keys(views).map(n=>(
-            <span key={n} className="flex items-center gap-1 px-2 py-1 rounded-lg text-slate-200" style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)' }}>
-              <button onClick={()=>loadView(n)}>{n}</button>
-              <button onClick={()=>{ const v={...views}; delete v[n]; setViews(v); localStorage.setItem('wfm.dashViews', JSON.stringify(v)); }} className="text-slate-500 hover:text-rose-400"><X size={11}/></button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* filters */}
-      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-        <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
-          <input type="date" value={f.from} onChange={e=>set('from',e.target.value)} className={inputCls}/><span className="text-xs">→</span>
-          <input type="date" value={f.to} onChange={e=>set('to',e.target.value)} className={inputCls}/></div>
-        <div className="flex items-center gap-1.5 flex-1 min-w-[140px]"><Search size={14} className="text-slate-400"/>
-          <input value={f.search} onChange={e=>set('search',e.target.value)} placeholder={ar?'بحث':'Search'} className={`${inputCls} flex-1`}/></div>
-        {([['function','functions',ar?'كل الفنكشن':'All functions'],['role','roles',ar?'كل الأدوار':'All roles'],['shift','shifts',ar?'كل الشفتات':'All shifts'],['teamLeader','teamManagers',ar?'كل التيم ليدرز':'All TLs'],['group','teams',ar?'كل الجروبات':'All groups']] as [string,string,string][]).map(([k,o,label])=>(
-          <select key={k} value={(f as any)[k]} onChange={e=>set(k,e.target.value)} className={inputCls}>
-            <option value="">{label}</option>{(opt?.[o]||[]).map((v:string)=><option key={v} value={v}>{v}</option>)}
+      {/* ── dashboard controls: date pill + function chip (cascade) ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14, padding: '10px 12px', borderRadius: 14, background: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.015)', border: `1px solid ${border}` }}>
+        <DateRangePicker value={dateVal} dark={dark} ar={ar} onApply={v => { setDateVal(v); markDirty(); }} />
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Filter size={13} style={{ color: ts(dark) }} />
+          <select value={funcFilter} onChange={e => { setFuncFilter(e.target.value); markDirty(); }}
+            style={{ padding: '8px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: funcFilter ? 'rgba(99,102,241,0.12)' : (dark ? 'rgba(255,255,255,0.05)' : '#fff'), border: `1px solid ${funcFilter ? 'rgba(99,102,241,0.4)' : border}`, color: funcFilter ? (dark ? '#c7d2fe' : '#4338ca') : ts(dark), cursor: 'pointer', outline: 'none' }}>
+            <option value="">{L('All functions', 'كل الوظائف')}</option>
+            {functions.map(f => <option key={f} value={f}>{f}</option>)}
           </select>
-        ))}
-        {([['includeInactive',ar?'+ غير النشطين':'+ Inactive'],['includeExcludedRoles',ar?'+ أدوار 8 ساعات':'+ 8h roles']] as [string,string][]).map(([k,label])=>(
-          <label key={k} className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer select-none px-2 py-1 rounded-lg" style={{ background:(tog as any)[k]?'rgba(99,102,241,0.18)':'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)' }}>
-            <input type="checkbox" checked={(tog as any)[k]} onChange={e=>setTog(p=>({ ...p, [k]:e.target.checked }))} className="accent-indigo-500"/>{label}
-          </label>
-        ))}
-      </div>
-
-      {/* KPI card picker */}
-      <div className="rounded-2xl p-3" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-        <button onClick={()=>setPicker(p=>!p)} className="text-[11px] text-slate-400 flex items-center gap-1 mb-2"><Plus size={12}/>{ar?'اختر كروت المؤشرات':'Choose KPI cards'} ({cards.length})</button>
-        {picker && <div className="flex flex-wrap gap-1.5 mb-2">{KPI_CARDS.map(c=>(
-          <button key={c.key} onClick={()=>toggleCard(c.key)} className="px-2 py-1 rounded-lg text-[11px]" style={{ background:cards.includes(c.key)?`${c.c}22`:'rgba(255,255,255,0.04)', color:cards.includes(c.key)?c.c:'#94a3b8', border:`1px solid ${cards.includes(c.key)?c.c+'55':'rgba(255,255,255,0.08)'}` }}>{ar?c.ar:c.en}</button>
-        ))}</div>}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-          {activeCards.map(c=>{ const raw = summary?.[c.key]; const v = c.fmt?c.fmt(raw):(typeof raw==='number'?raw.toLocaleString():raw??'—');
-            return (
-              <div key={c.key} className="flex items-center gap-2 p-2.5 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
-                <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:`${c.c}22`, color:c.c }}><c.ic size={16}/></div>
-                <div className="min-w-0"><p className="text-[9px] text-slate-500 uppercase font-semibold tracking-wide truncate">{ar?c.ar:c.en}</p>
-                  <p className="text-lg font-bold text-white leading-tight">{v}</p>{c.sub&&summary&&<p className="text-[9px] text-slate-500">{c.sub(summary)}</p>}</div>
-              </div>
-            );
-          })}
         </div>
+        <span style={{ marginInlineStart: 'auto', fontSize: 10.5, color: ts(dark) }}>
+          {L('Date & function cascade to every widget (unless a widget pins its own dates).', 'التاريخ والوظيفة يسريان على كل الأدوات (إلا إذا ثبّتت الأداة تاريخها).')}
+        </span>
       </div>
 
-      {/* custom charts */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {charts.map((ch, i) => {
-          const rows = chartData[i] || []; const met = METRICS.find(m=>m.key===ch.metric);
-          const vals = rows.map((r:any)=>Number(r[ch.metric])||0); const max = Math.max(...vals, 1);
-          const fmt = (v:number)=> met?.time ? dur(v) : met?.pct ? `${v}%` : v.toLocaleString();
+      {/* ── section tabs ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 14, borderBottom: `1px solid ${border}`, paddingBottom: 10 }}>
+        {sections.map(s => {
+          const active = s.id === activeSec;
           return (
-            <div key={i} className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-              <div className="flex items-center gap-1.5 mb-2.5">
-                <BarChart3 size={13} className="text-indigo-400"/>
-                <select value={ch.dim} onChange={e=>setChart(i,{ dim:e.target.value })} className="bg-transparent text-xs font-bold text-white outline-none">
-                  {DIMS.map(dm=><option key={dm.key} value={dm.key} className="bg-slate-800">{ar?dm.ar:dm.en}</option>)}
-                </select>
-                <span className="text-slate-600 text-xs">·</span>
-                <select value={ch.metric} onChange={e=>setChart(i,{ metric:e.target.value })} className="bg-transparent text-[11px] text-slate-300 outline-none flex-1">
-                  {METRICS.map(m=><option key={m.key} value={m.key} className="bg-slate-800">{ar?m.ar:m.en}</option>)}
-                </select>
-                <button onClick={()=>rmChart(i)} className="text-slate-600 hover:text-rose-400"><X size={13}/></button>
-              </div>
-              <div className="space-y-1.5">
-                {rows.length===0 && <p className="text-[11px] text-slate-600">—</p>}
-                {rows.slice(0,12).map((r:any,j:number)=>{ const v=Number(r[ch.metric])||0;
-                  return (
-                    <div key={j} className="flex items-center gap-2 text-[11px] cursor-pointer hover:opacity-90"
-                      onClick={()=>{ const dimMap:Record<string,string>={ role:'role', function:'function', shift:'shift', teamLeader:'teamLeader', group:'group' }; if (dimMap[ch.dim]) set(dimMap[ch.dim], r.group); }}>
-                      <span className="w-24 truncate text-slate-300" title={r.group}>{r.group??'—'}</span>
-                      <div className="flex-1 h-3.5 rounded overflow-hidden" style={{ background:'rgba(255,255,255,0.04)' }}>
-                        <div className="h-full rounded" style={{ width:`${Math.max(4,100*v/max)}%`, background: met?.pct?`linear-gradient(90deg,${adhC(v)}cc,${adhC(v)}55)`:'linear-gradient(90deg,#6366f1cc,#8b5cf677)' }}/></div>
-                      <span className="font-semibold w-14 text-end" style={{ color: met?.pct?adhC(v):'#e2e8f0' }}>{fmt(v)}</span>
-                    </div>
-                  );
-                })}
-              </div>
+            <div key={s.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '7px 12px', borderRadius: 10, cursor: 'pointer',
+              background: active ? 'rgba(99,102,241,0.14)' : 'transparent', border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'transparent'}` }}
+              onClick={() => setActiveSec(s.id)}>
+              <span style={{ fontSize: 12.5, fontWeight: active ? 700 : 500, color: active ? (dark ? '#c7d2fe' : '#4338ca') : ts(dark) }}>{s.name}</span>
+              <span style={{ fontSize: 10, color: ts(dark), fontWeight: 600 }}>{s.widgets.length}</span>
+              {mode === 'edit' && active && <>
+                <Pencil size={11} style={{ color: ts(dark), cursor: 'pointer', marginInlineStart: 4 }} onClick={e => { e.stopPropagation(); renameSection(s.id); }} />
+                {sections.length > 1 && <X size={12} style={{ color: '#ef4444', cursor: 'pointer' }} onClick={e => { e.stopPropagation(); deleteSection(s.id); }} />}
+              </>}
             </div>
           );
         })}
-        <button onClick={addChart} className="rounded-2xl p-3.5 flex items-center justify-center gap-2 text-slate-400 hover:text-white min-h-[120px]" style={{ background:'rgba(255,255,255,0.02)', border:'1px dashed rgba(255,255,255,0.15)' }}>
-          <Plus size={16}/>{ar?'أضف رسم':'Add chart'}</button>
+        {mode === 'edit' && <button onClick={addSection} style={{ ...chip(false), borderStyle: 'dashed' }}><Plus size={12} /> {L('Section', 'قسم')}</button>}
       </div>
+
+      {/* ── widget grid ── */}
+      {section.widgets.length === 0 && (
+        <NxEmpty icon={LayoutGrid} ar={ar} dark={dark}
+          title={mode === 'edit' ? 'This section is empty' : 'Nothing to show'}
+          titleAr={mode === 'edit' ? 'هذا القسم فارغ' : 'لا شيء للعرض'}
+          desc={mode === 'edit' ? 'Add a widget — pick a saved report or build one inline.' : 'Switch to Edit mode to add widgets.'}
+          descAr={mode === 'edit' ? 'أضف أداة — اختر تقريراً محفوظاً أو ابنِ واحدة مباشرة.' : 'انتقل لوضع التعديل لإضافة أدوات.'} />
+      )}
+
+      <div className="grid gap-3 grid-cols-1 lg:grid-cols-2" style={{ alignItems: 'start' }}>
+        {section.widgets.map(w => (
+          <div key={w.id} style={{ gridColumn: w.span === 2 ? '1 / -1' : undefined, position: 'relative' }}>
+            <WidgetCard
+              widget={w} dashDate={dashDate} dashFunc={funcFilter} mode={mode} dark={dark} ar={ar}
+              onEdit={() => setEditor({ sectionId: section.id, widget: w })}
+              onRemove={() => removeWidget(section.id, w.id)}
+              onChange={patch => patchWidget(section.id, w.id, patch)}
+            />
+            {mode === 'edit' && (
+              <button onClick={() => duplicateWidget(section.id, w)} title={L('Duplicate', 'نسخ')}
+                style={{ position: 'absolute', bottom: 8, insetInlineEnd: 8, width: 24, height: 24, borderRadius: 7, display: 'grid', placeItems: 'center', background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)', border: `1px solid ${border}`, color: ts(dark), cursor: 'pointer' }}>
+                <Copy size={11} />
+              </button>
+            )}
+          </div>
+        ))}
+        {mode === 'edit' && (
+          <button onClick={() => setEditor({ sectionId: section.id, widget: null })}
+            style={{ minHeight: 140, borderRadius: 16, border: `1px dashed ${dark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.14)'}`, background: 'transparent', color: ts(dark), cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Plus size={20} /> <span style={{ fontSize: 13, fontWeight: 600 }}>{L('Add widget', 'إضافة أداة')}</span>
+          </button>
+        )}
+      </div>
+
+      {/* ── widget editor ── */}
+      {editor && (
+        <WidgetEditor
+          initial={editor.widget} savedReports={savedReports} dark={dark} ar={ar}
+          onCancel={() => setEditor(null)}
+          onSave={w => { upsertWidget(editor.sectionId, w); setEditor(null); }}
+        />
+      )}
+
+      {/* ── saved dashboards drawer ── */}
+      {drawer && (
+        <div onClick={() => setDrawer(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 60, display: 'flex', justifyContent: ar ? 'flex-start' : 'flex-end' }}>
+          <div onClick={e => e.stopPropagation()} dir={ar ? 'rtl' : 'ltr'} style={{ width: 360, maxWidth: '90vw', height: '100%', overflowY: 'auto', ...card(dark), borderRadius: 0, padding: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <Bookmark size={16} style={{ color: '#6366f1' }} />
+              <span style={{ fontSize: 15, fontWeight: 800, color: tp(dark) }}>{L('Saved dashboards', 'اللوحات المحفوظة')}</span>
+              <button onClick={() => setDrawer(false)} style={{ marginInlineStart: 'auto', ...chip(false, '#ef4444'), padding: 6 }}><X size={14} /></button>
+            </div>
+            {savedList.length === 0 && <NxEmpty ar={ar} dark={dark} title="No saved dashboards yet" titleAr="لا توجد لوحات محفوظة" desc="Compose a dashboard and press Save." descAr="أنشئ لوحة واضغط حفظ." />}
+            {savedList.map(s => (
+              <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 12, marginBottom: 8, border: `1px solid ${border}`, background: dashId === s.id ? 'rgba(99,102,241,0.1)' : 'transparent' }}>
+                <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => doLoad(s)}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: tp(dark), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
+                  <div style={{ fontSize: 10.5, color: ts(dark), display: 'flex', gap: 6 }}>
+                    {s.shared && <span style={{ color: '#22c55e' }}>{L('shared', 'مشترك')}</span>}
+                    {s.is_owner === false && <span>{L('by teammate', 'من زميل')}</span>}
+                    {s.updated_at && <span>{String(s.updated_at).slice(0, 10)}</span>}
+                  </div>
+                </div>
+                {s.is_owner !== false && <button onClick={() => doDelete(s.id)} style={{ ...chip(false, '#ef4444'), padding: 6 }}><Trash2 size={12} /></button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
