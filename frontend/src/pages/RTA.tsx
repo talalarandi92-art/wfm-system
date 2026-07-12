@@ -290,7 +290,30 @@ export default function RTAPage() {
           <KpiCard label={ar ? 'إيجنت متاح'      : 'Available'} val={s.totalAvailable || agAvail} color="#22c55e" icon={UserCheck} />
           <KpiCard label={ar ? 'في استراحة'      : 'On Break'}  val={agBreak}           color={agBreak > 0 ? '#818cf8' : '#475569'} icon={Coffee}
             sub={breakData && breakData.unauthorizedCount > 0 ? `${breakData.unauthorizedCount} ${ar ? 'غير مرخّص' : 'unauth'}` : undefined} />
-          <KpiCard label={ar ? 'متوسط SLA'       : 'Avg SLA'}  val={`${s.avgSla}%`}   color={slaColor(s.avgSla)} icon={TrendingUp} />
+          {/* SLA is UNKNOWN when the queue feed is degraded — show "—" + a note, never a green 100%. */}
+          <KpiCard label={ar ? 'متوسط SLA' : 'Avg SLA'}
+            val={s.avgSla == null ? '—' : `${s.avgSla}%`}
+            color={s.avgSla == null ? '#64748b' : slaColor(s.avgSla)} icon={TrendingUp}
+            sub={s.avgSla == null ? (ar ? 'لا تغذية طوابير' : 'no queue feed') : undefined} />
+        </div>
+      )}
+
+      {/* ── QUEUE-FEED-MISSING BANNER (degraded feed self-explains) ─────────── */}
+      {live && live.queueFeedMissing && (
+        <div className="flex-shrink-0 mx-4 mt-2 flex items-start gap-2.5 px-3 py-2.5 rounded-xl text-[11px]"
+          style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
+          <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ lineHeight: 1.55 }}>
+            <b>{ar ? 'تغذية الطوابير مفقودة' : 'Queue feed missing'}</b>{' — '}
+            {ar
+              ? 'الجسر يرى الموظفين لكن لا يرى حالة الطوابير الآن، فحالة SLA وعدد المنتظرين والطوابير تحت الخطر غير معروفة (ليست ٠). هذه ليست حالة "كل شيء سليم".'
+              : 'the bridge sees agents but not queue state right now, so SLA, waiting, and at-risk queues are UNKNOWN (not zero). This is not an all-clear.'}
+            <div className="mt-0.5" style={{ color: '#f87171' }}>
+              {ar
+                ? 'افتح محطة Sprinklr Supervisor (Queue Summary) مع إضافة WFM Bridge مفعّلة وثبّت التبويب.'
+                : 'Open the Sprinklr Supervisor station (Queue Summary) with the WFM Bridge extension enabled and pin the tab.'}
+            </div>
+          </div>
         </div>
       )}
 

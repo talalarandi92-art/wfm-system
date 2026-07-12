@@ -20,13 +20,15 @@ import { useCountUpOnce, AgentDonut, AgentBoard } from './LivePanels';
 /* Module-level so it keeps a STABLE identity across the Wallboard's frequent
    re-renders (clock 1s + rotation progress 120ms). If defined inline it would
    remount every render and the count-up would restart from 0 → numbers "dance". */
-function WbKpi({ label, num, suffix, color }: { label: string; num: number; suffix?: string; color: string }) {
-  const n = useCountUpOnce(num);
+function WbKpi({ label, num, suffix, color, text, note }: { label: string; num?: number; suffix?: string; color: string; text?: string; note?: string }) {
+  // `text` overrides the numeric count-up (e.g. "—" when a value is UNKNOWN, so the
+  // TV never fabricates a green 100% SLA on a degraded queue feed).
+  const n = useCountUpOnce(num ?? 0);
   return (
     <div style={{ flex: 1, background: 'rgba(255,255,255,0.03)', border: `1px solid ${color}33`, borderRadius: 20, padding: '20px 24px', position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 0, insetInlineStart: 0, insetInlineEnd: 0, height: 3, background: color }} />
-      <div style={{ fontSize: 64, fontWeight: 800, lineHeight: 1, color, letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(n)}{suffix || ''}</div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: '#94a3b8', marginTop: 10, letterSpacing: '0.04em' }}>{label}</div>
+      <div style={{ fontSize: 64, fontWeight: 800, lineHeight: 1, color, letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums' }}>{text != null ? text : `${fmtNum(n)}${suffix || ''}`}</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: '#94a3b8', marginTop: 10, letterSpacing: '0.04em' }}>{label}{note ? <span style={{ fontSize: 12, color: '#fca5a5', marginInlineStart: 8 }}>· {note}</span> : ''}</div>
     </div>
   );
 }
@@ -74,6 +76,7 @@ export function Wallboard({ live, breakData, fc, coverage, ar, onClose }: { live
   const queues = [...(live?.queues ?? [])].sort((a, b) => (b.waiting || 0) - (a.waiting || 0));
   const risky  = queues.filter(q => (q.slaPct ?? 100) < 80 || (q.waiting || 0) > 50);
   const s = live?.summary;
+  const avgSla = s?.avgSla ?? null; // null = UNKNOWN (degraded queue feed) — never fabricate 100
   const isStale = live?.isStale;
 
   // Page data-availability → drives empty-page skipping in the rotation.
@@ -91,6 +94,7 @@ export function Wallboard({ live, breakData, fc, coverage, ar, onClose }: { live
   }, [page, pageHasData[0], pageHasData[1], pageHasData[2]]);
 
   const alerts = [
+    ...(live?.queueFeedMissing ? [ar ? '⚠ تغذية الطوابير مفقودة — SLA وعدد المنتظرين غير معروف (ليس ٠)' : '⚠ Queue feed missing — SLA & waiting UNKNOWN (not zero)'] : []),
     ...risky.map(q => `⚠ ${q.queueName} — SLA ${q.slaPct ?? 0}% · ${q.waiting} ${ar ? 'بالانتظار' : 'waiting'}`),
     ...(breakData && breakData.unauthorizedCount > 0 ? [`⚠ ${breakData.unauthorizedCount} ${ar ? 'بريك غير مرخّص الآن' : 'unauthorized breaks now'}`] : []),
   ];
@@ -150,7 +154,11 @@ export function Wallboard({ live, breakData, fc, coverage, ar, onClose }: { live
         <WbKpi label={ar ? 'قيد التنفيذ' : 'Active'} num={s?.totalInProgress ?? 0} color="#818cf8" />
         <WbKpi label={ar ? 'متاح الآن' : 'Available'} num={avail} color="#22c55e" />
         <WbKpi label={ar ? 'في استراحة' : 'On Break'} num={brk} color="#a855f7" />
-        <WbKpi label={ar ? 'متوسط SLA' : 'Avg SLA'} num={s?.avgSla ?? 100} suffix="%" color={slaColor(s?.avgSla ?? 100)} />
+        <WbKpi label={ar ? 'متوسط SLA' : 'Avg SLA'}
+          num={avgSla ?? undefined} suffix="%"
+          text={avgSla == null ? '—' : undefined}
+          note={avgSla == null ? (ar ? 'لا تغذية طوابير' : 'no queue feed') : undefined}
+          color={avgSla == null ? '#64748b' : slaColor(avgSla)} />
       </div>
 
       {/* Page 0 — Queue grid */}
@@ -271,6 +279,7 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
   const { dark } = useUiStore();
   const T = tok(dark);
   const s = live?.summary;
+  const avgSla = s?.avgSla ?? null; // null = UNKNOWN (degraded queue feed) — never fabricate 100
   const agents = live?.agents ?? [];
   const avail = agents.filter(a => a.status === 'available' || a.status === 'idle').length;
   const busy  = agents.filter(a => a.status === 'busy').length;
@@ -284,9 +293,12 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
   const unauth = breakData?.unauthorizedCount ?? 0;
   const queues = [...(live?.queues ?? [])].sort((a, b) => (b.waiting || 0) - (a.waiting || 0));
 
+  // A degraded queue feed (avgSla unknown) can NEVER read as "Stable/on target" —
+  // that was the false all-clear. Force at least Caution when we can't see queues.
+  const feedDegraded = !!live?.queueFeedMissing || avgSla == null;
   const posture = (risky.length > 0 || below85 > 3 || unauth > 2)
     ? { c: '#ef4444', t: ar ? 'خطر — يتطلّب تدخّلاً الآن' : 'Risk — needs intervention now' }
-    : (openViol > 0 || unauth > 0 || (s?.avgSla ?? 100) < 90)
+    : (openViol > 0 || unauth > 0 || feedDegraded || (avgSla ?? 100) < 90)
       ? { c: '#f59e0b', t: ar ? 'انتباه — راقب عن قرب' : 'Caution — watch closely' }
       : { c: '#22c55e', t: ar ? 'مستقرّ — كل شيء ضمن الهدف' : 'Stable — everything on target' };
 
@@ -295,7 +307,7 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
     { l: ar ? 'قيد التنفيذ' : 'Active', v: fmtNum(s?.totalInProgress ?? 0), c: '#818cf8' },
     { l: ar ? 'متاح الآن' : 'Available', v: fmtNum(avail), c: '#22c55e' },
     { l: ar ? 'في استراحة' : 'On Break', v: fmtNum(brk), c: '#a855f7' },
-    { l: ar ? 'متوسط SLA' : 'Avg SLA', v: `${s?.avgSla ?? 100}%`, c: slaColor(s?.avgSla ?? 100) },
+    { l: ar ? 'متوسط SLA' : 'Avg SLA', v: avgSla == null ? '—' : `${avgSla}%`, c: avgSla == null ? tsColor(dark) : slaColor(avgSla) },
     { l: ar ? 'إجمالي الموظفين' : 'Agents', v: fmtNum(agents.length), c: '#06b6d4' },
     { l: ar ? 'الالتزام' : 'Adherence', v: avgAdh != null ? `${Math.round(avgAdh)}%` : '—', c: avgAdh != null ? pctColor(avgAdh) : tsColor(dark) },
     { l: ar ? 'مخالفات مفتوحة' : 'Open issues', v: fmtNum(openViol), c: openViol > 0 ? '#f87171' : tsColor(dark) },
@@ -311,6 +323,7 @@ export function ExecutiveOverview({ live, breakData, coverage, violations, adher
       <div className="rounded-2xl px-4 py-3 flex items-center gap-3" style={{ background: `${posture.c}14`, border: `1px solid ${posture.c}44` }}>
         <span className="w-2.5 h-2.5 rounded-full" style={{ background: posture.c, boxShadow: `0 0 10px ${posture.c}` }} />
         <span className="text-sm font-bold" style={{ color: posture.c }}>{ar ? 'الوضع التنفيذي' : 'Executive posture'}: {posture.t}</span>
+        {feedDegraded && <span className="text-[11px]" style={{ color: '#fca5a5' }}>⚠ {ar ? 'تغذية الطوابير مفقودة — SLA غير معروف' : 'queue feed missing — SLA unknown'}</span>}
         {live?.isStale && <span className="text-[11px] ms-auto" style={{ color: '#fbbf24' }}>⚠ {ar ? 'بيانات غير لحظية' : 'data not live'}</span>}
       </div>
 

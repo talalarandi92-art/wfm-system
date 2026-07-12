@@ -27,7 +27,11 @@ export interface StationSummary {
 }
 export interface SpLive {
   capturedAt: string; staleSec: number; isStale: boolean;
-  summary: { totalWaiting: number; totalInProgress: number; totalAvailable: number; totalBusy: number; avgSla: number };
+  // Degraded feed: agents present but no queues → SLA/waiting/at-risk are UNKNOWN.
+  queueFeedMissing?: boolean;
+  // avgSla is null when we can't compute it (no queues / degraded feed) — NEVER
+  // fabricate 100. Render "—"/degraded, not a green all-clear.
+  summary: { totalWaiting: number; totalInProgress: number; totalAvailable: number; totalBusy: number; avgSla: number | null };
   atRisk: SpQueue[]; queues: SpQueue[]; agents: SpAgent[];
   stationSummary?: StationSummary | null;
 }
@@ -73,10 +77,12 @@ export interface QueueDetail {
   capturedAt: string; staleSec: number;
 }
 export interface Coverage {
-  intervals: { interval_start: string; required_hc: number; scheduled_hc: number; live_hc: number }[];
+  intervals: { interval_start: string; required_hc: number; scheduled_hc: number; live_hc: number; live_updated_at?: string | null; live_stale?: boolean }[];
   attendance: { punched_in: number; total_scheduled: number };
   onPermission: number;
   liveSprinklr: { available: number; busy: number; onBreak: number; offline: number; totalLoggedIn: number } | null;
+  liveStale?: boolean;
+  queueFeedMissing?: boolean;
   capturedAt: string | null;
 }
 

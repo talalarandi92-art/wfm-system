@@ -319,15 +319,22 @@ export class SprinklrService {
         // if only small captures exist we still serve the best available.
         const rows = await this.dataSource.query(
           `WITH recent AS (
-             SELECT captured_at, queues_json, agents_json, agent_count
+             SELECT captured_at, queues_json, agents_json, agent_count, queue_count
                FROM integration_snapshots
               WHERE tenant_id = $1 AND source = 'sprinklr'
               ORDER BY captured_at DESC LIMIT 500
-           ), mx AS (SELECT MAX(agent_count) m FROM recent)
+           ), mx AS (SELECT MAX(agent_count) m, MAX(captured_at) latest FROM recent)
            SELECT captured_at, queues_json, agents_json
              FROM recent, mx
             WHERE agent_count >= GREATEST(1, mx.m * 0.5)
-            ORDER BY captured_at DESC
+            ORDER BY
+              -- Do NOT crown a queue-BLIND capture "best" purely on agent_count.
+              -- When a recent capture still carries queues, prefer it (the queue
+              -- feed is the point of the RTA board). Bounded to 10 min so we never
+              -- resurrect ancient queues: a long queue outage still serves the
+              -- freshest capture, flagged degraded downstream in getQueueSummary.
+              (queue_count > 0 AND captured_at >= mx.latest - INTERVAL '10 minutes') DESC,
+              captured_at DESC
             LIMIT 1`,
           [tenantId],
         );
@@ -350,10 +357,15 @@ export class SprinklrService {
     }
 
     if (!snap) return null;
+    // Queue-blind capture: agents scraped but NO queues → the queue side of the
+    // bridge is degraded. Surfaced so every consumer can tell honest-empty ("no
+    // queues right now") from feed-degraded ("we can't see the queues").
+    const queueFeedMissing = (snap.queues?.length ?? 0) === 0 && (snap.agents?.length ?? 0) > 0;
     return {
       ...snap,
       staleSec: Math.round((Date.now() - snap.receivedAt) / 1000),
       isStale: Date.now() - snap.receivedAt > 120_000, // > 2 min
+      queueFeedMissing,
     };
   }
 
@@ -365,7 +377,9 @@ export class SprinklrService {
         capturedAt: null,
         staleSec: 0,
         isStale: true,
-        summary: { totalWaiting: 0, totalInProgress: 0, totalAvailable: 0, totalBusy: 0, avgSla: 100 },
+        queueFeedMissing: false, // no snapshot at all → "connecting", not a degraded feed
+        // No data yet → SLA is UNKNOWN, never a fabricated 100 (that read as a green all-clear).
+        summary: { totalWaiting: 0, totalInProgress: 0, totalAvailable: 0, totalBusy: 0, avgSla: null },
         atRisk: [],
         queues: [],
         agents: [],
@@ -381,21 +395,26 @@ export class SprinklrService {
       q.queueName.length < 100,
     );
 
-    // Build per-queue agent counts from agent-level statuses as fallback when
-    // queue-level agentsAvailable / agentsBusy are not populated (0).
-    const agentsByQueue: Record<string, { avail: number; busy: number }> = {};
+    // Build per-CHANNEL agent counts from agent-level statuses as a fallback when
+    // queue-level agentsAvailable / agentsBusy are not populated (0). Keyed on the
+    // agent's currentChannel (which, when present, IS populated) — NOT on queueId,
+    // which the DOM bridge leaves empty ('') on every agent, so the old
+    // queueId-keyed map was always {} and this fallback silently never fired.
+    // Empty/unknown channels are skipped so a channel-blind capture can't dump
+    // every agent into one bucket and over-count a queue.
+    const agentsByChannel: Record<string, { avail: number; busy: number }> = {};
     for (const a of snap.agents) {
-      const qid = a.queueId;
-      if (!qid) continue;
-      if (!agentsByQueue[qid]) agentsByQueue[qid] = { avail: 0, busy: 0 };
-      if (a.status === 'available' || a.status === 'idle') agentsByQueue[qid].avail++;
-      if (a.status === 'busy' || a.status === 'away') agentsByQueue[qid].busy++;
+      const ch = this.mapChannel(a.currentChannel || '');
+      if (ch === 'unknown') continue;
+      if (!agentsByChannel[ch]) agentsByChannel[ch] = { avail: 0, busy: 0 };
+      if (a.status === 'available' || a.status === 'idle') agentsByChannel[ch].avail++;
+      if (a.status === 'busy' || a.status === 'away') agentsByChannel[ch].busy++;
     }
 
     const queues = rawQueues.map(q => ({
       ...q,
-      agentsAvailable: q.agentsAvailable || agentsByQueue[q.queueId]?.avail || 0,
-      agentsBusy:      q.agentsBusy      || agentsByQueue[q.queueId]?.busy || 0,
+      agentsAvailable: q.agentsAvailable || agentsByChannel[q.channel]?.avail || 0,
+      agentsBusy:      q.agentsBusy      || agentsByChannel[q.channel]?.busy || 0,
       // A3: honour the extension's per-queue freshness labels. The extension now
       // ships {source, ageSec, staleQueue} on each queue (fresh api / dom / cache).
       // A queue only carries stale values when it went ABSENT — never a silent 0.
@@ -419,9 +438,16 @@ export class SprinklrService {
     // Fall back to queue-sums only when the agents array is empty.
     const totalAvailable = allAvailAgents || totalAvailableFromQueues;
     const totalBusy      = allBusyAgents  || totalBusyFromQueues;
-    const avgSla         = queues.length
-      ? queues.reduce((s, q) => s + (q.slaPct ?? 100), 0) / queues.length
-      : 100;
+
+    // DEGRADED FEED: agents are present but there are NO queues (all queues empty
+    // or absent) → the queue side of the bridge is blind. We do NOT know SLA,
+    // waiting, or which queues are at risk. Reporting avgSla=100 + 0 at-risk here
+    // is the "false all-clear" the study flagged. Emit avgSla=null + a
+    // queueFeedMissing flag so the board renders "queue feed missing", not green.
+    const queueFeedMissing = queues.length === 0 && snap.agents.length > 0;
+    const avgSla = queues.length
+      ? +(queues.reduce((s, q) => s + (q.slaPct ?? 100), 0) / queues.length).toFixed(1)
+      : null;
 
     const atRisk = queues.filter(q => (q.slaPct ?? 100) < 80);
 
@@ -445,7 +471,8 @@ export class SprinklrService {
       capturedAt: snap.capturedAt,
       staleSec:   snap.staleSec,
       isStale:    snap.isStale,
-      summary: { totalWaiting, totalInProgress, totalAvailable, totalBusy, avgSla: +avgSla.toFixed(1) },
+      queueFeedMissing,
+      summary: { totalWaiting, totalInProgress, totalAvailable, totalBusy, avgSla },
       atRisk,
       queues,
       agents:  agentsEnriched,
@@ -615,17 +642,47 @@ export class SprinklrService {
     const totalBusy      = snapshot.agents.filter(a => a.status === 'busy').length;
     const liveHc         = totalAvailable + totalBusy;
 
-    if (liveHc === 0) return;
+    // Degraded capture: queue-blind, or every agent status is 'unknown' (the DOM
+    // bridge scraped names but no presence). Then liveHc=0 does NOT mean "no one
+    // is online" — it means "we can't tell". Writing 0 would be a FALSE signal, so
+    // skip the write and SAY so (was: a blanket `if (liveHc === 0) return` that
+    // silently no-op'd on every degraded capture and never logged).
+    const knownStatus = snapshot.agents.filter(a => a.status && a.status !== 'unknown').length;
+    const queueBlind  = (snapshot.queues?.length ?? 0) === 0 && snapshot.agents.length > 0;
+    if (liveHc === 0 && (queueBlind || knownStatus === 0)) {
+      this.logger.warn(
+        `[${tenantId}] live coverage: degraded feed (queues=${snapshot.queues?.length ?? 0}, ` +
+        `known-status agents=${knownStatus}/${snapshot.agents.length}) — not fabricating live_hc=0`,
+      );
+      return;
+    }
 
     try {
-      await this.dataSource.query(
+      // headcount_intervals is a per-day planning snapshot only populated for
+      // planned dates. A hard `snapshot_date = CURRENT_DATE` matched ZERO rows
+      // whenever today wasn't planned yet, so live_hc silently never updated
+      // (live coverage looked "dead"). Bind to the latest planned day at/before
+      // today so the live overlay actually lands — read side (getCoverageComparison)
+      // resolves the SAME day so they stay consistent.
+      const res: any = await this.dataSource.query(
         `UPDATE headcount_intervals
          SET live_hc = $1, live_updated_at = NOW()
          WHERE tenant_id = $2
-           AND snapshot_date = CURRENT_DATE
+           AND snapshot_date = COALESCE(
+             (SELECT MAX(snapshot_date) FROM headcount_intervals
+               WHERE tenant_id = $2 AND snapshot_date <= CURRENT_DATE),
+             CURRENT_DATE)
            AND interval_start::time = $3::time`,
         [liveHc, tenantId, intervalStart],
       );
+      // TypeORM raw UPDATE returns [rows, affectedCount]; be defensive about shape.
+      const affected = Array.isArray(res) ? Number(res[1] ?? 0) : Number(res?.rowCount ?? 0);
+      if (!affected) {
+        this.logger.warn(
+          `[${tenantId}] live coverage: no headcount_intervals row matched interval ${intervalStart} ` +
+          `(current day not planned?) — live_hc=${liveHc} not applied`,
+        );
+      }
     } catch {
       // headcount_intervals may not have live_hc column yet — non-fatal
     }
@@ -922,9 +979,18 @@ export class SprinklrService {
         `SELECT interval_start::text, function_id,
                 COALESCE(required_hc, 0) AS required_hc,
                 COALESCE(scheduled_hc, 0) AS scheduled_hc,
-                COALESCE(live_hc, 0) AS live_hc
+                COALESCE(live_hc, 0) AS live_hc,
+                live_updated_at,
+                -- Flag rather than silently pass a bare 0 off as real: a live_hc that
+                -- is NULL or last touched > 5 min ago is STALE, not "0 live now".
+                (live_hc IS NULL OR live_updated_at IS NULL
+                   OR live_updated_at < NOW() - INTERVAL '5 minutes') AS live_stale
          FROM headcount_intervals
-         WHERE tenant_id = $1 AND snapshot_date = CURRENT_DATE
+         WHERE tenant_id = $1
+           AND snapshot_date = COALESCE(
+             (SELECT MAX(snapshot_date) FROM headcount_intervals
+               WHERE tenant_id = $1 AND snapshot_date <= CURRENT_DATE),
+             CURRENT_DATE)
          ORDER BY interval_start`,
         [tenantId],
       ).catch(() => []),
@@ -950,11 +1016,17 @@ export class SprinklrService {
       ).catch(() => [{ cnt: 0 }]),
     ]);
 
+    // Live overlay is stale when EVERY interval is stale (or there are none) — so
+    // consumers can label live coverage "not live" instead of trusting bare zeros.
+    const liveStale = !intervals.length || intervals.every((iv: any) => iv.live_stale);
+
     return {
       intervals,
       attendance: attendance[0] ?? { punched_in: 0, total_scheduled: 0 },
       onPermission: +(activePermCount[0]?.cnt ?? 0),
       liveSprinklr,
+      liveStale,
+      queueFeedMissing: (snap as any)?.queueFeedMissing ?? false,
       capturedAt: snap?.capturedAt ?? null,
     };
   }
