@@ -69,6 +69,32 @@ function bucketExpr(dateCol: string, g: Granularity): string {
   }
 }
 
+/**
+ * Push the report date-range predicates onto `where`, binding bounds as $N params.
+ *
+ * Upper bound is HALF-OPEN and date-normalized (`< (d::date + 1)`) so the WHOLE end day is
+ * included even for timestamp/timestamptz date columns.
+ *
+ * MONTH-GRAIN sources (dateGrain==='month') store a month BUCKET (first-of-month). A day-grain
+ * `dateCol >= from` predicate would DROP a month whenever the range starts after the 1st — e.g. a
+ * 2026-06-10..2026-06-20 range silently excludes the whole June rollup. For those we use month-OVERLAP:
+ * the month [bucket, bucket + 1 month) is kept when it overlaps [from, to] at all — its END must be
+ * after the range start (`bucket + 1 month > from`) and its START before the range end (unchanged).
+ */
+function pushDateRange(src: DataSourceDef, dateFrom: string | undefined, dateTo: string | undefined, params: any[], where: string[]): void {
+  const monthly = src.dateGrain === 'month';
+  if (dateFrom) {
+    params.push(dateFrom);
+    where.push(monthly
+      ? `(${src.dateCol} + INTERVAL '1 month') > $${params.length}::date`
+      : `${src.dateCol} >= $${params.length}::date`);
+  }
+  if (dateTo) {
+    params.push(dateTo);
+    where.push(`${src.dateCol} < ($${params.length}::date + 1)`);
+  }
+}
+
 export function getSource(sourceKey: string): DataSourceDef {
   const src = SOURCE_BY_KEY[sourceKey];
   if (!src) throw new BuilderValidationError(`Unknown data source: ${sourceKey}`);
@@ -96,13 +122,8 @@ export function compile(input: CompileInput): CompiledQuery {
   const params: any[] = [input.tenantId];
   const where: string[] = [`${src.tenantCol} = $1`];
 
-  // date range on the source's date column.
-  // Upper bound is HALF-OPEN and date-normalized so the WHOLE end day is included even when
-  // dateCol is a timestamp/timestamptz (e.g. requests_sla.submitted_at): `<= 'YYYY-MM-DD'` would
-  // coerce to local midnight and silently drop every row after 00:00 on the final day. For a plain
-  // DATE column `< (d::date + 1)` is equivalent to `<= d`; for a timestamp column it spans the day.
-  if (input.dateFrom) { params.push(input.dateFrom); where.push(`${src.dateCol} >= $${params.length}::date`); }
-  if (input.dateTo)   { params.push(input.dateTo);   where.push(`${src.dateCol} < ($${params.length}::date + 1)`); }
+  // date range on the source's date column (half-open upper bound; month-overlap for month-grain sources).
+  pushDateRange(src, input.dateFrom, input.dateTo, params, where);
 
   // client filters — dim must be allowlisted, op allowlisted, value bound
   for (const f of input.filters ?? []) {
@@ -176,9 +197,8 @@ export function compileDrill(input: DrillInput): CompiledQuery {
   const params: any[] = [input.tenantId];
   const where: string[] = [`${src.tenantCol} = $1`];
 
-  // date range — identical half-open, date-normalized bound as compile()
-  if (input.dateFrom) { params.push(input.dateFrom); where.push(`${src.dateCol} >= $${params.length}::date`); }
-  if (input.dateTo)   { params.push(input.dateTo);   where.push(`${src.dateCol} < ($${params.length}::date + 1)`); }
+  // date range — identical half-open (+ month-overlap for month-grain) bound as compile()
+  pushDateRange(src, input.dateFrom, input.dateTo, params, where);
 
   // the aggregated cell's non-period dimension values → equality (NULL → IS NULL)
   for (const c of input.cell ?? []) {
@@ -215,8 +235,20 @@ export function compileDrill(input: DrillInput): CompiledQuery {
   }
   for (const k of metricKeys) {
     const m = metricByKey[k];
-    selectParts.push(`${drillMetricArg(m.expr)} AS "${k}"`);
-    columns.push({ key: k, label_en: m.label_en, label_ar: m.label_ar, kind: 'metric', format: m.format });
+    const rp = ratioParts(m.expr);
+    if (rp) {
+      // NON-ADDITIVE ratio (e.g. occupancy / PRR / shrinkage / approval-rate): a single per-row
+      // "ratio" would imply the percentage sums row-wise — it does not. Surface the two ADDITIVE
+      // BASE components instead (numerator & denominator), each formatted as a plain number: their
+      // column sums reconcile (100·Σnum/Σden == the aggregated cell), and nothing reads as a summable %.
+      selectParts.push(`${rp.num} AS "${k}"`);
+      columns.push({ key: k, label_en: `${m.label_en} · numerator`, label_ar: `${m.label_ar} · البسط`, kind: 'metric', format: 'number' });
+      selectParts.push(`${rp.den} AS "${k}__den"`);
+      columns.push({ key: `${k}__den`, label_en: `${m.label_en} · denominator`, label_ar: `${m.label_ar} · المقام`, kind: 'metric', format: 'number' });
+    } else {
+      selectParts.push(`${drillMetricArg(m.expr)} AS "${k}"`);
+      columns.push({ key: k, label_en: m.label_en, label_ar: m.label_ar, kind: 'metric', format: m.format });
+    }
   }
 
   const limit = Math.min(Math.max(1, input.limit ?? 500), DRILL_MAX);
@@ -262,6 +294,27 @@ export function drillMetricArg(expr: string): string {
   const t = inner.trim();
   const base = t === '*' ? '1' : t.replace(/^DISTINCT\s+/i, '');
   return filterCond ? `(CASE WHEN (${filterCond}) THEN (${base}) ELSE NULL END)` : base;
+}
+
+/**
+ * If `expr` is a RATIO of two aggregates — a `… / NULLIF(<aggregate>, 0)` percentage such as
+ * occupancy, PRR, shrinkage%, approval-rate% or conforming-days% — return the PER-ROW BASE of its
+ * numerator and denominator (both additive), so a drill can show reconciling component columns
+ * instead of a misleading per-row "percentage". Returns null for additive metrics and for
+ * AVG(x)/scaling metrics (e.g. `AVG(adherence_pct)`, `SUM(x)/60.0`), whose per-row base is already
+ * a genuine value that drillMetricArg surfaces correctly.
+ *   num = the first aggregate's base (drillMetricArg skips the `100.0*` scale and any FILTER)
+ *   den = the aggregate inside NULLIF(…, 0), reduced to its per-row base
+ */
+export function ratioParts(expr: string): { num: string; den: string } | null {
+  const m = /\/\s*NULLIF\s*\(/i.exec(expr);
+  if (!m) return null;
+  const num = drillMetricArg(expr);                 // numerator = first aggregate's per-row base
+  const openIdx = expr.indexOf('(', m.index);       // the '(' that opens NULLIF's argument list
+  const { inner } = balanced(expr, openIdx);        // "<denominator aggregate>,0"
+  const denAgg = inner.replace(/,\s*0\s*$/, '').trim(); // drop the NULLIF sentinel → the raw aggregate
+  const den = drillMetricArg(denAgg);
+  return { num, den };
 }
 
 function buildCond(col: string, op: FilterOp, value: any, params: any[]): string {

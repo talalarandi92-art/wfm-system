@@ -60,6 +60,9 @@ export interface DataSourceDef {
   from: string;                  // FROM clause (may include a FIXED join)
   tenantCol: string;             // tenant scoping column
   dateCol: string;               // date column the dashboard date-range filters on
+  dateGrain?: 'day' | 'month';   // 'month' → dateCol is a month BUCKET (first-of-month); the range
+                                 // filter uses month-OVERLAP semantics so a partial-month range
+                                 // includes the whole overlapping month instead of dropping it. Default 'day'.
   personCol?: string;            // if set, agents are auto-scoped to their own value here
   permission: string;            // RBAC code required to read this source
   dimensions: Dimension[];
@@ -280,15 +283,15 @@ export const DATA_SOURCES: DataSourceDef[] = [
     ],
     metrics: [
       { key: 'contacts',      expr: 'SUM(COALESCE(a.contacts_received,0))',    label_en: 'Contacts',        label_ar: 'جهات الاتصال', format: 'count', category: 'Volume',
-        description_en: 'Total contacts received by the agent.', description_ar: 'إجمالي جهات الاتصال المستلمة من الموظف.' },
+        description_en: 'Total contacts received by the agent — awaiting Sprinklr capture; this column is currently empty, so a total here is not yet real.', description_ar: 'إجمالي جهات الاتصال المستلمة من الموظف — بانتظار مزامنة سبرنكلر؛ العمود فارغ حالياً، فالإجمالي غير حقيقي بعد.' },
       { key: 'ahtSec',        expr: 'ROUND(AVG(a.aht_seconds))',               label_en: 'AHT (sec)',       label_ar: 'متوسط المعالجة (ث)', format: 'int', category: 'Performance', badge: 'calculated_metric',
-        description_en: 'Average handling time in seconds (fills automatically via the Sprinklr Auto-Ingest).', description_ar: 'متوسط وقت المعالجة بالثواني (يُملأ تلقائياً عبر مزامنة سبرنكلر).' },
+        description_en: 'Average handling time in seconds — awaiting Sprinklr capture; this column is currently empty, so any value shown is not yet real.', description_ar: 'متوسط وقت المعالجة بالثواني — بانتظار مزامنة سبرنكلر؛ العمود فارغ حالياً، فأي قيمة تظهر غير حقيقية بعد.' },
       { key: 'frtSec',        expr: 'ROUND(AVG(a.avg_response_seconds))',      label_en: 'First response (sec)', label_ar: 'أول رد (ث)', format: 'int', category: 'Performance', badge: 'calculated_metric',
-        description_en: 'Average first-response time in seconds (fills automatically via the Sprinklr Auto-Ingest).', description_ar: 'متوسط زمن أول رد بالثواني (يُملأ تلقائياً عبر مزامنة سبرنكلر).' },
+        description_en: 'Average first-response time in seconds — awaiting Sprinklr capture; this column is currently empty, so any value shown is not yet real.', description_ar: 'متوسط زمن أول رد بالثواني — بانتظار مزامنة سبرنكلر؛ العمود فارغ حالياً، فأي قيمة تظهر غير حقيقية بعد.' },
       { key: 'workingMin',    expr: 'SUM(COALESCE(a.total_working_minutes,0))',label_en: 'Working (min)',   label_ar: 'العمل (دقيقة)', format: 'minutes', category: 'Time in Status',
         description_en: 'Total minutes logged into Sprinklr.', description_ar: 'إجمالي دقائق تسجيل الدخول في سبرنكلر.' },
       { key: 'busyMin',       expr: 'SUM(COALESCE(a.busy_minutes,0))',         label_en: 'Busy (min)',      label_ar: 'مشغول (دقيقة)', format: 'minutes', category: 'Time in Status',
-        description_en: 'Minutes spent in busy (handling) status.', description_ar: 'الدقائق في حالة مشغول (معالجة).' },
+        description_en: 'Minutes spent in busy (handling) status — awaiting Sprinklr capture; this column is near-empty today, so a total is not yet representative.', description_ar: 'الدقائق في حالة مشغول (معالجة) — بانتظار مزامنة سبرنكلر؛ العمود شبه فارغ حالياً، فالإجمالي غير ممثِّل بعد.' },
       { key: 'idleNoCaseMin', expr: 'SUM(COALESCE(a.idle_no_case_minutes,0))', label_en: 'Idle no-case (min)', label_ar: 'خمول بلا حالة', format: 'minutes', category: 'Time in Status',
         description_en: 'Idle minutes with no case assigned.', description_ar: 'دقائق الخمول بدون حالة مسندة.' },
       { key: 'idleWithCaseMin',expr: 'SUM(COALESCE(a.idle_with_case_minutes,0))', label_en: 'Idle with case (min)', label_ar: 'خمول مع حالة', format: 'minutes', category: 'Time in Status',
@@ -297,8 +300,14 @@ export const DATA_SOURCES: DataSourceDef[] = [
         description_en: 'Minutes spent in break status.', description_ar: 'الدقائق في حالة الاستراحة.' },
       { key: 'offlineMin',    expr: 'SUM(COALESCE(a.offline_minutes,0))',      label_en: 'Offline (min)',   label_ar: 'غير متصل (دقيقة)', format: 'minutes', category: 'Time in Status',
         description_en: 'Minutes marked offline during the day window.', description_ar: 'الدقائق غير المتصلة خلال نافذة اليوم.' },
-      { key: 'occupancyPct',  expr: 'ROUND(100.0*SUM(COALESCE(a.busy_minutes,0))/NULLIF(SUM(COALESCE(a.busy_minutes,0)+COALESCE(a.idle_no_case_minutes,0)+COALESCE(a.idle_with_case_minutes,0)),0),1)', label_en: 'Occupancy %', label_ar: 'الإشغال %', format: 'pct', category: 'Performance', badge: 'calculated_metric',
-        description_en: 'Busy time as a share of busy plus idle time (busy ÷ (busy + idle)).', description_ar: 'وقت الانشغال كنسبة من الانشغال زائد الخمول (مشغول ÷ (مشغول + خمول)).' },
+      // Occupancy = busy ÷ (busy + idle). Idle time is still awaiting Sprinklr capture, so the
+      // denominator can be near-empty; without a guard, a group with busy time but NO idle capture
+      // collapses to busy/busy = a misleading precise 100%. The trailing `* CASE …` voids the result
+      // (→ NULL, renders "—") whenever idle coverage is effectively zero for the group, so the tile
+      // reads "no data" instead of a fake percentage. The numerator SUM(busy) stays the FIRST
+      // aggregate so drill base-component extraction still resolves num=busy, den=busy+idle.
+      { key: 'occupancyPct',  expr: `ROUND(100.0*SUM(COALESCE(a.busy_minutes,0))/NULLIF(SUM(COALESCE(a.busy_minutes,0)+COALESCE(a.idle_no_case_minutes,0)+COALESCE(a.idle_with_case_minutes,0)),0),1) * CASE WHEN SUM(COALESCE(a.idle_no_case_minutes,0)+COALESCE(a.idle_with_case_minutes,0)) = 0 THEN NULL ELSE 1 END`, label_en: 'Occupancy %', label_ar: 'الإشغال %', format: 'pct', category: 'Performance', badge: 'calculated_metric',
+        description_en: 'Busy as a share of busy + idle — awaiting Sprinklr capture; returns empty (not a precise %) when idle coverage is effectively zero, so a near-empty denominator cannot read as a real occupancy.', description_ar: 'الانشغال كنسبة من الانشغال + الخمول — بانتظار مزامنة سبرنكلر؛ يعود فارغاً (لا نسبة دقيقة) عندما تكون تغطية الخمول شبه معدومة، كي لا يظهر مقام شبه فارغ كإشغال حقيقي.' },
       { key: 'agents',        expr: 'COUNT(DISTINCT a.agent_email)',           label_en: 'Agents',          label_ar: 'الموظفون', format: 'count', category: 'Headcount',
         description_en: 'Distinct agents present in the selected rows.', description_ar: 'عدد الموظفين المختلفين في الصفوف المحددة.' },
     ],
@@ -309,7 +318,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     key: 'scorecard', label_en: 'Scorecard', label_ar: 'بطاقة الأداء', group: 'Scorecard', category: 'Performance',
     description_en: 'Monthly scorecard rollup per agent: average Net Points, best and worst weeks and how many weeks were scored.',
     description_ar: 'ملخص بطاقة الأداء الشهري لكل موظف: متوسط صافي النقاط وأفضل وأسوأ أسبوع وعدد الأسابيع المقيَّمة.',
-    from: 'scorecard_monthly', tenantCol: 'tenant_id', dateCol: 'make_date(year, month, 1)', personCol: 'employee_no',
+    from: 'scorecard_monthly', tenantCol: 'tenant_id', dateCol: 'make_date(year, month, 1)', dateGrain: 'month', personCol: 'employee_no',
     permission: 'reports.view',
     dimensions: [
       { key: 'person',     col: 'employee_no',                      label_en: 'Agent ID',    label_ar: 'رقم الموظف', type: 'string', category: 'Identity',
@@ -345,7 +354,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     description_en: 'Weekly scorecard entries with every KPI actual and its points: quality, AHT, FCR, CTR, quiz, productivity, PRR, mistakes, incidents and rank.',
     description_ar: 'إدخالات بطاقة الأداء الأسبوعية مع قيمة كل مؤشر ونقاطه: الجودة ومتوسط المعالجة وFCR وCTR والاختبار والإنتاجية وPRR والأخطاء والحوادث والترتيب.',
     from: 'scorecard_entries e JOIN scorecard_batches b ON b.id = e.batch_id',
-    tenantCol: 'e.tenant_id', dateCol: 'make_date(b.period_year, b.period_month, 1)', personCol: 'e.employee_no',
+    tenantCol: 'e.tenant_id', dateCol: 'make_date(b.period_year, b.period_month, 1)', dateGrain: 'month', personCol: 'e.employee_no',
     permission: 'reports.view',
     dimensions: [
       { key: 'person',     col: 'e.employee_no',    label_en: 'Agent ID',    label_ar: 'رقم الموظف', type: 'string', category: 'Identity',
@@ -412,7 +421,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     key: 'survey', label_en: 'Survey & FCR', label_ar: 'الاستبيان وFCR', group: 'Scorecard', category: 'Performance',
     description_en: 'Monthly customer-survey resolution results per agent and channel: yes/no counts, FCR percentage and the PRR ratio.',
     description_ar: 'نتائج استبيان العملاء الشهرية لكل موظف وقناة: عدّادات نعم/لا ونسبة FCR ومعدل PRR.',
-    from: 'survey_fcr_monthly', tenantCol: 'tenant_id', dateCol: 'year_month',
+    from: 'survey_fcr_monthly', tenantCol: 'tenant_id', dateCol: 'year_month', dateGrain: 'month',
     permission: 'reports.view',
     dimensions: [
       { key: 'agentEmail', col: 'agent_email', label_en: 'Agent Email', label_ar: 'بريد الموظف', type: 'string', category: 'Identity',
@@ -623,11 +632,11 @@ export const DATA_SOURCES: DataSourceDef[] = [
       { key: 'contacts',       expr: 'COUNT(*)',                                    label_en: 'Contacts',       label_ar: 'جهات الاتصال', format: 'count', category: 'Volume',
         description_en: 'Total number of contacts in the selection.', description_ar: 'إجمالي عدد جهات الاتصال في النطاق.' },
       { key: 'surveysSent',    expr: 'COUNT(*) FILTER (WHERE survey_sent)',         label_en: 'Surveys sent',   label_ar: 'استبيانات مرسلة', format: 'count', category: 'Survey', badge: 'calculated_metric',
-        description_en: 'Contacts where a satisfaction survey was sent.', description_ar: 'التواصلات التي أُرسل بعدها استبيان رضا.' },
+        description_en: 'Contacts where a satisfaction survey was sent — awaiting survey capture; this flag is currently empty, so a zero here is not yet real.', description_ar: 'التواصلات التي أُرسل بعدها استبيان رضا — بانتظار مزامنة الاستبيان؛ العلامة فارغة حالياً، فالصفر غير حقيقي بعد.' },
       { key: 'surveysClicked', expr: 'COUNT(*) FILTER (WHERE survey_clicked)',      label_en: 'Surveys clicked',label_ar: 'استبيانات منقورة', format: 'count', category: 'Survey', badge: 'calculated_metric',
-        description_en: 'Sent surveys the customer actually opened or answered.', description_ar: 'الاستبيانات المرسلة التي فتحها العميل أو أجاب عليها.' },
+        description_en: 'Sent surveys the customer opened or answered — awaiting survey capture; this flag is currently empty, so a zero here is not yet real.', description_ar: 'الاستبيانات المرسلة التي فتحها العميل أو أجاب عليها — بانتظار مزامنة الاستبيان؛ العلامة فارغة حالياً، فالصفر غير حقيقي بعد.' },
       { key: 'surveyClickRatePct', expr: 'ROUND(100.0*COUNT(*) FILTER (WHERE survey_clicked)/NULLIF(COUNT(*) FILTER (WHERE survey_sent),0),1)', label_en: 'Survey click rate %', label_ar: 'نسبة نقر الاستبيان %', format: 'pct', category: 'Survey', badge: 'calculated_metric',
-        description_en: 'Clicked surveys as a share of sent surveys.', description_ar: 'الاستبيانات المنقورة كنسبة من المرسلة.' },
+        description_en: 'Clicked surveys as a share of sent — awaiting survey capture; the sent/clicked flags are currently empty, so a 0% here is NOT a real click-rate (returns empty when nothing was sent).', description_ar: 'الاستبيانات المنقورة كنسبة من المرسلة — بانتظار مزامنة الاستبيان؛ علامتا الإرسال/النقر فارغتان حالياً، فنسبة 0% ليست معدل نقر حقيقياً (تعود فارغة عند عدم إرسال شيء).' },
       { key: 'agents',         expr: 'COUNT(DISTINCT agent_name)',                  label_en: 'Agents',         label_ar: 'الموظفون', format: 'count', category: 'Headcount',
         description_en: 'Distinct agents who handled contacts in the selection.', description_ar: 'عدد الموظفين المختلفين الذين عالجوا التواصلات في النطاق.' },
     ],

@@ -8,7 +8,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { compile, compileDrill, drillMetricArg, BuilderValidationError, getSource, listCatalog } from './query-compiler';
+import { compile, compileDrill, drillMetricArg, ratioParts, BuilderValidationError, getSource, listCatalog } from './query-compiler';
 import { DATA_SOURCES, dimensionBadge, metricBadge, contractFormat, contractType } from './data-sources';
 
 const TID = 'a0000000-0000-0000-0000-000000000001';
@@ -183,6 +183,83 @@ describe('drill compiler (BLD-4, pure)', () => {
       dateFrom: '2026-06-01', dateTo: '2026-06-30' });
     expect(c.sql).toContain('work_date >= $2::date');
     expect(c.sql).toContain('work_date < ($3::date + 1)');
+  });
+});
+
+/* ── A1c) DECISION-SAFETY fixes (deep risk study) — pure ────────────────────
+ *  #3 ratio-metric drill surfaces additive base components (not a summable %).
+ *  #4 month-grain sources use a month-OVERLAP date predicate so a partial-month
+ *     range keeps the whole overlapping month instead of dropping it.
+ *  #1 occupancy carries an idle-coverage guard so it cannot render a precise %
+ *     off an effectively-empty denominator. */
+describe('decision-safety fixes (pure)', () => {
+  it('ratioParts splits a NULLIF ratio into additive numerator + denominator bases', () => {
+    // occupancy: busy ÷ (busy + idle)
+    const occ = getSource('agent_ops').metrics.find(m => m.key === 'occupancyPct')!;
+    const rp = ratioParts(occ.expr)!;
+    expect(rp).not.toBeNull();
+    expect(rp.num).toBe('COALESCE(a.busy_minutes,0)');                       // numerator base = busy
+    expect(rp.den).toBe('COALESCE(a.busy_minutes,0)+COALESCE(a.idle_no_case_minutes,0)+COALESCE(a.idle_with_case_minutes,0)'); // denom base = busy+idle
+    // survey PRR: yes ÷ (yes + no)
+    const prr = getSource('survey').metrics.find(m => m.key === 'prrPct')!;
+    const rp2 = ratioParts(prr.expr)!;
+    expect(rp2.num).toBe('COALESCE(resolved_yes,0)');
+    expect(rp2.den).toBe('COALESCE(resolved_yes,0)+COALESCE(resolved_no,0)');
+    // COUNT-FILTER ratio (surveyClickRate) → CASE flags on both sides
+    const clk = getSource('contacts_volume').metrics.find(m => m.key === 'surveyClickRatePct')!;
+    const rp3 = ratioParts(clk.expr)!;
+    expect(rp3.num).toBe('(CASE WHEN (survey_clicked) THEN (1) ELSE NULL END)');
+    expect(rp3.den).toBe('(CASE WHEN (survey_sent) THEN (1) ELSE NULL END)');
+  });
+
+  it('ratioParts returns null for additive + AVG/scaling metrics (they drill fine as-is)', () => {
+    expect(ratioParts('SUM(COALESCE(ot_min,0))')).toBeNull();
+    expect(ratioParts('ROUND(AVG(adherence_pct),1)')).toBeNull();     // AVG per-row value is genuine
+    expect(ratioParts('ROUND(SUM(worked_min)/60.0,1)')).toBeNull();   // /60 scaling, not a ratio
+    expect(ratioParts('COUNT(*)')).toBeNull();
+  });
+
+  it('drill of a ratio metric emits TWO additive base columns, neither formatted as a %', () => {
+    const c = compileDrill({ sourceKey: 'agent_ops', tenantId: TID, metrics: ['occupancyPct'] });
+    const met = c.columns.filter(x => x.kind === 'metric');
+    expect(met.map(m => m.key)).toEqual(['occupancyPct', 'occupancyPct__den']);
+    expect(met.every(m => m.format === 'number')).toBe(true);        // never 'pct' — not a summable ratio
+    expect(met[0].label_en).toMatch(/numerator/);
+    expect(met[1].label_en).toMatch(/denominator/);
+    // the SELECT surfaces the additive bases, not a per-row percentage
+    expect(c.sql).toContain('COALESCE(a.busy_minutes,0) AS "occupancyPct"');
+    expect(c.sql).toContain('AS "occupancyPct__den"');
+    expect(c.sql).not.toContain('/NULLIF');                          // no ratio arithmetic in the drill projection
+  });
+
+  it('drill of an ADDITIVE metric is unchanged (single reconciling base column)', () => {
+    const c = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['regularOtMin'] });
+    const met = c.columns.filter(x => x.kind === 'metric');
+    expect(met.map(m => m.key)).toEqual(['regularOtMin']);
+    expect(met[0].format).toBe('minutes');
+  });
+
+  it('month-grain sources use a month-OVERLAP lower bound (partial-month range keeps the month)', () => {
+    const c = compile({ sourceKey: 'survey', tenantId: TID, metrics: ['fcrPct'], dateFrom: '2026-06-10', dateTo: '2026-06-20' });
+    expect(c.sql).toContain(`(year_month + INTERVAL '1 month') > $2::date`);   // month END after range start
+    expect(c.sql).toContain(`year_month < ($3::date + 1)`);                    // month START before range end
+    expect(c.sql).not.toContain(`year_month >= $2::date`);                     // NOT the day-grain drop predicate
+  });
+
+  it('day-grain sources keep the plain >= lower bound (no behaviour change)', () => {
+    const c = compile({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'], dateFrom: '2026-06-01', dateTo: '2026-06-30' });
+    expect(c.sql).toContain('work_date >= $2::date');
+    expect(c.sql).not.toContain(`INTERVAL '1 month'`);
+  });
+
+  it('scorecard (month-grain) drill also applies month-overlap', () => {
+    const c = compileDrill({ sourceKey: 'scorecard_kpi', tenantId: TID, metrics: ['netPoints'], dateFrom: '2026-06-10', dateTo: '2026-06-20' });
+    expect(c.sql).toContain(`+ INTERVAL '1 month') > $`);
+  });
+
+  it('occupancy carries the idle-coverage guard (→ NULL when idle coverage is effectively zero)', () => {
+    const occ = getSource('agent_ops').metrics.find(m => m.key === 'occupancyPct')!;
+    expect(occ.expr).toContain('CASE WHEN SUM(COALESCE(a.idle_no_case_minutes,0)+COALESCE(a.idle_with_case_minutes,0)) = 0 THEN NULL ELSE 1 END');
   });
 });
 
@@ -495,5 +572,61 @@ describe('query-compiler PARITY (live wfm_db)', () => {
       period: { granularity: 'month', value: '2026-06' }, dateFrom: '2026-01-01', dateTo: '2026-12-31', limit: 100000 });
     const rows = await q(d.sql, d.params);
     expect(rows.every((r: any) => String(r.date).slice(0, 7) === '2026-06')).toBe(true);
+  });
+
+  /* ── DECISION-SAFETY fixes against the live DB ─────────────────────────── */
+
+  // #1 occupancy guard: an agent with busy time but NO idle capture must NOT read as a precise
+  // (usually 100%) occupancy — the guard voids it to NULL. Proven on the live near-empty column.
+  it('occupancy guard: busy-only agents (no idle capture) come back NULL, never a fake %', async () => {
+    if (!up) return;
+    const c = compile({ sourceKey: 'agent_ops', tenantId: TID, dimensions: ['agentEmail'], metrics: ['occupancyPct'] });
+    const rows = await q(c.sql, c.params);
+    const occByEmail = new Map(rows.map((r: any) => [r.agentEmail, r.occupancyPct]));
+    const busyOnly = await q(
+      `SELECT agent_email FROM (
+         SELECT agent_email,
+                SUM(COALESCE(busy_minutes,0)) busy,
+                SUM(COALESCE(idle_no_case_minutes,0)+COALESCE(idle_with_case_minutes,0)) idle
+           FROM agent_daily_stats WHERE tenant_id=$1 GROUP BY agent_email) g
+       WHERE busy > 0 AND idle = 0`, [TID]);
+    for (const b of busyOnly) expect(occByEmail.get(b.agent_email)).toBeNull(); // guard fired for each
+  });
+
+  // #3 ratio-drill: the drill of an occupancy cell surfaces ADDITIVE num/den base columns whose
+  // sums reconcile back to the aggregated ratio (100·Σnum/Σden == the cell), not a summable %.
+  it('ratio drill: occupancy num/den bases reconcile to the aggregated cell', async () => {
+    if (!up) return;
+    const grouped = compile({ sourceKey: 'agent_ops', tenantId: TID, dimensions: ['agentEmail'], metrics: ['occupancyPct'] });
+    const cells = await q(grouped.sql, grouped.params);
+    const cell = cells.find((r: any) => r.occupancyPct != null);
+    if (!cell) { console.warn('no non-null occupancy — ratio-drill reconciliation skipped'); return; }
+    const d = compileDrill({ sourceKey: 'agent_ops', tenantId: TID, metrics: ['occupancyPct'],
+      cell: [{ dim: 'agentEmail', value: cell.agentEmail }], limit: 100000 });
+    expect(d.sql).not.toContain('/NULLIF');
+    const raw = await q(d.sql, d.params);
+    const sumNum = raw.reduce((a: number, r: any) => a + Number(r.occupancyPct || 0), 0);
+    const sumDen = raw.reduce((a: number, r: any) => a + Number(r['occupancyPct__den'] || 0), 0);
+    expect(sumDen).toBeGreaterThan(0);
+    const recomputed = Math.round(1000 * sumNum / sumDen) / 10;
+    expect(Math.abs(recomputed - Number(cell.occupancyPct))).toBeLessThanOrEqual(0.1); // reconciles
+  });
+
+  // #4 month-overlap: a partial-month range strictly INSIDE a month keeps that month's rollup,
+  // where the old day-grain (>= from) predicate would have dropped it entirely.
+  it('month-overlap: a partial-month range keeps the survey month the old predicate would drop', async () => {
+    if (!up) return;
+    const [anchor] = await q(
+      `SELECT to_char(max(year_month)::date + 5,'YYYY-MM-DD') frm,
+              to_char(max(year_month)::date + 15,'YYYY-MM-DD') too
+         FROM survey_fcr_monthly WHERE tenant_id=$1`, [TID]);
+    if (!anchor?.frm) { console.warn('no survey rows — month-overlap skipped'); return; }
+    const c = compile({ sourceKey: 'survey', tenantId: TID, metrics: ['responses'], dateFrom: anchor.frm, dateTo: anchor.too });
+    const [built] = await q(c.sql, c.params);
+    const [old] = await q(
+      `SELECT SUM(COALESCE(total,0)) n FROM survey_fcr_monthly
+         WHERE tenant_id=$1 AND year_month >= $2::date AND year_month < ($3::date + 1)`, [TID, anchor.frm, anchor.too]);
+    expect(Number(built.responses || 0)).toBeGreaterThan(0); // month kept by overlap
+    expect(Number(old.n || 0)).toBe(0);                       // the old day-grain predicate dropped it
   });
 });
