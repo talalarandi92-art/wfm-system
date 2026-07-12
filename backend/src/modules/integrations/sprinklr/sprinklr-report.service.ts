@@ -3,8 +3,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { createHash } from 'crypto';
 import {
-  RawReportItem, SprinklrReportType, classifyReport,
-  parseLoginLogout, parseSurvey, isEmail, isDateOnly,
+  RawReportItem, SprinklrReportType, ReportColumn, classifyReport,
+  parseLoginLogout, parseSurvey, parseAgentSummary, agentSummaryToStatRow,
+  AgentIdentity, isEmail, isDateOnly,
 } from './sprinklr-report.parser';
 
 /**
@@ -23,7 +24,7 @@ export interface IncomingReport {
   rawSample?: string;
 }
 
-const VALID_TYPES = new Set(['login_logout', 'survey', 'agent_perf', 'unknown']);
+const VALID_TYPES = new Set(['login_logout', 'survey', 'agent_perf', 'agent_summary', 'unknown']);
 
 @Injectable()
 export class SprinklrReportService {
@@ -32,8 +33,8 @@ export class SprinklrReportService {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
   /** Stage one or many captured reports. Idempotent per (tenant, report_type, content_hash). */
-  async ingestReports(tenantId: string, reports: IncomingReport[]): Promise<{ staged: number; skipped: number; byType: Record<string, number> }> {
-    let staged = 0, skipped = 0;
+  async ingestReports(tenantId: string, reports: IncomingReport[]): Promise<{ staged: number; skipped: number; promoted: number; byType: Record<string, number> }> {
+    let staged = 0, skipped = 0, promoted = 0;
     const byType: Record<string, number> = {};
 
     for (const rep of reports) {
@@ -68,16 +69,109 @@ export class SprinklrReportService {
            JSON.stringify(payload), rows.length, hash,
            this.safeIso(rep?.capturedAt)],
         );
-        if (Array.isArray(res) && res.length > 0) { staged++; byType[reportType] = (byType[reportType] || 0) + 1; }
-        else skipped++;
+        if (Array.isArray(res) && res.length > 0) {
+          staged++; byType[reportType] = (byType[reportType] || 0) + 1;
+          // Auto-promote agent-summary rows straight into agent_daily_stats so the Builder's
+          // agent_ops source + the Inbound scorecard AHT see the REAL numbers as soon as captured.
+          if (reportType === 'agent_summary') {
+            try {
+              const cols = Array.isArray(rep?.columns) ? (rep!.columns as ReportColumn[]) : undefined;
+              promoted += await this.promoteAgentSummary(tenantId, rows, cols);
+            } catch (e: any) {
+              this.logger.warn(`[${tenantId}] agent_summary promotion failed: ${e?.message}`);
+            }
+          }
+        } else skipped++;
       } catch (e: any) {
         this.logger.warn(`[${tenantId}] report stage failed (${reportType}): ${e?.message}`);
         skipped++;
       }
     }
 
-    if (staged > 0) this.logger.log(`[${tenantId}] staged ${staged} Sprinklr report(s): ${JSON.stringify(byType)}`);
-    return { staged, skipped, byType };
+    if (staged > 0) this.logger.log(`[${tenantId}] staged ${staged} Sprinklr report(s): ${JSON.stringify(byType)}${promoted ? ` | promoted ${promoted} agent-day stat(s)` : ''}`);
+    return { staged, skipped, promoted, byType };
+  }
+
+  /**
+   * Promote captured Agent-Summary rows → agent_daily_stats (aht_seconds + contacts_received +
+   * talk/hold/acw detail in `extra`). Resolves the numeric Sprinklr id + employee_id per agent
+   * from the identity maps (so it merges with the live-status row for that agent/day); when the
+   * email is unresolved it uses a deterministic `email:<addr>` key that stays idempotent and never
+   * double-counts against the live path (which owns the busy/idle minutes). Returns rows upserted.
+   */
+  async promoteAgentSummary(tenantId: string, rows: RawReportItem[], columns?: ReportColumn[]): Promise<number> {
+    const normalized = parseAgentSummary(rows, columns);
+    const idCache = new Map<string, AgentIdentity>();
+    let n = 0;
+
+    for (const row of normalized) {
+      if (!row.agent_email || !row.day) continue;         // need both the identity and the day
+      const email = row.agent_email;
+      let ident = idCache.get(email);
+      if (!ident) { ident = await this.resolveIdentity(tenantId, email); idCache.set(email, ident); }
+
+      const s = agentSummaryToStatRow(row, ident);
+      if (!s.sprinklr_agent_id || !s.stat_date) continue;
+
+      await this.ds.query(
+        `INSERT INTO agent_daily_stats
+           (tenant_id, stat_date, sprinklr_agent_id, agent_name, agent_email, employee_id,
+            contacts_received, aht_seconds, avg_response_seconds, extra, computed_at)
+         VALUES ($1,$2::date,$3,$4,NULLIF($5,''),$6,$7,$8,$9,$10::jsonb, NOW())
+         ON CONFLICT (tenant_id, stat_date, sprinklr_agent_id) DO UPDATE SET
+           agent_name           = COALESCE(EXCLUDED.agent_name, agent_daily_stats.agent_name),
+           agent_email          = COALESCE(EXCLUDED.agent_email, agent_daily_stats.agent_email),
+           employee_id          = COALESCE(EXCLUDED.employee_id, agent_daily_stats.employee_id),
+           contacts_received    = COALESCE(EXCLUDED.contacts_received, agent_daily_stats.contacts_received),
+           aht_seconds          = COALESCE(EXCLUDED.aht_seconds, agent_daily_stats.aht_seconds),
+           avg_response_seconds = COALESCE(EXCLUDED.avg_response_seconds, agent_daily_stats.avg_response_seconds),
+           extra                = COALESCE(agent_daily_stats.extra, '{}'::jsonb) || EXCLUDED.extra,
+           computed_at          = NOW()`,
+        [tenantId, s.stat_date, s.sprinklr_agent_id, s.agent_name, s.agent_email, s.employee_id,
+         s.contacts_received, s.aht_seconds, s.avg_response_seconds, JSON.stringify(s.extra)],
+      );
+      n++;
+    }
+    if (n > 0) this.logger.log(`[${tenantId}] agent_summary → agent_daily_stats: ${n} agent-day row(s) upserted`);
+    return n;
+  }
+
+  /** Re-promote ALL staged agent_summary reports (backfill / manual re-run — no re-capture needed). */
+  async promoteAllStagedAgentSummary(tenantId: string): Promise<{ reports: number; promoted: number }> {
+    const staged = await this.ds.query(
+      `SELECT payload FROM sprinklr_report_staging
+        WHERE tenant_id = $1 AND report_type = 'agent_summary' ORDER BY captured_at ASC`, [tenantId],
+    ).catch(() => []);
+    let promoted = 0;
+    for (const r of staged) {
+      const rows: RawReportItem[] = Array.isArray(r.payload?.rows) ? r.payload.rows : [];
+      const cols: ReportColumn[] | undefined = Array.isArray(r.payload?.columns) ? r.payload.columns : undefined;
+      if (rows.length) promoted += await this.promoteAgentSummary(tenantId, rows, cols).catch(() => 0);
+    }
+    return { reports: staged.length, promoted };
+  }
+
+  /** Resolve an agent email → { sprinklrAgentId, employeeId } via the identity maps (best effort). */
+  private async resolveIdentity(tenantId: string, email: string): Promise<AgentIdentity> {
+    const out: AgentIdentity = { sprinklrAgentId: null, employeeId: null };
+    const im = await this.ds.query(
+      `SELECT sprinklr_agent_id, employee_id FROM employee_identity_map
+        WHERE tenant_id = $1 AND (lower(email) = lower($2) OR lower(sprinklr_email) = lower($2))
+        ORDER BY resolved DESC, confidence DESC LIMIT 1`, [tenantId, email],
+    ).catch(() => []);
+    if (im?.length) { out.sprinklrAgentId = im[0].sprinklr_agent_id || null; out.employeeId = im[0].employee_id || null; }
+    if (!out.sprinklrAgentId || !out.employeeId) {
+      const am = await this.ds.query(
+        `SELECT sprinklr_agent_id, employee_id FROM sprinklr_agent_map
+          WHERE tenant_id = $1 AND lower(agent_email) = lower($2)
+          ORDER BY (employee_id IS NOT NULL) DESC, last_seen DESC LIMIT 1`, [tenantId, email],
+      ).catch(() => []);
+      if (am?.length) {
+        out.sprinklrAgentId = out.sprinklrAgentId || am[0].sprinklr_agent_id || null;
+        out.employeeId = out.employeeId || am[0].employee_id || null;
+      }
+    }
+    return out;
   }
 
   /** Inspect staged reports (metadata + optional normalized preview). */
@@ -116,8 +210,10 @@ export class SprinklrReportService {
       };
       if (opts.normalize) {
         const staged: RawReportItem[] = Array.isArray(r.payload?.rows) ? r.payload.rows : [];
+        const cols: ReportColumn[] | undefined = Array.isArray(r.payload?.columns) ? r.payload.columns : undefined;
         if (r.report_type === 'login_logout') return { ...base, normalized: parseLoginLogout(staged).slice(0, 100) };
         if (r.report_type === 'survey') return { ...base, normalized: parseSurvey(staged).slice(0, 100) };
+        if (r.report_type === 'agent_summary') return { ...base, normalized: parseAgentSummary(staged, cols).slice(0, 100) };
       }
       return base;
     });

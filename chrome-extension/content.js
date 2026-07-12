@@ -364,8 +364,10 @@ function _rowVals(it) {
   return a;
 }
 
+// Agent Summary (voice agent perf) signature — Offered/Taken/Talk/Hold/After-Call in headers or M_* keys.
+const _perfKeyRe = /OFFERED|TAKEN|HANDLED|TALK|HOLD|AFTER_?CALL|\bACW\b|WRAP_?UP/i;
 function classifyReportRows(rows) {
-  let email = false, yesno = false, ts = false, dateOnly = false, loginMeasure = false;
+  let email = false, yesno = false, ts = false, dateOnly = false, loginMeasure = false, perf = false;
   for (const it of rows.slice(0, 50)) {
     for (const v of _rowVals(it)) {
       if (typeof v === 'string' && _emailRe.test(v.trim())) email = true;
@@ -373,8 +375,14 @@ function classifyReportRows(rows) {
       if (typeof v === 'string' && _dateOnlyRe.test(v.trim())) dateOnly = true;
       else if (_tsish(v)) ts = true;
     }
-    for (const k of Object.keys(it.measures || {})) if (/LOGGED?_?IN|LOGIN|LOGOUT|AVAILABILITY|ONLINE_?TIME/i.test(k)) loginMeasure = true;
+    for (const k of Object.keys(it.dims || {}))     if (_perfKeyRe.test(k)) perf = true;
+    for (const k of Object.keys(it.measures || {})) {
+      if (/LOGGED?_?IN|LOGIN|LOGOUT|AVAILABILITY|ONLINE_?TIME/i.test(k)) loginMeasure = true;
+      if (_perfKeyRe.test(k)) perf = true;
+    }
   }
+  // Agent Summary is the most specific — detect before survey/login_logout (it has no Yes/No).
+  if (email && perf && !yesno) return 'agent_summary';
   if (email && yesno) return 'survey';
   if (ts && (loginMeasure || email)) return 'login_logout';
   if (email || dateOnly) return 'agent_perf';

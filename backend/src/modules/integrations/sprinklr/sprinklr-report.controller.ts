@@ -44,8 +44,21 @@ export class SprinklrReportController {
   }
 
   /**
+   * POST /integrations/sprinklr/promote-agent-summary
+   * Re-promote ALL staged agent_summary reports into agent_daily_stats (backfill / re-run after an
+   * identity-map update). Capture auto-promotes; this exists to re-apply without re-capturing.
+   */
+  @Post('promote-agent-summary')
+  @ApiOperation({ summary: 'Re-promote staged Agent Summary reports into agent_daily_stats (backfill)' })
+  @HttpCode(HttpStatus.OK)
+  async promoteAgentSummary(@Request() req: any) {
+    const result = await this.reports.promoteAllStagedAgentSummary(req.user.tenantId);
+    return { ok: true, ...result };
+  }
+
+  /**
    * GET /integrations/sprinklr/report-staging?type&from&to&limit&normalize=1
-   * Inspect staged reports; ?normalize=1 previews the parsed login_logout / survey rows.
+   * Inspect staged reports; ?normalize=1 previews the parsed login_logout / survey / agent_summary rows.
    */
   @Get('report-staging')
   @ApiOperation({ summary: 'Inspect staged Sprinklr reports (per-type counts + rows; optional normalized preview)' })

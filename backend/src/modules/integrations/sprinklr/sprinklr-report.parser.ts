@@ -19,7 +19,7 @@
  *   "Were we able to resolve your issue today?" (Yes/No) · Survey Response Count.
  */
 
-export type SprinklrReportType = 'login_logout' | 'survey' | 'agent_perf' | 'unknown';
+export type SprinklrReportType = 'login_logout' | 'survey' | 'agent_perf' | 'agent_summary' | 'unknown';
 
 /** One captured row as produced by the extension harvester (see chrome-extension/content.js). */
 export interface RawReportItem {
@@ -47,6 +47,32 @@ export interface NormalizedSurvey {
   channel: string | null;
   resolved: boolean | null;    // "Were we able to resolve?" Yes=true / No=false
   response_count: number | null;
+}
+
+/**
+ * One normalized Agent Summary row (voice/Inbound agent performance, grain = agent × day).
+ * Columns from the Director's report: Date · User · Offered · Taken · Not taken · User Email ·
+ * Unique Profiles (Agent) · Talk Time · Avg Talk Time · Hold Time · Avg Hold Time · After Call up Time
+ * (+ optional Avg After Call). Durations arrive as "03h 38m" / "02m 27s" / "12s" strings (or M_* secs).
+ */
+export interface NormalizedAgentSummary {
+  agent_email: string | null;
+  user: string | null;             // agent display name
+  day: string | null;              // YYYY-MM-DD
+  offered: number | null;          // contacts offered (received)
+  taken: number | null;            // contacts handled / answered
+  notTaken: number | null;         // missed / abandoned
+  uniqueProfiles: number | null;
+  talkSecTotal: number | null;
+  talkSecAvg: number | null;
+  holdSecTotal: number | null;
+  holdSecAvg: number | null;
+  acwSecTotal: number | null;      // After Call up Time (wrap) total
+  acwSecAvg: number | null;        // per-call ACW (derived from total/taken when the avg column is absent)
+  ahtSec: number | null;           // avg talk + avg hold + avg ACW (seconds)
+  /** the original captured row, so columns we did not map are never lost. */
+  rawSample?: RawReportItem;
+  needs_confirmation?: boolean;
 }
 
 // ── low-level value detectors ────────────────────────────────────────────────
@@ -107,6 +133,40 @@ export function toSeconds(v: any): number | null {
   return null;
 }
 
+/** "90" | "1,234" | 90 → integer, or null. */
+export function toInt(v: any): number | null {
+  if (v == null) return null;
+  if (typeof v === 'number') return Math.round(v);
+  const s = String(v).trim().replace(/,/g, '');
+  if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+  if (/^-?\d+\.\d+$/.test(s)) return Math.round(parseFloat(s));
+  return null;
+}
+
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+/** "Thu, Jul 02, 2026" | "Jul 02, 2026" | "2026-07-02" | "02/07/2026" → YYYY-MM-DD, or null. */
+export function normalizeReportDate(v: any): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (DATE_ONLY_RE.test(s)) return s;
+  const iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  // "Thu, Jul 02, 2026" / "Jul 2, 2026"
+  const named = s.match(/([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{4})/);
+  if (named) {
+    const mo = MONTHS[named[1].slice(0, 3).toLowerCase()];
+    if (mo) return `${named[3]}-${String(mo).padStart(2, '0')}-${String(+named[2]).padStart(2, '0')}`;
+  }
+  // "02/07/2026" or "2/7/2026" — assume DD/MM/YYYY (report locale)
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (dmy) return `${dmy[3]}-${String(+dmy[2]).padStart(2, '0')}-${String(+dmy[1]).padStart(2, '0')}`;
+  return null;
+}
+
 /** All scalar values of a row across dims + expandedKey (flattened, in a stable order). */
 function rowValues(item: RawReportItem): any[] {
   const vals: any[] = [];
@@ -124,7 +184,7 @@ function rowValues(item: RawReportItem): any[] {
  * families from the live agent-STATUS poll the extension already handles (whose expandedKey
  * is [id, statusLabel, loginStatusLabel] — strings, no timestamps, no Yes/No).
  */
-export function classifyReport(items: RawReportItem[]): SprinklrReportType {
+export function classifyReport(items: RawReportItem[], columns?: ReportColumn[]): SprinklrReportType {
   let email = false, yesno = false, ts = false, dateOnly = false, loginMeasure = false, channel = false;
   for (const it of items.slice(0, 50)) {
     for (const v of rowValues(it)) {
@@ -138,6 +198,9 @@ export function classifyReport(items: RawReportItem[]): SprinklrReportType {
       if (/LOGGED?_?IN|LOGIN|LOGOUT|AVAILABILITY|ONLINE_?TIME/i.test(k)) loginMeasure = true;
     }
   }
+  // Agent Summary (voice agent perf) is the MOST specific — it carries the Offered/Taken/Talk/Hold
+  // signature and NO Yes/No. Detect it before survey/login_logout so it never mis-buckets.
+  if (email && !yesno && looksLikeAgentSummary(items, columns)) return 'agent_summary';
   if (email && yesno && channel) return 'survey';
   if (email && yesno) return 'survey';
   if (ts && (loginMeasure || email)) return 'login_logout';
@@ -217,6 +280,191 @@ export function parseSurvey(items: RawReportItem[]): NormalizedSurvey[] {
       response_count: count,
     };
   });
+}
+
+// ── agent-summary (voice agent performance) ──────────────────────────────────
+export interface ReportColumn { key: string; label?: string | null; }
+
+/** Which Agent-Summary field a column header / measure key maps to (contains-rules, avg-aware). */
+type AgentSummaryField =
+  | 'email' | 'date' | 'user' | 'offered' | 'taken' | 'notTaken' | 'uniqueProfiles'
+  | 'talkTotal' | 'talkAvg' | 'holdTotal' | 'holdAvg' | 'acwTotal' | 'acwAvg' | null;
+
+const norm = (k: string) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Classify a column header / measure key to its Agent-Summary field. Works for both the human
+ * labels ("Average Talk Time", "After Call up Time", "User Email") and Sprinklr measure keys
+ * ("M_AVG_TALK_TIME", "M_AFTER_CALL_UP_TIME"). Order matters: specific/avg before generic/total.
+ */
+export function classifyAgentSummaryKey(rawKey: string): AgentSummaryField {
+  const k = norm(rawKey);
+  if (!k) return null;
+  if (k.includes('email')) return 'email';
+  if (k === 'date' || k.endsWith('date') || k.includes('day')) return 'date';
+  if (k.includes('nottaken') || k.includes('missed') || k.includes('abandon') ||
+      (k.includes('not') && k.includes('taken'))) return 'notTaken';
+  if (k.includes('offered')) return 'offered';
+  if (k.includes('taken') || k.includes('handled') || k.includes('answered')) return 'taken';
+  if (k.includes('unique')) return 'uniqueProfiles';
+  const avg = k.includes('avg') || k.includes('average');
+  if (k.includes('talk')) return avg ? 'talkAvg' : 'talkTotal';
+  if (k.includes('hold')) return avg ? 'holdAvg' : 'holdTotal';
+  if (k.includes('aftercall') || k.includes('acw') || k.includes('wrapup') || k.includes('wrap'))
+    return avg ? 'acwAvg' : 'acwTotal';
+  if (k.includes('user') || k.includes('agent') || k.includes('name')) return 'user';
+  return null;
+}
+
+/** Build a field→value cell map for one row from named dims + measures + (positional expandedKey via columns). */
+function agentSummaryCells(item: RawReportItem, columns?: ReportColumn[]): Partial<Record<Exclude<AgentSummaryField, null>, any>> {
+  const cells: Partial<Record<Exclude<AgentSummaryField, null>, any>> = {};
+  const put = (field: AgentSummaryField, val: any) => {
+    if (!field || val == null || val === '') return;
+    if (cells[field] == null) cells[field] = val; // first non-null wins
+  };
+  // named dims + measures carry their own header/measure keys
+  for (const [k, v] of Object.entries(item.dims || {})) {
+    if (k === 'key') continue;                 // numeric agent id — not a metric
+    if (k === 'groupName') { put('user', v); continue; }
+    put(classifyAgentSummaryKey(k), v);
+  }
+  for (const [k, v] of Object.entries(item.measures || {})) put(classifyAgentSummaryKey(k), v);
+  // positional dimension tuple, named by the report's declared column order when provided
+  if (Array.isArray(item.expandedKey) && columns && columns.length) {
+    item.expandedKey.forEach((val, i) => {
+      const col = columns[i];
+      if (col) put(classifyAgentSummaryKey(col.label || col.key), val);
+    });
+  }
+  return cells;
+}
+
+/**
+ * Normalize captured Agent-Summary rows. Durations ("03h 38m" / "02m 27s" / "12s") and M_* second
+ * measures both flow through toSeconds. AHT = avg talk + avg hold + avg ACW; when a column only ships
+ * the TOTAL (no per-call avg), the avg is derived as total/taken. Unmapped columns are preserved in rawSample.
+ */
+export function parseAgentSummary(items: RawReportItem[], columns?: ReportColumn[]): NormalizedAgentSummary[] {
+  return items.map((it) => {
+    const c = agentSummaryCells(it, columns);
+    const vals = rowValues(it);
+
+    // email/day resilience: fall back to a type-scan of raw values when the header didn't name them
+    const email = (c.email && isEmail(c.email) ? String(c.email) : null) ?? (vals.find(isEmail) ?? null);
+    const day = normalizeReportDate(c.date)
+      ?? (() => { for (const v of vals) { const d = normalizeReportDate(v); if (d) return d; } return null; })();
+
+    const offered = toInt(c.offered);
+    const taken = toInt(c.taken);
+    const notTaken = toInt(c.notTaken);
+    const uniqueProfiles = toInt(c.uniqueProfiles);
+
+    const talkSecTotal = toSeconds(c.talkTotal);
+    let talkSecAvg = toSeconds(c.talkAvg);
+    const holdSecTotal = toSeconds(c.holdTotal);
+    let holdSecAvg = toSeconds(c.holdAvg);
+    const acwSecTotal = toSeconds(c.acwTotal);
+    let acwSecAvg = toSeconds(c.acwAvg);
+
+    // derive per-call averages from totals when the report omitted the avg column
+    const perCall = (total: number | null) => (total != null && taken && taken > 0 ? total / taken : null);
+    if (talkSecAvg == null) talkSecAvg = perCall(talkSecTotal);
+    if (holdSecAvg == null) holdSecAvg = perCall(holdSecTotal);
+    if (acwSecAvg == null) acwSecAvg = perCall(acwSecTotal);
+
+    // AHT = avg talk + avg hold + avg ACW (whichever components exist)
+    let ahtSec: number | null = null;
+    const comps = [talkSecAvg, holdSecAvg, acwSecAvg].filter((x): x is number => x != null);
+    if (comps.length) ahtSec = Math.round(comps.reduce((s, x) => s + x, 0) * 100) / 100;
+
+    const user = (typeof c.user === 'string' && !isEmail(c.user)) ? String(c.user).trim() : null;
+    const needs = email == null || (talkSecTotal == null && offered == null && taken == null);
+
+    return {
+      agent_email: email ? String(email).toLowerCase() : null,
+      user,
+      day,
+      offered, taken, notTaken, uniqueProfiles,
+      talkSecTotal, talkSecAvg: talkSecAvg == null ? null : Math.round(talkSecAvg * 100) / 100,
+      holdSecTotal, holdSecAvg: holdSecAvg == null ? null : Math.round(holdSecAvg * 100) / 100,
+      acwSecTotal, acwSecAvg: acwSecAvg == null ? null : Math.round(acwSecAvg * 100) / 100,
+      ahtSec,
+      rawSample: it,
+      needs_confirmation: needs || undefined,
+    };
+  });
+}
+
+/** True when a captured table carries the Agent-Summary signature (Offered/Taken/Talk/Hold + email, no Yes/No). */
+export function looksLikeAgentSummary(items: RawReportItem[], columns?: ReportColumn[]): boolean {
+  let email = false, perf = false, yesno = false;
+  const noteKey = (k: string) => {
+    const f = classifyAgentSummaryKey(k);
+    if (f === 'talkTotal' || f === 'talkAvg' || f === 'holdTotal' || f === 'holdAvg' ||
+        f === 'acwTotal' || f === 'acwAvg' || f === 'offered' || f === 'taken') perf = true;
+  };
+  for (const col of (columns || [])) { noteKey(col.label || col.key || ''); if (col.label && isEmail(col.label)) {} }
+  for (const it of items.slice(0, 50)) {
+    for (const k of Object.keys(it.dims || {})) noteKey(k);
+    for (const k of Object.keys(it.measures || {})) noteKey(k);
+    for (const v of rowValues(it)) {
+      if (isEmail(v)) email = true;
+      else if (typeof v === 'string' && YESNO_RE.test(v.trim())) yesno = true;
+    }
+  }
+  return email && perf && !yesno;
+}
+
+/** Resolved cross-system identity for one agent (from employee_identity_map / sprinklr_agent_map). */
+export interface AgentIdentity { sprinklrAgentId?: string | null; employeeId?: string | null; }
+
+/** The exact agent_daily_stats column values for one Agent-Summary row (pure — DB-free, so it is unit-testable). */
+export interface AgentDailyStatUpsert {
+  stat_date: string | null;
+  sprinklr_agent_id: string | null;
+  agent_name: string | null;
+  agent_email: string | null;
+  employee_id: string | null;
+  contacts_received: number | null;   // ← offered (contacts received/demand); handled kept in extra
+  aht_seconds: number | null;          // ← computed AHT
+  avg_response_seconds: number | null; // report carries no first-response time → null
+  extra: Record<string, any>;          // talk/hold/acw seconds + offered/handled/etc. + rawRow
+}
+
+/**
+ * Map a normalized Agent-Summary row → the agent_daily_stats upsert values. agent_daily_stats has no
+ * dedicated talk/hold/acw columns, so those live in `extra`; the dedicated aht_seconds + contacts_received
+ * columns are what the Builder agent_ops source and the Inbound scorecard AHT read. When the email has no
+ * resolved numeric Sprinklr id, a deterministic `email:<addr>` key keeps the upsert idempotent (and never
+ * collides with — nor double-counts against — the live-status path, whose rows carry the busy/idle minutes).
+ */
+export function agentSummaryToStatRow(n: NormalizedAgentSummary, resolved: AgentIdentity = {}): AgentDailyStatUpsert {
+  return {
+    stat_date: n.day,
+    sprinklr_agent_id: resolved.sprinklrAgentId || (n.agent_email ? `email:${n.agent_email}` : null),
+    agent_name: n.user,
+    agent_email: n.agent_email,
+    employee_id: resolved.employeeId ?? null,
+    contacts_received: n.offered ?? n.taken ?? null,
+    aht_seconds: n.ahtSec,
+    avg_response_seconds: null,
+    extra: {
+      source: 'agent_summary',
+      offered: n.offered,
+      handled: n.taken,          // "Taken"
+      notTaken: n.notTaken,
+      uniqueProfiles: n.uniqueProfiles,
+      talkSecTotal: n.talkSecTotal,
+      talkSecAvg: n.talkSecAvg,
+      holdSecTotal: n.holdSecTotal,
+      holdSecAvg: n.holdSecAvg,
+      acwSecTotal: n.acwSecTotal,
+      acwSecAvg: n.acwSecAvg,
+      ahtSec: n.ahtSec,
+      rawRow: n.rawSample ? { dims: n.rawSample.dims, measures: n.rawSample.measures, expandedKey: n.rawSample.expandedKey } : undefined,
+    },
+  };
 }
 
 /**
