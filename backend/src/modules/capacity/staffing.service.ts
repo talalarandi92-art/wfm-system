@@ -278,8 +278,11 @@ export class StaffingService implements OnModuleInit {
           const ahtEff = volume > 0 ? ahtWeighted / volume : (shareSum > 0 ? shareAht / shareSum : 300);
           // 2-4. Erlang / concurrency / throughput → agents that must be AVAILABLE.
           // LEARNED floor: where the Sprinklr learning store has measured P90 concurrent
-          // load (Erlangs, incl. waiting) for this weekday×hour, never staff below it —
-          // measurement beats estimation (volume×AHT) when they disagree upward.
+          // load (Erlangs = inProgress ONLY — waiting is queue BACKLOG, an outcome of
+          // understaffing, not concurrent demand; Erlang already models the wait, so adding
+          // queue depth to the required-server floor double-counts and runs away on a spike)
+          // for this weekday×hour, never staff below it — measurement beats estimation
+          // (volume×AHT) when they disagree upward.
           let learnedErl = 0;
           if (!windowed || inWindow(h)) {   // deferred functions never staff outside their window
             for (const [ch, share] of Object.entries(p.channelMix)) {
@@ -818,7 +821,7 @@ export class StaffingService implements OnModuleInit {
       `SELECT channel,
               EXTRACT(DOW  FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS dow,
               EXTRACT(HOUR FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS hr,
-              PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY erlangs + waiting_avg) AS p90,
+              PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY erlangs) AS p90,
               COUNT(*)::int n
        FROM staffing_observations WHERE tenant_id = $1
        GROUP BY channel, dow, hr ORDER BY channel, dow, hr`, [tenantId]);
@@ -830,21 +833,23 @@ export class StaffingService implements OnModuleInit {
     }
     return {
       ...meta,
-      note: 'P90 measured concurrent load (Erlangs incl. waiting) per weekday×hour — the engine never staffs below these where present. aht/acw/hold learn the same way once the bridge captures handle stats.',
+      note: 'P90 measured CONCURRENT load (Erlangs = inProgress; queue WAITING is excluded — it is backlog, not concurrent demand) per weekday×hour, over ≥5 same-weekday samples — the engine never staffs below these where present. aht/acw/hold learn the same way once the bridge captures handle stats.',
       channels,
     };
   }
 
-  /** Learned P90 measured Erlangs per channel × weekday × hour (≥2 same-weekday samples). */
+  /** Learned P90 measured concurrent Erlangs (inProgress; waiting EXCLUDED) per channel ×
+   *  weekday × hour, requiring ≥5 same-weekday-hour samples so one anomalous snapshot
+   *  (e.g. a transient queue backlog) can never become a hard staffing floor. */
   async learnedCurves(tenantId: string): Promise<Record<string, Record<number, Record<number, number>>>> {
     const rows = await this.ds.query(
       `SELECT channel,
               EXTRACT(DOW  FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS dow,
               EXTRACT(HOUR FROM obs_hour AT TIME ZONE 'Asia/Kuwait')::int AS hr,
-              PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY erlangs + waiting_avg) AS p90,
+              PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY erlangs) AS p90,
               COUNT(*)::int AS n
        FROM staffing_observations WHERE tenant_id = $1
-       GROUP BY channel, dow, hr HAVING COUNT(*) >= 2`,
+       GROUP BY channel, dow, hr HAVING COUNT(*) >= 5`,
       [tenantId],
     );
     const out: Record<string, Record<number, Record<number, number>>> = {};
