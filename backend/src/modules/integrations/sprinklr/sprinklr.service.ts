@@ -396,6 +396,13 @@ export class SprinklrService {
       ...q,
       agentsAvailable: q.agentsAvailable || agentsByQueue[q.queueId]?.avail || 0,
       agentsBusy:      q.agentsBusy      || agentsByQueue[q.queueId]?.busy || 0,
+      // A3: honour the extension's per-queue freshness labels. The extension now
+      // ships {source, ageSec, staleQueue} on each queue (fresh api / dom / cache).
+      // A queue only carries stale values when it went ABSENT — never a silent 0.
+      // Prefer fresh, keep stale-labelled so RTA consumers can down-weight it.
+      source:     (q as any).source     ?? 'live',
+      ageSec:     (q as any).ageSec     ?? (snap as any).staleSec ?? 0,
+      staleQueue: (q as any).staleQueue ?? false,
     }));
 
     // Count unique agents by status — avoids double-counting agents who appear in

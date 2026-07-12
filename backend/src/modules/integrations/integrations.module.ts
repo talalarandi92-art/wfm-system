@@ -8,10 +8,12 @@ import { OdooController }     from './odoo/odoo.controller';
 import { OdooBridgeController } from './odoo/odoo-bridge.controller';
 import { AmeyoController }    from './ameyo/ameyo.controller';
 import { AmeyoService }       from './ameyo/ameyo.service';
+import { IntegrationHealthController } from './health/integration-health.controller';
+import { IntegrationHealthService }    from './health/integration-health.service';
 
 @Module({
-  controllers: [SprinklrController, SprinklrReportController, OdooController, OdooBridgeController, AmeyoController],
-  providers:   [SprinklrService, SprinklrReportService, OdooService, AmeyoService],
+  controllers: [SprinklrController, SprinklrReportController, OdooController, OdooBridgeController, AmeyoController, IntegrationHealthController],
+  providers:   [SprinklrService, SprinklrReportService, OdooService, AmeyoService, IntegrationHealthService],
   exports:     [SprinklrService, SprinklrReportService, OdooService, AmeyoService],
 })
 export class IntegrationsModule {}

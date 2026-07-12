@@ -1,5 +1,5 @@
 'use strict';
-console.log('[WFM Bridge] content.js v17.2 loaded ✓ (open-queue merge + near-live + any-*-break→break)');
+console.log('[WFM Bridge] content.js v17.3 loaded ✓ (0-queue guard: per-queue freshness merge + entityFeed no-stats guard)');
 
 const SEND_INTERVAL_MS = 8_000;   // periodic poll fallback (near-live)
 const MIN_SEND_GAP_MS  = 5_000;   // hard floor between sends. The trySend() hash-dedup
@@ -7,6 +7,11 @@ const MIN_SEND_GAP_MS  = 5_000;   // hard floor between sends. The trySend() has
                                   // CHANGES, so event-driven updates land within ~5s
                                   // without flooding the backend with identical rows.
 const CACHE_STALE_MS   = 15 * 60_000; // cached agent status older than this → 'unknown'
+// A3 — a queue observation is "fresh" for this window. Beyond it, the merged
+// snapshot still SERVES the last-known-good value (labelled stale) rather than
+// letting the queue silently collapse to 0 just because it went absent.
+const QUEUE_FRESH_MS   = 90_000;      // 90s — a live source seen within this is authoritative
+const QUEUE_TTL_MS     = 12 * 3600 * 1000; // last-known-good queues survive 12h
 
 // ── Inject page-context script ────────────────────────────────────────────────
 const script = document.createElement('script');
@@ -421,6 +426,11 @@ function harvestAndForwardReport(payloadData, opName, url) {
   } catch (e) { /* shape varies — never break live capture */ }
 }
 
+// ── entityFeedStats freshness marker (A3 guard) ───────────────────────────────
+// Timestamp of the last stats-bearing entityFeed. Lets diagnostics report how
+// fresh the authoritative queue source is.
+let entityFeedStatsAt = 0;
+
 // ── Persistent queue cache ────────────────────────────────────────────────────
 // queueId → full queue object + lastSeen. Survives page refreshes so queues
 // keep flowing to WFM even when entityFeed hasn't fired yet in this session.
@@ -428,14 +438,25 @@ let queueCache = {};
 chrome.storage.local.get('queueCache', (d) => {
   queueCache = d.queueCache || {};
   const count = Object.keys(queueCache).length;
-  if (count > 0) console.log(`[WFM Bridge] 📦 Loaded ${count} cached queues`);
+  if (count > 0) {
+    console.log(`[WFM Bridge] 📦 Loaded ${count} cached queues`);
+    // Hydrate the name-keyed freshness store so a fresh page load never starts
+    // from zero queues while entityFeed hasn't fired yet.
+    Object.values(queueCache).forEach(c => {
+      if (!c.queueName) return;
+      if (Date.now() - (c.lastSeen || 0) > QUEUE_TTL_MS) return;
+      const { lastSeen, ...q } = c;
+      queueFreshness[c.queueName] = { q, source: 'cache', at: c.lastSeen || 0,
+        nonEmptyAt: queueActivity(q) > 0 ? (c.lastSeen || 0) : 0 };
+    });
+  }
 });
 
 function updateQueueCache(queues) {
   let changed = 0;
   queues.forEach(q => {
     if (!q.queueId || !q.queueName) return;
-    if (q.queueId.startsWith('dom_')) return; // never cache DOM-scraped queues
+    if (q.queueId.startsWith('dom_')) return; // never cache DOM-scraped queues (unstable ids)
     queueCache[q.queueId] = { ...q, lastSeen: Date.now() };
     changed++;
   });
@@ -443,6 +464,79 @@ function updateQueueCache(queues) {
     chrome.storage.local.set({ queueCache });
     console.log(`[WFM Bridge] 📦 Queue cache updated: ${changed} queues, total=${Object.keys(queueCache).length}`);
   }
+}
+
+// ── A3: per-queue freshness store (name-keyed) ────────────────────────────────
+// name → { q, source, at, nonEmptyAt }. This is THE merge substrate: every live
+// pass records observations here; the snapshot is emitted from it. A queue only
+// leaves once it's older than QUEUE_TTL_MS. A queue's value drops to 0 ONLY when
+// a FRESH source of >= the priority that set the non-zero explicitly reports 0 —
+// a mere ABSENCE from a pass never zeroes it (the store keeps last-known-good).
+let queueFreshness = {};
+const QUEUE_SRC_RANK = { dom: 0, cache: 0, api: 1 }; // api (entityFeed) is authoritative
+
+function queueActivity(q) {
+  return (q?.waiting || 0) + (q?.inProgress || 0) + (q?.agentsAvailable || 0) + (q?.agentsBusy || 0);
+}
+
+// Fill only the fields the higher-priority object left blank/zero (used so a weak
+// DOM pass can enrich, but never wipe, entityFeed's real agent counts / SLA).
+function fillBlanks(base, extra) {
+  const out = { ...base };
+  for (const k of Object.keys(extra || {})) {
+    const bv = out[k], ev = extra[k];
+    if (bv === undefined || bv === null || bv === '' || bv === 0) {
+      if (ev !== undefined && ev !== null && ev !== '' && ev !== 0) out[k] = ev;
+    }
+  }
+  return out;
+}
+
+// Record one source's queues into the freshness store for THIS pass.
+function recordQueueObservations(queues, source, now) {
+  for (const q of queues) {
+    const name = q.queueName;
+    if (!name) continue;
+    const prev = queueFreshness[name];
+    const active = queueActivity(q) > 0;
+    const curRank = QUEUE_SRC_RANK[source] ?? 0;
+
+    let merged = q;
+    if (prev) {
+      const prevRank = QUEUE_SRC_RANK[prev.source] ?? 0;
+      const prevFresh = now - prev.at < QUEUE_FRESH_MS;
+      if (prevRank > curRank && prevFresh) {
+        // A fresher, higher-priority source (api) already spoke this window.
+        // A lower-priority source (dom/cache) may only BACKFILL blanks — it can
+        // never overwrite api's non-zero values (the classic DOM→0 collapse).
+        merged = fillBlanks(prev.q, q);
+        queueFreshness[name] = { q: merged, source: prev.source, at: prev.at,
+          nonEmptyAt: queueActivity(merged) > 0 ? now : prev.nonEmptyAt || 0 };
+        continue;
+      }
+      if (prevRank === curRank && prev.at === now) {
+        // Same source recorded twice in one pass — keep the richer values.
+        merged = fillBlanks(q, prev.q);
+      }
+    }
+    queueFreshness[name] = {
+      q: { ...merged, queueName: name },
+      source, at: now,
+      nonEmptyAt: active ? now : (prev?.nonEmptyAt || 0),
+    };
+  }
+}
+
+// Emit the merged queue list from the freshness store, each labelled with its
+// {source, ageSec} and a stale flag. Absent-but-recent queues survive here.
+function emitFreshnessQueues(now) {
+  const out = [];
+  for (const [name, e] of Object.entries(queueFreshness)) {
+    if (now - e.at > QUEUE_TTL_MS) { delete queueFreshness[name]; continue; }
+    const ageSec = Math.round((now - e.at) / 1000);
+    out.push({ ...e.q, queueName: name, source: e.source, ageSec, staleQueue: (now - e.at) >= QUEUE_FRESH_MS });
+  }
+  return out;
 }
 
 // Diagnostic raw samples (temporary — until the metrics parser is confirmed)
@@ -544,8 +638,14 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
         const feed = payload.data?.entityFeed || payload.data?.data?.entityFeed;
         const hasStats = Array.isArray(feed) && feed.some(i => i.workQueueStats);
         if (hasStats) {
+          // A3 guard: only the stats-bearing variant becomes the authoritative
+          // queue source, timestamped. A UserMapping entityFeed (agents/users,
+          // NO workQueueStats) can NEVER overwrite the last-known-good queues.
           sprinklrOps.set('entityFeedStats', payload.data);
+          entityFeedStatsAt = Date.now();
           console.log('[WFM Bridge] ✅ entityFeedStats saved, queues=', feed.filter(i => i.workQueueStats).length);
+        } else {
+          console.debug('[WFM Bridge] entityFeed without workQueueStats ignored for queues (last-known-good preserved)');
         }
       }
 
@@ -1122,28 +1222,38 @@ function scrapeDOM() {
 
 // ── Build final snapshot ──────────────────────────────────────────────────────
 function buildSnapshot() {
+  const now       = Date.now();
   const apiQueues = parseQueueStats();
   const apiAgents = parseEntityFeed();
   const { queues: domQ, agents: domA } = scrapeDOM();
 
-  // Save live API queues to persistent cache
+  // Save live API queues to persistent cache (cross-session survival).
   if (apiQueues.length > 0) updateQueueCache(apiQueues);
 
-  const queueMap = new Map();
-  [...apiQueues, ...domQ].forEach(q => {
-    if (q.queueName && !queueMap.has(q.queueName)) queueMap.set(q.queueName, q);
-  });
+  // A3 — record this pass's observations into the per-queue freshness store.
+  // Order matters: lowest-priority first so api can override in the same pass.
+  // A queue absent from BOTH live sources this pass keeps its last-known-good
+  // value (labelled stale) instead of collapsing to 0.
+  recordQueueObservations(domQ, 'dom', now);
+  recordQueueObservations(apiQueues, 'api', now);
 
-  // Merge cached queues (seen within last 12h) so the WFM dashboard never loses
-  // queues just because entityFeed hasn't fired yet in this tab/session.
-  const QUEUE_TTL = 12 * 3600 * 1000;
-  Object.values(queueCache).forEach(c => {
-    if (Date.now() - (c.lastSeen || 0) > QUEUE_TTL) return;
-    if (!queueMap.has(c.queueName)) {
-      const { lastSeen, ...q } = c;
-      queueMap.set(q.queueName, q);
-    }
-  });
+  const mergedQueues = emitFreshnessQueues(now);
+  const queueMap = new Map();
+  mergedQueues.forEach(q => { if (q.queueName) queueMap.set(q.queueName, q); });
+
+  // Queue-capture diagnostics (for the popup Doctor).
+  const lastNonEmptyAt = Object.values(queueFreshness)
+    .reduce((mx, e) => Math.max(mx, e.nonEmptyAt || 0), 0);
+  const queueDiag = {
+    lastMethod:     apiQueues.length ? 'entityFeed/api' : (domQ.length ? 'dom' : (queueMap.size ? 'cache' : 'none')),
+    queuesSeen:     queueMap.size,
+    apiThisPass:    apiQueues.length,
+    domThisPass:    domQ.length,
+    entityFeedAgeSec: entityFeedStatsAt ? Math.round((now - entityFeedStatsAt) / 1000) : null,
+    lastNonEmptyAt: lastNonEmptyAt || null,
+    lastNonEmptyAgoSec: lastNonEmptyAt ? Math.round((now - lastNonEmptyAt) / 1000) : null,
+    staleQueues:    mergedQueues.filter(q => q.staleQueue).length,
+  };
 
   const agentMap = new Map();
 
@@ -1216,6 +1326,7 @@ function buildSnapshot() {
     summary:       { totalWaiting, totalAvailable: totalAvail, runningCalls },
     captureMethod: apiQueues.length ? (sprinklrOps.has('entityFeedStats') ? 'api/entityFeed' : 'api')
                   : (queues.length ? 'cache' : (domQ.length ? 'dom' : 'empty')),
+    queueDiag,     // A3: per-queue capture diagnostics for the popup Doctor
     debugSamples: Object.keys(lastRawSamples).length ? lastRawSamples : undefined,
     opsDetected:   [...sprinklrOps.keys()],
   };

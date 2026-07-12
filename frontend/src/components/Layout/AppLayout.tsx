@@ -32,6 +32,7 @@ const SEARCH_PAGES: { path: string; ar: string; en: string; perm: string | null 
   { path: '/import',        ar: 'استيراد البيانات',  en: 'Data Import',      perm: 'settings.view' },
   { path: '/reports',       ar: 'التقارير',          en: 'Reports',          perm: 'reports.view' },
   { path: '/integrations/odoo', ar: 'تكامل Odoo',    en: 'Odoo Integration', perm: 'settings.edit' },
+  { path: '/integrations/health', ar: 'صحة الجسور',  en: 'Bridge Health',    perm: 'rta.view' },
   { path: '/settings',      ar: 'الإعدادات',         en: 'Settings',         perm: 'settings.view' },
 ];
 
@@ -64,6 +65,7 @@ const PAGE_TITLES: Record<string, { ar: string; en: string }> = {
   '/chief':      { ar: 'الرئيس',           en: 'The Chief'        },
   '/coaching':   { ar: 'التدريب',          en: 'Coaching'         },
   '/integrations/odoo':   { ar: 'تكامل أودو',      en: 'Odoo Integration' },
+  '/integrations/health': { ar: 'صحة الجسور',      en: 'Bridge Health'    },
 };
 
 /* ── Avatar gradient by first char ───────────────────────────────────────── */

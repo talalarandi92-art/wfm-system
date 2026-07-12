@@ -55,6 +55,13 @@ const I18N = {
     chkPushNeverFix: 'لم تصل أي لقطة بعد — تأكد أن سبرينكلر مفتوح والمزامنة مفعّلة.',
     chkPushNet: 'تعذّر الوصول للخادم', chkPushNetFix: (u) => `الخادم لا يردّ على ${u} — تأكد أنه يعمل وأن الرابط صحيح.`,
     chkPushHttp: (s) => `الخادم ردّ بخطأ ${s}`, chkPushHttpFix: 'راجع الرابط وصلاحيات الحساب (RTA) في المنصة.',
+    // A3: queue-capture health line
+    chkQueue: 'التقاط الطوابير',
+    chkQueueOk: (m, n) => `${m} · ${n} طابور محفوظ`,
+    chkQueueStale: (m, n, ago) => `${m} · ${n} طابور — آخر قيمة غير صفرية ${ago}`,
+    chkQueueNone: 'لا طوابير ملتقطة بعد',
+    chkQueueNoneFix: 'افتح Supervisor Console — تُحفظ الطوابير وتبقى ظاهرة حتى لو توقف التدفق لحظياً.',
+    chkQueueStaleFix: 'التدفق المباشر توقّف — تُعرض آخر قيمة معروفة (لا تنهار لصفر). أعد تنشيط تبويب سبرينكلر.',
   },
   en: {
     tagline: 'Sprinklr ← → WFM Platform',
@@ -108,6 +115,13 @@ const I18N = {
     chkPushNeverFix: 'No snapshot has arrived yet — make sure Sprinklr is open and sync is enabled.',
     chkPushNet: 'Server unreachable', chkPushNetFix: (u) => `The server is not responding at ${u} — check it is running and the URL is correct.`,
     chkPushHttp: (s) => `Server returned error ${s}`, chkPushHttpFix: 'Check the URL and the account permissions (RTA) on the platform.',
+    // A3: queue-capture health line
+    chkQueue: 'Queue capture',
+    chkQueueOk: (m, n) => `${m} · ${n} queues kept`,
+    chkQueueStale: (m, n, ago) => `${m} · ${n} queues — last non-empty ${ago}`,
+    chkQueueNone: 'No queues captured yet',
+    chkQueueNoneFix: 'Open the Supervisor Console — queues are cached and stay visible even if the live feed pauses.',
+    chkQueueStaleFix: 'Live feed paused — last-known-good values are shown (never collapse to 0). Re-focus the Sprinklr tab.',
   },
 };
 let lang = 'ar';
@@ -313,6 +327,20 @@ function buildDoctor(status) {
   else if (ops > 0) c.push({ level: 'bad', label: `${t.chkData}: ${t.chkDataNone}`, hint: t.chkDataFix });
   else c.push({ level: 'warn', label: `${t.chkData}: ${t.chkDataWait}`, hint: t.chkDataFix });
 
+  // 4b) Queue capture health (A3): last method, queues kept, last non-empty time.
+  // A stale-labelled queue is last-known-good served on purpose — never a silent 0.
+  const qd = snap.queueDiag || {};
+  const qKept = qd.queuesSeen ?? q;
+  const method = qd.lastMethod || (q ? 'cache' : 'none');
+  if (qKept > 0 && (qd.staleQueues || 0) === 0) {
+    c.push({ level: 'ok', label: `${t.chkQueue}: ${t.chkQueueOk(method, qKept)}` });
+  } else if (qKept > 0) {
+    const ago = qd.lastNonEmptyAt ? timeAgo(qd.lastNonEmptyAt) : '—';
+    c.push({ level: 'warn', label: `${t.chkQueue}: ${t.chkQueueStale(method, qKept, ago)}`, hint: t.chkQueueStaleFix });
+  } else if (ops > 0) {
+    c.push({ level: 'warn', label: `${t.chkQueue}: ${t.chkQueueNone}`, hint: t.chkQueueNoneFix });
+  }
+
   // 5) WFM auth
   if (isAuthErr(pushSt)) c.push({ level: 'bad', label: `${t.chkAuth}: ${t.chkAuthExpired}`, hint: t.chkAuthExpFix });
   else if (status?.hasToken || status?.hasRefreshToken) c.push({ level: 'ok', label: `${t.chkAuth}: ${t.chkAuthOk}` });
@@ -364,6 +392,11 @@ function doctorReport(status) {
     `Ops detected (${(snap.opsDetected || []).length}): ${(snap.opsDetected || []).join(', ') || 'none'}`,
     `Capture method: ${snap.captureMethod || '—'}`,
     `Queues: ${snap.queues?.length || 0} | Agents: ${snap.agents?.length || 0}`,
+    `Queue capture: method=${snap.queueDiag?.lastMethod || '—'} | kept=${snap.queueDiag?.queuesSeen ?? '—'}`
+      + ` | api/dom this pass=${snap.queueDiag?.apiThisPass ?? '—'}/${snap.queueDiag?.domThisPass ?? '—'}`
+      + ` | stale=${snap.queueDiag?.staleQueues ?? 0}`
+      + ` | last non-empty=${snap.queueDiag?.lastNonEmptyAt ? iso(snap.queueDiag.lastNonEmptyAt) : 'never'}`
+      + ` | entityFeed age=${snap.queueDiag?.entityFeedAgeSec ?? '—'}s`,
     `Auth: token=${!!status?.hasToken} refresh=${!!status?.hasRefreshToken} lastLogin=${iso(status?.lastLoginAt)}`,
     `Push: ${status?.lastPushStatus || 'never'} | last push: ${iso(status?.lastPushAt)} | pending: ${!!status?.hasPending}`,
     '',

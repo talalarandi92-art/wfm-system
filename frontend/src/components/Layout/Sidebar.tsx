@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Calendar, ClockIcon, FileText, BarChart3,
   Radio, AlertTriangle, Users, Settings, UserCog, Award,
   Upload, ChevronLeft, ChevronRight, Activity, Zap, Shuffle,
-  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit, MessageCircle, BookOpen, UserCircle, Plug, Megaphone, ClipboardCheck, CalendarCog, GraduationCap, ShieldCheck, Bot, FileBarChart, Sparkles, ShieldAlert, Crown, Gauge,
+  GitMerge, Wrench, Coffee, CalendarDays, BrainCircuit, MessageCircle, BookOpen, UserCircle, Plug, Megaphone, ClipboardCheck, CalendarCog, GraduationCap, ShieldCheck, Bot, FileBarChart, Sparkles, ShieldAlert, Crown, Gauge, ArrowRightLeft,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth.store';
 import { useUiStore } from '@/store/ui.store';
@@ -62,6 +62,7 @@ const NAV_SECTIONS = [
       { key: 'users',     icon: UserCog,  path: '/users',     permission: 'users.view' },
       { key: 'import',    icon: Upload,   path: '/import',    permission: 'settings.view' },
       { key: 'odoo',      icon: Plug,     path: '/integrations/odoo', permission: 'settings.edit' },
+      { key: 'bridgeHealth', icon: ArrowRightLeft, path: '/integrations/health', permission: 'rta.view' },
       { key: 'settings',  icon: Settings, path: '/settings',  permission: 'settings.view' },
     ],
   },

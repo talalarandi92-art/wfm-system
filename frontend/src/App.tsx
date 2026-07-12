@@ -27,6 +27,7 @@ import SkillsPage              from '@/pages/Skills';
 import WorkspaceHub           from '@/pages/WorkspaceHub';
 import AgentHome               from '@/pages/AgentHome';
 import OdooIntegrationPage     from '@/pages/OdooIntegration';
+import BridgeHealth            from '@/pages/BridgeHealth';
 import AmeyoLive               from '@/pages/AmeyoLive';
 import AppLayout from '@/components/Layout/AppLayout';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -105,6 +106,7 @@ export default function App() {
           <Route path="ops-analytics" element={<Navigate to="/analytics?tab=ops" replace />} />
           <Route path="knowledge-base" element={<Navigate to="/chat?tab=kb" replace />} />
           <Route path="integrations/odoo" element={<OdooIntegrationPage />} />
+          <Route path="integrations/health" element={<BridgeHealth />} />
           <Route path="ameyo-live" element={<AmeyoLive />} />
           <Route path="integrations/ameyo" element={<Navigate to="/ameyo-live" replace />} />
           <Route path="analytics" element={<AnalyticsHub />} />
