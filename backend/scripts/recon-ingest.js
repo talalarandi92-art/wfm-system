@@ -81,6 +81,24 @@ const MAP = {
     const rFrom = process.env.RECON_FROM || ingDates[0];
     const rTo   = process.env.RECON_TO   || ingDates[ingDates.length - 1];
 
+    // ── CRITICAL SAFETY (FIX 1 — pre-June wipe guard): NEVER DELETE roster_days earlier than the
+    //    earliest date this ingest actually CARRIES. An operator who sets RECON_FROM to a pre-June date
+    //    while the source folder holds only June+ data would otherwise DELETE the whole Jan–May history
+    //    (rows this ingest cannot replace), and the golden test — scoped to the June+ era — would still
+    //    pass vacuously. Refuse any delete-from earlier than the source floor. HARD_FLOOR is the ultimate
+    //    reconciled-era floor used when the source min can't be derived. A legitimate June rebuild
+    //    (source starts 2026-06-01) is unaffected; narrowing the range (RECON_FROM later) is fine.
+    const HARD_FLOOR = '2026-06-01';                                   // reconciled era never starts before this
+    const srcMin = ingDates[0] || HARD_FLOOR;                          // earliest work_date present in ingest.json (guarded non-empty above)
+    const deleteFloor = srcMin > HARD_FLOOR ? srcMin : HARD_FLOOR;     // whichever is LATER = the safest allowed floor
+    if (rFrom < deleteFloor) {
+      throw new Error(
+        `REFUSING pre-floor wipe: requested delete-from ${rFrom} (RECON_FROM) is earlier than the allowed floor ${deleteFloor} ` +
+        `(earliest date present in ingest.json = ${srcMin}; reconciled-era hard floor = ${HARD_FLOOR}). ` +
+        `A DELETE from ${rFrom} would wipe roster_days history this ingest cannot replace. ` +
+        `Set RECON_FROM >= ${deleteFloor} or leave it unset for a normal rebuild.`);
+    }
+
     await c.query('BEGIN');
     // BACKUP the affected range FRESH each run = a true "undo last ingest"
     await c.query(`DROP TABLE IF EXISTS roster_days_recon_bak`);

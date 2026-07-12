@@ -34,6 +34,7 @@
  */
 const XLSX = require('xlsx');
 const path = require('path');
+const fs = require('fs');
 
 const SRCDIR = process.env.RECON_SRCDIR || 'C:/Users/t.bassam/Desktop/new roster/';
 const TENANT = process.env.RECON_TENANT || 'a0000000-0000-0000-0000-000000000001';
@@ -210,10 +211,17 @@ if (require.main === module) {
           ' APPROXIMATE session(s) from agent_status_events (--from-status).');
       }
 
-      writeAoa(outPath, built.aoa);
       if (built.count === 0) {
-        console.log('[recon-emit-sprinklr] 0 sessions (awaiting live capture) — wrote header-only ' + OUT_NAME);
+        // FIX 2(a): staging (and the optional --from-status fallback) yielded nothing — do NOT overwrite
+        // the Director's manual "Login and Logout sprinklr.xlsx" with a header-only file. Leave it untouched.
+        console.log('[recon-emit-sprinklr] 0 sessions (awaiting live capture) — SKIPPING write; left existing ' +
+          OUT_NAME + ' untouched');
       } else {
+        // FIX 2(b): back up the current file before any overwrite, so a bad capture can be undone.
+        try {
+          if (fs.existsSync(outPath)) { fs.copyFileSync(outPath, outPath + '.bak'); }
+        } catch (e) { console.warn('[recon-emit-sprinklr] pre-overwrite backup skipped: ' + e.message); }
+        writeAoa(outPath, built.aoa);
         console.log('[recon-emit-sprinklr] wrote ' + built.count + ' session row(s) → ' + outPath);
       }
     } finally {

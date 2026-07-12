@@ -27,6 +27,7 @@
  */
 const XLSX = require('xlsx');
 const path = require('path');
+const fs = require('fs');
 
 const SRCDIR = process.env.RECON_SRCDIR || 'C:/Users/t.bassam/Desktop/new roster/';
 const TENANT = process.env.RECON_TENANT || 'a0000000-0000-0000-0000-000000000001';
@@ -112,10 +113,17 @@ if (require.main === module) {
         `SELECT data FROM odoo_staging WHERE tenant_id=$1 AND model='hr.attendance'`, [TENANT])
         .catch(() => ({ rows: [] }));
       const built = buildOdooFingerprint(staged.rows, TZ_OFFSET_MIN);
-      writeAoa(outPath, built.aoa);
       if (built.count === 0) {
-        console.log('[recon-emit-odoo-fingerprint] 0 rows awaiting capture — wrote header-only ' + OUT_NAME);
+        // FIX 2(a): staging is empty (no live capture yet) — do NOT overwrite the Director's manual
+        // "Odoo Fingerprint June.xlsx" with a header-only file. Leave the existing source untouched.
+        console.log('[recon-emit-odoo-fingerprint] 0 rows awaiting capture — SKIPPING write; left existing ' +
+          OUT_NAME + ' untouched');
       } else {
+        // FIX 2(b): back up the current file before any overwrite, so a bad capture can be undone.
+        try {
+          if (fs.existsSync(outPath)) { fs.copyFileSync(outPath, outPath + '.bak'); }
+        } catch (e) { console.warn('[recon-emit-odoo-fingerprint] pre-overwrite backup skipped: ' + e.message); }
+        writeAoa(outPath, built.aoa);
         console.log('[recon-emit-odoo-fingerprint] wrote ' + built.count + ' punch row(s) (skipped ' +
           built.skipped + ') → ' + outPath + '  [tz+' + TZ_OFFSET_MIN + 'm]');
       }

@@ -93,6 +93,17 @@ for (const p of [B + '/.env', B + '/../.env']) if (fs.existsSync(p)) for (const 
   // off_worked_min (non-payable) and must NEVER also sit in payable offday_ot_min. (skipped pre-migration)
   const hasOffWorked = (await c.query(`SELECT 1 FROM information_schema.columns WHERE table_name='roster_days' AND column_name='off_worked_hr_review' LIMIT 1`)).rows.length > 0;
   if (hasOffWorked) await one('OFF-worked (HR review) carries no payable off-day OT (era)', `SELECT COUNT(*) FROM roster_days WHERE is_active AND ${ERA} AND COALESCE(off_worked_hr_review,false) AND COALESCE(offday_ot_min,0) > 0`);
+  // FIX 3 (deep-risk study — anti-vacuous guard): every clamp above reads "0 violating rows", which an
+  // EMPTY table also satisfies — so a catastrophic wipe / failed rebuild could pass this suite green.
+  // Assert a MINIMUM row floor for the reconciled era. Live era count = 3,840 active rows (2026-07-12);
+  // floor set well below at 3,000 to catch any wipe / vacuous result while tolerating normal variance.
+  {
+    const MIN_ERA_ROWS = 3000;
+    const [r] = (await c.query(`SELECT COUNT(*)::int n FROM roster_days WHERE is_active AND ${ERA}`)).rows;
+    const n = +r.n;
+    if (n >= MIN_ERA_ROWS) console.log('  ✓ roster_days era row floor (' + n + ' >= ' + MIN_ERA_ROWS + ')');
+    else { failures++; console.error('  ✗ roster_days era row floor → ' + n + ' rows (< ' + MIN_ERA_ROWS + ') — vacuous/empty reconciliation, refusing green'); }
+  }
   await c.end();
   console.log(failures ? `\n❌ GOLDEN MASTER FAILED — ${failures} assertion(s). A pay rule changed or a rebuild violated a clamp.` : '\n✅ GOLDEN MASTER PASS — the pay rules hold.');
   process.exit(failures ? 1 : 0);
