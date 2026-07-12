@@ -2,11 +2,36 @@ import { useState, useEffect, useCallback } from 'react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { StatTile, Gauge } from '@/components/dazzle';
+import { tp } from '@/components/ds';
 import {
   Phone, MessageSquare, Mail, Zap, Users, TrendingUp, TrendingDown,
   AlertTriangle, CheckCircle, BarChart3, RefreshCw, ChevronDown, ChevronUp,
   Info, Calculator, Target, Clock, Activity, Minus, ShoppingBag, ArrowRight,
 } from 'lucide-react';
+
+/* ── Theme-aware neutral tokens (same shape as ScheduleChanges/Calendar) ─────────
+   Centralizes Capacity's card / border / input / chip surfaces + secondary/body
+   text. Dark keeps the page's original explicit values; light mirrors them (white
+   cards + slate borders + tinted inputs so panels read on the light bg). Primary
+   headings use the ds tp() helper. Semantic hues (blue/emerald/amber/red accents,
+   occupancy status) stay inline. `tip` is a floating tooltip kept dark in BOTH
+   themes on purpose. Residual neutral literals live only in this block. */
+const T = (dark: boolean) => ({
+  card:        dark ? 'rgba(255,255,255,0.03)' : '#ffffff',
+  cardBorder:  dark ? 'rgba(255,255,255,0.08)' : '#e2e8f0',
+  cardSoft:    dark ? 'rgba(255,255,255,0.02)' : '#ffffff',
+  borderSoft:  dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)',
+  border2:     dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+  panel2:      dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+  panel2Bd:    dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+  input:       dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+  inputBorder: dark ? 'rgba(255,255,255,0.1)'  : 'rgba(0,0,0,0.1)',
+  chip:        dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+  chip2:       dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+  tBody:       dark ? '#e2e8f0' : '#0f172a',
+  tRow:        dark ? '#e2e8f0' : '#1e293b',
+  tip:         dark ? '#0f1527' : '#1e293b',    // floating tooltip — dark in BOTH themes on purpose
+});
 
 /* ─────────────────────────────────────────────────────────────────────────────
  *  TYPES
@@ -213,7 +238,7 @@ function IntervalChart({ result, dark, ar }: { result: CapacityResult; dark: boo
               <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 group relative" style={{ minWidth: 22 }}>
                 {/* tooltip */}
                 <div className="absolute -top-1 hidden group-hover:block z-10 px-2 py-1 rounded-lg text-[9px] whitespace-nowrap"
-                  style={{ background: dark ? '#0f1527' : '#1e293b', color: '#fff', bottom: H + 4 }}>
+                  style={{ background: T(dark).tip, color: '#fff', bottom: H + 4 }}>
                   {r.intervalStart} · req {r.requiredHcWithShrinkage} · sched {r.scheduledHc}{understaffed ? ` · gap ${r.gap}` : ''}
                 </div>
                 <div className="flex items-end gap-0.5" style={{ height: H }}>
@@ -239,6 +264,7 @@ function ResultsTable({ result, dark, ar }: { result: CapacityResult; dark: bool
   const visible = showAll ? intervals : intervals.slice(0, 12);
 
   const isVoice = result.channelType === 'voice';
+  const t = T(dark);
 
   return (
     <div>
@@ -261,11 +287,11 @@ function ResultsTable({ result, dark, ar }: { result: CapacityResult; dark: bool
 
       {/* occupancy dial — the headline staffing-health metric, interpreted */}
       <div className="rounded-2xl border p-4 mb-4 flex flex-col items-center sm:flex-row sm:items-center sm:gap-5"
-        style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#fff', borderColor: dark ? 'rgba(255,255,255,0.08)' : '#e2e8f0' }}>
+        style={{ background: t.card, borderColor: t.cardBorder }}>
         <Gauge value={Math.round(result.avgOccupancy * 100)} label={ar ? 'متوسط الإشغال' : 'Avg Occupancy'}
           color={result.avgOccupancy > 0.9 ? '#ef4444' : result.avgOccupancy > 0.8 ? '#f59e0b' : '#22c55e'} size={150} />
         <div className="flex-1 text-xs leading-relaxed mt-2 sm:mt-0" style={{ color: dark ? '#94a3b8' : '#64748b' }}>
-          <div className="font-bold mb-1" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{ar ? 'صحّة الإشغال' : 'Occupancy health'}</div>
+          <div className="font-bold mb-1" style={{ color: tp(dark) }}>{ar ? 'صحّة الإشغال' : 'Occupancy health'}</div>
           {result.avgOccupancy > 0.9
             ? (ar ? 'الفريق محمّل فوق 90% — خطر إرهاق وتدهور SLA؛ أضف تغطية أو أوفرتايم.' : 'Loaded above 90% — burnout & SLA risk; add coverage or OT.')
             : result.avgOccupancy > 0.8
@@ -596,8 +622,9 @@ export default function CapacityPage() {
   /* ─────────────────────────────────────────────────────────────────────────
    *  RENDER
    * ────────────────────────────────────────────────────────────────────────*/
+  const t = T(dark);
   return (
-    <div className="min-h-screen p-5 sm:p-6" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)', color: dark ? '#e2e8f0' : '#0f172a' }}>
+    <div className="min-h-screen p-5 sm:p-6" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)', color: t.tBody }}>
       {/* Header — modern icon-chip style, consistent with the rest of the app */}
       <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
         <div className="flex items-center gap-3">
@@ -606,7 +633,7 @@ export default function CapacityPage() {
             <Calculator size={20} style={{ color: '#3b82f6' }} />
           </div>
           <div>
-            <h1 className="text-xl font-bold" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
+            <h1 className="text-xl font-bold" style={{ color: tp(dark) }}>
               {ar ? 'تخطيط الطاقة الاستيعابية' : 'Capacity Planning'}
             </h1>
             <p className="text-xs mt-0.5" style={{ color: '#64748b' }}>
@@ -620,7 +647,7 @@ export default function CapacityPage() {
             value={date}
             onChange={e => setDate(e.target.value)}
             className="text-xs rounded-xl px-3 py-2 outline-none"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: dark ? '#e2e8f0' : '#0f172a' }}
+            style={{ background: t.input, border: `1px solid ${t.inputBorder}`, color: t.tBody }}
           />
           <button onClick={loadOverview}
             className="flex items-center justify-center w-9 h-9 rounded-xl"
@@ -650,20 +677,20 @@ export default function CapacityPage() {
               onClick={() => { const fn = functions.find(f => f.id === row.function_id); if (fn) selectFunc(fn); }}
               className="rounded-2xl p-3 text-start transition-all"
               style={{
-                background: sel ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.02)',
-                border: `1px solid ${sel ? 'rgba(59,130,246,0.45)' : 'rgba(255,255,255,0.07)'}`,
+                background: sel ? 'rgba(59,130,246,0.12)' : t.cardSoft,
+                border: `1px solid ${sel ? 'rgba(59,130,246,0.45)' : t.borderSoft}`,
                 boxShadow: sel ? '0 4px 16px rgba(59,130,246,0.15)' : 'none',
               }}>
               <div className="flex items-center justify-between mb-2">
-                <span className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: t.chip }}>
                   <Icon size={14} className={meta.color} />
                 </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded uppercase font-mono" style={{ background: 'rgba(255,255,255,0.05)', color: '#64748b' }}>{row.channel_type}</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded uppercase font-mono" style={{ background: t.chip2, color: '#64748b' }}>{row.channel_type}</span>
               </div>
-              <div className="font-semibold text-sm truncate mb-1.5" style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>{row.func_name}</div>
+              <div className="font-semibold text-sm truncate mb-1.5" style={{ color: tp(dark) }}>{row.func_name}</div>
               <div className="flex items-end justify-between">
                 <div>
-                  <div className="text-2xl font-bold leading-none" style={{ color: sel ? '#60a5fa' : (dark ? '#f1f5f9' : '#0f172a') }}>{row.scheduled_hc}</div>
+                  <div className="text-2xl font-bold leading-none" style={{ color: sel ? '#60a5fa' : tp(dark) }}>{row.scheduled_hc}</div>
                   <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>{ar ? 'مجدول اليوم' : 'scheduled'}</div>
                 </div>
                 <div className="text-end text-[10px]" style={{ color: '#64748b' }}>
@@ -699,13 +726,13 @@ export default function CapacityPage() {
         </div>
 
         {savedScenarios.length > 0 && (
-          <div className="mb-3 rounded-xl p-3" style={{ background: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', border: `0.5px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}` }}>
+          <div className="mb-3 rounded-xl p-3" style={{ background: t.panel2, border: `0.5px solid ${t.panel2Bd}` }}>
             <div className="text-xs font-semibold mb-2" style={{ color: dark ? '#cbd5e1' : '#475569' }}>{ar ? `السيناريوهات المحفوظة (${savedScenarios.length})` : `Saved scenarios (${savedScenarios.length})`}</div>
             <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
               {savedScenarios.map((s: any) => (
-                <div key={s.id} className="flex items-center justify-between rounded-lg px-2.5 py-1.5" style={{ background: dark ? 'rgba(255,255,255,0.03)' : '#fff', border: `0.5px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'}` }}>
+                <div key={s.id} className="flex items-center justify-between rounded-lg px-2.5 py-1.5" style={{ background: t.card, border: `0.5px solid ${t.border2}` }}>
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold truncate" style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>{s.name}</div>
+                    <div className="text-xs font-semibold truncate" style={{ color: t.tRow }}>{s.name}</div>
                     <div className="text-[10px]" style={{ color: dark ? '#64748b' : '#94a3b8' }}>
                       {s.channel} · {s.scenario_type || 'base'}
                       {s.results?.summary?.peakErlangs != null && ` · ${ar ? 'ذروة' : 'peak'} ${s.results.summary.peakErlangs}`}

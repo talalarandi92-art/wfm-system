@@ -8,6 +8,27 @@ import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { card as cardStyle, tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 
+/* ── Theme-aware neutral tokens (same shape as ScheduleChanges/Calendar) ─────────
+   The rows/inputs were authored dark-only; these tokens give the card / row-border /
+   search & link inputs / expand panel / primary text a proper light mirror (white
+   surfaces + slate borders + tinted inputs so the controls read on light). Headings
+   use the ds tp()/ts() helpers. Semantic link/role/status hues stay inline. Primary
+   text stays on the page's own #e2e8f0 (not ds #f1f5f9) to avoid a shift. Residual
+   neutral literals live only in this block. */
+const T = (dark: boolean) => ({
+  card:        dark ? 'rgba(255,255,255,0.02)' : '#ffffff',
+  border:      dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)',
+  rowBorder:   dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)',
+  input:       dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+  inputBorder: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+  field:       dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+  fieldBorder: dark ? 'rgba(255,255,255,0.1)'  : 'rgba(0,0,0,0.1)',
+  suggBg:      dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+  suggBorder:  dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)',
+  expandBg:    dark ? 'rgba(0,0,0,0.15)'       : 'rgba(0,0,0,0.03)',
+  tPri:        dark ? '#e2e8f0'                : '#0f172a',
+});
+
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface LinkedEmp {
   employeeNo: string;
@@ -63,6 +84,7 @@ const ROLE_LABEL: Record<string, string> = {
 /* ─── Page ──────────────────────────────────────────────────────────────── */
 export default function UserManagementPage() {
   const { lang, dark } = useUiStore();
+  const t = T(dark);
   const ar = lang === 'ar';
   useInjectDsStyles();
 
@@ -214,9 +236,9 @@ export default function UserManagementPage() {
           placeholder={ar ? 'بحث بالاسم أو البريد...' : 'Search by name or email...'}
           className="w-full rounded-xl text-sm py-2.5 outline-none"
           style={{
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            color: '#e2e8f0',
+            background: t.input,
+            border: `1px solid ${t.inputBorder}`,
+            color: t.tPri,
             paddingInlineStart: 36,
             paddingInlineEnd: 12,
           }}
@@ -231,13 +253,14 @@ export default function UserManagementPage() {
         </div>
       ) : (
         <div className="rounded-2xl overflow-hidden"
-          style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          style={{ background: t.card, border: `1px solid ${t.border}` }}>
 
           {users.map((user, idx) => (
             <UserRowComp
               key={user.id}
               user={user}
               ar={ar}
+              dark={dark}
               isExpanded={expandedId === user.id}
               onExpand={() => expand(user.id)}
               isLast={idx === users.length - 1}
@@ -286,6 +309,7 @@ export default function UserManagementPage() {
 interface RowProps {
   user: UserRow;
   ar: boolean;
+  dark: boolean;
   isExpanded: boolean;
   onExpand: () => void;
   isLast: boolean;
@@ -301,14 +325,15 @@ interface RowProps {
 }
 
 function UserRowComp({
-  user, ar, isExpanded, onExpand, isLast,
+  user, ar, dark, isExpanded, onExpand, isLast,
   suggestions, sugLoading, empSearch, setEmpSearch,
   empResults, empSearching, linking, onLink, onUnlink,
 }: RowProps) {
   const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email;
+  const t = T(dark);
 
   return (
-    <div style={{ borderBottom: isLast ? 'none' : '1px solid rgba(255,255,255,0.05)' }}>
+    <div style={{ borderBottom: isLast ? 'none' : `1px solid ${t.rowBorder}` }}>
 
       {/* ── Main row ─────────────────────────────────────────────────────── */}
       <div
@@ -333,7 +358,7 @@ function UserRowComp({
         {/* Name + email */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold truncate" style={{ color: '#e2e8f0' }}>
+            <span className="text-sm font-semibold truncate" style={{ color: t.tPri }}>
               {fullName}
             </span>
             {/* Status badge */}
@@ -403,7 +428,7 @@ function UserRowComp({
       {isExpanded && (
         <div
           className="px-4 pb-5 pt-1"
-          style={{ background: 'rgba(0,0,0,0.15)' }}
+          style={{ background: t.expandBg }}
           onClick={e => e.stopPropagation()}
         >
           {/* Current link info */}
@@ -470,6 +495,7 @@ function UserRowComp({
                     functionName={s.function_name}
                     score={s.score}
                     ar={ar}
+                    dark={dark}
                     linking={linking}
                     onLink={onLink}
                     alreadyLinked={user.employeeId === s.id}
@@ -489,9 +515,9 @@ function UserRowComp({
               placeholder={ar ? 'أو ابحث عن موظف...' : 'Or search for an employee...'}
               className="w-full rounded-xl text-sm py-2 outline-none"
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                color: '#e2e8f0',
+                background: t.field,
+                border: `1px solid ${t.fieldBorder}`,
+                color: t.tPri,
                 paddingInlineStart: 30,
                 paddingInlineEnd: empSearch ? 30 : 10,
               }}
@@ -525,6 +551,7 @@ function UserRowComp({
                   functionName={e.functionName}
                   score={null}
                   ar={ar}
+                  dark={dark}
                   linking={linking}
                   onLink={onLink}
                   alreadyLinked={user.employeeId === e.id}
@@ -546,22 +573,23 @@ function UserRowComp({
 /* ─── SuggestionCard ──────────────────────────────────────────────────────── */
 function SuggestionCard({
   id, employeeNo, fullName, functionName, score,
-  ar, linking, onLink, alreadyLinked,
+  ar, dark, linking, onLink, alreadyLinked,
 }: {
   id: string; employeeNo: string; fullName: string; functionName: string | null;
-  score: number | null; ar: boolean; linking: boolean; onLink: (id: string) => void;
+  score: number | null; ar: boolean; dark: boolean; linking: boolean; onLink: (id: string) => void;
   alreadyLinked: boolean;
 }) {
+  const t = T(dark);
   return (
     <div
       className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl"
       style={{
         background: alreadyLinked
           ? 'rgba(16,185,129,0.08)'
-          : 'rgba(255,255,255,0.04)',
+          : t.suggBg,
         border: alreadyLinked
           ? '1px solid rgba(16,185,129,0.2)'
-          : '1px solid rgba(255,255,255,0.07)',
+          : `1px solid ${t.suggBorder}`,
       }}
     >
       <div className="flex items-center gap-2.5 min-w-0">
@@ -572,7 +600,7 @@ function SuggestionCard({
           {fullName[0]?.toUpperCase()}
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-medium truncate" style={{ color: '#e2e8f0' }}>{fullName}</div>
+          <div className="text-sm font-medium truncate" style={{ color: t.tPri }}>{fullName}</div>
           <div className="flex items-center gap-2 text-[10px]" style={{ color: '#64748b' }}>
             <span>#{employeeNo}</span>
             {functionName && (

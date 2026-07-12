@@ -9,6 +9,31 @@ import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { card as cardStyle, tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 
+/* ── Theme-aware neutral tokens (same shape as ScheduleChanges/Calendar) ─────────
+   Centralizes Employees' input / field / select / chip surfaces, table-head +
+   expand/edit panels, and primary field text. Dark keeps the page's original
+   explicit values; light mirrors them (light-tinted fields + slate borders so the
+   controls read on the white card). Primary field text stays on the page's own
+   #e2e8f0 (not the ds #f1f5f9) to avoid a shift; headings/labels already use the ds
+   tp()/ts() helpers. Semantic status/role hues stay inline. Residual neutral
+   literals live only in this block. */
+const T = (dark: boolean) => ({
+  input:        dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+  inputBorder:  dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+  field:        dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+  fieldBorder:  dark ? 'rgba(255,255,255,0.1)'  : 'rgba(0,0,0,0.1)',
+  selectBg:     dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)',
+  selectBorder: dark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.09)',
+  chip:         dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+  softChip:     dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)',
+  headBg:       dark ? 'rgba(0,0,0,0.2)'        : 'rgba(0,0,0,0.03)',
+  headBorder:   dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+  divider:      dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)',
+  expandBg:     dark ? 'rgba(0,0,0,0.12)'       : 'rgba(0,0,0,0.02)',
+  editBg:       dark ? 'rgba(0,0,0,0.15)'       : 'rgba(0,0,0,0.02)',
+  tPri:         dark ? '#e2e8f0'                : '#0f172a',
+});
+
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface Employee {
   id: string;
@@ -56,6 +81,7 @@ export default function EmployeesPage() {
   const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
   useInjectDsStyles();
+  const t = T(dark);
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [total, setTotal]         = useState(0);
@@ -213,8 +239,8 @@ export default function EmployeesPage() {
             placeholder={ar ? 'بحث بالاسم أو الرقم...' : 'Search by name or employee #...'}
             className="w-full rounded-xl text-sm py-2.5 outline-none"
             style={{
-              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-              color: '#e2e8f0', paddingInlineStart: 36, paddingInlineEnd: 12,
+              background: t.input, border: `1px solid ${t.inputBorder}`,
+              color: t.tPri, paddingInlineStart: 36, paddingInlineEnd: 12,
             }}
           />
         </div>
@@ -222,8 +248,8 @@ export default function EmployeesPage() {
           onClick={() => setFiltersOpen(o => !o)}
           className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-colors"
           style={{
-            background: filtersOpen ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${filtersOpen ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.08)'}`,
+            background: filtersOpen ? 'rgba(99,102,241,0.15)' : t.input,
+            border: `1px solid ${filtersOpen ? 'rgba(99,102,241,0.3)' : t.inputBorder}`,
             color: filtersOpen ? '#818cf8' : '#94a3b8',
           }}
         >
@@ -243,7 +269,7 @@ export default function EmployeesPage() {
         >
           {/* Status */}
           <FilterSelect
-            value={statusF} onChange={setStatusF}
+            value={statusF} onChange={setStatusF} dark={dark}
             placeholder={ar ? 'الحالة' : 'Status'}
             options={[
               { value: 'active',     label: ar ? 'نشط' : 'Active' },
@@ -254,13 +280,13 @@ export default function EmployeesPage() {
           />
           {/* Function */}
           <FilterSelect
-            value={functionF} onChange={setFunctionF}
+            value={functionF} onChange={setFunctionF} dark={dark}
             placeholder={ar ? 'الوظيفة' : 'Function'}
             options={functions.map(f => ({ value: f.id, label: f.name }))}
           />
           {/* Type */}
           <FilterSelect
-            value={typeF} onChange={setTypeF}
+            value={typeF} onChange={setTypeF} dark={dark}
             placeholder={ar ? 'نوع التوظيف' : 'Type'}
             options={[
               { value: 'full_time',  label: ar ? 'دوام كامل' : 'Full Time' },
@@ -271,7 +297,7 @@ export default function EmployeesPage() {
           />
           {/* Gender */}
           <FilterSelect
-            value={genderF} onChange={setGenderF}
+            value={genderF} onChange={setGenderF} dark={dark}
             placeholder={ar ? 'الجنس' : 'Gender'}
             options={[
               { value: 'male',   label: ar ? 'ذكر' : 'Male' },
@@ -297,8 +323,8 @@ export default function EmployeesPage() {
               style={{
                 gridTemplateColumns: '1fr 1fr 120px 100px 100px 36px',
                 color: tsColor(dark),
-                borderBottom: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-                background: dark ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.03)',
+                borderBottom: `1px solid ${t.headBorder}`,
+                background: t.headBg,
               }}
             >
               <span>{ar ? 'الموظف' : 'Employee'}</span>
@@ -351,7 +377,7 @@ export default function EmployeesPage() {
                     onClick={() => goPage(p)}
                     className="w-7 h-7 rounded-lg text-xs font-medium transition-colors"
                     style={{
-                      background: p === page ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.05)',
+                      background: p === page ? 'rgba(99,102,241,0.3)' : t.chip,
                       color: p === page ? '#818cf8' : '#64748b',
                       border: p === page ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
                     }}
@@ -402,7 +428,8 @@ function EmployeeRow({
 }) {
   const ss = STATUS_STYLE[emp.status] ?? { bg: 'rgba(100,116,139,0.12)', color: '#94a3b8', label: emp.status };
   const typeStyle = TYPE_STYLE[emp.employmentType] ?? { bg: 'rgba(100,116,139,0.12)', color: '#94a3b8' };
-  const dividerColor = dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)';
+  const t = T(dark);
+  const dividerColor = t.divider;
 
   return (
     <div style={{ borderBottom: isLast ? 'none' : `1px solid ${dividerColor}` }}>
@@ -499,7 +526,7 @@ function EmployeeRow({
       {isExpanded && !isEditing && (
         <div
           className="px-4 pb-4 pt-1"
-          style={{ background: dark ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.02)' }}
+          style={{ background: t.expandBg }}
           onClick={e => e.stopPropagation()}
         >
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
@@ -515,7 +542,7 @@ function EmployeeRow({
               color={emp.userId ? '#34d399' : '#f59e0b'} />
           </div>
           {emp.notes && (
-            <div className="text-xs mb-3 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', color: '#94a3b8' }}>
+            <div className="text-xs mb-3 px-3 py-2 rounded-xl" style={{ background: t.softChip, color: '#94a3b8' }}>
               {emp.notes}
             </div>
           )}
@@ -534,7 +561,7 @@ function EmployeeRow({
       {isEditing && (
         <div
           className="px-4 pb-4 pt-2"
-          style={{ background: dark ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.02)', borderTop: '1px solid rgba(99,102,241,0.15)' }}
+          style={{ background: t.editBg, borderTop: '1px solid rgba(99,102,241,0.15)' }}
           onClick={e => e.stopPropagation()}
         >
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
@@ -547,7 +574,7 @@ function EmployeeRow({
                 value={editStatus}
                 onChange={e => setEditStatus(e.target.value)}
                 className="w-full rounded-xl text-sm py-2 px-3 outline-none"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }}
+                style={{ background: t.field, border: `1px solid ${t.fieldBorder}`, color: t.tPri }}
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
@@ -566,7 +593,7 @@ function EmployeeRow({
                 value={editPF}
                 onChange={e => setEditPF(e.target.value)}
                 className="w-full rounded-xl text-sm py-2 px-3 outline-none"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }}
+                style={{ background: t.field, border: `1px solid ${t.fieldBorder}`, color: t.tPri }}
               />
             </div>
             {/* Notes */}
@@ -578,7 +605,7 @@ function EmployeeRow({
                 value={editNotes}
                 onChange={e => setEditNotes(e.target.value)}
                 className="w-full rounded-xl text-sm py-2 px-3 outline-none"
-                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }}
+                style={{ background: t.field, border: `1px solid ${t.fieldBorder}`, color: t.tPri }}
               />
             </div>
           </div>
@@ -626,18 +653,19 @@ function DetailItem({ label, value, icon: Icon, color = '#94a3b8' }: {
 }
 
 /* ─── FilterSelect ────────────────────────────────────────────────────────── */
-function FilterSelect({ value, onChange, placeholder, options }: {
+function FilterSelect({ value, onChange, placeholder, options, dark }: {
   value: string; onChange: (v: string) => void;
-  placeholder: string; options: { value: string; label: string }[];
+  placeholder: string; options: { value: string; label: string }[]; dark: boolean;
 }) {
+  const t = T(dark);
   return (
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
       className="w-full rounded-xl text-sm py-2 px-3 outline-none"
       style={{
-        background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)',
-        color: value ? '#e2e8f0' : '#64748b',
+        background: t.selectBg, border: `1px solid ${t.selectBorder}`,
+        color: value ? t.tPri : '#64748b',
       }}
     >
       <option value="">{placeholder}</option>

@@ -10,6 +10,21 @@ import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 import { StatTile } from '@/components/dazzle';
 
+/* ── Theme-aware neutral tokens (same shape as ScheduleChanges/Calendar) ─────────
+   The Chief page was authored dark-only; these tokens give its panel / border /
+   divider / chip neutrals a proper light mirror (white cards + slate borders so the
+   surfaces read on the light bg). Headings use the ds tp()/ts() helpers. Semantic
+   posture/status hues (gold, green/amber/red) and brand indigo stay inline. `sheen`
+   is the faint gradient tail of the posture banner. Residual neutral literals live
+   only in this block. */
+const T = (dark: boolean) => ({
+  card:    dark ? 'rgba(255,255,255,0.02)' : '#ffffff',
+  border:  dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)',
+  divider: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.05)',
+  chip:    dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.04)',
+  sheen:   dark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.4)',
+});
+
 type Sev = 'risk' | 'caution' | 'ok' | 'info';
 interface Domain { key: string; label: string; sev: Sev; line: string }
 interface Priority { sev: Sev; domain: string; title: string; action: string }
@@ -92,6 +107,7 @@ export default function ChiefPage() {
   const revert = async (id: string) => { setBusy(true); try { await apiClient.post(`/automode/decisions/${id}/revert`); await load(); } catch { /* noop */ } setBusy(false); };
 
   const posture = data ? SEV[data.posture] : SEV.info;
+  const t = T(dark);
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'} style={{ background: 'var(--bg)' }}>
@@ -117,7 +133,7 @@ export default function ChiefPage() {
       ) : (
         <div className="space-y-4">
           {/* Posture + directive banner */}
-          <div className="rounded-2xl p-5" style={{ background: `linear-gradient(135deg, ${posture.color}1a, rgba(255,255,255,0.02))`, border: `1px solid ${posture.color}40` }}>
+          <div className="rounded-2xl p-5" style={{ background: `linear-gradient(135deg, ${posture.color}1a, ${t.sheen})`, border: `1px solid ${posture.color}40` }}>
             <div className="flex items-center gap-3 mb-2">
               <span className="text-xs font-bold px-2.5 py-1 rounded-lg" style={{ background: posture.color, color: '#0b0f1c' }}>{ar ? 'الوضع العام' : 'Posture'}: {ar ? posture.ar : posture.en}</span>
               <span className="text-[11px]" style={{ color: '#64748b' }}>{data.date}{data.llm ? '' : ` · ${ar ? 'موجز قواعدي' : 'rule-based'}`}</span>
@@ -142,7 +158,7 @@ export default function ChiefPage() {
             {data.domains.map(d => {
               const s = SEV[d.sev]; const Ic = DICON[d.key] ?? Activity;
               return (
-                <div key={d.key} className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${s.color}2e` }}>
+                <div key={d.key} className="rounded-2xl p-4" style={{ background: t.card, border: `1px solid ${s.color}2e` }}>
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="flex items-center gap-2"><Ic size={15} style={{ color: s.color }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{d.label}</span></div>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${s.color}1a`, color: s.color }}>{ar ? s.ar : s.en}</span>
@@ -154,8 +170,8 @@ export default function ChiefPage() {
           </div>
 
           {/* Prioritized directives */}
-          <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}><Target size={14} style={{ color: '#eab308' }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'أولويات القيادة' : 'Command priorities'}</span></div>
+          <div className="rounded-2xl overflow-hidden" style={{ background: t.card, border: `1px solid ${t.border}` }}>
+            <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${t.border}` }}><Target size={14} style={{ color: '#eab308' }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'أولويات القيادة' : 'Command priorities'}</span></div>
             {data.priorities.length === 0 ? (
               <p className="text-xs py-6 text-center" style={{ color: '#22c55e' }}>{ar ? 'لا مخاطر بارزة عبر الفريق' : 'No notable risks across the team'}</p>
             ) : (
@@ -163,7 +179,7 @@ export default function ChiefPage() {
                 {data.priorities.map((p, i) => {
                   const s = SEV[p.sev];
                   return (
-                    <div key={i} className="flex items-start gap-3 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    <div key={i} className="flex items-start gap-3 px-4 py-3" style={{ borderBottom: `1px solid ${t.divider}` }}>
                       <span className="text-xs font-bold tabular-nums mt-0.5" style={{ color: s.color, minWidth: 18 }}>{i + 1}</span>
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded mt-0.5" style={{ background: `${s.color}1a`, color: s.color }}>{p.domain}</span>
                       <div className="flex-1 min-w-0">
@@ -179,7 +195,7 @@ export default function ChiefPage() {
 
           {/* Auto Mode — the deputy */}
           {data.autoMode && (
-            <div className="rounded-2xl p-4" style={{ background: data.autoMode.enabled ? 'rgba(234,179,8,0.06)' : 'rgba(255,255,255,0.02)', border: `1px solid ${data.autoMode.enabled ? 'rgba(234,179,8,0.3)' : 'rgba(255,255,255,0.06)'}` }}>
+            <div className="rounded-2xl p-4" style={{ background: data.autoMode.enabled ? 'rgba(234,179,8,0.06)' : t.card, border: `1px solid ${data.autoMode.enabled ? 'rgba(234,179,8,0.3)' : t.border}` }}>
               <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
                 <div className="flex items-center gap-2">
                   <Zap size={15} style={{ color: data.autoMode.enabled ? '#eab308' : '#64748b' }} />
@@ -193,8 +209,8 @@ export default function ChiefPage() {
               </div>
               <p className="text-[11px] mb-3" style={{ color: '#94a3b8' }}>{ar ? 'يوافق على الطلبات تلقائياً عند وجود فائض تغطية آمن، ويترك الباقي لك. الرفض التلقائي اختياري (حساس). كل قرار مُسجّل وقابل للتراجع.' : 'Auto-approves when coverage surplus is safe; holds the rest. Auto-reject is opt-in (sensitive). Every action is logged and reversible.'}</p>
               <div className="flex items-center gap-2 flex-wrap mb-3">
-                <Toggle on={data.autoMode.autoApprove} label={ar ? 'موافقة تلقائية' : 'auto-approve'} onClick={() => saveAuto({ autoApprove: !data.autoMode!.autoApprove })} busy={busy} color="#22c55e" />
-                <Toggle on={data.autoMode.autoReject} label={ar ? 'رفض تلقائي (حساس)' : 'auto-reject (sensitive)'} onClick={() => saveAuto({ autoReject: !data.autoMode!.autoReject })} busy={busy} color="#ef4444" />
+                <Toggle on={data.autoMode.autoApprove} label={ar ? 'موافقة تلقائية' : 'auto-approve'} onClick={() => saveAuto({ autoApprove: !data.autoMode!.autoApprove })} busy={busy} color="#22c55e" dark={dark} />
+                <Toggle on={data.autoMode.autoReject} label={ar ? 'رفض تلقائي (حساس)' : 'auto-reject (sensitive)'} onClick={() => saveAuto({ autoReject: !data.autoMode!.autoReject })} busy={busy} color="#ef4444" dark={dark} />
               </div>
               {/* Editable allowed request types — click to include/exclude from Auto Mode */}
               <div className="flex items-center gap-1.5 flex-wrap mb-3">
@@ -215,9 +231,9 @@ export default function ChiefPage() {
                         onClick={() => saveAuto({ allowedTypes: on ? current.filter(c => c !== code) : [...current, code] })}
                         className="text-[11px] px-2 py-1 rounded-lg transition-all disabled:opacity-50"
                         style={{
-                          background: on ? 'rgba(99,102,241,0.16)' : 'rgba(255,255,255,0.03)',
+                          background: on ? 'rgba(99,102,241,0.16)' : t.chip,
                           color: on ? '#a5b4fc' : '#64748b',
-                          border: `1px solid ${on ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                          border: `1px solid ${on ? 'rgba(99,102,241,0.4)' : t.border}`,
                         }}>
                         {on ? '✓ ' : ''}{ar ? lbl.ar : lbl.en}
                       </button>
@@ -259,7 +275,7 @@ export default function ChiefPage() {
               {decisions.length > 0 && (
                 <div className="space-y-1 mt-2">
                   {decisions.filter(d => d.decision !== 'hold').slice(0, 6).map(d => (
-                    <div key={d.id} className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <div key={d.id} className="flex items-center gap-2 text-[11px] px-2 py-1.5 rounded-lg" style={{ background: t.card }}>
                       <span className="font-bold px-1.5 py-0.5 rounded" style={{ background: d.decision === 'approve' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', color: d.decision === 'approve' ? '#22c55e' : '#f87171' }}>{d.decision === 'approve' ? (ar ? 'وافق' : 'approved') : (ar ? 'رفض' : 'rejected')}</span>
                       <span className="flex-1 min-w-0 truncate" style={{ color: '#cbd5e1' }}>{d.request_type} · {d.function_name} — {d.reason}</span>
                       {d.reverted ? <span className="text-[10px]" style={{ color: '#64748b' }}>{ar ? 'متراجَع' : 'reverted'}</span>
@@ -287,7 +303,7 @@ export default function ChiefPage() {
 
           {/* Smoke test probe results */}
           {smoke && (
-            <div className="rounded-2xl p-3" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${smoke.passed === smoke.total ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.25)'}` }}>
+            <div className="rounded-2xl p-3" style={{ background: t.card, border: `1px solid ${smoke.passed === smoke.total ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.25)'}` }}>
               <p className="text-[10px] font-bold mb-2" style={{ color: '#64748b' }}>{ar ? 'اختبار وظيفي — يجرّب مسارات الكتابة الحقيقية (حفظ/نشر/طلبات) ويكشف الأعطال' : 'Functional smoke test — exercises real write paths (save/publish/requests) to catch bugs'}</p>
               <div className="flex flex-wrap gap-1.5">
                 {smoke.probes.map(p => (
@@ -300,7 +316,7 @@ export default function ChiefPage() {
           )}
 
           {/* The team behind the scenes */}
-          <div className="rounded-2xl p-3" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+          <div className="rounded-2xl p-3" style={{ background: t.card, border: `1px solid ${t.border}` }}>
             <p className="text-[10px] font-bold mb-2" style={{ color: '#64748b' }}>{ar ? 'الفريق خلف الكواليس' : 'The team behind the scenes'}</p>
             <div className="flex items-center gap-2 flex-wrap">
               {TEAM.map(g => (
@@ -316,10 +332,10 @@ export default function ChiefPage() {
   );
 }
 
-function Toggle({ on, label, onClick, busy, color }: { on: boolean; label: string; onClick: () => void; busy: boolean; color: string }) {
+function Toggle({ on, label, onClick, busy, color, dark }: { on: boolean; label: string; onClick: () => void; busy: boolean; color: string; dark: boolean }) {
   return (
     <button onClick={onClick} disabled={busy} className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-lg"
-      style={{ background: on ? `${color}1a` : 'rgba(255,255,255,0.03)', color: on ? color : '#64748b', border: `1px solid ${on ? `${color}40` : 'transparent'}` }}>
+      style={{ background: on ? `${color}1a` : T(dark).chip, color: on ? color : '#64748b', border: `1px solid ${on ? `${color}40` : 'transparent'}` }}>
       <span className="w-3 h-3 rounded-full" style={{ background: on ? color : '#475569' }} /> {label}
     </button>
   );

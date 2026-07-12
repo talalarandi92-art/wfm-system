@@ -6,6 +6,24 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 
+/* ── Theme-aware neutral tokens (same shape as ScheduleChanges/Calendar) ─────────
+   Centralizes the page's surface / border / soft-field / heat-zero / modal neutrals.
+   Dark keeps the page's original explicit values; light mirrors them (slate-tinted
+   so date inputs & chips read on white). Primary text stays on the page's own
+   #e2e8f0 (not the ds #f1f5f9) to avoid a visual shift; secondary text (tSec) stays
+   the page's #64748b in both themes. Semantic hues (emerald/indigo/amber, status)
+   and the emerald heat gradient stay inline. Residual literals live only here. */
+const T = (dark: boolean) => ({
+  surface:   dark ? 'rgba(255,255,255,0.03)' : '#ffffff',
+  border:    dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
+  tPri:      dark ? '#e2e8f0' : '#0f172a',
+  soft:      dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)',
+  softEmpty: dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)',
+  heatZero:  dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+  panel:     dark ? '#0f172a' : '#ffffff',    // drill-down modal surface
+  overlay:   'rgba(0,0,0,0.5)',               // scrim — same in both themes
+});
+
 /* ═════════════════════════════════════════════════════════════════════════════
  *  STAFFING ENGINE — the forecast → Erlang → generator chain, visible.
  *  Left: per-function parameters (CPO/AHT/ACW/Hold/SL/occupancy/shrinkage/
@@ -203,6 +221,7 @@ function LearnedSection({ dark, ar, surface, border, tPri, tSec }: {
   const [data, setData] = useState<any>(null);
   const [ch, setCh] = useState<string>('');
   const [busy, setBusy] = useState(false);
+  const t = T(dark);
 
   const loadLearned = useCallback(async () => {
     const r = await apiClient.get('/capacity/staffing/learned').catch(() => null);
@@ -239,7 +258,7 @@ function LearnedSection({ dark, ar, surface, border, tPri, tSec }: {
             {Object.keys(data?.channels ?? {}).map(c => (
               <button key={c} onClick={() => setCh(c)}
                 className="text-[10px] font-bold px-2.5 py-1 rounded-lg"
-                style={{ background: c === ch ? '#34d399' : (dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)'), color: c === ch ? '#052e22' : tSec }}>
+                style={{ background: c === ch ? '#34d399' : t.soft, color: c === ch ? '#052e22' : tSec }}>
                 {c} <span style={{ opacity: 0.75 }}>({data.channels[c].cells})</span>
               </button>
             ))}
@@ -274,7 +293,7 @@ function LearnedSection({ dark, ar, surface, border, tPri, tSec }: {
                           title={v != null ? `${DOWS[dow]} ${String(h).padStart(2, '0')}:00 — P90 ${v} Erlang` : (ar ? 'لم يُقس بعد' : 'not measured yet')}
                           style={{
                             height: 20, minWidth: 24,
-                            background: v == null ? (dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)') : `rgba(52,211,153,${0.12 + 0.7 * (v / maxV)})`,
+                            background: v == null ? t.softEmpty : `rgba(52,211,153,${0.12 + 0.7 * (v / maxV)})`,
                             color: v != null && v / maxV > 0.5 ? '#052e22' : tSec,
                           }}>
                           {v != null ? Math.round(v) : ''}
@@ -297,7 +316,7 @@ function LearnedSection({ dark, ar, surface, border, tPri, tSec }: {
 }
 
 const heat = (v: number, max: number, dark: boolean) => {
-  if (v <= 0) return dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)';
+  if (v <= 0) return T(dark).heatZero;
   const t = Math.min(v / Math.max(max, 1), 1);
   return `rgba(${Math.round(99 + t * 140)}, ${Math.round(102 - t * 40)}, ${Math.round(241 - t * 130)}, ${0.25 + t * 0.65})`;
 };
@@ -364,9 +383,8 @@ export default function StaffingEnginePage() {
   const staffedFns = useMemo(() => (day?.functions ?? []).filter(f => f.dayContacts > 0 || f.dayTotalRequired > 0), [day]);
   const maxCell = useMemo(() => Math.max(1, ...staffedFns.flatMap(f => f.hours.map(h => h.requiredScheduledHc))), [staffedFns]);
 
-  const surface = dark ? 'rgba(255,255,255,0.03)' : '#ffffff';
-  const border = dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)';
-  const tPri = dark ? '#e2e8f0' : '#0f172a';
+  const t = T(dark);
+  const { surface, border, tPri, soft } = t;
   const tSec = '#64748b';
 
   return (
@@ -389,13 +407,13 @@ export default function StaffingEnginePage() {
             <span className="text-[9px] font-bold" style={{ color: tSec }}>{ar ? 'من' : 'From'}</span>
             <input type="date" value={from} onChange={e => setFrom(e.target.value)}
               className="text-xs rounded-lg px-2 py-1.5"
-              style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)', color: tPri, border: `1px solid ${border}` }} />
+              style={{ background: soft, color: tPri, border: `1px solid ${border}` }} />
             <span className="text-[9px] font-bold" style={{ color: tSec }}>{ar ? 'إلى' : 'To'}</span>
             <input type="date" value={to} onChange={e => setTo(e.target.value)}
               className="text-xs rounded-lg px-2 py-1.5"
-              style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)', color: tPri, border: `1px solid ${border}` }} />
+              style={{ background: soft, color: tPri, border: `1px solid ${border}` }} />
             <button onClick={load} className="p-1.5 rounded-lg" title={ar ? 'تحديث' : 'Refresh'}
-              style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)' }}>
+              style={{ background: soft }}>
               <RefreshCw size={14} style={{ color: tSec }} />
             </button>
           </div>
@@ -408,7 +426,7 @@ export default function StaffingEnginePage() {
               <button key={d.date} onClick={() => setViewDate(d.date)}
                 className="text-[9px] font-bold px-2 py-1 rounded-lg tabular-nums"
                 style={{
-                  background: d.date === day?.date ? '#6366f1' : (dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)'),
+                  background: d.date === day?.date ? '#6366f1' : soft,
                   color: d.date === day?.date ? '#fff' : tSec,
                 }}>
                 {d.date.slice(5)} · {ar
@@ -590,7 +608,7 @@ export default function StaffingEnginePage() {
                       <input type="number" placeholder={ar ? 'مقاس' : 'auto'} value={p.ahtSec ?? ''}
                         onChange={e => edit(p.functionKey, 'ahtSec', e.target.value === '' ? null : +e.target.value)}
                         className="w-14 text-center rounded px-1 py-0.5 text-[10px]"
-                        style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)', color: tPri, border: `1px solid ${border}` }} />
+                        style={{ background: soft, color: tPri, border: `1px solid ${border}` }} />
                     </td>
                     {NUM_FIELDS.map(f => (
                       <td key={String(f.key)} className="px-1 py-1.5 text-center">
@@ -598,7 +616,7 @@ export default function StaffingEnginePage() {
                           value={f.pct ? Math.round((p[f.key] as number) * 100) : (p[f.key] as number)}
                           onChange={e => edit(p.functionKey, f.key, f.pct ? +e.target.value / 100 : +e.target.value)}
                           className="w-12 text-center rounded px-1 py-0.5 text-[10px]"
-                          style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.04)', color: tPri, border: `1px solid ${border}` }} />
+                          style={{ background: soft, color: tPri, border: `1px solid ${border}` }} />
                       </td>
                     ))}
                     <td className="px-2 py-1.5 text-center">
@@ -693,10 +711,10 @@ export default function StaffingEnginePage() {
 
       {/* ── Math drill-down ────────────────────────────────────────────────── */}
       {drill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: t.overlay, backdropFilter: 'blur(4px)' }}
           onClick={() => setDrill(null)}>
           <div className="w-full max-w-sm rounded-2xl p-5 space-y-2" dir={ar ? 'rtl' : 'ltr'}
-            style={{ background: dark ? '#0f172a' : '#fff', border: `1px solid ${border}` }}
+            style={{ background: t.panel, border: `1px solid ${border}` }}
             onClick={e => e.stopPropagation()}>
             <div className="font-black text-sm mb-2" style={{ color: tPri }}>
               {drill.fn} — {String(drill.h.hour).padStart(2, '0')}:00
