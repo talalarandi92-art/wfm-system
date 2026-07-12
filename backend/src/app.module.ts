@@ -109,6 +109,14 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
           max: config.get<number>('DB_POOL_MAX', 50),
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,
+          // Statement guards (2026-07-12, risk study): without these, ONE heavy or
+          // leaked query (Builder v2 permits LIMIT 50000) pins a pool connection
+          // indefinitely and starves everyone else at 100+ concurrency. Postgres
+          // cancels any single statement past statement_timeout, and any connection
+          // left idle inside an open transaction past idle_in_transaction_session_timeout —
+          // both in ms, both env-overridable. Keep them >= long-running report budgets.
+          statement_timeout: config.get<number>('DB_STATEMENT_TIMEOUT_MS', 30000),
+          idle_in_transaction_session_timeout: config.get<number>('DB_IDLE_TX_TIMEOUT_MS', 30000),
         },
       }),
     }),

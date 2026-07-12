@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { ValidationPipe, VersioningType, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
@@ -143,5 +143,29 @@ async function bootstrap() {
   console.log(`Swagger docs:       http://localhost:${port}/api/docs`);
 }
 
-bootstrap();
+// ── Crash safety (2026-07-12, risk study) ────────────────────────────────────
+// Fail fast, loudly, and deterministically so a process supervisor (systemd /
+// pm2 / Docker restart:always) can bring the service back up. A swallowed error
+// leaves the process alive-but-broken (silent downtime); exiting non-zero is the
+// signal the supervisor needs to restart.
+const bootstrapLogger = new Logger('Bootstrap');
+
+// An unhandled promise rejection or a truly uncaught exception means the app is
+// in an unknown, unsafe state — do NOT try to limp along. Log the full error and
+// exit non-zero for a clean supervised restart.
+process.on('unhandledRejection', (reason: unknown) => {
+  bootstrapLogger.error('Unhandled promise rejection — exiting for supervised restart', reason instanceof Error ? reason.stack : String(reason));
+  process.exit(1);
+});
+process.on('uncaughtException', (err: Error) => {
+  bootstrapLogger.error('Uncaught exception — exiting for supervised restart', err.stack);
+  process.exit(1);
+});
+
+bootstrap().catch((err) => {
+  // A transient DB blip (or any error) during boot must not leave a dead, silent
+  // process — surface it clearly and exit non-zero so the supervisor restarts us.
+  bootstrapLogger.error('Fatal error during bootstrap — exiting for supervised restart', err instanceof Error ? err.stack : String(err));
+  process.exit(1);
+});
 
