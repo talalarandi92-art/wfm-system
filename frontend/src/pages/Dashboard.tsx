@@ -10,6 +10,37 @@ import { useAuthStore } from '@/store/auth.store';
 import { useUiStore }   from '@/store/ui.store';
 import { apiClient }    from '@/api/client';
 import { useNavigate }  from 'react-router-dom';
+import { tp as tpTok, ts as tsTok } from '@/components/ds';
+
+/* ── Theme-aware neutral tokens ──────────────────────────────────────────────
+   One factory feeds every card / chart / table on the dashboard. Dark keeps
+   the page's original explicit values; light mirrors them for the comfort
+   layer. Semantic colors (status + brand hues) stay inline where used. */
+const nt = (dark: boolean) => ({
+  card:       dark ? 'rgba(255,255,255,0.04)'  : '#fff',
+  cardHov:    dark ? 'rgba(255,255,255,0.07)'  : '#f8faff',
+  cardBd:     dark ? 'rgba(255,255,255,0.07)'  : 'rgba(0,0,0,0.06)',
+  cardShadow: dark ? 'none'                    : '0 1px 3px rgba(0,0,0,0.04)',
+  bd:         dark ? 'rgba(255,255,255,0.08)'  : 'rgba(0,0,0,0.07)',
+  bdInput:    dark ? 'rgba(255,255,255,0.1)'   : 'rgba(0,0,0,0.1)',
+  btnBd:      dark ? 'rgba(255,255,255,0.07)'  : 'rgba(0,0,0,0.07)',
+  hair:       dark ? 'rgba(255,255,255,0.05)'  : 'rgba(0,0,0,0.04)',
+  rowBd:      dark ? 'rgba(255,255,255,0.04)'  : 'rgba(0,0,0,0.04)',
+  rowHov:     dark ? 'rgba(255,255,255,0.025)' : 'rgba(99,102,241,0.025)',
+  grid:       dark ? 'rgba(255,255,255,0.05)'  : 'rgba(0,0,0,0.05)',
+  crosshair:  dark ? 'rgba(255,255,255,0.12)'  : 'rgba(0,0,0,0.08)',
+  track:      dark ? 'rgba(255,255,255,0.06)'  : 'rgba(0,0,0,0.05)',
+  tooltipBg:  dark ? '#1e293b'                 : '#fff',
+  tooltipTx:  dark ? '#94a3b8'                 : '#64748b',
+  text:       tpTok(dark),
+  text2:      tsTok(dark),
+  text3:      dark ? '#e2e8f0' : '#1e293b',
+  textStrong: dark ? '#f1f5f9' : '#1e293b',
+  muted:      dark ? '#475569' : '#94a3b8',
+  faint:      dark ? '#334155' : '#94a3b8',
+  desc:       dark ? '#475569' : '#64748b',
+  axis:       dark ? '#334155' : '#cbd5e1',
+});
 
 /* ─── Keyframes ─────────────────────────────────────────────────────────── */
 const STYLES = `
@@ -85,17 +116,18 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
   const num = useCountUp(numValue??0, 800, rdy && numValue!==undefined);
   const disp = numValue!==undefined ? num.toLocaleString() : (value ?? '—');
   const up = (trendPct??0) >= 0;
+  const T = nt(dark);
 
   return (
     <div onClick={onClick}
       onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
       style={{
         flex:1, minWidth:0,
-        background: dark ? (hov?'rgba(255,255,255,0.07)':'rgba(255,255,255,0.04)') : (hov?'#f8faff':'#fff'),
-        border: `1px solid ${hov ? color+'50' : dark?'rgba(255,255,255,0.08)':'rgba(0,0,0,0.07)'}`,
+        background: (hov ? T.cardHov : T.card),
+        border: `1px solid ${hov ? color+'50' : T.bd}`,
         borderRadius: 16, padding: '14px 16px',
         cursor: onClick?'pointer':'default',
-        boxShadow: hov ? `0 8px 28px ${color}22, 0 0 0 1px ${color}18` : dark?'none':'0 1px 3px rgba(0,0,0,0.04)',
+        boxShadow: hov ? `0 8px 28px ${color}22, 0 0 0 1px ${color}18` : T.cardShadow,
         transition: 'all 0.2s cubic-bezier(.4,0,.2,1)',
         opacity: rdy ? 1 : 0,
         transform: hov ? 'translateY(-3px)' : (rdy ? 'translateY(0)' : 'translateY(10px)'),
@@ -115,7 +147,7 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
         }}>
           <Icon size={13} style={{ color, transition:'transform 0.2s', transform: hov?'scale(1.2)':'scale(1)' }} strokeWidth={2.2} />
         </div>
-        <span style={{ fontSize:11, fontWeight:500, color: dark?'#64748b':'#94a3b8', lineHeight:1.35 }}>
+        <span style={{ fontSize:11, fontWeight:500, color: T.text2, lineHeight:1.35 }}>
           {ar ? titleAr : title}
         </span>
       </div>
@@ -124,7 +156,7 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
         <div style={{
           fontSize:26, fontWeight:800, letterSpacing:'-0.04em', lineHeight:1,
-          color: dark ? '#f1f5f9' : '#0f172a',
+          color: T.text,
         }}>
           {disp}
         </div>
@@ -144,7 +176,7 @@ function KpiCard({ icon:Icon, title, titleAr, value, numValue, trendPct, trendLa
             {up ? <ChevronUp size={9}/> : <ChevronDown size={9}/>}
             {Math.abs(trendPct).toFixed(1)}%
           </span>
-          <span style={{ fontSize:10, color: dark?'#475569':'#94a3b8' }}>
+          <span style={{ fontSize:10, color: T.muted }}>
             {ar ? trendLabelAr : trendLabel}
           </span>
         </div>
@@ -166,6 +198,8 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
   const forecast  = d.map(x=>x.present+Math.round((x.absent+x.leave)*0.5+4));
   const maxV = Math.max(...d.map(x=>x.present+x.absent+x.leave), ...forecast, 1);
 
+  const T = nt(dark);
+
   const line = (vals: number[], clr: string) => {
     const pts = vals.map((v,i)=>{
       const x = PL + (i/(d.length-1||1))*cw;
@@ -179,10 +213,10 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ overflow:'visible' }}>
       {[0,.25,.5,.75,1].map(f=>{
         const y = PT + ch*(1-f);
-        return <line key={f} x1={PL} x2={W-PR} y1={y} y2={y} stroke={dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)'} strokeDasharray="3,3" />;
+        return <line key={f} x1={PL} x2={W-PR} y1={y} y2={y} stroke={T.grid} strokeDasharray="3,3" />;
       })}
       {[0,.5,1].map(f=>(
-        <text key={f} x={PL-4} y={PT+ch*(1-f)+4} textAnchor="end" fontSize={9} fill={dark?'#334155':'#cbd5e1'}>{Math.round(maxV*f)}</text>
+        <text key={f} x={PL-4} y={PT+ch*(1-f)+4} textAnchor="end" fontSize={9} fill={T.axis}>{Math.round(maxV*f)}</text>
       ))}
       {line(forecast, '#818cf8')}
       {line(scheduled, '#38bdf8')}
@@ -191,7 +225,7 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
         const x = PL+(hovered/(d.length-1||1))*cw;
         return (
           <>
-            <line x1={x} x2={x} y1={PT} y2={PT+ch} stroke={dark?'rgba(255,255,255,0.12)':'rgba(0,0,0,0.08)'} />
+            <line x1={x} x2={x} y1={PT} y2={PT+ch} stroke={T.crosshair} />
             {[
               { v:forecast[hovered], c:'#818cf8' },
               { v:scheduled[hovered], c:'#38bdf8' },
@@ -199,8 +233,8 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
             ].map(({v,c},i)=>(
               <circle key={i} cx={x} cy={PT+ch-(v/maxV)*ch} r={3.5} fill={c} />
             ))}
-            <rect x={Math.min(x-34, W-80)} y={PT} width={68} height={60} rx={6} fill={dark?'#1e293b':'#fff'} stroke={dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)'} />
-            <text x={Math.min(x-34, W-80)+34} y={PT+13} textAnchor="middle" fontSize={9} fontWeight="600" fill={dark?'#94a3b8':'#64748b'}>
+            <rect x={Math.min(x-34, W-80)} y={PT} width={68} height={60} rx={6} fill={T.tooltipBg} stroke={T.bdInput} />
+            <text x={Math.min(x-34, W-80)+34} y={PT+13} textAnchor="middle" fontSize={9} fontWeight="600" fill={T.tooltipTx}>
               {new Date(d[hovered].date).toLocaleDateString(ar?'ar':'en',{day:'numeric',month:'short'})}
             </text>
             <text x={Math.min(x-34, W-80)+34} y={PT+26} textAnchor="middle" fontSize={9} fill="#34d399">{ar?'فعلي':'Actual'}: {d[hovered].present}</text>
@@ -215,7 +249,7 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
           <g key={i}>
             <rect x={x-20} y={PT} width={40} height={ch} fill="transparent"
               onMouseEnter={()=>setHovered(i)} onMouseLeave={()=>setHovered(null)} style={{cursor:'default'}} />
-            <text x={x} y={H-4} textAnchor="middle" fontSize={9} fill={dark?'#334155':'#cbd5e1'}>
+            <text x={x} y={H-4} textAnchor="middle" fontSize={9} fill={T.axis}>
               {new Date(d[i].date).toLocaleDateString(ar?'ar':'en',{weekday:'short'})}
             </text>
           </g>
@@ -233,14 +267,15 @@ function AdherenceChart({ data, dark, ar }: { data: DashData['trend']; dark: boo
   const W=340, H=220, PL=28, PB=24, PT=14, PR=8;
   const cw=W-PL-PR, ch=H-PT-PB;
   const bw = Math.max(Math.floor(cw/d.length)-6, 8);
+  const T = nt(dark);
 
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ overflow:'visible' }}>
       {[0,.5,1].map(f=>{
         const y=PT+ch*(1-f);
         return <g key={f}>
-          <line x1={PL} x2={W-PR} y1={y} y2={y} stroke={dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)'} strokeDasharray="3,3" />
-          <text x={PL-3} y={y+4} textAnchor="end" fontSize={9} fill={dark?'#334155':'#cbd5e1'}>{Math.round(f*100)}%</text>
+          <line x1={PL} x2={W-PR} y1={y} y2={y} stroke={T.grid} strokeDasharray="3,3" />
+          <text x={PL-3} y={y+4} textAnchor="end" fontSize={9} fill={T.axis}>{Math.round(f*100)}%</text>
         </g>;
       })}
       {d.map((row,i)=>{
@@ -259,7 +294,7 @@ function AdherenceChart({ data, dark, ar }: { data: DashData['trend']; dark: boo
                 {Math.round(pct*100)}%
               </text>
             )}
-            <text x={x+bw/2} y={H-4} textAnchor="middle" fontSize={9} fill={dark?'#334155':'#cbd5e1'}>
+            <text x={x+bw/2} y={H-4} textAnchor="middle" fontSize={9} fill={T.axis}>
               {new Date(row.date).toLocaleDateString(ar?'ar':'en',{weekday:'short'})}
             </text>
           </g>
@@ -282,12 +317,13 @@ function LiveStat({ label, labelAr, value, color, dark, ar }: {
   const isNum = typeof value === 'number';
   const v = useCountUp(isNum ? (value as number) : 0, 850, isNum);
   const disp = isNum ? v.toLocaleString() : value;
+  const T = nt(dark);
   return (
     <div style={{ textAlign:'center' }}>
-      <div style={{ fontSize:26, fontWeight:800, letterSpacing:'-0.03em', color: color ?? (dark?'#f1f5f9':'#0f172a'), fontVariantNumeric:'tabular-nums' }}>
+      <div style={{ fontSize:26, fontWeight:800, letterSpacing:'-0.03em', color: color ?? (T.text), fontVariantNumeric:'tabular-nums' }}>
         {disp}
       </div>
-      <div style={{ fontSize:11, marginTop:3, color: dark?'#475569':'#94a3b8' }}>
+      <div style={{ fontSize:11, marginTop:3, color: T.muted }}>
         {ar ? labelAr : label}
       </div>
     </div>
@@ -300,22 +336,23 @@ function FnRow({ fn, i, total, dark, ar }: { fn:DashData['functions'][0]; i:numb
   const pct = fn.scheduled>0 ? Math.round((fn.present/fn.scheduled)*100) : 0;
   const s = pct>=85?{l:'Good',ar:'جيد',c:'#10b981'}:pct>=65?{l:'Watch',ar:'مراقبة',c:'#f59e0b'}:{l:'At Risk',ar:'خطر',c:'#ef4444'};
   const ahtMins = 10 + Math.floor((fn.name.length * 7) % 30);
+  const T = nt(dark);
   const aht = `0${3 + Math.floor(ahtMins/20)}:${String(ahtMins % 60).padStart(2,'0')}`;
 
   return (
     <tr onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
-      style={{ borderBottom: i<total-1?`1px solid ${dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.04)'}`:undefined,
-        background: hov?(dark?'rgba(255,255,255,0.025)':'rgba(99,102,241,0.025)'):'transparent', transition:'background 0.15s' }}>
+      style={{ borderBottom: i<total-1?`1px solid ${T.rowBd}`:undefined,
+        background: hov?(T.rowHov):'transparent', transition:'background 0.15s' }}>
       <td style={{ padding:'13px 20px', fontSize:13 }}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <div style={{ width:3, height:18, borderRadius:2, background:s.c, opacity:hov?1:.4, transition:'opacity 0.15s' }} />
-          <span style={{ fontWeight:hov?600:400, color:dark?'#e2e8f0':'#1e293b', transition:'font-weight 0.1s' }}>{fn.name}</span>
+          <span style={{ fontWeight:hov?600:400, color:T.text3, transition:'font-weight 0.1s' }}>{fn.name}</span>
         </div>
       </td>
-      <td style={{ padding:'13px 20px', fontSize:13, fontWeight:700, color:dark?'#f1f5f9':'#1e293b', fontVariantNumeric:'tabular-nums' }}>{fn.present.toLocaleString()}</td>
+      <td style={{ padding:'13px 20px', fontSize:13, fontWeight:700, color:T.textStrong, fontVariantNumeric:'tabular-nums' }}>{fn.present.toLocaleString()}</td>
       <td style={{ padding:'13px 20px', fontSize:13, fontWeight:700, color: pct>=85?'#10b981':pct>=65?'#f59e0b':'#ef4444', fontVariantNumeric:'tabular-nums' }}>{pct}%</td>
-      <td style={{ padding:'13px 20px', fontSize:12, color:dark?'#64748b':'#94a3b8', fontVariantNumeric:'tabular-nums' }}>{aht}</td>
-      <td style={{ padding:'13px 20px', fontSize:13, color:dark?'#e2e8f0':'#1e293b', fontVariantNumeric:'tabular-nums' }}>{fn.scheduled}</td>
+      <td style={{ padding:'13px 20px', fontSize:12, color:T.text2, fontVariantNumeric:'tabular-nums' }}>{aht}</td>
+      <td style={{ padding:'13px 20px', fontSize:13, color:T.text3, fontVariantNumeric:'tabular-nums' }}>{fn.scheduled}</td>
       <td style={{ padding:'13px 20px' }}>
         <span style={{ padding:'4px 12px', borderRadius:20, fontSize:11, fontWeight:700, background:`${s.c}15`, color:s.c, border:`1px solid ${s.c}30`, display:'inline-flex', alignItems:'center', gap:5 }}>
           {s.c==='#ef4444' && <span style={{ width:5,height:5,borderRadius:'50%',background:'#ef4444',animation:'nx-pulse 1.5s ease infinite',display:'inline-block' }} />}
@@ -325,9 +362,9 @@ function FnRow({ fn, i, total, dark, ar }: { fn:DashData['functions'][0]; i:numb
       <td style={{ padding:'13px 20px' }}>
         <button style={{
           fontSize:11, fontWeight:600, padding:'5px 12px', borderRadius:8, cursor:'pointer', transition:'all 0.15s',
-          background: hov?`${s.c}15`:(dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.04)'),
-          border:`1px solid ${hov?s.c+'40':(dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.07)')}`,
-          color: hov?s.c:(dark?'#64748b':'#94a3b8'),
+          background: hov?`${s.c}15`:(T.hair),
+          border:`1px solid ${hov?s.c+'40':(T.btnBd)}`,
+          color: hov?s.c:(T.text2),
           display:'flex', alignItems:'center', gap:4,
         }}>
           {ar?'إدارة':'Manage'} <ChevronDown size={10}/>
@@ -341,17 +378,18 @@ function FnRow({ fn, i, total, dark, ar }: { fn:DashData['functions'][0]; i:numb
 function AlertItem({ icon:Icon, color, title, titleAr, desc, descAr, time, dark, ar, crit=false }: {
   icon:any; color:string; title:string; titleAr:string; desc:string; descAr:string; time:string; dark:boolean; ar:boolean; crit?:boolean;
 }) {
+  const T = nt(dark);
   return (
-    <div style={{ display:'flex', gap:10, padding:'10px 0', borderBottom:`1px solid ${dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.04)'}` }}>
+    <div style={{ display:'flex', gap:10, padding:'10px 0', borderBottom:`1px solid ${T.rowBd}` }}>
       <div style={{ width:32,height:32,borderRadius:9,background:`${color}18`,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center', boxShadow:crit?`0 0 10px ${color}30`:'none' }}>
         <Icon size={14} style={{ color, animation:crit?'nx-pulse 2s ease infinite':'none' }} />
       </div>
       <div style={{ flex:1, minWidth:0 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-          <div style={{ fontSize:12, fontWeight:600, color:dark?'#e2e8f0':'#1e293b' }}>{ar?titleAr:title}</div>
-          <div style={{ fontSize:10, color:dark?'#334155':'#94a3b8', flexShrink:0, marginInlineStart:8 }}>{time}</div>
+          <div style={{ fontSize:12, fontWeight:600, color:T.text3 }}>{ar?titleAr:title}</div>
+          <div style={{ fontSize:10, color:T.faint, flexShrink:0, marginInlineStart:8 }}>{time}</div>
         </div>
-        <div style={{ fontSize:11, marginTop:2, color:dark?'#475569':'#64748b', lineHeight:1.4 }}>{ar?descAr:desc}</div>
+        <div style={{ fontSize:11, marginTop:2, color:T.desc, lineHeight:1.4 }}>{ar?descAr:desc}</div>
       </div>
     </div>
   );
@@ -440,9 +478,11 @@ export default function Dashboard() {
     ? (hr<12?'صباح الخير':hr<17?'مساء الخير':'مساء النور')
     : (hr<12?'Good morning':hr<17?'Good afternoon':'Good evening');
 
-  const card  = { background: dark?'rgba(255,255,255,0.04)':'#fff', border:`1px solid ${dark?'rgba(255,255,255,0.07)':'rgba(0,0,0,0.06)'}`, borderRadius:18 } as const;
-  const tp    = dark?'#f1f5f9':'#0f172a';
-  const ts    = dark?'#64748b':'#94a3b8';
+  const T = nt(dark);
+
+  const card  = { background: T.card, border:`1px solid ${T.cardBd}`, borderRadius:18 } as const;
+  const tp    = T.text;
+  const ts    = T.text2;
 
   const adherePct = data?.mtd.attendanceRate ?? 0;
   const pendTotal = data ? data.requests.pending + data.requests.peerPending : 0;
@@ -469,12 +509,12 @@ export default function Dashboard() {
             {new Date(Date.now()+6*86400000).toLocaleDateString(ar?'ar-KW':'en-US',{month:'short',day:'numeric',year:'numeric'})}
           </div>
           <button onClick={()=>load(true)} style={{
-            width:34,height:34,borderRadius:10,border:`1px solid ${dark?'rgba(255,255,255,0.08)':'rgba(0,0,0,0.07)'}`,
-            background:dark?'rgba(255,255,255,0.04)':'#fff',color:ts,cursor:'pointer',
+            width:34,height:34,borderRadius:10,border:`1px solid ${T.bd}`,
+            background:T.card,color:ts,cursor:'pointer',
             display:'flex',alignItems:'center',justifyContent:'center',transition:'all 0.18s',
           }}
             onMouseEnter={e=>{const b=e.currentTarget;b.style.background='rgba(99,102,241,0.1)';b.style.color='#6366f1';}}
-            onMouseLeave={e=>{const b=e.currentTarget;b.style.background=dark?'rgba(255,255,255,0.04)':'#fff';b.style.color=ts;}}>
+            onMouseLeave={e=>{const b=e.currentTarget;b.style.background=T.card;b.style.color=ts;}}>
             <RefreshCw size={13} style={{ animation:spin?'nx-spin .7s linear infinite':'none' }} />
           </button>
           <div style={{ display:'flex',alignItems:'center',gap:6,padding:'7px 12px',borderRadius:12,fontSize:12,fontWeight:700, background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.2)',color:'#10b981',position:'relative' }}>
@@ -567,7 +607,7 @@ export default function Dashboard() {
                 ].map((k,i) => (
                   <div key={k.lbl} style={{
                     flex:1, textAlign:'center', minWidth:0,
-                    borderInlineStart: i===0?'none':`1px solid ${dark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)'}`,
+                    borderInlineStart: i===0?'none':`1px solid ${T.track}`,
                     animation:'nx-slide 0.4s ease both', animationDelay:`${i*55}ms`,
                   }}>
                     <div style={{ fontSize:19, fontWeight:900, color:k.color, lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{typeof k.val==='number' ? <Counted n={k.val}/> : k.val}</div>
@@ -586,7 +626,7 @@ export default function Dashboard() {
                     {ar ? 'المتوقع مقابل المجدول مقابل الفعلي' : 'Forecast vs Scheduled vs Actual'}
                   </div>
                   <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6, flexShrink:0 }}>
-                    <select style={{ fontSize:11,background:'transparent',border:`1px solid ${dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)'}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer' }}>
+                    <select style={{ fontSize:11,background:'transparent',border:`1px solid ${T.bdInput}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer' }}>
                       <option>{ar?'ساعات':'Hours'}</option>
                     </select>
                     <div style={{ display:'flex', gap:10, alignItems:'center' }}>
@@ -606,7 +646,7 @@ export default function Dashboard() {
               <div style={{ ...card, padding:'16px 20px' }}>
                 <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12, gap:8 }}>
                   <div style={{ fontSize:13, fontWeight:600, color:tp, lineHeight:1.3 }}>{ar?'مسار الالتزام بالجدول':'Schedule Adherence Trend'}</div>
-                  <select style={{ fontSize:11,background:'transparent',border:`1px solid ${dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)'}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer',flexShrink:0 }}>
+                  <select style={{ fontSize:11,background:'transparent',border:`1px solid ${T.bdInput}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer',flexShrink:0 }}>
                     <option>{ar?'نسبة مئوية':'Percentage'}</option>
                   </select>
                 </div>
@@ -619,7 +659,7 @@ export default function Dashboard() {
             {/* ── Intraday Management ──────────────────────────────────── */}
             <div style={{ ...card, padding:0 }}>
               {/* header */}
-              <div style={{ padding:'14px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:`1px solid ${dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.04)'}`, flexWrap:'wrap', gap:10 }}>
+              <div style={{ padding:'14px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', borderBottom:`1px solid ${T.hair}`, flexWrap:'wrap', gap:10 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                   <Radio size={14} style={{ color:'#818cf8', animation:'nx-pulse 3s ease infinite' }} strokeWidth={2.5} />
                   <span style={{ fontSize:14, fontWeight:700, color:tp }}>{ar?'إدارة اليوم المباشرة':'Intraday Management'}</span>
@@ -635,7 +675,7 @@ export default function Dashboard() {
               </div>
 
               {/* live stats */}
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', padding:'18px 24px', borderBottom:`1px solid ${dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.04)'}` }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', padding:'18px 24px', borderBottom:`1px solid ${T.hair}` }}>
                 {[
                   { l:'Live Contacts',    ar:'جهات اتصال مباشرة', v: data.today.present,                     c:undefined },
                   { l:'Agents Available', ar:'متاحون',            v: data.today.present - data.today.lateIn,  c:undefined },
@@ -643,7 +683,7 @@ export default function Dashboard() {
                   { l:'Agents on Leave',  ar:'في إجازة',          v: data.today.onLeave,                      c:undefined },
                   { l:'Late Arrivals',    ar:'متأخرون',           v: data.today.lateIn,                       c: data.today.lateIn>5?'#ef4444':'#f59e0b' },
                 ].map((s,i)=>(
-                  <div key={i} style={{ borderInlineEnd:i<4?`1px solid ${dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.04)'}`:undefined, paddingInline:12, textAlign:'center' }}>
+                  <div key={i} style={{ borderInlineEnd:i<4?`1px solid ${T.hair}`:undefined, paddingInline:12, textAlign:'center' }}>
                     <LiveStat label={s.l} labelAr={s.ar} value={s.v} color={s.c} dark={dark} ar={ar} />
                   </div>
                 ))}
@@ -653,10 +693,10 @@ export default function Dashboard() {
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
-                    <tr style={{ borderBottom:`1px solid ${dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.04)'}` }}>
+                    <tr style={{ borderBottom:`1px solid ${T.rowBd}` }}>
                       {[{ar:'الوظيفة',en:'Queue'},{ar:'الحاضرون',en:'Live Contacts'},{ar:'مستوى الخدمة',en:'SL %'},{ar:'متوسط المعالجة',en:'Avg Handle Time'},{ar:'المجدولون',en:'Agents Available'},{ar:'الحالة',en:'Status'},{ar:'إجراء',en:'Actions'}]
                         .map(h=>(
-                          <th key={h.en} style={{ padding:'9px 20px', textAlign:'start', fontSize:10, fontWeight:600, letterSpacing:'0.07em', textTransform:'uppercase', color:dark?'#334155':'#cbd5e1', whiteSpace:'nowrap' }}>
+                          <th key={h.en} style={{ padding:'9px 20px', textAlign:'start', fontSize:10, fontWeight:600, letterSpacing:'0.07em', textTransform:'uppercase', color:T.axis, whiteSpace:'nowrap' }}>
                             {ar?h.ar:h.en}
                           </th>
                         ))}
@@ -729,7 +769,7 @@ export default function Dashboard() {
                         {fn.present} <span style={{ fontWeight:400, color:ts }}>/ {fn.scheduled}</span>
                       </span>
                     </div>
-                    <div style={{ height:5, borderRadius:5, background:dark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.05)', overflow:'hidden' }}>
+                    <div style={{ height:5, borderRadius:5, background:T.track, overflow:'hidden' }}>
                       <div style={{ height:'100%', borderRadius:5, width:`${pct}%`, background:`linear-gradient(90deg,${color}80,${color})`, transition:`width 0.9s cubic-bezier(.4,0,.2,1) ${i*100}ms` }} />
                     </div>
                   </div>
@@ -750,7 +790,7 @@ export default function Dashboard() {
                 { icon:Zap,      color:'#f59e0b', title:ar?'تدريب: تحديث المنتج':'Training: Product Update', sub:ar?'الاثنين، 2:00 م':'Mon, 2:00 PM' },
                 { icon:Activity, color:'#ef4444', title:ar?'صيانة النظام':'System Maintenance',     sub:ar?'الخميس، 11:00 م':'Thu, 11:00 PM' },
               ].map((ev,i)=>(
-                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderBottom:i<2?`1px solid ${dark?'rgba(255,255,255,0.04)':'rgba(0,0,0,0.04)'}`:undefined }}>
+                <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderBottom:i<2?`1px solid ${T.rowBd}`:undefined }}>
                   <div style={{ width:32,height:32,borderRadius:9,background:`${ev.color}15`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>
                     <ev.icon size={14} style={{ color:ev.color }} />
                   </div>

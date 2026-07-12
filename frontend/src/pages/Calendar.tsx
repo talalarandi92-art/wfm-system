@@ -6,6 +6,30 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '../store/ui.store';
+import { ts as tsTok } from '@/components/ds';
+
+/* ── Theme-aware neutral tokens ──────────────────────────────────────────────
+   Centralizes the calendar's surface / border / text / overlay neutrals. Dark
+   keeps the page's original explicit values; light mirrors them. Primary text
+   stays on the page's own slate #e2e8f0 (not the ds #f1f5f9) to avoid a visual
+   shift; secondary modal text reuses the ds ts() helper (exact match). Semantic
+   hues (event colors, status, indigo highlights) stay inline where used. */
+const ct = (dark: boolean) => ({
+  panel:       dark ? '#1e293b' : '#ffffff',                              // modal / dropdown surface
+  card:        dark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.9)', // page surface
+  bdModal:     dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)',
+  bdCard:      dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)',
+  overlay:     'rgba(0,0,0,0.5)',                                         // scrim (both themes)
+  soft:        dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+  chipBg:      dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+  toggleBg:    dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+  toggleOn:    dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+  weekend:     dark ? 'rgba(255,255,255,0.01)' : 'rgba(0,0,0,0.01)',
+  textPri:     dark ? '#e2e8f0' : '#0f172a',
+  textSec:     tsTok(dark),                    // #64748b / #94a3b8
+  textSecMain: dark ? '#475569' : '#94a3b8',
+  textMuted:   dark ? '#334155' : '#cbd5e1',
+});
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 interface CalEvent {
@@ -106,14 +130,12 @@ function EventChip({ ev, onClick }: { ev: CalEvent; onClick: () => void }) {
 function EventModal({ event, dark, ar, onClose }: { event: CalEvent; dark: boolean; ar: boolean; onClose: () => void }) {
   const color = event.color ?? EVENT_COLORS[event.eventType] ?? '#60a5fa';
   const Icon  = EVENT_ICONS[event.eventType] ?? CalIcon;
-  const surface = dark ? '#1e293b' : '#ffffff';
-  const border  = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)';
-  const textPri = dark ? '#e2e8f0' : '#0f172a';
-  const textSec = dark ? '#64748b' : '#94a3b8';
+  const T = ct(dark);
+  const surface = T.panel, border = T.bdModal, textPri = T.textPri, textSec = T.textSec;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+      style={{ background: T.overlay, backdropFilter: 'blur(4px)' }}
       onClick={onClose}>
       <div className="w-full max-w-md rounded-3xl p-6 space-y-4" dir={ar ? 'rtl' : 'ltr'}
         style={{ background: surface, border: `1px solid ${border}` }}
@@ -155,7 +177,7 @@ function EventModal({ event, dark, ar, onClose }: { event: CalEvent; dark: boole
             </div>
           )}
           {event.description && (
-            <div className="text-sm rounded-xl p-3" style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', color: textSec }}>
+            <div className="text-sm rounded-xl p-3" style={{ background: T.soft, color: textSec }}>
               {event.description}
             </div>
           )}
@@ -170,7 +192,7 @@ function EventModal({ event, dark, ar, onClose }: { event: CalEvent; dark: boole
             <div className="flex flex-wrap gap-1.5">
               {event.attendees.map((a, i) => (
                 <span key={i} className="text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5"
-                  style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', color: textPri }}>
+                  style={{ background: T.chipBg, color: textPri }}>
                   {a.status === 'accepted' && <Check size={9} style={{ color: '#22c55e' }} />}
                   {a.name}
                 </span>
@@ -206,11 +228,8 @@ function EventModal({ event, dark, ar, onClose }: { event: CalEvent; dark: boole
 function CreateEventModal({ date, dark, ar, onClose, onCreated }: { date: string; dark: boolean; ar: boolean; onClose: () => void; onCreated: () => void }) {
   const [form, setForm]   = useState({ title: '', eventType: 'general', startTime: '09:00', endTime: '10:00', location: '', description: '' });
   const [saving, setSaving] = useState(false);
-  const surface = dark ? '#1e293b' : '#ffffff';
-  const border  = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)';
-  const textPri = dark ? '#e2e8f0' : '#0f172a';
-  const textSec = dark ? '#64748b' : '#94a3b8';
-  const inputBg = dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)';
+  const T = ct(dark);
+  const surface = T.panel, border = T.bdModal, textPri = T.textPri, textSec = T.textSec, inputBg = T.soft;
 
   const handleSave = async () => {
     if (!form.title) return;
@@ -232,7 +251,7 @@ function CreateEventModal({ date, dark, ar, onClose, onCreated }: { date: string
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
+      style={{ background: T.overlay, backdropFilter: 'blur(4px)' }}
       onClick={onClose}>
       <div className="w-full max-w-sm rounded-3xl p-5 space-y-4" dir={ar ? 'rtl' : 'ltr'}
         style={{ background: surface, border: `1px solid ${border}` }}
@@ -313,11 +332,8 @@ export default function CalendarPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'list'>('month');
 
-  const surface   = dark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.9)';
-  const border    = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)';
-  const textPri   = dark ? '#e2e8f0' : '#0f172a';
-  const textSec   = dark ? '#475569' : '#94a3b8';
-  const textMuted = dark ? '#334155' : '#cbd5e1';
+  const T = ct(dark);
+  const surface = T.card, border = T.bdCard, textPri = T.textPri, textSec = T.textSecMain, textMuted = T.textMuted;
 
   const MONTH_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
   const MONTH_EN = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -418,7 +434,7 @@ export default function CalendarPage() {
             {/* Notification dropdown */}
             {showNotifs && (
               <div className="absolute top-11 end-0 w-80 rounded-2xl z-40 shadow-xl overflow-hidden"
-                style={{ background: dark ? '#1e293b' : '#fff', border: `1px solid ${border}` }}>
+                style={{ background: T.panel, border: `1px solid ${border}` }}>
                 <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: border }}>
                   <span className="text-xs font-bold" style={{ color: textPri }}>
                     {ar ? 'الإشعارات' : 'Notifications'}
@@ -456,12 +472,12 @@ export default function CalendarPage() {
           </div>
 
           {/* View toggle */}
-          <div className="flex gap-1 rounded-xl p-1" style={{ background: dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+          <div className="flex gap-1 rounded-xl p-1" style={{ background: T.toggleBg }}>
             {(['month','list'] as const).map(v => (
               <button key={v} onClick={() => setViewMode(v)}
                 className="text-xs px-3 py-1.5 rounded-lg transition-all"
                 style={{
-                  background: viewMode === v ? (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)') : 'transparent',
+                  background: viewMode === v ? (T.toggleOn) : 'transparent',
                   color: viewMode === v ? textPri : textSec,
                 }}>
                 {v === 'month' ? (ar ? 'شهر' : 'Month') : (ar ? 'قائمة' : 'List')}
@@ -530,7 +546,7 @@ export default function CalendarPage() {
                     borderRight:  idx % 7 !== 6 ? `1px solid ${border}` : undefined,
                     borderBottom: `1px solid ${border}`,
                     background:   isToday ? (dark ? 'rgba(129,140,248,0.08)' : 'rgba(129,140,248,0.04)') :
-                                  isWeekend ? (dark ? 'rgba(255,255,255,0.01)' : 'rgba(0,0,0,0.01)') : undefined,
+                                  isWeekend ? (T.weekend) : undefined,
                   }}>
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full"
