@@ -16,6 +16,7 @@ import { BarRow, Donut } from '@/components/dazzle';
 import { Kpi } from '@/components/kpi';
 import { useSourceDetail } from './sourceCatalog';
 import { WidgetTable, WidgetLine, chartData } from './viz';
+import { DrillModal, DrillRequest, drillRequestFromRow } from '@/components/report-builder/DrillModal';
 import {
   WidgetConfig, RunResult, Gran, VALUELESS, fmtVal, CHART_COLORS, effectiveDates,
 } from './types';
@@ -46,6 +47,7 @@ export function WidgetCard({ widget, dashDate, dashFunc, mode, dark, ar, onEdit,
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [drill, setDrill] = useState<DrillRequest | null>(null);
   const runId = useRef(0);
 
   const buildFilters = useCallback(() => {
@@ -93,6 +95,16 @@ export function WidgetCard({ widget, dashDate, dashFunc, mode, dark, ar, onEdit,
 
   useEffect(() => { run(); }, [run, nonce]);
 
+  /* ── drill a widget data-point → the underlying un-aggregated rows ── */
+  const openDrill = useCallback((row: any) => {
+    if (!result) return;
+    setDrill(drillRequestFromRow({
+      sourceKey: widget.sourceKey, columns: result.columns as any, row,
+      granularity: (widget.viz === 'stat' ? 'none' : widget.granularity) as any,
+      filters: buildFilters(), dateFrom: eff.dateFrom, dateTo: eff.dateTo, ar,
+    }));
+  }, [result, widget.sourceKey, widget.viz, widget.granularity, buildFilters, eff.dateFrom, eff.dateTo, ar]);
+
   const border = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
   const iconBtn: React.CSSProperties = {
     width: 26, height: 26, borderRadius: 8, display: 'grid', placeItems: 'center', cursor: 'pointer',
@@ -121,7 +133,8 @@ export function WidgetCard({ widget, dashDate, dashFunc, mode, dark, ar, onEdit,
       const raw = mCol ? result.rows[0]?.[mCol.key] : null;
       const accent = CHART_COLORS[0];
       return (
-        <div style={{ padding: 4 }}>
+        <div style={{ padding: 4, cursor: 'pointer' }} onClick={() => openDrill(result.rows[0])}
+          title={L('Drill into underlying rows', 'التفصيل إلى الصفوف الأساسية')}>
           <Kpi
             label={mCol ? (ar ? mCol.label_ar : mCol.label_en) : widget.title}
             value={fmtVal(raw, mCol)}
@@ -138,7 +151,7 @@ export function WidgetCard({ widget, dashDate, dashFunc, mode, dark, ar, onEdit,
       );
     }
 
-    if (widget.viz === 'table') return <WidgetTable result={result} ar={ar} />;
+    if (widget.viz === 'table') return <WidgetTable result={result} ar={ar} onRowClick={openDrill} />;
 
     const c = chartData(result);
     if (!c) return <Center><Muted>{L('Add a dimension to chart this data.', 'أضف بُعداً لعرض هذه البيانات كرسم.')}</Muted></Center>;
@@ -147,10 +160,14 @@ export function WidgetCard({ widget, dashDate, dashFunc, mode, dark, ar, onEdit,
       return <div style={{ padding: 6 }}><Donut segments={c.pts} centerNum={c.pts.reduce((a, p) => a + p.value, 0)} centerLabel={metLabel} /></div>;
     if (widget.viz === 'line')
       return <div style={{ padding: 6 }}><WidgetLine pts={c.pts} /></div>;
-    // bar
+    // bar — each bar drills its underlying rows
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9, padding: '6px 4px' }}>
-        {c.pts.map((p, i) => <BarRow key={i} label={p.label} value={p.value} max={c.max} color={p.color} delay={i * 30} />)}
+        {c.pts.map((p, i) => (
+          <div key={i} onClick={() => openDrill((p as any).row)} title={L('Drill into underlying rows', 'التفصيل إلى الصفوف الأساسية')} style={{ cursor: 'pointer', borderRadius: 7, padding: '1px 3px', margin: '0 -3px' }}>
+            <BarRow label={p.label} value={p.value} max={c.max} color={p.color} delay={i * 30} />
+          </div>
+        ))}
       </div>
     );
   };
@@ -204,6 +221,9 @@ export function WidgetCard({ widget, dashDate, dashFunc, mode, dark, ar, onEdit,
       <div style={{ flex: 1, padding: widget.viz === 'table' ? 0 : '10px 12px', minHeight: 0 }}>
         {renderBody()}
       </div>
+
+      {/* drill modal (per-widget) */}
+      {drill && <DrillModal request={drill} dark={dark} ar={ar} onClose={() => setDrill(null)} />}
     </div>
   );
 }

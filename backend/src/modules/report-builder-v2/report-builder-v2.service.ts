@@ -1,7 +1,8 @@
 import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { compile, getSource, listCatalog, CompileInput, EnforcedFilter, BuilderValidationError } from './query-compiler';
+import { compile, compileDrill, getSource, listCatalog, CompileInput, DrillInput, EnforcedFilter, BuilderValidationError } from './query-compiler';
+import { DataSourceDef } from './data-sources';
 import { DATA_SOURCES, dimensionBadge, metricBadge, contractFormat, contractType } from './data-sources';
 
 /**
@@ -64,12 +65,17 @@ export class ReportBuilderV2Service {
     };
   }
 
-  /** Compile + execute a builder request with RBAC + agent self-scope. */
-  async run(user: { tenantId: string; employeeId?: string | null; permissionCodes: string[] }, body: any) {
+  /**
+   * Resolve RBAC + agent self-scope for a source: throws if the caller may not read
+   * it; returns the server-enforced filters (agent hard-scoped to own person). Shared
+   * by run() and drill() so both apply IDENTICAL scoping.
+   */
+  private async resolveScope(
+    user: { tenantId: string; employeeId?: string | null; permissionCodes: string[] },
+    src: DataSourceDef,
+  ): Promise<EnforcedFilter[]> {
     const perms = user.permissionCodes ?? [];
-    const src = getSource(body?.sourceKey);
     if (!this.has(perms, src.permission)) throw new ForbiddenException(`Not permitted to read source "${src.key}"`);
-
     const enforced: EnforcedFilter[] = [];
     if (!this.isTeamViewer(perms)) {
       // agent: restrict to own person, or deny if the source has no person grain
@@ -78,6 +84,13 @@ export class ReportBuilderV2Service {
       if (!own) throw new ForbiddenException('No employee profile linked to this account');
       enforced.push({ col: src.personCol, op: 'eq', value: own });
     }
+    return enforced;
+  }
+
+  /** Compile + execute a builder request with RBAC + agent self-scope. */
+  async run(user: { tenantId: string; employeeId?: string | null; permissionCodes: string[] }, body: any) {
+    const src = getSource(body?.sourceKey);
+    const enforced = await this.resolveScope(user, src);
 
     const input: CompileInput = {
       sourceKey: src.key, tenantId: user.tenantId,
@@ -96,6 +109,37 @@ export class ReportBuilderV2Service {
     const rows = await this.ds.query(compiled.sql, compiled.params);
     const formatted = this.formatRows(rows, compiled.columns);
     return { sourceKey: src.key, columns: compiled.columns, rowCount: formatted.length, rows: formatted };
+  }
+
+  /**
+   * DRILL — the UN-aggregated rows behind ONE aggregated cell. Same RBAC + agent
+   * self-scope as run(); the compiler re-applies the source's allowlist so only
+   * catalog keys reach SQL. Returns up to `cap` rows with a `truncated` flag.
+   */
+  async drill(user: { tenantId: string; employeeId?: string | null; permissionCodes: string[] }, body: any) {
+    const src = getSource(body?.sourceKey);
+    const enforced = await this.resolveScope(user, src);
+    const cap = Math.min(Math.max(1, Number(body?.limit) || 500), 500);
+
+    const input: DrillInput = {
+      sourceKey: src.key, tenantId: user.tenantId,
+      cell: Array.isArray(body?.cell) ? body.cell : [],
+      period: body?.period && body.period.granularity ? body.period : null,
+      metrics: Array.isArray(body?.metrics) ? body.metrics : [],
+      filters: Array.isArray(body?.filters) ? body.filters : [],
+      dateFrom: body?.dateFrom, dateTo: body?.dateTo,
+      enforcedFilters: enforced,
+      limit: cap + 1, // over-fetch by one to detect truncation
+    };
+
+    let compiled;
+    try { compiled = compileDrill(input); }
+    catch (e) { if (e instanceof BuilderValidationError) throw new BadRequestException(e.message); throw e; }
+
+    const raw = await this.ds.query(compiled.sql, compiled.params);
+    const truncated = raw.length > cap;
+    const rows = this.formatRows(truncated ? raw.slice(0, cap) : raw, compiled.columns);
+    return { sourceKey: src.key, columns: compiled.columns, rowCount: rows.length, truncated, rows };
   }
 
   private formatRows(rows: any[], columns: { key: string; time?: boolean }[]) {

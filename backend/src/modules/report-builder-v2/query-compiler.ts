@@ -39,6 +39,21 @@ export interface CompileInput {
 export interface CompiledColumn { key: string; label_en: string; label_ar: string; kind: 'dimension' | 'metric'; type?: string; time?: boolean; format?: string; }
 export interface CompiledQuery { sql: string; params: any[]; columns: CompiledColumn[]; }
 
+/** One aggregated cell's dimension value (dim is a catalog KEY, value is $N-bound). */
+export interface DrillCell { dim: string; value: any; }
+export interface DrillInput {
+  sourceKey: string;
+  tenantId: string;
+  cell?: DrillCell[];                                  // the aggregated cell's non-period dim values
+  period?: { granularity: Granularity; value: any } | null; // a bucketed (day/week/month) cell value
+  metrics?: string[];                                  // metric KEYS whose per-row base to surface
+  filters?: FilterInput[];                             // the report's active filters, re-applied
+  dateFrom?: string;
+  dateTo?: string;
+  enforcedFilters?: EnforcedFilter[];                  // agent self-scope (trusted col)
+  limit?: number;
+}
+
 const OPS: Record<FilterOp, string> = {
   eq: '=', ne: '<>', lt: '<', gt: '>', lte: '<=', gte: '>=', in: 'IN', like: 'ILIKE', not_null: 'IS NOT NULL', is_null: 'IS NULL',
 };
@@ -134,6 +149,119 @@ export function compile(input: CompileInput): CompiledQuery {
   sql += ` LIMIT ${limit}`;
 
   return { sql, params, columns };
+}
+
+const DRILL_MAX = 2000;
+
+/**
+ * DRILL (BLD-4) — compile a request for the UN-aggregated rows behind ONE aggregated
+ * cell. SAME allowlist discipline as compile(): every dim/metric/filter target must
+ * resolve to a catalog entry for the source; the client only sends catalog KEYS; all
+ * values are $N-bound; tenant is $1; enforcedFilters carry the trusted agent-scope col.
+ *
+ * The projection is the source's RAW dimension columns (per-row, no GROUP BY) plus,
+ * for each requested metric, its PER-ROW BASE — the aggregate's inner argument
+ * (drillMetricArg). For an additive metric SUM(x)→x, so Σ(base over the drill rows)
+ * reconciles EXACTLY to the aggregated cell; COUNT(*)→1, COUNT(*) FILTER (WHERE p)→a
+ * CASE flag, so their row-count / sum reconciles too.
+ */
+export function compileDrill(input: DrillInput): CompiledQuery {
+  const src = getSource(input.sourceKey);
+  const dimByKey: Record<string, Dimension> = Object.fromEntries(src.dimensions.map(d => [d.key, d]));
+  const metricByKey: Record<string, Metric> = Object.fromEntries(src.metrics.map(m => [m.key, m]));
+
+  const metricKeys = input.metrics ?? [];
+  for (const k of metricKeys) if (!metricByKey[k]) throw new BuilderValidationError(`Unknown metric "${k}" for source "${src.key}"`);
+
+  const params: any[] = [input.tenantId];
+  const where: string[] = [`${src.tenantCol} = $1`];
+
+  // date range — identical half-open, date-normalized bound as compile()
+  if (input.dateFrom) { params.push(input.dateFrom); where.push(`${src.dateCol} >= $${params.length}::date`); }
+  if (input.dateTo)   { params.push(input.dateTo);   where.push(`${src.dateCol} < ($${params.length}::date + 1)`); }
+
+  // the aggregated cell's non-period dimension values → equality (NULL → IS NULL)
+  for (const c of input.cell ?? []) {
+    const d = dimByKey[c.dim];
+    if (!d) throw new BuilderValidationError(`Unknown drill dimension "${c.dim}" for source "${src.key}"`);
+    if (c.value === null || c.value === undefined || c.value === '') where.push(`${d.col} IS NULL`);
+    else where.push(buildCond(d.col, 'eq', c.value, params));
+  }
+
+  // a bucketed (period) cell → constrain by the EXACT same bucket expression compile() groups on
+  if (input.period && input.period.granularity && input.period.granularity !== 'none') {
+    const be = bucketExpr(src.dateCol, input.period.granularity);
+    if (be) { params.push(input.period.value); where.push(`${be} = $${params.length}`); }
+  }
+
+  // the report's active client filters (allowlisted) + server-enforced agent-scope
+  for (const f of input.filters ?? []) {
+    const d = dimByKey[f.dim];
+    if (!d) throw new BuilderValidationError(`Unknown filter dimension "${f.dim}" for source "${src.key}"`);
+    if (!OPS[f.op]) throw new BuilderValidationError(`Unsupported filter operator "${f.op}"`);
+    where.push(buildCond(d.col, f.op, f.value, params));
+  }
+  for (const f of input.enforcedFilters ?? []) {
+    if (!OPS[f.op]) throw new BuilderValidationError(`Unsupported enforced operator "${f.op}"`);
+    where.push(buildCond(f.col, f.op, f.value, params));
+  }
+
+  // ── SELECT: every source dimension (raw, per-row) + each metric's per-row base ──
+  const selectParts: string[] = [];
+  const columns: CompiledColumn[] = [];
+  for (const d of src.dimensions) {
+    selectParts.push(`${d.col} AS "${d.key}"`);
+    columns.push({ key: d.key, label_en: d.label_en, label_ar: d.label_ar, kind: 'dimension', type: d.type, time: d.time });
+  }
+  for (const k of metricKeys) {
+    const m = metricByKey[k];
+    selectParts.push(`${drillMetricArg(m.expr)} AS "${k}"`);
+    columns.push({ key: k, label_en: m.label_en, label_ar: m.label_ar, kind: 'metric', format: m.format });
+  }
+
+  const limit = Math.min(Math.max(1, input.limit ?? 500), DRILL_MAX);
+  let sql = `SELECT ${selectParts.join(', ')} FROM ${src.from} WHERE ${where.join(' AND ')}`;
+  sql += ` ORDER BY ${src.dateCol} NULLS LAST`;
+  sql += ` LIMIT ${limit}`;
+
+  return { sql, params, columns };
+}
+
+/** Return the balanced content of the parenthesis that OPENS at `openIdx`. */
+function balanced(s: string, openIdx: number): { inner: string; end: number } {
+  let depth = 0;
+  for (let i = openIdx; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')') { depth--; if (depth === 0) return { inner: s.slice(openIdx + 1, i), end: i }; }
+  }
+  throw new BuilderValidationError('Unbalanced parentheses in metric expression');
+}
+
+/**
+ * Reduce an aggregate metric expression to its PER-ROW base value:
+ *   SUM(x)                         → x                       (Σ base == aggregate)
+ *   COUNT(*)                       → 1                       (Σ base == count)
+ *   COUNT(*) FILTER (WHERE p)      → CASE WHEN (p) THEN 1 END (Σ base == filtered count)
+ *   COUNT(DISTINCT x) / AVG(x) …   → x                       (row shows the underlying value)
+ *   ROUND(SUM(x)/60.0,1) etc.      → x  (first real aggregate found; scaling drops off)
+ * Non-decomposable ratios surface their first aggregate's argument — still the raw
+ * underlying value for that row. All column refs are unchanged, so the result is valid
+ * SQL over the same FROM as the aggregate.
+ */
+export function drillMetricArg(expr: string): string {
+  const m = /\b(SUM|COUNT|AVG|MIN|MAX)\s*\(/i.exec(expr);
+  if (!m) return expr; // already per-row
+  const openIdx = expr.indexOf('(', m.index);
+  const { inner, end } = balanced(expr, openIdx);
+  // an immediately following FILTER (WHERE …) narrows the aggregate to matching rows
+  let filterCond: string | null = null;
+  if (/^\s*FILTER\s*\(\s*WHERE\b/i.test(expr.slice(end + 1))) {
+    const fopen = expr.indexOf('(', end + 1);
+    filterCond = balanced(expr, fopen).inner.replace(/^\s*WHERE\s+/i, '').trim();
+  }
+  const t = inner.trim();
+  const base = t === '*' ? '1' : t.replace(/^DISTINCT\s+/i, '');
+  return filterCond ? `(CASE WHEN (${filterCond}) THEN (${base}) ELSE NULL END)` : base;
 }
 
 function buildCond(col: string, op: FilterOp, value: any, params: any[]): string {

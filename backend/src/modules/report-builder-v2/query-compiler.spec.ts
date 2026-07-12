@@ -8,7 +8,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { compile, BuilderValidationError, getSource, listCatalog } from './query-compiler';
+import { compile, compileDrill, drillMetricArg, BuilderValidationError, getSource, listCatalog } from './query-compiler';
 import { DATA_SOURCES, dimensionBadge, metricBadge, contractFormat, contractType } from './data-sources';
 
 const TID = 'a0000000-0000-0000-0000-000000000001';
@@ -98,6 +98,91 @@ describe('query-compiler (pure allowlist + shape)', () => {
     const c = compile({ sourceKey: 'attendance', tenantId: TID, metrics: ['permissionDays'], filters: [{ dim: 'hrCode', op: 'not_null' }] });
     expect(c.sql).toContain('hr_code IS NOT NULL');
     expect(c.params.length).toBe(1); // only tenant bound
+  });
+});
+
+/* ── A1b) BLD-4 DRILL compiler (pure allowlist + shape + reconciliation algebra) ── */
+describe('drill compiler (BLD-4, pure)', () => {
+  it('drillMetricArg unwraps the aggregate to its per-row base', () => {
+    expect(drillMetricArg('SUM(COALESCE(ot_min,0))')).toBe('COALESCE(ot_min,0)');
+    expect(drillMetricArg('COUNT(*)')).toBe('1');
+    expect(drillMetricArg('COUNT(*) FILTER (WHERE late_minutes > 0)'))
+      .toBe('(CASE WHEN (late_minutes > 0) THEN (1) ELSE NULL END)');
+    // COUNT(DISTINCT x) with a comma inside the argument (balanced-paren safe)
+    expect(drillMetricArg('COUNT(DISTINCT COALESCE(person_no,employee_no))')).toBe('COALESCE(person_no,employee_no)');
+    // a /60 hours metric drops the scaling and exposes the raw minutes argument
+    expect(drillMetricArg('ROUND(SUM(worked_min)/60.0,1)')).toBe('worked_min');
+    expect(drillMetricArg('ROUND(AVG(a.aht_seconds))')).toBe('a.aht_seconds');
+  });
+
+  it('reconciles algebraically: Σ(per-row base) equals the SUM aggregate over synthetic rows', () => {
+    const rows = [{ ot_min: 30 }, { ot_min: null }, { ot_min: 90 }, { ot_min: 12 }];
+    // aggregate: SUM(COALESCE(ot_min,0))
+    const agg = rows.reduce((a, r) => a + (r.ot_min ?? 0), 0);
+    // per-row base COALESCE(ot_min,0) evaluated in JS
+    const base = (r: any) => r.ot_min ?? 0;
+    const sumBase = rows.reduce((a, r) => a + base(r), 0);
+    expect(sumBase).toBe(agg); // 132 — the exact reconciliation the live DB proves
+  });
+
+  it('selects every source dimension raw + the metric base, with NO GROUP BY', () => {
+    const c = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['regularOtMin'],
+      cell: [{ dim: 'function', value: 'CH-WA' }] });
+    expect(c.sql).not.toContain('GROUP BY');
+    expect(c.sql).toContain('COALESCE(ot_min,0) AS "regularOtMin"');          // un-aggregated base
+    expect(c.sql).toContain('canon_fn(COALESCE(role_function,function_name)) AS "function"'); // raw dim col
+    expect(c.columns.filter(x => x.kind === 'dimension').length).toBe(getSource('overtime').dimensions.length);
+    expect(c.columns.find(x => x.key === 'regularOtMin')?.kind).toBe('metric');
+  });
+
+  it('binds tenant as $1 and the cell value as a later $N (never inlined)', () => {
+    const c = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      cell: [{ dim: 'function', value: 'CH-WA' }], dateFrom: '2026-06-01', dateTo: '2026-06-30' });
+    expect(c.sql).toContain('tenant_id = $1');
+    expect(c.params[0]).toBe(TID);
+    expect(c.params).toContain('CH-WA');
+    expect(c.sql).not.toContain("'CH-WA'"); // value bound, not inlined
+    expect(c.sql).toContain('canon_fn(COALESCE(role_function,function_name)) = $');
+  });
+
+  it('a NULL cell value compiles to IS NULL (no bound param)', () => {
+    const c = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      cell: [{ dim: 'shift', value: null }] });
+    expect(c.sql).toContain('shift_code IS NULL');
+  });
+
+  it('translates a period cell into the SAME bucket expression compile() groups on', () => {
+    const c = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      period: { granularity: 'month', value: '2026-06' } });
+    expect(c.sql).toContain(`to_char(work_date::timestamp,'YYYY-MM') = $`);
+    expect(c.params).toContain('2026-06');
+  });
+
+  it('rejects an injection cell dimension (no raw column reaches SQL)', () => {
+    expect(() => compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      cell: [{ dim: 'work_date); DROP TABLE roster_days;--', value: 'x' }] })).toThrow(/Unknown drill dimension/);
+  });
+  it('rejects an unknown metric in a drill', () => {
+    expect(() => compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['1; DROP'] })).toThrow(/Unknown metric/);
+  });
+  it('rejects an injection filter dimension in a drill', () => {
+    expect(() => compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      filters: [{ dim: 'evil', op: 'eq', value: 1 }] })).toThrow(/Unknown filter dimension/);
+  });
+
+  it('appends the server-enforced agent-scope filter (self-scope) and clamps the cap', () => {
+    const c = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      enforcedFilters: [{ col: 'COALESCE(person_no,employee_no)', op: 'eq', value: '11801' }], limit: 999999 });
+    expect(c.params).toContain('11801');
+    expect(c.sql).toContain('COALESCE(person_no,employee_no) =');
+    expect(c.sql).toMatch(/LIMIT 2000/); // clamped to DRILL_MAX
+  });
+
+  it('re-applies the report date range with the half-open upper bound', () => {
+    const c = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      dateFrom: '2026-06-01', dateTo: '2026-06-30' });
+    expect(c.sql).toContain('work_date >= $2::date');
+    expect(c.sql).toContain('work_date < ($3::date + 1)');
   });
 });
 
@@ -357,5 +442,58 @@ describe('query-compiler PARITY (live wfm_db)', () => {
       enforcedFilters: [{ col: 'COALESCE(person_no,employee_no)', op: 'eq', value: person.p }] });
     const rows = await q(c.sql, c.params);
     expect(rows.every((r: any) => String(r.person) === String(person.p))).toBe(true);
+  });
+
+  /* ── BLD-4 DRILL reconciliation against the live DB ─────────────────────────
+   * Prove the drill of one aggregated Overtime cell (grouped by function) returns
+   * per-day rows whose true-OT base SUMS EXACTLY back to the aggregated cell. */
+  it('drill of an overtime-by-function cell reconciles to the aggregate (sum of parts == cell)', async () => {
+    if (!up) return;
+    const grouped = compile({ sourceKey: 'overtime', tenantId: TID, dimensions: ['function'],
+      metrics: ['trueOtMin'], dateFrom: FROM, dateTo: TO });
+    const cells = await q(grouped.sql, grouped.params);
+    const cell = cells.find((r: any) => Number(r.trueOtMin) > 0) ?? cells[0];
+    if (!cell) { console.warn('no overtime rows — drill reconciliation skipped'); return; }
+
+    const d = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      cell: [{ dim: 'function', value: cell.function }], dateFrom: FROM, dateTo: TO, limit: 100000 });
+    expect(d.sql).not.toContain('GROUP BY');
+    const raw = await q(d.sql, d.params);
+    const sumBase = raw.reduce((a: number, r: any) => a + Number(r.trueOtMin || 0), 0);
+    expect(sumBase).toBe(Number(cell.trueOtMin));            // EXACT reconciliation
+    expect(raw.every((r: any) => r.function === cell.function)).toBe(true); // every row is the drilled cell
+  });
+
+  it('drill of a regular-OT cell reconciles and every drill row is a real person-day', async () => {
+    if (!up) return;
+    const grouped = compile({ sourceKey: 'overtime', tenantId: TID, dimensions: ['function'],
+      metrics: ['regularOtMin'], dateFrom: FROM, dateTo: TO });
+    const cells = await q(grouped.sql, grouped.params);
+    const cell = cells.find((r: any) => Number(r.regularOtMin) > 0) ?? cells[0];
+    if (!cell) return;
+    const d = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['regularOtMin'],
+      cell: [{ dim: 'function', value: cell.function }], dateFrom: FROM, dateTo: TO, limit: 100000 });
+    const raw = await q(d.sql, d.params);
+    const sumBase = raw.reduce((a: number, r: any) => a + Number(r.regularOtMin || 0), 0);
+    expect(sumBase).toBe(Number(cell.regularOtMin));
+    expect(raw.every((r: any) => r.person && r.date)).toBe(true); // raw dims present per row
+  });
+
+  it('drill honors the agent self-scope (only that person’s rows come back)', async () => {
+    if (!up) return;
+    const [person] = await q(`SELECT COALESCE(person_no,employee_no) p FROM roster_days WHERE tenant_id=$1 AND person_no IS NOT NULL LIMIT 1`, [TID]);
+    const d = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      enforcedFilters: [{ col: 'COALESCE(person_no,employee_no)', op: 'eq', value: person.p }],
+      dateFrom: FROM, dateTo: TO, limit: 100000 });
+    const rows = await q(d.sql, d.params);
+    expect(rows.every((r: any) => String(r.person) === String(person.p))).toBe(true);
+  });
+
+  it('drill of a period (month) cell stays inside that month bucket', async () => {
+    if (!up) return;
+    const d = compileDrill({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'],
+      period: { granularity: 'month', value: '2026-06' }, dateFrom: '2026-01-01', dateTo: '2026-12-31', limit: 100000 });
+    const rows = await q(d.sql, d.params);
+    expect(rows.every((r: any) => String(r.date).slice(0, 7) === '2026-06')).toBe(true);
   });
 });

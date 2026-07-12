@@ -7,8 +7,8 @@ import { RunResult, RunColumn, fmtVal, CHART_COLORS } from './types';
 
 const labelOf = (o: { label_en: string; label_ar: string }, ar: boolean) => (ar ? o.label_ar : o.label_en) || o.label_en;
 
-/* ── compact result table ── */
-export function WidgetTable({ result, ar, maxRows = 200 }: { result: RunResult; ar: boolean; maxRows?: number }) {
+/* ── compact result table (rows drill to underlying data) ── */
+export function WidgetTable({ result, ar, maxRows = 200, onRowClick }: { result: RunResult; ar: boolean; maxRows?: number; onRowClick?: (row: any) => void }) {
   return (
     <div style={{ overflow: 'auto', maxHeight: 320 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -23,7 +23,9 @@ export function WidgetTable({ result, ar, maxRows = 200 }: { result: RunResult; 
         </thead>
         <tbody>
           {result.rows.slice(0, maxRows).map((r, ri) => (
-            <tr key={ri} style={{ borderTop: '1px solid var(--border)' }}>
+            <tr key={ri} onClick={onRowClick ? () => onRowClick(r) : undefined}
+              title={onRowClick ? (ar ? 'انقر للتفصيل' : 'Click to drill') : undefined}
+              style={{ borderTop: '1px solid var(--border)', cursor: onRowClick ? 'pointer' : 'default' }}>
               {result.columns.map((c, ci) => (
                 <td key={c.key} style={{ padding: '7px 12px', textAlign: ci === 0 ? 'start' : 'end', color: ci === 0 ? 'var(--text-1)' : (c.kind === 'metric' ? 'var(--text-1)' : 'var(--text-2)'), fontWeight: ci === 0 ? 600 : (c.kind === 'metric' ? 700 : 400), fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                   {fmtVal(r[c.key], c)}
@@ -76,7 +78,7 @@ export function chartData(result: RunResult) {
   const metCol = result.columns.find(c => c.kind === 'metric') as RunColumn | undefined;
   if (!dimCol || !metCol) return null;
   const pts = result.rows.slice(0, 24).map((r, i) => ({
-    label: String(r[dimCol.key] ?? '—'), value: Number(r[metCol.key]) || 0, color: CHART_COLORS[i % CHART_COLORS.length],
+    label: String(r[dimCol.key] ?? '—'), value: Number(r[metCol.key]) || 0, color: CHART_COLORS[i % CHART_COLORS.length], row: r,
   }));
   return { dimCol, metCol, pts, max: Math.max(1, ...pts.map(p => p.value)) };
 }

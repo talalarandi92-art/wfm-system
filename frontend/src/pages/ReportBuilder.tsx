@@ -12,6 +12,7 @@ import {
 import { BarRow, Donut } from '@/components/dazzle';
 import { FieldPicker, PickerField } from '@/components/report-builder/FieldPicker';
 import { DateRangePicker, DateRangeValue, presetById } from '@/components/report-builder/DateRangePicker';
+import { DrillModal, DrillRequest, drillRequestFromRow } from '@/components/report-builder/DrillModal';
 
 /* ── types mirroring the BLD-1/BLD-2 backend (category/description/badge are
       optional — the picker falls back gracefully on today's payload) ───────── */
@@ -88,6 +89,7 @@ export default function ReportBuilderPage() {
   const [saved, setSaved] = useState<SavedReport[]>([]);
   const [drawer, setDrawer] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [drill, setDrill] = useState<DrillRequest | null>(null);
 
   /* ── initial loads ── */
   useEffect(() => {
@@ -111,21 +113,33 @@ export default function ReportBuilderPage() {
     }).catch(() => setErr('source'));
   }, []);
 
+  /* mapped filter payload — shared by /run and /drill so both see the same universe */
+  const activeFilters = useCallback(() =>
+    filters.filter(f => f.dim && (VALUELESS.includes(f.op) || f.value !== '')).map(f => ({
+      dim: f.dim, op: f.op,
+      ...(VALUELESS.includes(f.op) ? {} : { value: f.op === 'in' ? f.value.split(',').map(s => s.trim()).filter(Boolean) : f.value }),
+    })), [filters]);
+
   /* ── run (debounced) ── */
   const runNow = useCallback(() => {
     if (!sourceKey || metrics.length === 0) { setResult(null); return; }
     setLoading(true); setErr(null);
     apiClient.post('/report-builder-v2/run', {
-      sourceKey, dimensions: dims, metrics,
-      filters: filters.filter(f => f.dim && (VALUELESS.includes(f.op) || f.value !== '')).map(f => ({
-        dim: f.dim, op: f.op,
-        ...(VALUELESS.includes(f.op) ? {} : { value: f.op === 'in' ? f.value.split(',').map(s => s.trim()).filter(Boolean) : f.value }),
-      })),
+      sourceKey, dimensions: dims, metrics, filters: activeFilters(),
       dateFrom: from, dateTo: to, granularity: gran, limit: 5000,
     }).then((r: any) => setResult(r.data)).catch((e: any) => {
       setErr(e?.response?.data?.message || 'run'); setResult(null);
     }).finally(() => setLoading(false));
-  }, [sourceKey, dims, metrics, filters, from, to, gran]);
+  }, [sourceKey, dims, metrics, activeFilters, from, to, gran]);
+
+  /* ── drill a result row → the underlying un-aggregated rows ── */
+  const openDrill = useCallback((row: any) => {
+    if (!result) return;
+    setDrill(drillRequestFromRow({
+      sourceKey, columns: result.columns as any, row,
+      granularity: gran as any, filters: activeFilters(), dateFrom: from, dateTo: to, ar,
+    }));
+  }, [result, sourceKey, gran, activeFilters, from, to, ar]);
 
   const firstRun = useRef(true);
   useEffect(() => {
@@ -214,7 +228,7 @@ export default function ReportBuilderPage() {
     const metCol = result.columns.find(c => c.kind === 'metric');
     if (!dimCol || !metCol) return null;
     const pts = result.rows.slice(0, 24).map((r, i) => ({
-      label: String(r[dimCol.key] ?? '—'), value: Number(r[metCol.key]) || 0, color: CHART_COLORS[i % CHART_COLORS.length],
+      label: String(r[dimCol.key] ?? '—'), value: Number(r[metCol.key]) || 0, color: CHART_COLORS[i % CHART_COLORS.length], row: r,
     }));
     return { dimCol, metCol, pts, max: Math.max(1, ...pts.map(p => p.value)) };
   }, [result]);
@@ -397,12 +411,16 @@ export default function ReportBuilderPage() {
 
               {!loading && !err && result && result.rows.length > 0 && (
                 <div style={{ padding: viz === 'table' ? 0 : 18 }}>
-                  {viz === 'table' && <ResultTable result={result} dark={dark} ar={ar} label={label} />}
+                  {viz === 'table' && <ResultTable result={result} dark={dark} ar={ar} label={label} onRowClick={openDrill} />}
                   {(viz === 'bar' || viz === 'line') && chart && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <div style={{ fontSize: 11, color: ts(dark), marginBottom: 4 }}>{label(chart.metCol)} {L('by', 'حسب')} {label(chart.dimCol)}</div>
+                      <div style={{ fontSize: 11, color: ts(dark), marginBottom: 4 }}>{label(chart.metCol)} {L('by', 'حسب')} {label(chart.dimCol)} · {L('click a bar to drill', 'انقر عموداً للتفصيل')}</div>
                       {viz === 'bar'
-                        ? chart.pts.map((p, i) => <BarRow key={i} label={p.label} value={p.value} max={chart.max} color={p.color} delay={i * 40} />)
+                        ? chart.pts.map((p, i) => (
+                            <div key={i} onClick={() => openDrill(p.row)} title={L('Drill into underlying rows', 'التفصيل إلى الصفوف الأساسية')} style={{ cursor: 'pointer', borderRadius: 8, padding: '2px 4px', margin: '0 -4px' }}>
+                              <BarRow label={p.label} value={p.value} max={chart.max} color={p.color} delay={i * 40} />
+                            </div>
+                          ))
                         : <LineChartSvg pts={chart.pts} dark={dark} />}
                     </div>
                   )}
@@ -418,6 +436,9 @@ export default function ReportBuilderPage() {
           </div>
         </div>
       )}
+
+      {/* ── DRILL MODAL ── */}
+      {drill && <DrillModal request={drill} dark={dark} ar={ar} onClose={() => setDrill(null)} />}
 
       {/* ── FIELD PICKER MODAL ── */}
       {picker && detail && (
@@ -487,8 +508,8 @@ function SelChip({ label, color, dark, onUp, onDown, onRemove }: { label: string
   );
 }
 
-/* ── result table ── */
-function ResultTable({ result, dark, ar, label }: { result: RunResult; dark: boolean; ar: boolean; label: (o: any) => string }) {
+/* ── result table (rows drill to underlying data) ── */
+function ResultTable({ result, dark, ar, label, onRowClick }: { result: RunResult; dark: boolean; ar: boolean; label: (o: any) => string; onRowClick?: (row: any) => void }) {
   return (
     <div style={{ overflowX: 'auto', maxHeight: '58vh' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
@@ -501,7 +522,11 @@ function ResultTable({ result, dark, ar, label }: { result: RunResult; dark: boo
         </thead>
         <tbody>
           {result.rows.slice(0, 1000).map((r, ri) => (
-            <tr key={ri} style={{ borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}` }}>
+            <tr key={ri} onClick={onRowClick ? () => onRowClick(r) : undefined}
+              title={onRowClick ? (ar ? 'انقر للتفصيل إلى الصفوف الأساسية' : 'Click to drill into underlying rows') : undefined}
+              style={{ borderTop: `1px solid ${dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'}`, cursor: onRowClick ? 'pointer' : 'default' }}
+              onMouseEnter={onRowClick ? e => (e.currentTarget.style.background = dark ? 'rgba(99,102,241,0.08)' : 'rgba(99,102,241,0.05)') : undefined}
+              onMouseLeave={onRowClick ? e => (e.currentTarget.style.background = 'transparent') : undefined}>
               {result.columns.map((c, ci) => (
                 <td key={c.key} style={{ padding: '9px 16px', textAlign: ci === 0 ? 'start' : 'end', color: ci === 0 ? tp(dark) : (c.kind === 'metric' ? tp(dark) : ts(dark)), fontWeight: ci === 0 ? 600 : (c.kind === 'metric' ? 700 : 400), fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                   {fmtCell(r[c.key], c)}

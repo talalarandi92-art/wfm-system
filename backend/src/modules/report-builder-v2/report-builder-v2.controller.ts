@@ -35,6 +35,13 @@ export class ReportBuilderV2Controller {
     return this.svc.run(req.user, body);
   }
 
+  @Post('drill')
+  @RequirePermissions('reports.view')
+  @ApiOperation({ summary: 'Drill an aggregated cell → the underlying un-aggregated rows (same RBAC + agent scope)' })
+  drill(@Req() req: any, @Body() body: any) {
+    return this.svc.drill(req.user, body);
+  }
+
   /* saved reports */
   @Get('saved-reports')
   @RequirePermissions('reports.view')
