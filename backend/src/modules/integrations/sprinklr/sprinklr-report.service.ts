@@ -22,9 +22,14 @@ export interface IncomingReport {
   columns?: { key: string; label?: string | null }[];
   rows?: RawReportItem[];
   rawSample?: string;
+  /** TEMP debug-capture: the raw intercepted JSON payload (string), for shape discovery only. */
+  rawPayload?: string;
+  truncated?: boolean;
 }
 
-const VALID_TYPES = new Set(['login_logout', 'survey', 'agent_perf', 'agent_summary', 'unknown']);
+// 'debug_raw' is a store-only shape-discovery bucket — never parsed/promoted, but VALID so the
+// getStaging endpoint can filter to it (?type=debug_raw).
+const VALID_TYPES = new Set(['login_logout', 'survey', 'agent_perf', 'agent_summary', 'debug_raw', 'unknown']);
 
 @Injectable()
 export class SprinklrReportService {
@@ -38,6 +43,15 @@ export class SprinklrReportService {
     const byType: Record<string, number> = {};
 
     for (const rep of reports) {
+      // TEMP debug-capture: store the raw payload as-is and STOP — never parse or promote it.
+      // This is how we learn the real reportingQuery / label-metadata JSON shape before fixing
+      // the agent_summary parser. Store-only, idempotent per (tenant, 'debug_raw', content_hash).
+      if (rep?.reportType === 'debug_raw') {
+        if (await this.stageDebugRaw(tenantId, rep)) { staged++; byType['debug_raw'] = (byType['debug_raw'] || 0) + 1; }
+        else skipped++;
+        continue;
+      }
+
       const rows: RawReportItem[] = Array.isArray(rep?.rows) ? rep.rows : [];
       if (!rows.length) { skipped++; continue; }
 
@@ -90,6 +104,44 @@ export class SprinklrReportService {
 
     if (staged > 0) this.logger.log(`[${tenantId}] staged ${staged} Sprinklr report(s): ${JSON.stringify(byType)}${promoted ? ` | promoted ${promoted} agent-day stat(s)` : ''}`);
     return { staged, skipped, promoted, byType };
+  }
+
+  /**
+   * TEMP debug-capture: store one raw intercepted payload for shape discovery. Store-ONLY — this
+   * NEVER parses or promotes. row_count=0, day/agent_email NULL; the raw JSON lives in payload.rawPayload.
+   * Idempotent per (tenant, 'debug_raw', content_hash) so the throttled poll can't duplicate.
+   * Inspect with: SELECT report_type, source_op, left(payload::text,4000) FROM sprinklr_report_staging
+   *               WHERE report_type='debug_raw' ORDER BY captured_at DESC LIMIT 5;
+   */
+  private async stageDebugRaw(tenantId: string, rep: IncomingReport): Promise<boolean> {
+    const raw = typeof rep?.rawPayload === 'string' ? rep.rawPayload
+      : (typeof rep?.rawSample === 'string' ? rep.rawSample : '');
+    if (!raw) return false;
+
+    const payload = {
+      rawPayload: raw.slice(0, 200000),
+      sourceOp: rep?.sourceOp ?? null,
+      sourceUrl: rep?.url ?? null,
+      truncated: rep?.truncated ?? undefined,
+    };
+    const hash = createHash('sha256')
+      .update('debug_raw\n' + (rep?.sourceOp ?? '') + '\n' + raw)
+      .digest('hex');
+
+    try {
+      const res = await this.ds.query(
+        `INSERT INTO sprinklr_report_staging
+           (tenant_id, report_type, source_op, day, agent_email, payload, row_count, content_hash, captured_at)
+         VALUES ($1,'debug_raw',$2,NULL,NULL,$3::jsonb,0,$4, COALESCE($5::timestamptz, now()))
+         ON CONFLICT (tenant_id, report_type, content_hash) DO NOTHING
+         RETURNING id`,
+        [tenantId, rep?.sourceOp ?? null, JSON.stringify(payload), hash, this.safeIso(rep?.capturedAt)],
+      );
+      return Array.isArray(res) && res.length > 0;
+    } catch (e: any) {
+      this.logger.warn(`[${tenantId}] debug_raw stage failed: ${e?.message}`);
+      return false;
+    }
   }
 
   /**

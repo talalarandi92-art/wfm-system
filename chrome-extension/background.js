@@ -275,7 +275,12 @@ async function pushToWfm(snapshot, isRetryAfterLogin = false) {
 // Separate from pushToWfm (live snapshots). Same JWT + auto re-login on 401; does not touch
 // the snapshot badge/status so live capture health remains the primary signal.
 async function pushReportToWfm(report, isRetryAfterLogin = false) {
-  if (!report || !Array.isArray(report.rows) || report.rows.length === 0) return { ok: false, error: 'empty' };
+  if (!report) return { ok: false, error: 'empty' };
+  // debug_raw carries a rawPayload string (no parsed rows) — let it through; every other
+  // report type still requires non-empty rows.
+  if (report.reportType !== 'debug_raw' && (!Array.isArray(report.rows) || report.rows.length === 0)) {
+    return { ok: false, error: 'empty' };
+  }
   const { config = DEFAULT_CONFIG } = await chrome.storage.local.get('config');
   if (!config.enabled) return { ok: false, error: 'Disabled' };
 

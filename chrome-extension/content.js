@@ -434,6 +434,48 @@ function harvestAndForwardReport(payloadData, opName, url) {
   } catch (e) { /* shape varies — never break live capture */ }
 }
 
+// ── TEMP debug-capture: forward the REAL raw payloads so we can see the true shape ─
+// The Agent-Summary harvest fails because the reportingQuery JSON shape the parser
+// assumes (rq.responses) does NOT match the real payload, and the M_*→column-label map
+// lives in a SEPARATE op (fetchTargetMetric / dimension ops). To fix the parser we must
+// first SEE the truth. This forwards the raw intercepted payload (report_type='debug_raw')
+// straight to staging — store-only, NEVER parsed/promoted — for the ops that carry either
+// the report rows or the column-label metadata. Fires REGARDLESS of the reportingQuery
+// shape (it does NOT gate on rq.responses), so it captures even when harvestAndForwardReport
+// bails. Throttled to ≤1 per op per 30s so the continuous poll never floods staging.
+// Remove this block once the real shape is mapped and the parser is corrected.
+const DEBUG_RAW_OPS = new Set([
+  'queries', 'reportingQuery',                                   // the report ROWS (opaque M_* measures)
+  'fetchTargetMetric', 'getSortedDimensionValues', 'fetchSortDimensions', // the M_*→label metadata
+]);
+const debugRawSeen = new Map();        // opName → last-forwarded ts (per-op throttle)
+const DEBUG_RAW_THROTTLE_MS = 30_000;  // ≤1 raw capture per op per 30s
+const DEBUG_RAW_CAP_BYTES   = 180_000; // cap the raw JSON we ship (~180KB)
+
+function forwardDebugRaw(opName, payloadData, url) {
+  try {
+    if (!opName || !DEBUG_RAW_OPS.has(opName)) return;
+    const now  = Date.now();
+    const last = debugRawSeen.get(opName) || 0;
+    if (now - last < DEBUG_RAW_THROTTLE_MS) return;   // throttle: one per op per 30s
+
+    let raw = '';
+    try { raw = JSON.stringify(payloadData); } catch (e) { return; }
+    if (!raw) return;
+    const truncated = raw.length > DEBUG_RAW_CAP_BYTES;
+    if (truncated) raw = raw.slice(0, DEBUG_RAW_CAP_BYTES);
+
+    debugRawSeen.set(opName, now);
+    const report = {
+      source: 'sprinklr', reportType: 'debug_raw', sourceOp: opName,
+      url: (url || '').split('?')[0], capturedAt: new Date().toISOString(),
+      rawPayload: raw, truncated,
+    };
+    chrome.runtime.sendMessage({ type: 'SPRINKLR_REPORT', report });
+    console.log(`[WFM Bridge] 🐞 debug_raw forwarded: op=${opName} (${raw.length} bytes${truncated ? ', truncated' : ''}) → report-push`);
+  } catch (e) { /* never break live capture */ }
+}
+
 // ── entityFeedStats freshness marker (A3 guard) ───────────────────────────────
 // Timestamp of the last stats-bearing entityFeed. Lets diagnostics report how
 // fresh the authoritative queue source is.
@@ -587,6 +629,10 @@ window.addEventListener('__wfm_sprinklr_data__', (e) => {
 
     if (opName) {
       sprinklrOps.set(opName, payload.data);
+
+      // TEMP: forward the RAW payload for shape-discovery (store-only debug_raw). Independent of
+      // every parser below — fires for the report + label-metadata ops regardless of JSON shape.
+      try { forwardDebugRaw(opName, payload.data, payload.url); } catch (e) { /* never break live capture */ }
 
       // Harvest agent names/emails/measurements from every reportingQuery variant.
       // CONFIRMED from raw samples: the Supervisor agents TABLE (Case Count /
