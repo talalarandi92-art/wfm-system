@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { AgentRunner } from '@common/agent-runner';
 
 /**
  * SLA auto-escalation.
@@ -14,7 +15,10 @@ export class SlaEscalationService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private readonly INTERVAL_MS = 3 * 60_000; // every 3 minutes
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  private readonly runner: AgentRunner;
+  constructor(@InjectDataSource() private readonly ds: DataSource) {
+    this.runner = new AgentRunner(this.ds, 'sla-escalation-loop');
+  }
 
   onModuleInit() {
     // First pass shortly after boot, then on a fixed cadence.
@@ -27,8 +31,14 @@ export class SlaEscalationService implements OnModuleInit, OnModuleDestroy {
   }
 
   private run() {
-    this.escalateOverdue().catch(e => this.logger.warn(`SLA escalation pass failed: ${e.message}`));
-    this.escalateOverdueTechReports().catch(e => this.logger.warn(`Tech-report SLA pass failed: ${e.message}`));
+    // Cross-process exclusivity: a pg advisory lock ensures only ONE instance runs this
+    // write-loop per tick, so a multi-instance deploy never double-escalates / double-notifies.
+    this.runner.runExclusive(async () => {
+      await Promise.all([
+        this.escalateOverdue().catch(e => this.logger.warn(`SLA escalation pass failed: ${e.message}`)),
+        this.escalateOverdueTechReports().catch(e => this.logger.warn(`Tech-report SLA pass failed: ${e.message}`)),
+      ]);
+    }).catch(e => this.logger.warn(`SLA escalation lock skipped: ${e.message}`));
   }
 
   /** Reviewers (RTA/WFM/Ops/Admin) for a tenant — notification recipients. */

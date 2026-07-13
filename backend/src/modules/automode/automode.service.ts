@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/commo
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AnalystService } from '@modules/analyst/analyst.service';
+import { AgentRunner } from '@common/agent-runner';
 
 /**
  * Auto Mode — the Chief acting as deputy on requests. When enabled, a background
@@ -19,16 +20,26 @@ export class AutoModeService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('AutoMode');
   private timer?: NodeJS.Timeout;
 
+  private readonly runner: AgentRunner;
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly analyst: AnalystService,
-  ) {}
+  ) {
+    this.runner = new AgentRunner(this.ds, 'automode-loop');
+  }
 
   onModuleInit() {
-    setTimeout(() => this.tickAll().catch(() => {}), 100_000);
-    this.timer = setInterval(() => this.tickAll().catch(() => {}), 3 * 60_000);
+    setTimeout(() => this.tickAllExclusive(), 100_000);
+    this.timer = setInterval(() => this.tickAllExclusive(), 3 * 60_000);
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
+
+  // Advisory-lock exclusive so a multi-instance deploy never double-decides (double
+  // approve/reject/notify) the same pending request. The controller's manual run (tick(tid))
+  // and act-on-enable path are intentionally NOT gated — they are operator-initiated.
+  private tickAllExclusive() {
+    this.runner.runExclusive(() => this.tickAll()).catch(() => {});
+  }
 
   // ── Settings ─────────────────────────────────────────────────────────────────
   async getSettings(tid: string) {

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { AgentRunner } from '@common/agent-runner';
 
 /**
  * Scorecard Guard — builds and reviews the performance scorecard from real KPI
@@ -22,11 +23,20 @@ export class ScorecardGuardService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('ScorecardGuard');
   private timer?: NodeJS.Timeout;
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  private readonly runner: AgentRunner;
+  constructor(@InjectDataSource() private readonly ds: DataSource) {
+    this.runner = new AgentRunner(this.ds, 'scorecard-guard-loop');
+  }
 
   onModuleInit() {
-    setTimeout(() => this.scanAll().catch(() => {}), 110_000);
-    this.timer = setInterval(() => this.scanAll().catch(() => {}), 6 * 3600_000); // every 6h
+    setTimeout(() => this.scanAllExclusive(), 110_000);
+    this.timer = setInterval(() => this.scanAllExclusive(), 6 * 3600_000); // every 6h
+  }
+
+  // Advisory-lock exclusive so multi-instance never double-writes coaching_flags. The manual
+  // per-tenant scan(tid) path (controller) is intentionally NOT gated.
+  private scanAllExclusive() {
+    this.runner.runExclusive(() => this.scanAll()).catch(() => {});
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 

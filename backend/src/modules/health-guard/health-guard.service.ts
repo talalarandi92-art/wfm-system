@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { AgentRunner } from '@common/agent-runner';
 
 /**
  * System Integrity & Health Guard.
@@ -43,12 +44,21 @@ export class HealthGuardService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private lastFailIds: Record<string, Set<string>> = {}; // tenant -> failed check ids
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  private readonly runner: AgentRunner;
+  constructor(@InjectDataSource() private readonly ds: DataSource) {
+    this.runner = new AgentRunner(this.ds, 'health-guard-loop');
+  }
 
   onModuleInit() {
     // First sweep after 60s, then every 30 minutes.
-    setTimeout(() => this.sweepAll().catch(() => {}), 60_000);
-    this.timer = setInterval(() => this.sweepAll().catch(() => {}), 30 * 60_000);
+    setTimeout(() => this.sweepAllExclusive(), 60_000);
+    this.timer = setInterval(() => this.sweepAllExclusive(), 30 * 60_000);
+  }
+
+  // Advisory-lock exclusive so multi-instance never double-notifies on a fresh failure. The
+  // on-demand run(tid) path (controller) is read-only and intentionally NOT gated.
+  private sweepAllExclusive() {
+    this.runner.runExclusive(() => this.sweepAll()).catch(() => {});
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 

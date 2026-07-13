@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { AgentRunner } from '@common/agent-runner';
 
 /**
  * Coaching trigger engine.
@@ -25,14 +26,22 @@ export class CoachingService implements OnModuleInit, OnModuleDestroy {
     { type: 'missing_punch',      col: 'CASE WHEN ar.is_missing_punch THEN 1 ELSE 0 END',            ar: 'بصمات ناقصة متكررة' },
   ];
 
-  constructor(@InjectDataSource() private readonly ds: DataSource) {}
+  private readonly runner: AgentRunner;
+  constructor(@InjectDataSource() private readonly ds: DataSource) {
+    this.runner = new AgentRunner(this.ds, 'coaching-loop');
+  }
 
   onModuleInit() {
     setTimeout(() => this.run(), 60_000);                 // first scan ~1 min after boot
     this.timer = setInterval(() => this.run(), 6 * 3600_000); // every 6h
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
-  private run() { this.scanAllTenants().catch(e => this.logger.warn(`coaching scan failed: ${e.message}`)); }
+  // Advisory-lock exclusive so multi-instance never double-flags/double-notifies. The manual
+  // per-tenant scan(tid) path (controller) is intentionally NOT gated.
+  private run() {
+    this.runner.runExclusive(() => this.scanAllTenants())
+      .catch(e => this.logger.warn(`coaching scan failed: ${e.message}`));
+  }
 
   private severityOf(n: number): string {
     return n >= CoachingService.THRESHOLD * 2 ? 'high' : n >= CoachingService.THRESHOLD + 1 ? 'medium' : 'low';

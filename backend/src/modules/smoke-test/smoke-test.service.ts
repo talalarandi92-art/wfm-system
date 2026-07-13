@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { AgentRunner } from '@common/agent-runner';
 import { GeneratorService } from '@modules/schedule-generator/generator.service';
 
 /**
@@ -22,15 +23,24 @@ export class SmokeTestService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('SmokeTest');
   private timer?: NodeJS.Timeout;
 
+  private readonly runner: AgentRunner;
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly gen: GeneratorService,
-  ) {}
+  ) {
+    this.runner = new AgentRunner(this.ds, 'smoke-test-loop');
+  }
 
   onModuleInit() {
     // First sweep 3 min after boot, then once a day.
-    setTimeout(() => this.sweepAll().catch(() => {}), 180_000);
-    this.timer = setInterval(() => this.sweepAll().catch(() => {}), 24 * 3600_000);
+    setTimeout(() => this.sweepAllExclusive(), 180_000);
+    this.timer = setInterval(() => this.sweepAllExclusive(), 24 * 3600_000);
+  }
+
+  // Advisory-lock exclusive so multi-instance never double-notifies on a failed probe. The
+  // on-demand run(tid,userId) path (controller) rolls back its probe writes and is NOT gated.
+  private sweepAllExclusive() {
+    this.runner.runExclusive(() => this.sweepAll()).catch(() => {});
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 

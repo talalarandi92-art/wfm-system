@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { AgentRunner } from '@common/agent-runner';
 import { BreaksService } from './breaks.service';
 import { BreakPolicyService } from './break-policy.service';
 import {
@@ -101,11 +102,14 @@ export class BreakReleaseService implements OnModuleInit, OnModuleDestroy {
     staleSec: number | null;
   } | null = null;
 
+  private readonly runner: AgentRunner;
   constructor(
     private readonly dataSource: DataSource,
     private readonly breaksService: BreaksService,
     private readonly policyService: BreakPolicyService,
-  ) {}
+  ) {
+    this.runner = new AgentRunner(this.dataSource, 'break-release-loop');
+  }
 
   onModuleInit() {
     const ms = parseInt(process.env.BREAK_ENGINE_INTERVAL_MS ?? '45000', 10);
@@ -124,7 +128,12 @@ export class BreakReleaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   private safeTick() {
-    this.tick().catch(e => this.logger.warn(`break engine tick failed: ${e.message}`));
+    // Cross-process exclusivity: a pg advisory lock ensures only ONE instance runs the live
+    // release engine per tick (no double-release / double-transition). The manual tick(date)
+    // path (controller) is intentionally NOT gated — it is operator-initiated and rare, and the
+    // in-process `ticking` guard still prevents overlap within a process.
+    this.runner.runExclusive(() => this.tick())
+      .catch(e => this.logger.warn(`break engine tick failed: ${e.message}`));
   }
 
   // ── Time helpers (all wall clocks are Kuwait +03, matching the data) ──────

@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { AnalystService } from '@modules/analyst/analyst.service';
 import { HealthGuardService } from '@modules/health-guard/health-guard.service';
+import { AgentRunner } from '@common/agent-runner';
 
 /**
  * Reporting bot — the third guard. Composes a daily WFM report from the Analyst
@@ -20,15 +21,23 @@ export class ReporterService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('Reporter');
   private timer?: NodeJS.Timeout;
 
+  private readonly runner: AgentRunner;
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly analyst: AnalystService,
     private readonly health: HealthGuardService,
-  ) {}
+  ) {
+    this.runner = new AgentRunner(this.ds, 'reporter-loop');
+  }
 
   onModuleInit() {
-    setTimeout(() => this.tick().catch(() => {}), 90_000);     // first check after 90s
-    this.timer = setInterval(() => this.tick().catch(() => {}), 5 * 60_000); // every 5 min
+    setTimeout(() => this.tickExclusive(), 90_000);     // first check after 90s
+    this.timer = setInterval(() => this.tickExclusive(), 5 * 60_000); // every 5 min
+  }
+  // Advisory-lock exclusive so multi-instance never double-fires a scheduled report/notification.
+  // The manual generate(...) path (controller) is intentionally NOT gated.
+  private tickExclusive() {
+    this.runner.runExclusive(() => this.tick()).catch(() => {});
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 

@@ -68,6 +68,7 @@ import { AttritionModule }           from '@modules/attrition/attrition.module';
 import { AutoModeModule }            from '@modules/automode/automode.module';
 import { ChiefModule }               from '@modules/chief/chief.module';
 import { BotsModule }                from '@modules/bots/bots.module';
+import { RetentionModule }           from '@modules/retention/retention.module';
 import { TenantMiddleware } from '@common/middleware/tenant.middleware';
 
 @Module({
@@ -193,6 +194,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     ChiefModule,
     BotsModule,
     ReportBuilderV2Module,
+    RetentionModule,
   ],
   providers: [
     // Guard order (2026-07-06, risk #15): JWT FIRST so the throttler can key by USER —
