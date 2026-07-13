@@ -14,10 +14,27 @@ interface Report {
   byFunction: Grp[]; byMonth: Grp[]; separations: Sep[]; transfers: Transfer[];
 }
 
+/* theme-aware neutral tokens — dark keeps the original explicit values; light mirrors them
+   with a slate-navy tint. Semantic/brand (status colors) + mid-gray muted text
+   (#94a3b8 / #64748b / #475569) stay inline as they read on both themes. Shared by the page
+   and the Panel component so residual literals live in this one documented block. */
+const nt = (dark: boolean) => ({
+  cardBg:  dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)',
+  fieldBg: dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
+  bdr:     dark ? 'rgba(255,255,255,0.1)'  : 'rgba(15,23,42,0.12)',
+  bdrSoft: dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)',
+  bdrRow:  dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.06)',
+  headBg:  dark ? 'rgba(0,0,0,0.2)'        : 'rgba(15,23,42,0.05)',
+  headBg2: dark ? 'rgba(0,0,0,0.15)'       : 'rgba(15,23,42,0.04)',
+  text:    tp(dark),
+  text2:   dark ? '#cbd5e1' : '#334155',
+});
+
 export default function AttritionPage() {
   const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
   useInjectDsStyles();
+  const T = nt(dark);
 
   const [data, setData] = useState<Report | null>(null);
   const [loading, setL] = useState(true);
@@ -56,9 +73,9 @@ export default function AttritionPage() {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }} />
+          <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: T.fieldBg, border: `1px solid ${T.bdr}`, color: T.text }} />
           <span style={{ color: '#475569' }}>→</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }} />
+          <input type="date" value={to} onChange={e => setTo(e.target.value)} className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: T.fieldBg, border: `1px solid ${T.bdr}`, color: T.text }} />
           <button onClick={load} disabled={loading} className="flex items-center gap-2 text-xs font-semibold rounded-xl px-3 py-2" style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)', color: '#fca5a5' }}>{loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}{ar ? 'حساب' : 'Compute'}</button>
         </div>
       </div>
@@ -120,19 +137,19 @@ export default function AttritionPage() {
           </div>
 
           {/* Separations table */}
-          <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-            <div className="px-4 py-3 text-sm font-bold" style={{ color: tp(dark), borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{ar ? 'قائمة المغادرين' : 'Separations'} ({data.separations.length})</div>
+          <div className="rounded-2xl overflow-hidden" style={{ background: T.cardBg, border: `1px solid ${T.bdrSoft}` }}>
+            <div className="px-4 py-3 text-sm font-bold" style={{ color: T.text, borderBottom: `1px solid ${T.bdrSoft}` }}>{ar ? 'قائمة المغادرين' : 'Separations'} ({data.separations.length})</div>
             <div className="overflow-x-auto">
               <table className="w-full text-[11px]">
-                <thead><tr style={{ background: 'rgba(0,0,0,0.2)' }}>
+                <thead><tr style={{ background: T.headBg }}>
                   {[ar ? 'الموظف' : 'Employee', ar ? 'القسم' : 'Function', ar ? 'النوع' : 'Type', ar ? 'تاريخ المغادرة' : 'Separation', ar ? 'آخر يوم عمل' : 'Last working day'].map((h, i) => (
                     <th key={i} className="text-start px-3 py-2 text-[10px] uppercase tracking-wider" style={{ color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
                   {data.separations.map((s, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                      <td className="px-3 py-1.5" style={{ color: '#cbd5e1' }}>{s.name} <span style={{ color: '#475569' }}>#{s.employee_no}</span></td>
+                    <tr key={i} style={{ borderBottom: `1px solid ${T.bdrRow}` }}>
+                      <td className="px-3 py-1.5" style={{ color: T.text2 }}>{s.name} <span style={{ color: '#475569' }}>#{s.employee_no}</span></td>
                       <td className="px-3 py-1.5" style={{ color: '#94a3b8' }}>{s.function_name}</td>
                       <td className="px-3 py-1.5">
                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: s.code === 'RES' ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)', color: s.code === 'RES' ? '#fbbf24' : '#f87171' }}>
@@ -157,15 +174,15 @@ export default function AttritionPage() {
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[11px]">
-                  <thead><tr style={{ background: 'rgba(0,0,0,0.15)' }}>
+                  <thead><tr style={{ background: T.headBg2 }}>
                     {[ar ? 'الموظف' : 'Employee', ar ? 'القسم السابق' : 'From department', ar ? 'تاريخ الانتقال' : 'Transfer date'].map((h, i) => (
                       <th key={i} className="text-start px-3 py-2 text-[10px] uppercase tracking-wider" style={{ color: '#475569', whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr></thead>
                   <tbody>
                     {data.transfers.map((t, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                        <td className="px-3 py-1.5" style={{ color: '#cbd5e1' }}>{t.name} <span style={{ color: '#475569' }}>#{t.employee_no}</span></td>
+                      <tr key={i} style={{ borderBottom: `1px solid ${T.bdrRow}` }}>
+                        <td className="px-3 py-1.5" style={{ color: T.text2 }}>{t.name} <span style={{ color: '#475569' }}>#{t.employee_no}</span></td>
                         <td className="px-3 py-1.5" style={{ color: '#94a3b8' }}>{t.from_function}</td>
                         <td className="px-3 py-1.5 tabular-nums" style={{ color: '#67e8f9' }}>{t.transfer_date}</td>
                       </tr>
@@ -182,9 +199,10 @@ export default function AttritionPage() {
 }
 
 function Panel({ title, dark, children }: { title: string; dark: boolean; children: any }) {
+  const T = nt(dark);
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-      <div className="px-4 py-2.5 text-xs font-bold" style={{ color: tp(dark), borderBottom: '1px solid rgba(255,255,255,0.06)' }}>{title}</div>
+    <div className="rounded-2xl overflow-hidden" style={{ background: T.cardBg, border: `1px solid ${T.bdrSoft}` }}>
+      <div className="px-4 py-2.5 text-xs font-bold" style={{ color: T.text, borderBottom: `1px solid ${T.bdrSoft}` }}>{title}</div>
       <div className="px-2 py-1">{children}</div>
     </div>
   );

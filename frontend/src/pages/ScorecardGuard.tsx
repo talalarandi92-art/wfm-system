@@ -17,10 +17,26 @@ interface Review {
   trend?: { week_label: string; avg: string }[];
 }
 
+/* theme-aware neutral tokens — dark keeps the original explicit values; light mirrors them
+   with a slate-navy tint. Semantic/brand (amber/red status) + mid-gray muted text
+   (#94a3b8 / #64748b / #475569) stay inline as they read on both themes. Shared by the page,
+   Panel and Row so residual literals live in this one documented block. */
+const nt = (dark: boolean) => ({
+  cardBg:  dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)',
+  fieldBg: dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
+  bdr:     dark ? 'rgba(255,255,255,0.1)'  : 'rgba(15,23,42,0.12)',
+  bdrSoft: dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)',
+  bdrRow:  dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.06)',
+  optBg:   dark ? '#0f172a' : '#fff',
+  text:    tp(dark),
+  text2:   dark ? '#cbd5e1' : '#334155',
+});
+
 export default function ScorecardGuardPage() {
   const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
   useInjectDsStyles();
+  const T = nt(dark);
 
   const [data, setData] = useState<Review | null>(null);
   const [weeks, setWeeks] = useState<{ week_label: string; n: number }[]>([]);
@@ -54,8 +70,8 @@ export default function ScorecardGuardPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <select value={week} onChange={e => setWeek(e.target.value)} className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }}>
-            {weeks.map(w => <option key={w.week_label} value={w.week_label} style={{ background: '#0f172a' }}>{w.week_label} ({w.n})</option>)}
+          <select value={week} onChange={e => setWeek(e.target.value)} className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: T.fieldBg, border: `1px solid ${T.bdr}`, color: T.text }}>
+            {weeks.map(w => <option key={w.week_label} value={w.week_label} style={{ background: T.optBg }}>{w.week_label} ({w.n})</option>)}
           </select>
           <button onClick={load} disabled={loading} className="flex items-center gap-2 text-xs font-semibold rounded-xl px-3 py-2" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)', color: '#fcd34d' }}>{loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}{ar ? 'راجع' : 'Review'}</button>
         </div>
@@ -75,14 +91,14 @@ export default function ScorecardGuardPage() {
               [ar ? 'الأعلى' : 'max', data.overall!.max, '#22c55e'],
               [ar ? 'تحت الهدف' : 'below', data.coachingCandidates, '#f87171'],
             ].map(([l, v, c], i) => (
-              <div key={i} className="rounded-2xl px-4 py-3" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div key={i} className="rounded-2xl px-4 py-3" style={{ background: T.cardBg, border: `1px solid ${T.bdrSoft}` }}>
                 <p className="text-[11px]" style={{ color: '#64748b' }}>{l as string}</p>
                 <p className="text-2xl font-bold tabular-nums" style={{ color: c as string }}>{v as number}</p>
               </div>
             ))}
           </div>
           {data.trend && data.trend.length > 1 && (
-            <div className="rounded-2xl p-4" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="rounded-2xl p-4" style={{ background: T.cardBg, border: `1px solid ${T.bdrSoft}` }}>
               <p className="text-xs font-bold mb-2" style={{ color: tp(dark) }}>{ar ? 'اتجاه المتوسّط أسبوعياً' : 'Weekly average trend'}</p>
               <div className="flex items-end gap-3 h-24">
                 {data.trend.map(t => (
@@ -116,15 +132,15 @@ export default function ScorecardGuardPage() {
 
           {/* Coaching candidates */}
           {data.belowTarget!.length > 0 && (
-            <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(248,113,113,0.22)' }}>
-              <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(248,113,113,0.06)' }}>
+            <div className="rounded-2xl overflow-hidden" style={{ background: T.cardBg, border: '1px solid rgba(248,113,113,0.22)' }}>
+              <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${T.bdrSoft}`, background: 'rgba(248,113,113,0.06)' }}>
                 <GraduationCap size={14} style={{ color: '#f87171' }} /><span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? 'مرشّحون للكوتشينج (تحت متوسّط القسم)' : 'Coaching candidates (below function avg)'}</span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg ms-auto" style={{ background: 'rgba(248,113,113,0.15)', color: '#f87171' }}>{data.belowTarget!.length}</span>
               </div>
               <div className="max-h-72 overflow-y-auto">
                 {data.belowTarget!.map((b, i) => (
-                  <div key={i} className="flex items-center gap-3 px-4 py-2 text-[11px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                    <span className="flex-1 min-w-0 truncate" style={{ color: '#cbd5e1' }}>{b.name} <span style={{ color: '#64748b' }}>· {b.fn} · {b.tl}</span></span>
+                  <div key={i} className="flex items-center gap-3 px-4 py-2 text-[11px]" style={{ borderBottom: `1px solid ${T.bdrRow}` }}>
+                    <span className="flex-1 min-w-0 truncate" style={{ color: T.text2 }}>{b.name} <span style={{ color: '#64748b' }}>· {b.fn} · {b.tl}</span></span>
                     <span style={{ color: '#fb923c' }}>{ar ? 'الأضعف' : 'weak'}: {b.weakest}</span>
                     <span className="tabular-nums font-bold" style={{ color: '#f87171' }}>{b.points}</span>
                     <span className="text-[10px]" style={{ color: '#475569' }}>/ {b.funcAvg}</span>
@@ -141,17 +157,20 @@ export default function ScorecardGuardPage() {
 
 function Panel({ title, icon: Icon, color, children }: any) {
   const { dark } = useUiStore();
+  const T = nt(dark);
   return (
-    <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-      <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}><Icon size={13} style={{ color }} /><span className="text-xs font-bold" style={{ color: tp(dark) }}>{title}</span></div>
+    <div className="rounded-2xl overflow-hidden" style={{ background: T.cardBg, border: `1px solid ${T.bdrSoft}` }}>
+      <div className="flex items-center gap-2 px-4 py-2.5" style={{ borderBottom: `1px solid ${T.bdrSoft}` }}><Icon size={13} style={{ color }} /><span className="text-xs font-bold" style={{ color: tp(dark) }}>{title}</span></div>
       <div className="px-2 py-1">{children}</div>
     </div>
   );
 }
 function Row({ a, b, c, color }: { a: string; b: string; c: number; color: string }) {
+  const { dark } = useUiStore();
+  const T = nt(dark);
   return (
-    <div className="flex items-center gap-2 px-2 py-1.5 text-[11px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-      <span className="flex-1 min-w-0 truncate" style={{ color: '#cbd5e1' }}>{a} <span style={{ color: '#64748b' }}>· {b}</span></span>
+    <div className="flex items-center gap-2 px-2 py-1.5 text-[11px]" style={{ borderBottom: `1px solid ${T.bdrRow}` }}>
+      <span className="flex-1 min-w-0 truncate" style={{ color: T.text2 }}>{a} <span style={{ color: '#64748b' }}>· {b}</span></span>
       <span className="tabular-nums font-bold" style={{ color }}>{c}</span>
     </div>
   );

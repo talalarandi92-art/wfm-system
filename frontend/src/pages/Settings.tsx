@@ -53,6 +53,18 @@ export default function SettingsPage() {
   const ar = lang === 'ar';
   useInjectDsStyles();
 
+  /* theme-aware neutral tokens — dark keeps the original explicit values; light mirrors
+     them with a slate-navy tint. Cards use ds card()/cardStyle(dark); brand accents
+     (#818cf8 / #22d3ee) + mid-gray muted text (#64748b / #475569) stay inline. */
+  const T = {
+    fieldBg:  dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)',
+    fieldBg2: dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
+    bdr:      dark ? 'rgba(255,255,255,0.1)'  : 'rgba(15,23,42,0.12)',
+    bdrSoft:  dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)',
+    bdrRow:   dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.06)',
+    text:     tp(dark),
+  };
+
   const [view, setView]         = useState<View>('overview');
   const [settings, setSettings] = useState<Record<string, Setting[]>>({});
   const [shifts, setShifts]     = useState<ShiftCode[]>([]);
@@ -249,7 +261,7 @@ export default function SettingsPage() {
                     return (
                       <div key={key} className="px-4 py-3 flex items-center gap-4 flex-wrap">
                         <div className="flex-1 min-w-48">
-                          <div className="text-xs font-medium font-mono" style={{ color: '#e2e8f0' }}>{key}</div>
+                          <div className="text-xs font-medium font-mono" style={{ color: T.text }}>{key}</div>
                           {item.description && <div className="text-[10px] mt-0.5" style={{ color: '#475569' }}>{item.description}</div>}
                         </div>
                         <div className="flex items-center gap-2">
@@ -267,7 +279,7 @@ export default function SettingsPage() {
                               value={editVal}
                               onChange={e => setEdits(d => ({ ...d, [key]: e.target.value }))}
                               className="text-xs rounded-xl px-3 py-1.5 outline-none w-40"
-                              style={{ background: 'rgba(255,255,255,0.05)', border: `1px solid ${isEdited ? '#818cf8' : 'rgba(255,255,255,0.1)'}`, color: '#e2e8f0', fontFamily: 'monospace' }} />
+                              style={{ background: T.fieldBg, border: `1px solid ${isEdited ? '#818cf8' : T.bdr}`, color: T.text, fontFamily: 'monospace' }} />
                           )}
                           {isEdited && !isBool && (
                             <>
@@ -302,7 +314,7 @@ export default function SettingsPage() {
             <input value={shiftFilter} onChange={e => setShiftFilter(e.target.value)}
               placeholder={ar ? 'بحث عن كود...' : 'Search code...'}
               className="text-xs rounded-xl px-3 py-2 outline-none w-52"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
+              style={{ background: T.fieldBg2, border: `1px solid ${T.bdrSoft}`, color: T.text }} />
             <span className="text-xs" style={{ color: '#475569' }}>
               {filteredShifts.length} / {shifts.length} {ar ? 'كود' : 'codes'}
             </span>
@@ -375,12 +387,12 @@ export default function SettingsPage() {
             <input value={leaveFilter} onChange={e => setLeaveFilter(e.target.value)}
               placeholder={ar ? 'بحث بالاسم / الرقم / الوظيفة...' : 'Search name / no. / function...'}
               className="text-xs rounded-xl px-3 py-2 outline-none w-60"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }} />
+              style={{ background: T.fieldBg2, border: `1px solid ${T.bdrSoft}`, color: T.text }} />
             <div className="flex items-center gap-1.5">
               <span className="text-xs" style={{ color: tsColor(dark) }}>{ar ? 'السنة' : 'Year'}</span>
               <select value={leaveYear} onChange={e => setLeaveYear(parseInt(e.target.value, 10))}
                 className="text-xs rounded-xl px-2 py-2 outline-none"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0' }}>
+                style={{ background: T.fieldBg2, border: `1px solid ${T.bdrSoft}`, color: T.text }}>
                 {[0, -1, 1].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
               </select>
             </div>
@@ -404,7 +416,7 @@ export default function SettingsPage() {
               <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} rows={6}
                 placeholder={'10234\t30\t5\t15\n10235\t30'}
                 className="w-full text-xs rounded-xl px-3 py-2 outline-none font-mono"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }} />
+                style={{ background: T.fieldBg, border: `1px solid ${T.bdr}`, color: T.text }} />
               <div className="flex items-center gap-3 mt-2">
                 <button onClick={submitBulk} disabled={bulkBusy || !bulkText.trim()}
                   className="text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 disabled:opacity-50"
@@ -429,7 +441,7 @@ export default function SettingsPage() {
           <div className="rounded-2xl overflow-x-auto" style={{ ...cardStyle(dark) }}>
             <table className="w-full text-xs" style={{ borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <tr style={{ borderBottom: `1px solid ${T.bdrSoft}` }}>
                   <th className="text-start font-semibold px-3 py-2.5" style={{ color: tsColor(dark) }}>{ar ? 'الموظف' : 'Employee'}</th>
                   {LEAVE_TYPES.map(t => (
                     <th key={t} className="text-center font-semibold px-3 py-2.5" style={{ color: '#22d3ee' }}>
@@ -440,7 +452,7 @@ export default function SettingsPage() {
               </thead>
               <tbody>
                 {filteredLeaves.map(r => (
-                  <tr key={r.employeeId} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <tr key={r.employeeId} style={{ borderBottom: `1px solid ${T.bdrRow}` }}>
                     <td className="px-3 py-2">
                       <div className="font-medium" style={{ color: tp(dark) }}>{r.name || '—'}</div>
                       <div className="text-[10px]" style={{ color: '#475569' }}>
@@ -460,7 +472,7 @@ export default function SettingsPage() {
                               onChange={e => setEntEdits(d => ({ ...d, [k]: e.target.value }))}
                               placeholder="—" inputMode="decimal"
                               className="w-14 text-center text-xs rounded-lg px-1.5 py-1 outline-none"
-                              style={{ background: 'rgba(255,255,255,0.05)', border: `1px solid ${isEdited ? '#22d3ee' : 'rgba(255,255,255,0.1)'}`, color: '#e2e8f0' }} />
+                              style={{ background: T.fieldBg, border: `1px solid ${isEdited ? '#22d3ee' : T.bdr}`, color: T.text }} />
                             {isEdited && (
                               <button onClick={() => saveEntitlement(r.employeeId, t, editVal)} disabled={entSaving === k}
                                 className="p-1 rounded-md hover:bg-white/5" style={{ color: '#34d399' }}>

@@ -38,6 +38,17 @@ export default function AnalystPage() {
   const ar = lang === 'ar';
   useInjectDsStyles();
 
+  /* theme-aware neutral tokens — dark keeps the original explicit values; light mirrors
+     them with a slate-navy tint. Semantic/brand (SEV/VERD status colors) + mid-gray muted
+     text (#64748b / #94a3b8 / #475569) stay inline as they read on both themes. */
+  const T = {
+    cardBg:  dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)',
+    fieldBg: dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
+    bdr:     dark ? 'rgba(255,255,255,0.1)'  : 'rgba(15,23,42,0.12)',
+    bdrSoft: dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.08)',
+    text:    tp(dark),
+  };
+
   const [date, setDate] = useState('');
   const [data, setData] = useState<Assessment | null>(null);
   const [loading, setL] = useState(true);
@@ -70,8 +81,8 @@ export default function AnalystPage() {
     .sort((a, b) => (['risk', 'caution', 'info', 'ok'].indexOf(a.severity) - ['risk', 'caution', 'info', 'ok'].indexOf(b.severity))) : [];
 
   const sectionCard = (Icon: any, titleAr: string, titleEn: string, sev: Severity, children: any) => (
-    <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${SEV[sev].color}22` }}>
-      <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: `${SEV[sev].color}0d` }}>
+    <div className="rounded-2xl overflow-hidden" style={{ background: T.cardBg, border:`1px solid ${SEV[sev].color}22` }}>
+      <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: `1px solid ${T.bdrSoft}`, background: `${SEV[sev].color}0d` }}>
         <Icon size={15} style={{ color: SEV[sev].color }} />
         <span className="text-sm font-bold" style={{ color: tp(dark) }}>{ar ? titleAr : titleEn}</span>
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg ms-auto" style={{ background: `${SEV[sev].color}1a`, color: SEV[sev].color }}>{ar ? SEV[sev].ar : SEV[sev].en}</span>
@@ -96,7 +107,7 @@ export default function AnalystPage() {
         </div>
         <div className="flex items-center gap-2">
           <input type="date" value={date} onChange={e => setDate(e.target.value)} onBlur={load}
-            className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0' }} />
+            className="text-xs rounded-xl px-3 py-1.5 outline-none" style={{ background: T.fieldBg, border: `1px solid ${T.bdr}`, color: T.text }} />
           <button onClick={load} disabled={loading} className="flex items-center gap-2 text-xs font-semibold rounded-xl px-3 py-2" style={{ background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.25)', color: '#d8b4fe' }}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}{ar ? 'تحليل' : 'Assess'}
           </button>
@@ -127,7 +138,7 @@ export default function AnalystPage() {
                   const { color } = SEV[r.severity];
                   const done = acted[r.title] ?? (r.decision && r.decision !== 'pending' ? r.decision as 'accepted' | 'rejected' : undefined);
                   return (
-                    <div key={i} className="rounded-xl px-4 py-3" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${color}22` }}>
+                    <div key={i} className="rounded-xl px-4 py-3" style={{ background: T.cardBg, border:`1px solid ${color}22` }}>
                       <div className="flex items-start gap-2 flex-wrap">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
@@ -157,7 +168,7 @@ export default function AnalystPage() {
           {sectionCard(Users, 'التغطية والقرار لكل قسم', 'Coverage & decision per function', data.coverage.severity, (
             <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))' }}>
               {data.coverage.functions.map(f => (
-                <div key={f.functionId} className="rounded-xl px-3 py-2" style={{ background: 'rgba(255,255,255,0.02)', border: `1px solid ${VERD[f.verdict].color}33` }}>
+                <div key={f.functionId} className="rounded-xl px-3 py-2" style={{ background: T.cardBg, border:`1px solid ${VERD[f.verdict].color}33` }}>
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold truncate" style={{ color: tp(dark) }}>{f.functionName}</span>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${VERD[f.verdict].color}1a`, color: VERD[f.verdict].color }}>{ar ? VERD[f.verdict].ar : VERD[f.verdict].en}</span>
@@ -178,7 +189,7 @@ export default function AnalystPage() {
               data.queues.queues.length ? (
                 <div className="space-y-1.5">
                   {data.queues.queues.slice(0, 8).map((q, i) => (
-                    <div key={i} className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <div key={i} className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-lg" style={{ background: T.cardBg }}>
                       <span className="truncate" style={{ color: tp(dark) }}>{q.name}</span>
                       <span className="tabular-nums" style={{ color: q.sla < data.thresholds.slaTarget ? '#f87171' : '#94a3b8' }}>SLA {q.sla}% · {ar ? 'باكلوج' : 'bk'} {q.backlog} · {ar ? 'متاح' : 'av'} {q.agentsAvailable}</span>
                     </div>
@@ -192,7 +203,7 @@ export default function AnalystPage() {
               data.compliance.offenders.length ? (
                 <div className="space-y-1.5">
                   {data.compliance.offenders.slice(0, 8).map((o, i) => (
-                    <div key={i} className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <div key={i} className="flex items-center justify-between text-[11px] px-2 py-1.5 rounded-lg" style={{ background: T.cardBg }}>
                       <span className="truncate" style={{ color: tp(dark) }}>{o.name} <span style={{ color: '#64748b' }}>· {o.fn}</span></span>
                       <span className="truncate ms-2" style={{ color: '#fb923c', maxWidth: 160 }}>{o.issues.join(ar ? '، ' : ', ')}</span>
                     </div>
@@ -206,7 +217,7 @@ export default function AnalystPage() {
           {data.schedule.findings.length > 0 && sectionCard(CalendarCheck, 'سلامة الجدول والقواعد', 'Schedule & rule integrity', data.schedule.severity, (
             <div className="space-y-1.5">
               {data.schedule.findings.map((c, i) => (
-                <div key={i} className="text-[11px] px-2 py-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', color: c.status === 'fail' ? '#f87171' : '#fbbf24' }}>{ar ? c.labelAr : c.label} — {c.count} ({c.detail})</div>
+                <div key={i} className="text-[11px] px-2 py-1.5 rounded-lg" style={{ background: T.cardBg, color: c.status === 'fail' ? '#f87171' : '#fbbf24' }}>{ar ? c.labelAr : c.label} — {c.count} ({c.detail})</div>
               ))}
             </div>
           ))}
