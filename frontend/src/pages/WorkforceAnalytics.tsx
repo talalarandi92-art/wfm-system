@@ -51,11 +51,11 @@ function CoverGapModal({ hour, defaultDate, ar, onClose }: { hour: number; defau
 
   const eligible = cands.filter(c => c.eligible);
   const others   = cands.filter(c => !c.eligible);
-  const inp = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' };
+  const inp = { background: 'var(--surface-2)', border: '1px solid var(--border)' };
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl overflow-hidden" style={{ background: '#0f1527', border: '1px solid rgba(255,255,255,0.12)' }} onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-lg rounded-2xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border-strong)' }} onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between border-b border-white/[0.07]">
           <h3 className="text-sm font-bold text-white flex items-center gap-2"><Zap size={15} className="text-amber-400" /> {ar ? `تغطية فجوة الساعة ${hour}:00` : `Cover ${hour}:00 gap`}</h3>
           <button onClick={onClose} className="text-slate-500 hover:text-white"><X size={16} /></button>
@@ -63,7 +63,7 @@ function CoverGapModal({ hour, defaultDate, ar, onClose }: { hour: number; defau
         <div className="p-5 space-y-3">
           <div className="flex items-center gap-2">
             <select value={skill} onChange={e => setSkill(e.target.value)} className="flex-1 px-3 py-2 rounded-xl text-sm text-white outline-none cursor-pointer" style={inp}>
-              {CHANNELS.map(c => <option key={c.code} value={c.code} style={{ background: '#0f1527' }}>{ar ? c.ar : c.en}</option>)}
+              {CHANNELS.map(c => <option key={c.code} value={c.code} style={{ background: 'var(--surface)' }}>{ar ? c.ar : c.en}</option>)}
             </select>
             <input type="date" value={date} onChange={e => setDate(e.target.value)} className="px-3 py-2 rounded-xl text-sm text-white outline-none" style={inp} />
           </div>
@@ -90,7 +90,7 @@ function CoverGapModal({ hour, defaultDate, ar, onClose }: { hour: number; defau
                     <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1"><CheckCircle2 size={13} /> {ar ? 'تم' : 'Sent'}</span>
                   ) : (
                     <button onClick={() => dispatch(c)} disabled={busy === c.employeeId}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#16a34a,#22c55e)' }}>
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold text-white disabled:opacity-50" style={{ background: 'linear-gradient(135deg,#16a34a,#22c55e)', color: '#fff' }}>
                       {busy === c.employeeId ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} {ar ? 'كلّف' : 'Dispatch'}
                     </button>
                   )}
@@ -100,7 +100,7 @@ function CoverGapModal({ hour, defaultDate, ar, onClose }: { hour: number; defau
                 <>
                   <p className="text-[10px] text-slate-600 uppercase font-bold pt-2">{ar ? `عندهم المهارة لكن غير متاحين (${others.length})` : `Skilled but unavailable (${others.length})`}</p>
                   {others.slice(0, 8).map(c => (
-                    <div key={c.employeeId} className="flex items-center justify-between px-3 py-1.5 rounded-xl opacity-60" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <div key={c.employeeId} className="flex items-center justify-between px-3 py-1.5 rounded-xl opacity-60" style={{ background: 'var(--surface-2)' }}>
                       <p className="text-[11px] text-slate-400 truncate">{c.name} <span className="text-slate-600">· {c.marker ?? (ar ? 'غير مجدول' : 'not scheduled')}</span></p>
                     </div>
                   ))}
@@ -234,11 +234,25 @@ export default function WorkforceAnalyticsPage() {
     { key: 'forecast',  icon: TrendingDown, ar: 'توقّع التغطية', en: 'Coverage Forecast' },
   ];
 
-  const card = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' };
-  const inp = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' };
+  const card = { background: 'var(--surface)', border: '1px solid var(--border)' };
+  const inp = { background: 'var(--surface-2)', border: '1px solid var(--border)' };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 r5t">
+      {/* R5: light-theme-only remap of dark-only Tailwind neutrals (dark/glass untouched) */}
+      <style>{`
+        .theme-light .r5t .text-white{color:var(--text-1)}
+        .theme-light .r5t .text-slate-100,.theme-light .r5t .text-slate-200{color:#1e293b}
+        .theme-light .r5t .text-slate-300{color:#334155}
+        .theme-light .r5t .text-slate-400{color:#475569}
+        .theme-light .r5t .text-slate-500{color:#64748b}
+        .theme-light .r5t .text-slate-600{color:#94a3b8}
+        .theme-light .r5t [class*="hover:text-white"]:hover{color:var(--text-1)}
+        .theme-light .r5t [class*="border-white/"]{border-color:var(--border)}
+        .theme-light .r5t :not([class*="hover:"])[class*="bg-white/"]{background-color:var(--surface-2)}
+        .theme-light .r5t [class*="hover:bg-white/"]:hover{background-color:var(--chip-bg)}
+        .theme-light .r5t input::placeholder,.theme-light .r5t textarea::placeholder{color:#94a3b8}
+      `}</style>
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2.5">
@@ -252,8 +266,8 @@ export default function WorkforceAnalyticsPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select value={functionId} onChange={e => setFunctionId(e.target.value)} className="px-2.5 py-1.5 rounded-lg text-xs text-white outline-none cursor-pointer" style={inp}>
-            <option value="" style={{ background: '#0f1527' }}>{ar ? 'كل الأقسام' : 'All functions'}</option>
-            {funcs.map(f => <option key={f.id} value={f.id} style={{ background: '#0f1527' }}>{f.name}</option>)}
+            <option value="" style={{ background: 'var(--surface)' }}>{ar ? 'كل الأقسام' : 'All functions'}</option>
+            {funcs.map(f => <option key={f.id} value={f.id} style={{ background: 'var(--surface)' }}>{f.name}</option>)}
           </select>
           <input type="date" value={from} onChange={e => setFrom(e.target.value)} className="px-2.5 py-1.5 rounded-lg text-xs text-white outline-none" style={inp} />
           <span className="text-slate-500 text-xs">→</span>
@@ -269,7 +283,7 @@ export default function WorkforceAnalyticsPage() {
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${tab === t.key ? 'text-white' : 'text-slate-500 hover:text-slate-300'}`}
-            style={tab === t.key ? { background: 'linear-gradient(135deg,#4338ca,#6366f1)' } : {}}>
+            style={tab === t.key ? { background: 'linear-gradient(135deg,#4338ca,#6366f1)', color: '#fff' } : {}}>
             <t.icon size={13} /> {ar ? t.ar : t.en}
           </button>
         ))}
@@ -284,7 +298,7 @@ export default function WorkforceAnalyticsPage() {
             <div className="rounded-2xl overflow-x-auto" style={card}>
               <table className="w-full text-xs" style={{ minWidth: 920 }}>
                 <thead>
-                  <tr className="text-slate-500 text-[10px] uppercase" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                  <tr className="text-slate-500 text-[10px] uppercase" style={{ background: 'var(--surface-2)' }}>
                     {(ar
                       ? ['كود','الوردية','ساعات','مجدول','حاضر','غياب','مرضي','إجازة','عطلة','عن بُعد','OT','تأخير','بصمة ناقصة','استئذان','بريك','مخطط','غير مخطط','حضور%','Shrinkage%']
                       : ['Code','Shift','Hours','Scheduled','Present','Absent','Sick','Leave','Holiday','WFH','OT','Late','Missing Punch','Permission','Break','Planned','Unplanned','Attendance%','Shrinkage%']
@@ -324,10 +338,10 @@ export default function WorkforceAnalyticsPage() {
                   const present = sum('present'), absent = sum('absent'), sick = sum('sick'), leave = sum('leave'), holiday = sum('holiday');
                   const stw = present + absent + sick + leave + holiday;
                   const planned = sum('plannedShrinkage'), unplanned = sum('unplannedShrinkage');
-                  const cell = 'px-2.5 py-2.5 text-center font-bold text-white';
+                  const cell = 'px-2.5 py-2.5 text-center font-bold';
                   return (
                     <tfoot>
-                      <tr style={{ background: 'rgba(99,102,241,0.10)', borderTop: '1px solid rgba(255,255,255,0.12)' }}>
+                      <tr style={{ background: 'rgba(99,102,241,0.10)', borderTop: '1px solid var(--border-strong)', color: 'var(--text-1)' }}>
                         <td className="px-2.5 py-2.5 font-bold text-indigo-300 text-start">{ar ? 'الإجمالي' : 'Total'}</td>
                         <td className={cell}></td>
                         <td className={cell}></td>
@@ -372,7 +386,7 @@ export default function WorkforceAnalyticsPage() {
                     ].map(x => (
                       <div key={x.l} className="mb-2">
                         <div className="flex justify-between text-[10px] mb-0.5"><span className="text-slate-400">{x.l}</span><span className="font-bold text-white">{x.v}%</span></div>
-                        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                        <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--chip-bg)' }}>
                           <div className="h-full rounded-full" style={{ width: `${Math.min(100, x.v * 3)}%`, background: x.c }} />
                         </div>
                       </div>
@@ -393,7 +407,7 @@ export default function WorkforceAnalyticsPage() {
             <div className="p-5 rounded-2xl mt-4" style={card}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2"><TrendingDown size={15} className="text-indigo-400" /> {ar ? 'اتجاه الـShrinkage' : 'Shrinkage Trend'}</h3>
-                <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                <div className="flex items-center gap-1 p-0.5 rounded-lg" style={{ background: 'var(--chip-bg)' }}>
                   {(['weekly', 'monthly'] as const).map(m => (
                     <button key={m} onClick={() => setTrendMode(m)}
                       className={`px-2.5 py-1 rounded-md text-[10px] font-semibold ${trendMode === m ? 'text-white' : 'text-slate-500'}`}
@@ -474,10 +488,10 @@ export default function WorkforceAnalyticsPage() {
               </div>
 
               {/* ── HC cascade table: normal → after permission → after sick → after OT ── */}
-              <div className="mt-6 rounded-2xl overflow-x-auto" style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="mt-6 rounded-2xl overflow-x-auto" style={{ border: '1px solid var(--border)' }}>
                 <table className="w-full text-xs" style={{ minWidth: 640 }}>
                   <thead>
-                    <tr className="text-slate-500 text-[10px] uppercase" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <tr className="text-slate-500 text-[10px] uppercase" style={{ background: 'var(--surface-2)' }}>
                       {[ar ? 'الساعة' : 'Hour', ar ? 'عادي' : 'Normal', ar ? 'استئذان' : 'Permission', ar ? 'بعد الاستئذان' : 'After perm.', ar ? 'مرضي' : 'Sick', ar ? 'بعد المرضي' : 'After sick', ar ? 'أوفرتايم' : 'Overtime', ar ? 'بعد الأوفرتايم' : 'After OT'].map(h => (
                         <th key={h} className="px-3 py-2.5 text-center first:text-start">{h}</th>
                       ))}
@@ -523,7 +537,7 @@ export default function WorkforceAnalyticsPage() {
                       <td className="px-4 py-2 text-center text-slate-400">{e.totalOff}</td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-2">
-                          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: 'var(--chip-bg)' }}>
                             <div className="h-full rounded-full" style={{ width: `${e.weekendOffPct}%`, background: e.weekendOffPct >= 40 ? '#22c55e' : e.weekendOffPct >= 20 ? '#f59e0b' : '#ef4444' }} />
                           </div>
                           <span className="text-[10px] font-bold text-white w-9 text-end">{e.weekendOffPct}%</span>
@@ -540,7 +554,7 @@ export default function WorkforceAnalyticsPage() {
                   const to = fairness.reduce((a, e) => a + e.totalOff, 0);
                   return (
                     <tfoot>
-                      <tr style={{ background: 'rgba(99,102,241,0.10)', borderTop: '1px solid rgba(255,255,255,0.12)' }}>
+                      <tr style={{ background: 'rgba(99,102,241,0.10)', borderTop: '1px solid var(--border-strong)', color: 'var(--text-1)' }}>
                         <td className="px-4 py-2.5 font-bold text-indigo-300 text-start">{ar ? 'الإجمالي' : 'Total'}</td>
                         <td className="px-4 py-2.5"></td>
                         <td className="px-4 py-2.5 text-center font-bold text-white">{wd}</td>
@@ -584,7 +598,7 @@ export default function WorkforceAnalyticsPage() {
                   const wk = sick.reduce((a, e) => a + e.weekdaySick, 0);
                   return (
                     <tfoot>
-                      <tr style={{ background: 'rgba(99,102,241,0.10)', borderTop: '1px solid rgba(255,255,255,0.12)' }}>
+                      <tr style={{ background: 'rgba(99,102,241,0.10)', borderTop: '1px solid var(--border-strong)', color: 'var(--text-1)' }}>
                         <td className="px-4 py-2.5 font-bold text-indigo-300 text-start">{ar ? 'الإجمالي' : 'Total'}</td>
                         <td className="px-4 py-2.5"></td>
                         <td className="px-4 py-2.5 text-center font-bold text-white">{ts}</td>
@@ -627,7 +641,7 @@ export default function WorkforceAnalyticsPage() {
                               return (
                                 <td key={h.hour} className="w-7 h-6 rounded text-center text-[8px] font-bold"
                                   title={`${day.date} ${h.hour}:00 → ${h.forecastHc}`}
-                                  style={{ background: h.forecastHc ? `rgba(99,102,241,${0.12 + intensity * 0.8})` : 'rgba(255,255,255,0.02)', color: intensity > 0.5 ? '#fff' : '#64748b' }}>
+                                  style={{ background: h.forecastHc ? `rgba(99,102,241,${0.12 + intensity * 0.8})` : 'var(--surface-2)', color: intensity > 0.5 ? '#fff' : '#64748b' }}>
                                   {h.forecastHc ? Math.round(h.forecastHc) : ''}
                                 </td>
                               );

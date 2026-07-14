@@ -81,7 +81,7 @@ function ArticleEditor({ article, categories, onClose, onSaved, ar }: {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div className="w-full max-w-3xl max-h-[90vh] rounded-2xl flex flex-col overflow-hidden"
-        style={{ background: '#0f1527', border: '1px solid rgba(255,255,255,0.12)' }}
+        style={{ background: 'var(--surface)', border: '1px solid var(--border-strong)' }}
         onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 flex items-center justify-between border-b border-white/[0.07] flex-shrink-0">
           <h3 className="text-sm font-bold text-white">{isEdit ? (ar ? 'تعديل المقال' : 'Edit Article') : (ar ? 'مقال جديد' : 'New Article')}</h3>
@@ -99,26 +99,26 @@ function ArticleEditor({ article, categories, onClose, onSaved, ar }: {
           <div className="grid grid-cols-2 gap-3">
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder={ar ? 'العنوان (إنجليزي)' : 'Title (English)'}
               className="px-3 py-2 rounded-xl text-sm text-white outline-none"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }} />
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }} />
             <input value={titleAr} onChange={e => setTitleAr(e.target.value)} placeholder={ar ? 'العنوان (عربي)' : 'Title (Arabic)'} dir="rtl"
               className="px-3 py-2 rounded-xl text-sm text-white outline-none"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }} />
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <select value={categoryId} onChange={e => setCat(e.target.value)}
               className="px-3 py-2 rounded-xl text-sm text-white outline-none cursor-pointer"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-              <option value="" style={{ background: '#0f1527' }}>{ar ? 'بدون تصنيف' : 'No category'}</option>
-              {categories.map(c => <option key={c.id} value={c.id} style={{ background: '#0f1527' }}>{c.icon} {c.name_ar || c.name}</option>)}
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+              <option value="" style={{ background: 'var(--surface)' }}>{ar ? 'بدون تصنيف' : 'No category'}</option>
+              {categories.map(c => <option key={c.id} value={c.id} style={{ background: 'var(--surface)' }}>{c.icon} {c.name_ar || c.name}</option>)}
             </select>
             <input value={tags} onChange={e => setTags(e.target.value)} placeholder={ar ? 'وسوم مفصولة بفاصلة' : 'Tags, comma-separated'}
               className="px-3 py-2 rounded-xl text-sm text-white outline-none"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }} />
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }} />
           </div>
 
           {preview ? (
             <div className="px-4 py-3 rounded-xl kb-prose min-h-[240px]"
-              style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}
               dangerouslySetInnerHTML={{ __html: mdToHtml(body) }} />
           ) : (
             <textarea value={body} onChange={e => setBody(e.target.value)}
@@ -126,19 +126,19 @@ function ArticleEditor({ article, categories, onClose, onSaved, ar }: {
                 ? 'محتوى المقال... يدعم Markdown:\n# عنوان\n**عريض**  *مائل*  `كود`\n- نقطة\n[رابط](https://...)'
                 : 'Article content... supports Markdown:\n# Heading\n**bold**  *italic*  `code`\n- bullet\n[link](https://...)'}
               className="w-full px-4 py-3 rounded-xl text-sm text-white outline-none resize-none font-mono leading-relaxed"
-              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', minHeight: 240 }} />
+              style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', minHeight: 240 }} />
           )}
         </div>
 
         <div className="px-5 py-3 flex items-center justify-end gap-2 border-t border-white/[0.07] flex-shrink-0">
           <button onClick={() => save('draft')} disabled={!title.trim() || saving}
             className="px-4 py-2 rounded-xl text-xs font-bold text-slate-300 transition-all disabled:opacity-40"
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
             <FileEdit size={13} className="inline me-1" /> {ar ? 'حفظ كمسودة' : 'Save as Draft'}
           </button>
           <button onClick={() => save('published')} disabled={!title.trim() || saving}
             className="px-4 py-2 rounded-xl text-xs font-bold text-white transition-all disabled:opacity-40"
-            style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)' }}>
+            style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)', color: '#fff' }}>
             <Globe size={13} className="inline me-1" /> {ar ? 'نشر' : 'Publish'}
           </button>
         </div>
@@ -176,12 +176,35 @@ function ArticleReader({ id, ar, canManage, onBack, onEdit, onDeleted }: {
   const body = ar ? (article.body_ar || article.body) : (article.body || article.body_ar);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="max-w-3xl mx-auto space-y-4 r5t">
+      {/* markdown + R5 light-theme neutral remap (this reader is an early-return, so it needs its own copy) */}
+      <style>{`
+        .kb-prose { color: var(--text-2); font-size: 14px; line-height: 1.75; }
+        .kb-prose h1 { font-size: 20px; font-weight: 700; color: var(--text-1); margin: 16px 0 8px; }
+        .kb-prose h2 { font-size: 17px; font-weight: 700; color: var(--text-1); margin: 14px 0 6px; }
+        .kb-prose h3 { font-size: 15px; font-weight: 600; color: var(--text-1); margin: 12px 0 4px; }
+        .kb-prose p { margin: 8px 0; }
+        .kb-prose ul { margin: 8px 0; padding-inline-start: 22px; list-style: disc; }
+        .kb-prose li { margin: 3px 0; }
+        .kb-prose code { background: rgba(99,102,241,0.15); color: var(--accent-text); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+        .kb-prose a { color: var(--accent-text); text-decoration: underline; }
+        .kb-prose strong { color: var(--text-1); }
+        .theme-light .r5t .text-white{color:var(--text-1)}
+        .theme-light .r5t .text-slate-100,.theme-light .r5t .text-slate-200{color:#1e293b}
+        .theme-light .r5t .text-slate-300{color:#334155}
+        .theme-light .r5t .text-slate-400{color:#475569}
+        .theme-light .r5t .text-slate-500{color:#64748b}
+        .theme-light .r5t .text-slate-600{color:#94a3b8}
+        .theme-light .r5t [class*="hover:text-white"]:hover{color:var(--text-1)}
+        .theme-light .r5t [class*="border-white/"]{border-color:var(--border)}
+        .theme-light .r5t :not([class*="hover:"])[class*="bg-white/"]{background-color:var(--surface-2)}
+        .theme-light .r5t [class*="hover:bg-white/"]:hover{background-color:var(--chip-bg)}
+      `}</style>
       <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-all">
         <ArrowLeft size={14} /> {ar ? 'رجوع للقائمة' : 'Back to list'}
       </button>
 
-      <div className="p-6 rounded-2xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="p-6 rounded-2xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
             {article.category_name && (
@@ -211,7 +234,7 @@ function ArticleReader({ id, ar, canManage, onBack, onEdit, onDeleted }: {
           <div className="flex flex-wrap gap-1.5 mb-4">
             {article.tags.map(t => (
               <span key={t} className="flex items-center gap-1 text-[10px] text-slate-400 px-2 py-0.5 rounded-lg"
-                style={{ background: 'rgba(255,255,255,0.05)' }}><Tag size={9} /> {t}</span>
+                style={{ background: 'var(--chip-bg)' }}><Tag size={9} /> {t}</span>
             ))}
           </div>
         )}
@@ -222,13 +245,13 @@ function ArticleReader({ id, ar, canManage, onBack, onEdit, onDeleted }: {
           <div className="flex items-center gap-2 mt-6 pt-4 border-t border-white/[0.07]">
             <button onClick={() => onEdit(article)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold text-white transition-all"
-              style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)' }}>
+              style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)', color: '#fff' }}>
               <Edit3 size={13} /> {ar ? 'تعديل' : 'Edit'}
             </button>
             {versions.length > 0 && (
               <button onClick={() => setShowVersions(v => !v)}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-white hover:bg-white/5 transition-all"
-                style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+                style={{ border: '1px solid var(--border)' }}>
                 <History size={13} /> {ar ? 'السجل' : 'History'} ({versions.length})
               </button>
             )}
@@ -243,7 +266,7 @@ function ArticleReader({ id, ar, canManage, onBack, onEdit, onDeleted }: {
           <div className="mt-4 space-y-1.5">
             {versions.map(v => (
               <div key={v.id} className="flex items-center justify-between px-3 py-2 rounded-xl text-[11px]"
-                style={{ background: 'rgba(255,255,255,0.03)' }}>
+                style={{ background: 'var(--surface-2)' }}>
                 <span className="text-slate-300">v{v.version_no} · {v.title}</span>
                 <span className="text-slate-600">{v.edited_by_name} · {fmtD(v.created_at)}</span>
               </div>
@@ -312,19 +335,30 @@ export default function KnowledgeBasePage() {
   }
 
   return (
-    <div className="space-y-4">
-      {/* style for rendered markdown */}
+    <div className="space-y-4 r5t">
+      {/* style for rendered markdown + R5 light-theme neutral remap (dark/glass untouched) */}
       <style>{`
-        .kb-prose { color: #cbd5e1; font-size: 14px; line-height: 1.75; }
-        .kb-prose h1 { font-size: 20px; font-weight: 700; color: #fff; margin: 16px 0 8px; }
-        .kb-prose h2 { font-size: 17px; font-weight: 700; color: #fff; margin: 14px 0 6px; }
-        .kb-prose h3 { font-size: 15px; font-weight: 600; color: #e2e8f0; margin: 12px 0 4px; }
+        .kb-prose { color: var(--text-2); font-size: 14px; line-height: 1.75; }
+        .kb-prose h1 { font-size: 20px; font-weight: 700; color: var(--text-1); margin: 16px 0 8px; }
+        .kb-prose h2 { font-size: 17px; font-weight: 700; color: var(--text-1); margin: 14px 0 6px; }
+        .kb-prose h3 { font-size: 15px; font-weight: 600; color: var(--text-1); margin: 12px 0 4px; }
         .kb-prose p { margin: 8px 0; }
         .kb-prose ul { margin: 8px 0; padding-inline-start: 22px; list-style: disc; }
         .kb-prose li { margin: 3px 0; }
-        .kb-prose code { background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 1px 6px; border-radius: 5px; font-size: 12px; }
-        .kb-prose a { color: #818cf8; text-decoration: underline; }
-        .kb-prose strong { color: #fff; }
+        .kb-prose code { background: rgba(99,102,241,0.15); color: var(--accent-text); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+        .kb-prose a { color: var(--accent-text); text-decoration: underline; }
+        .kb-prose strong { color: var(--text-1); }
+        .theme-light .r5t .text-white{color:var(--text-1)}
+        .theme-light .r5t .text-slate-100,.theme-light .r5t .text-slate-200{color:#1e293b}
+        .theme-light .r5t .text-slate-300{color:#334155}
+        .theme-light .r5t .text-slate-400{color:#475569}
+        .theme-light .r5t .text-slate-500{color:#64748b}
+        .theme-light .r5t .text-slate-600{color:#94a3b8}
+        .theme-light .r5t [class*="hover:text-white"]:hover{color:var(--text-1)}
+        .theme-light .r5t [class*="border-white/"]{border-color:var(--border)}
+        .theme-light .r5t :not([class*="hover:"])[class*="bg-white/"]{background-color:var(--surface-2)}
+        .theme-light .r5t [class*="hover:bg-white/"]:hover{background-color:var(--chip-bg)}
+        .theme-light .r5t input::placeholder,.theme-light .r5t textarea::placeholder{color:#94a3b8}
       `}</style>
 
       {/* Header */}
@@ -341,7 +375,7 @@ export default function KnowledgeBasePage() {
         {canManage && (
           <button onClick={() => setEditor(null)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white transition-all"
-            style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)' }}>
+            style={{ background: 'linear-gradient(135deg,#4338ca,#6366f1)', color: '#fff' }}>
             <Plus size={14} /> {ar ? 'مقال جديد' : 'New Article'}
           </button>
         )}
@@ -349,7 +383,7 @@ export default function KnowledgeBasePage() {
 
       {/* Search */}
       <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl max-w-xl"
-        style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
         <Search size={15} className="text-slate-500 flex-shrink-0" />
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder={ar ? 'ابحث في المقالات والوسوم...' : 'Search articles and tags...'}
@@ -384,7 +418,7 @@ export default function KnowledgeBasePage() {
             {whatsNew.items.slice(0, 12).map((it: any, i: number) => (
               <button key={i} onClick={() => it.article_id && setReading(it.article_id)}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] text-slate-200 hover:bg-white/[0.06] transition-all"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
                 <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
                   style={{ background: it.change_type === 'new' ? 'rgba(34,197,94,0.15)' : 'rgba(59,130,246,0.15)', color: it.change_type === 'new' ? '#6ee7b7' : '#93c5fd' }}>
                   {it.change_type === 'new' ? (ar ? 'جديد' : 'NEW') : (ar ? 'محدّث' : 'UPD')}</span>
@@ -432,7 +466,7 @@ export default function KnowledgeBasePage() {
             articles.map(a => (
               <button key={a.id} onClick={() => setReading(a.id)}
                 className="w-full text-start p-4 rounded-2xl transition-all hover:bg-white/[0.04] group"
-                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
@@ -456,7 +490,7 @@ export default function KnowledgeBasePage() {
                       <span className="flex items-center gap-1"><Eye size={10} /> {a.view_count}</span>
                       <span className="flex items-center gap-1"><Clock size={10} /> {fmtD(a.updated_at)}</span>
                       {a.tags?.slice(0, 3).map(t => (
-                        <span key={t} className="px-1.5 py-0.5 rounded" style={{ background: 'rgba(255,255,255,0.05)' }}>{t}</span>
+                        <span key={t} className="px-1.5 py-0.5 rounded" style={{ background: 'var(--chip-bg)' }}>{t}</span>
                       ))}
                     </div>
                   </div>

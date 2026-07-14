@@ -140,10 +140,24 @@ export default function Agent360Page() {
   ] : [];
 
   return (
-    <div className="space-y-4 page-enter">
+    <div className="space-y-4 page-enter r5t">
+      {/* R5: light-theme-only remap of dark-only Tailwind neutrals (dark/glass untouched) */}
+      <style>{`
+        .theme-light .r5t .text-white{color:var(--text-1)}
+        .theme-light .r5t .text-slate-100,.theme-light .r5t .text-slate-200{color:#1e293b}
+        .theme-light .r5t .text-slate-300{color:#334155}
+        .theme-light .r5t .text-slate-400{color:#475569}
+        .theme-light .r5t .text-slate-500{color:#64748b}
+        .theme-light .r5t .text-slate-600{color:#94a3b8}
+        .theme-light .r5t [class*="hover:text-white"]:hover{color:var(--text-1)}
+        .theme-light .r5t [class*="border-white/"]{border-color:var(--border)}
+        .theme-light .r5t :not([class*="hover:"])[class*="bg-white/"]{background-color:var(--surface-2)}
+        .theme-light .r5t [class*="hover:bg-white/"]:hover{background-color:var(--chip-bg)}
+        .theme-light .r5t input::placeholder,.theme-light .r5t textarea::placeholder{color:#94a3b8}
+      `}</style>
       <div className="flex items-center gap-3 flex-wrap">
-        <button onClick={()=>nav('/roster')} className="p-2 rounded-xl" style={{ background:'rgba(255,255,255,0.06)' }}><ArrowLeft size={16} className="text-white"/></button>
-        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#8b5cf6,#6366f1)' }}><UserSearch size={20} className="text-white"/></div>
+        <button onClick={()=>nav('/roster')} className="p-2 rounded-xl" style={{ background:'var(--chip-bg)' }}><ArrowLeft size={16} className="text-white"/></button>
+        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#8b5cf6,#6366f1)' }}><UserSearch size={20} className="text-white" style={{ color:'#fff' }}/></div>
         <div className="flex-1 min-w-[180px]"><h1 className="text-lg font-bold text-white">{ar?'ملف الموظف 360':'Agent 360 Profile'}</h1>
           <p className="text-xs text-slate-500">{ar?'صورة كاملة لأداء وحضور الموظف من الماستر النظيف':'A complete attendance & performance picture from the clean master'}</p></div>
         <DateRangeBar from={from} to={to} onChange={(a,b)=>{setFrom(a);setTo(b);}} />
@@ -158,11 +172,11 @@ export default function Agent360Page() {
             <ChevronDown size={14} className="text-slate-500 -ms-6 pointer-events-none" />
           </div>
           {open && (
-            <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)' }}>
+            <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'var(--surface)', border:'1px solid var(--border-strong)' }}>
               {people.filter((p:any)=>{ const t=q.toLowerCase().trim(); return !t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t) || (p.role_category||'').toLowerCase().includes(t); }).slice(0,150).map((p:any)=>(
                 <button key={p.person_no} onMouseDown={()=>{ setPerson(p.person_no); setOpen(false); setQ(''); }}
                   className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex items-center justify-between gap-2"
-                  style={{ color: p.person_no===person?'#a5b4fc':'#cbd5e1', background: p.person_no===person?'rgba(99,102,241,0.12)':'transparent' }}>
+                  style={{ color: p.person_no===person?'#a5b4fc':'var(--text-2)', background: p.person_no===person?'rgba(99,102,241,0.12)':'transparent' }}>
                   <span className="truncate">{p.clean_name}</span>
                   <span className="text-slate-500 text-[10px] flex-shrink-0">{p.role_category} · #{p.person_no}</span>
                 </button>
@@ -187,10 +201,10 @@ export default function Agent360Page() {
                 placeholder={ar?'＋ قارن مع…':'＋ Compare…'} className={`${inputCls} min-w-[150px]`} />
               {person2 && !open2 && <button onMouseDown={()=>{ setPerson2(''); setD2(null); }} className="absolute end-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-rose-400"><XCircle size={13}/></button>}
               {open2 && (
-                <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)' }}>
+                <div className="absolute z-50 mt-1 end-0 w-[300px] max-h-80 overflow-auto rounded-xl shadow-2xl" style={{ background:'var(--surface)', border:'1px solid var(--border-strong)' }}>
                   {people.filter((p:any)=>{ const t=q2.toLowerCase().trim(); return p.person_no!==person && (!t || p.clean_name.toLowerCase().includes(t) || String(p.person_no).includes(t) || (p.role_category||'').toLowerCase().includes(t)); }).slice(0,150).map((p:any)=>(
                     <button key={p.person_no} onMouseDown={()=>{ setPerson2(p.person_no); setOpen2(false); setQ2(''); }}
-                      className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex items-center justify-between gap-2" style={{ color: p.person_no===person2?'#67e8f9':'#cbd5e1' }}>
+                      className="w-full text-start px-3 py-1.5 text-xs hover:bg-white/10 flex items-center justify-between gap-2" style={{ color: p.person_no===person2?'#67e8f9':'var(--text-2)' }}>
                       <span className="truncate">{p.clean_name}</span><span className="text-slate-500 text-[10px]">{p.role_category} · #{p.person_no}</span>
                     </button>
                   ))}
@@ -200,7 +214,7 @@ export default function Agent360Page() {
           ) : (
             <div className="flex items-center gap-1.5 flex-wrap">
               {([[1,ar?'الشهر السابق':'Prev mo'],[2,ar?'آخر شهرين':'Last 2mo'],[3,ar?'آخر 3 أشهر':'Last 3mo']] as [number,string][]).map(([n,l])=>(
-                <button key={n} onClick={()=>presetB(n)} className="px-2 py-1.5 text-[11px] rounded-lg" style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', color:'#cbd5e1' }}>{l}</button>
+                <button key={n} onClick={()=>presetB(n)} className="px-2 py-1.5 text-[11px] rounded-lg" style={{ background:'var(--chip-bg)', border:'1px solid var(--border)', color:'var(--text-2)' }}>{l}</button>
               ))}
               <span className="text-[10px] text-slate-500">{ar?'مقابل':'vs'}</span>
               <input type="date" value={pcFrom} onChange={e=>setPcFrom(e.target.value)} className={inputCls} title={ar?'بداية فترة المقارنة':'comparison from'}/>
@@ -216,7 +230,7 @@ export default function Agent360Page() {
 
       {!loading && d && e && (<>
         {/* identity band */}
-        <div className="rounded-2xl p-4 flex flex-wrap items-center gap-x-6 gap-y-2" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+        <div className="rounded-2xl p-4 flex flex-wrap items-center gap-x-6 gap-y-2" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
           <div><p className="text-base font-bold text-white">{e.clean_name}</p><p className="text-[11px] text-slate-500 font-mono">#{e.person_no}</p></div>
           {[[ar?'الفنكشن':'Function',e.function_name],[ar?'الدور':'Role',`${e.role_category} · ${Number(e.expected_hours)}h`],[ar?'التيم ليدر':'Team leader',e.team_leader],[ar?'الجروب':'Group',e.team_group],[ar?'النوع':'Gender',e.gender],[ar?'الحالة':'Status',e.is_active?(ar?'نشط':'Active'):(ar?'غير نشط':'Inactive')]].map(([l,v]:any,i)=>(
             <div key={i}><p className="text-[9px] text-slate-500 uppercase font-semibold">{l}</p><p className="text-xs text-slate-200">{v||'—'}</p></div>
@@ -245,7 +259,7 @@ export default function Agent360Page() {
             const [vc,vl] = VC[pc.verdict.overall]||VC.stable;
             const fmt=(unit:string,v:any)=> v==null?'—' : unit==='pct'?`${v}%` : unit==='sec'?`${Math.floor(v/60)}:${String(Math.round(v%60)).padStart(2,'0')}` : unit==='min'?`${v}m` : `${v}`;
             const fmtD=(unit:string,v:number)=>{ const s=v>0?'+':'-'; const a=Math.abs(v); return unit==='pct'?`${s}${a}%` : unit==='sec'?`${s}${Math.floor(a/60)}:${String(Math.round(a%60)).padStart(2,'0')}` : unit==='min'?`${s}${a}m` : `${s}${a}`; };
-            const tc=(tr:string)=> tr==='improved'?'#4ade80':tr==='declined'?'#f87171':tr==='context'?'#cbd5e1':tr==='flat'?'#94a3b8':'#475569';
+            const tc=(tr:string)=> tr==='improved'?'#4ade80':tr==='declined'?'#f87171':tr==='context'?'var(--text-2)':tr==='flat'?'#94a3b8':'#475569';
             const tl=(tr:string)=> tr==='improved'?(ar?'تحسّن':'better'):tr==='declined'?(ar?'تراجع':'worse'):tr==='context'?(ar?'للعلم':'info'):tr==='flat'?(ar?'ثابت':'same'):'—';
             const lowSample = pc.a.workedDays<5 || pc.b.workedDays<5;
             return (
@@ -302,7 +316,7 @@ export default function Agent360Page() {
               <tbody>{([['workedDays','أيام عمل','Worked',true],['conformance','كونفورمانس','Conformance',true],['lateDays','أيام تأخير','Late days',false],['totalLateMin','دقائق تأخير','Late min',false],['otBefore','OT قبل','OT before',true],['otAfter','OT بعد','OT after',true],['sickDays','سيك','Sick',false],['absenceDays','غياب','Absent',false],['permissions','استئذانات','Permissions',false],['missingPunch','بصمة ناقصة','Missing punch',false],['missingSystem','سيستم ناقص','Missing system',false]] as [string,string,string,boolean][]).map(([k,la,le,hib],i)=>{
                 const v1=Number(s?.[k]??0), v2=Number(d2.summary?.[k]??0); const eq=v1===v2; const w1=hib?v1>v2:v1<v2;
                 const fmt=(v:number)=> k==='conformance'?`${v}%`:(/Min$/.test(k)||k==='otBefore'||k==='otAfter')?dur(v):v.toLocaleString();
-                const col=(win:boolean)=> eq?'#cbd5e1':win?'#4ade80':'#f87171';
+                const col=(win:boolean)=> eq?'var(--text-2)':win?'#4ade80':'#f87171';
                 return (<tr key={i} className="border-t border-white/5">
                   <td className="py-1 text-slate-300">{ar?la:le}</td>
                   <td className="py-1 text-center font-bold" style={{ color:col(w1) }}>{fmt(v1)}</td>
@@ -319,7 +333,7 @@ export default function Agent360Page() {
               const keys = Array.from(new Set<string>([...k1.map((k:any)=>k.key), ...k2.map((k:any)=>k.key)]));
               const fmtA = (k:any)=> !k||k.actual==null?'' : k.unit==='pct'?`${Math.round(k.actual*1000)/10}%` : k.unit==='min'?`${Math.floor(k.actual)}:${String(Math.round((k.actual-Math.floor(k.actual))*60)).padStart(2,'0')}` : `${k.actual}`;
               const net1 = perf?.latestNet, net2 = perf2?.latestNet;
-              const col=(v:number|null,o:number|null)=> v==null?'#475569' : (o==null||v===o)?'#cbd5e1' : v>o?'#4ade80':'#f87171';
+              const col=(v:number|null,o:number|null)=> v==null?'#475569' : (o==null||v===o)?'var(--text-2)' : v>o?'#4ade80':'#f87171';
               return (
                 <div className="mt-3 pt-3 border-t border-white/10">
                   <p className="text-[10px] text-slate-500 mb-1.5 font-semibold">{ar?'مقارنة السكور كارد — نقاط (والقيمة الفعلية)':'Scorecard comparison — points (with actual)'}</p>
@@ -356,7 +370,7 @@ export default function Agent360Page() {
 
         {/* personal adherence dial */}
         {s && s.conformance != null && (
-          <div className="rounded-2xl p-4 flex flex-col sm:flex-row items-center sm:gap-5" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)' }}>
+          <div className="rounded-2xl p-4 flex flex-col sm:flex-row items-center sm:gap-5" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
             <Gauge value={Number(s.conformance)} label={ar?'كونفورمانس الموظف':'agent conformance'} color={adhC(s.conformance)} size={150} />
             <div className="flex-1 text-xs leading-relaxed mt-2 sm:mt-0" style={{ color:'var(--text-3)' }}>
               <div className="font-bold mb-1" style={{ color:'var(--text-1)' }}>{ar?'صحّة التزام الموظف':'Adherence health'}</div>
@@ -380,7 +394,7 @@ export default function Agent360Page() {
                 { l:ar?'مكالمات':'Calls', v:(perf.productivity.calls||0).toLocaleString(), sub:`${perf.productivity.days} ${ar?'يوم':'days'}`, c:'#22c55e' },
                 { l:'FCR', v:perf.fcr?.pct!=null?perf.fcr.pct+'%':'—', c:'#34d399' },
               ].map((x,i)=>(
-                <div key={i} className="p-2.5 rounded-xl" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
+                <div key={i} className="p-2.5 rounded-xl" style={{ background:'var(--surface-2)', border:'1px solid var(--border)' }}>
                   <p className="text-[9px] text-slate-500 uppercase font-semibold truncate">{x.l}</p>
                   <p className="text-lg font-bold leading-tight" style={{ color:x.c }}>{x.v}</p>{x.sub&&<p className="text-[9px] text-slate-500">{x.sub}</p>}</div>
               ))}
@@ -404,7 +418,7 @@ export default function Agent360Page() {
                 <p className="text-[10px] text-slate-500 mb-2">{ar?`تفصيل الـKPIs (سكور كارد · ${perf.scorecardDetail.weeks} أسابيع · ترتيب #${perf.scorecardDetail.rank??'—'})`:`Scorecard KPI breakdown (${perf.scorecardDetail.weeks} weeks · rank #${perf.scorecardDetail.rank??'—'})`}</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                   {perf.scorecardDetail.kpis.map((k:any,i:number)=>(
-                    <div key={i} className="p-2 rounded-lg" style={{ background:'rgba(255,255,255,0.035)', border:'1px solid rgba(255,255,255,0.06)' }}>
+                    <div key={i} className="p-2 rounded-lg" style={{ background:'var(--surface-2)', border:'1px solid var(--border)' }}>
                       <p className="text-[10px] text-slate-400 font-semibold truncate">{k.label}</p>
                       <p className="text-base font-bold text-white leading-tight">{k.score}<span className="text-[9px] text-slate-500"> {ar?'نقطة':'pts'}</span></p>
                       <p className="text-[9px] text-slate-500">{k.actual==null?'' : k.unit==='pct'?`${Math.round(k.actual*1000)/10}%` : k.unit==='min'?`${Math.floor(k.actual)}:${String(Math.round((k.actual-Math.floor(k.actual))*60)).padStart(2,'0')}` : `${k.actual}`}</p>
@@ -423,7 +437,7 @@ export default function Agent360Page() {
           const cols = PROG_METRICS.filter(c=>progCols.includes(c.key));
           const toggle = (k:string)=> setProgCols(p=> p.includes(k) ? p.filter(x=>x!==k) : [...p,k]);
           const fmtV = (unit:string, val:any)=> val==null?'—' : unit==='min'?dur(val) : unit==='pct'?`${val}%` : `${val}`;
-          const valColor = (c:any, val:any)=> val==null?'#475569' : c.key==='conf'?adhC(val) : c.key==='net'?(val>=100?'#4ade80':val>=80?'#22d3ee':val>=60?'#fbbf24':'#f87171') : '#cbd5e1';
+          const valColor = (c:any, val:any)=> val==null?'#475569' : c.key==='conf'?adhC(val) : c.key==='net'?(val>=100?'#4ade80':val>=80?'#22d3ee':val>=60?'#fbbf24':'#f87171') : 'var(--text-2)';
           // Δ arrow: green/red by goodWhenUp; neutral (grey) for context metrics; carries the change magnitude
           const arrow = (dd:number|null, unit:string, up:boolean|null) => { if (dd==null) return <span className="text-slate-600">·</span>;
             if (dd===0) return <span className="text-slate-600">•0</span>;
@@ -439,11 +453,11 @@ export default function Agent360Page() {
                 {v.net && <span className="text-[11px] text-slate-300">Net: {v.net.first} → {v.net.last} <b style={{ color:v.net.change>=0?'#4ade80':'#f87171' }}>({v.net.change>=0?'+':''}{v.net.change})</b></span>}
               </div>
               {/* metric picker — choose the columns you care about */}
-              <div className="flex items-center gap-1.5 flex-wrap mb-3 pb-3" style={{ borderBottom:'1px solid rgba(255,255,255,0.06)' }}>
+              <div className="flex items-center gap-1.5 flex-wrap mb-3 pb-3" style={{ borderBottom:'1px solid var(--border)' }}>
                 <span className="text-[10px] text-slate-500 me-1">{ar?'الأعمدة:':'Columns:'}</span>
                 {PROG_METRICS.map(c=>{ const on=progCols.includes(c.key);
                   return <button key={c.key} onClick={()=>toggle(c.key)} className="px-2 py-0.5 rounded-full text-[10px] font-medium transition-all duration-150"
-                    style={ on ? { background:'linear-gradient(135deg,#6366f1,#06b6d4)', color:'#fff', boxShadow:'0 2px 8px rgba(99,102,241,0.35)' } : { background:'rgba(255,255,255,0.05)', color:'#94a3b8', border:'1px solid rgba(255,255,255,0.08)' } }>
+                    style={ on ? { background:'linear-gradient(135deg,#6366f1,#06b6d4)', color:'#fff', boxShadow:'0 2px 8px rgba(99,102,241,0.35)' } : { background:'var(--chip-bg)', color:'var(--text-3)', border:'1px solid var(--border)' } }>
                     {ar?c.ar:c.en}</button>; })}
               </div>
               {cols.length===0 ? <p className="text-[11px] text-slate-500 py-2 text-center">{ar?'اختر مؤشراً واحداً على الأقل':'Pick at least one metric'}</p> : (
@@ -472,13 +486,13 @@ export default function Agent360Page() {
 
         <div className="grid lg:grid-cols-3 gap-3">
           {/* tardiness bands */}
-          <div className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+          <div className="rounded-2xl p-3.5" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
             <h3 className="text-xs font-bold text-white mb-2.5">{ar?'فئات التأخير':'Tardiness bands'}</h3>
             {BAND_ORDER.filter(b=>(d.tardinessBands||[]).some((x:any)=>x.band===b)).map(b=>{ const n=(d.tardinessBands.find((x:any)=>x.band===b)||{}).n||0;
               return (
                 <div key={b} className="flex items-center gap-2 text-[11px] mb-1">
                   <span className="w-16 text-slate-400">{b}</span>
-                  <div className="flex-1 h-3 rounded overflow-hidden" style={{ background:'rgba(255,255,255,0.04)' }}><div className="h-full rounded" style={{ width:`${100*n/bandsMax}%`, background:BAND_COLOR[b] }}/></div>
+                  <div className="flex-1 h-3 rounded overflow-hidden" style={{ background:'var(--chip-bg)' }}><div className="h-full rounded" style={{ width:`${100*n/bandsMax}%`, background:BAND_COLOR[b] }}/></div>
                   <span className="w-6 text-end font-semibold text-slate-200">{n}</span>
                 </div>
               );
@@ -486,13 +500,13 @@ export default function Agent360Page() {
           </div>
 
           {/* shift-rate */}
-          <div className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+          <div className="rounded-2xl p-3.5" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
             <h3 className="text-xs font-bold text-white mb-2.5">{ar?'توزيع الشفتات':'Shift-rate distribution'}</h3>
             {['Morning','Night','Evening','Midnight'].map(c=>{ const n=d.shiftRate?.[c]||0; const tot=Object.values(d.shiftRate||{}).map(Number).reduce((a:number,b:number)=>a+b,0)||1;
               return (
                 <div key={c} className="flex items-center gap-2 text-[11px] mb-1">
                   <span className="w-16 text-slate-400">{c}</span>
-                  <div className="flex-1 h-3 rounded overflow-hidden" style={{ background:'rgba(255,255,255,0.04)' }}><div className="h-full rounded" style={{ width:`${100*n/srMax}%`, background:CAT_COLOR[c] }}/></div>
+                  <div className="flex-1 h-3 rounded overflow-hidden" style={{ background:'var(--chip-bg)' }}><div className="h-full rounded" style={{ width:`${100*n/srMax}%`, background:CAT_COLOR[c] }}/></div>
                   <span className="w-14 text-end font-semibold text-slate-200">{n} <span className="text-slate-500">({Math.round(100*n/tot)}%)</span></span>
                 </div>
               );
@@ -500,14 +514,14 @@ export default function Agent360Page() {
           </div>
 
           {/* monthly trend */}
-          <div className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+          <div className="rounded-2xl p-3.5" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
             <h3 className="text-xs font-bold text-white mb-2.5">{ar?'الاتجاه الشهري':'Monthly trend'}</h3>
             <div className="flex items-end gap-2 h-28">
               {(d.byMonth||[]).map((m:any,i:number)=>(
                 <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
                   <div className="w-full rounded-t" style={{ height:`${Math.max(4,100*m.worked/monMax)}%`, background:adhC(m.conformance) }}/>
                   <span className="text-[8px] text-slate-500 mt-1">{(m.month||'').slice(0,3)}</span>
-                  <div className="hidden group-hover:block absolute bottom-full mb-1 px-2 py-1 rounded text-[10px] whitespace-nowrap z-10" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)', color:'#e2e8f0' }}>{m.month}: {m.worked}d · {m.conformance}% · OT {dur(m.otMin)}</div>
+                  <div className="hidden group-hover:block absolute bottom-full mb-1 px-2 py-1 rounded text-[10px] whitespace-nowrap z-10" style={{ background:'var(--surface)', border:'1px solid var(--border-strong)', color:'var(--text-1)' }}>{m.month}: {m.worked}d · {m.conformance}% · OT {dur(m.otMin)}</div>
                 </div>
               ))}
             </div>
@@ -515,9 +529,9 @@ export default function Agent360Page() {
         </div>
 
         {/* recent days */}
-        <div className="rounded-2xl overflow-auto" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)', maxHeight:'44vh' }}>
+        <div className="rounded-2xl overflow-auto" style={{ background:'var(--surface)', border:'1px solid var(--border)', maxHeight:'44vh' }}>
           <table className="w-full text-[11px]">
-            <thead className="sticky top-0" style={{ background:'#11162a' }}><tr className="text-slate-400">
+            <thead className="sticky top-0" style={{ background:'var(--surface-2)' }}><tr className="text-slate-400">
               {[ar?'التاريخ':'Date',ar?'اليوم':'Day',ar?'الشفت':'Shift',ar?'الحالة':'Status',ar?'دخول':'In',ar?'خروج':'Out',ar?'تأخير':'Late',ar?'OT قبل':'OTb',ar?'OT بعد':'OTa',ar?'كونف.':'Conf'].map((h,i)=><th key={i} className="px-2 py-2 font-semibold text-start whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody>{(d.recent||[]).map((r:any,i:number)=>(
@@ -561,15 +575,15 @@ export default function Agent360Page() {
             <div className="flex flex-wrap gap-1.5">
               {(rpt.mode==='detail'?RFIELDS:RKPIS).map(([k,l])=>{ const sel=(rpt.mode==='detail'?rpt.fields:rpt.kpis).includes(k);
                 return <button key={k} onClick={()=>toggleR(rpt.mode==='detail'?'fields':'kpis',k)} className="px-2.5 py-1 rounded-lg text-[11px] font-medium"
-                  style={sel?{background:'rgba(99,102,241,0.25)',color:'#c7d2fe',border:'1px solid rgba(99,102,241,0.5)'}:{background:'rgba(255,255,255,0.04)',color:'#94a3b8',border:'1px solid rgba(255,255,255,0.08)'}}>{l}</button>;
+                  style={sel?{background:'rgba(99,102,241,0.25)',color:'#c7d2fe',border:'1px solid rgba(99,102,241,0.5)'}:{background:'var(--chip-bg)',color:'var(--text-3)',border:'1px solid var(--border)'}}>{l}</button>;
               })}
             </div>
             {/* preview */}
             {rData && (
-              <div className="rounded-xl overflow-auto" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)', maxHeight:'40vh' }}>
+              <div className="rounded-xl overflow-auto" style={{ background:'var(--surface)', border:'1px solid var(--border)', maxHeight:'40vh' }}>
                 <div className="px-3 py-1.5 text-[10px] text-slate-500 border-b border-white/5">{rData.count} {ar?'صف':'rows'} · {rData.from} → {rData.to}</div>
                 <table className="w-full text-[11px]">
-                  <thead className="sticky top-0" style={{ background:'#11162a' }}><tr className="text-slate-400">{(rData.columns||[]).map((c:any,i:number)=><th key={c.key} className={`px-2 py-1.5 font-semibold whitespace-nowrap ${i===0?'text-start':'text-center'}`}>{c.label}</th>)}</tr></thead>
+                  <thead className="sticky top-0" style={{ background:'var(--surface-2)' }}><tr className="text-slate-400">{(rData.columns||[]).map((c:any,i:number)=><th key={c.key} className={`px-2 py-1.5 font-semibold whitespace-nowrap ${i===0?'text-start':'text-center'}`}>{c.label}</th>)}</tr></thead>
                   <tbody>{(rData.rows||[]).slice(0,200).map((row:any,ri:number)=>(
                     <tr key={ri} className="border-t border-white/5">{(rData.columns||[]).map((c:any,ci:number)=><td key={c.key} className={`px-2 py-1 whitespace-nowrap ${ci===0?'text-start text-white':'text-center text-slate-300'}`}>{row[c.key]??'—'}</td>)}</tr>
                   ))}</tbody>

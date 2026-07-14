@@ -89,9 +89,23 @@ export default function People360Page() {
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 r5t">
+      {/* R5: light-theme-only remap of dark-only Tailwind neutrals (dark/glass untouched) */}
+      <style>{`
+        .theme-light .r5t .text-white{color:var(--text-1)}
+        .theme-light .r5t .text-slate-100,.theme-light .r5t .text-slate-200{color:#1e293b}
+        .theme-light .r5t .text-slate-300{color:#334155}
+        .theme-light .r5t .text-slate-400{color:#475569}
+        .theme-light .r5t .text-slate-500{color:#64748b}
+        .theme-light .r5t .text-slate-600{color:#94a3b8}
+        .theme-light .r5t [class*="hover:text-white"]:hover{color:var(--text-1)}
+        .theme-light .r5t [class*="border-white/"]{border-color:var(--border)}
+        .theme-light .r5t :not([class*="hover:"])[class*="bg-white/"]{background-color:var(--surface-2)}
+        .theme-light .r5t [class*="hover:bg-white/"]:hover{background-color:var(--chip-bg)}
+        .theme-light .r5t input::placeholder,.theme-light .r5t textarea::placeholder{color:#94a3b8}
+      `}</style>
       {/* ── filter bar ── */}
-      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
         <div className="flex rounded-lg overflow-hidden border border-white/10">
           {([['people',Users,ar?'الموظفين':'Employees'],['functions',Building2,ar?'الفنكشن':'Functions']] as const).map(([k,Ic,lbl]) => (
             <button key={k} onClick={() => setView(k as any)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
@@ -151,10 +165,10 @@ export default function People360Page() {
         )}
 
         {/* compact table (essential cols only — no horizontal scroll) */}
-        <div className="rounded-2xl overflow-hidden" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)' }}>
+        <div className="rounded-2xl overflow-hidden" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
           <table className="w-full text-xs" style={{ tableLayout:'fixed' }}>
             <colgroup><col style={{width:'30%'}}/><col/><col/><col/><col/><col/><col/><col/></colgroup>
-            <thead style={{ background:'#11162a' }}>
+            <thead style={{ background:'var(--surface-2)' }}>
               <tr className="text-slate-400">
                 <th className="text-start px-4 py-2.5 font-semibold">{ar?'الموظف':'Employee'}</th>
                 {[ar?'أيام':'Days', ar?'سيك':'Sick', ar?'تأخير':'Late', 'OT', 'AHT', ar?'كونف':'Conf', ar?'سكور':'Score'].map((h,i) =>
@@ -200,9 +214,9 @@ export default function People360Page() {
           <div className="flex items-center justify-between px-1">
             <p className="text-[11px] text-slate-500">{ar?`عرض ${page*PER+1}–${Math.min((page+1)*PER, data.rows.length)} من ${data.total}`:`${page*PER+1}–${Math.min((page+1)*PER, data.rows.length)} of ${data.total}`}</p>
             <div className="flex items-center gap-1">
-              <button disabled={page===0} onClick={() => { setPage(p=>p-1); setOpenId(null); }} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:'rgba(255,255,255,0.05)' }}><ChevronLeft size={14} className="text-white" /></button>
+              <button disabled={page===0} onClick={() => { setPage(p=>p-1); setOpenId(null); }} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:'var(--chip-bg)' }}><ChevronLeft size={14} className="text-white" /></button>
               <span className="text-xs text-slate-300 px-2 font-semibold">{page+1} / {pageCount}</span>
-              <button disabled={page>=pageCount-1} onClick={() => { setPage(p=>p+1); setOpenId(null); }} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:'rgba(255,255,255,0.05)' }}><ChevronRight size={14} className="text-white" /></button>
+              <button disabled={page>=pageCount-1} onClick={() => { setPage(p=>p+1); setOpenId(null); }} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:'var(--chip-bg)' }}><ChevronRight size={14} className="text-white" /></button>
             </div>
           </div>
         )}
@@ -210,9 +224,9 @@ export default function People360Page() {
 
       {/* ── FUNCTIONS ── */}
       {!loading && view === 'functions' && data?.functions && (
-        <div className="rounded-2xl overflow-hidden" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)' }}>
+        <div className="rounded-2xl overflow-hidden" style={{ background:'var(--surface)', border:'1px solid var(--border)' }}>
           <table className="w-full text-xs">
-            <thead style={{ background:'#11162a' }}>
+            <thead style={{ background:'var(--surface-2)' }}>
               <tr className="text-slate-400">
                 {[ar?'الفنكشن':'Function', ar?'موظفين':'Emp', ar?'أيام':'Days', ar?'سيك':'Sick', ar?'غياب':'Abs', ar?'تأخير':'Late', 'OT', ar?'مكالمات':'Calls', 'AHT', ar?'إشغال':'Occ', ar?'كونف':'Conf', ar?'سكور':'Score'].map((h,i) =>
                   <th key={i} className={`px-2.5 py-2.5 font-semibold ${i===0?'text-start':'text-center'}`}>{h}</th>)}
@@ -250,9 +264,9 @@ function DetailPanel({ d, r, ar }: { d: any; r: Row; ar: boolean }) {
       <p className="text-[10px] text-slate-500 uppercase font-semibold mb-1.5">{title}</p>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
         {items.map(([l, v, c], i) => (
-          <div key={i} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg" style={{ background:'rgba(255,255,255,0.04)' }}>
+          <div key={i} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg" style={{ background:'var(--chip-bg)' }}>
             <span className="text-[10px] text-slate-400">{l}</span>
-            <span className="text-xs font-bold" style={{ color: c || '#e2e8f0' }}>{v == null || v === '' ? '—' : v}</span>
+            <span className="text-xs font-bold" style={{ color: c || 'var(--text-1)' }}>{v == null || v === '' ? '—' : v}</span>
           </div>
         ))}
       </div>
@@ -266,7 +280,7 @@ function DetailPanel({ d, r, ar }: { d: any; r: Row; ar: boolean }) {
     <div className="space-y-3.5 pt-3">
       <div className="grid md:grid-cols-3 gap-4">
         {grp(ar?'الحضور':'Attendance', [
-          [ar?'أيام عمل':'Work days', r.working_days, '#fff'], [ar?'مكتب':'Office', r.office_days], [ar?'WFH':'WFH', r.wfh_days],
+          [ar?'أيام عمل':'Work days', r.working_days, 'var(--text-1)'], [ar?'مكتب':'Office', r.office_days], [ar?'WFH':'WFH', r.wfh_days],
           [ar?'سيك':'Sick', r.sick_days, r.sick_days?'#f59e0b':''], [ar?'إجازة':'Leave', r.leave_days], [ar?'غياب':'Absence', r.absence_days, r.absence_days?'#f43f5e':''],
           [ar?'أوف':'Off', r.off_days], [ar?'تعويضي':'Comp', r.comp_days], [ar?'كونفورمانس':'Conformance', pct(r.conformance_pct), cf(r.conformance_pct)],
         ])}
