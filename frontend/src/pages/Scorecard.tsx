@@ -8,7 +8,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { useAuthStore } from '@/store/auth.store';
 import { apiClient } from '@/api/client';
-import { useInjectDsStyles } from '@/components/ds';
+import { tp, useInjectDsStyles } from '@/components/ds';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface DashboardData {
@@ -55,6 +55,44 @@ const medal = (rank: number | null) => {
   if (rank === 3) return '🥉';
   return null;
 };
+
+/* ─── Theme-aware neutral tokens ─────────────────────────────────────────────
+   The ONE documented home for this page's near-black / near-white NEUTRALS.
+   The dark branch is byte-identical to the original scattered literals; the light
+   branch mirrors black-tint fills to slate-navy (rgba(15,23,42,…)) and keeps genuine
+   white surfaces white (real light-theme card fills). Fed by ds tp() for hero text.
+   NOT tokenized (stay inline, read on both themes): semantic status hues
+   (green #22c55e / amber #f59e0b / red #ef4444 score bands, wd/scoreBg tints),
+   brand accents (#818cf8 · #fbbf24 · fnColor), and mid-gray muted text
+   (#475569 · #64748b · #94a3b8 · #334155 · #cbd5e1). Shared by every sub-component
+   via `const T = nt(dark)` so residual neutral literals live here only. */
+const nt = (dark: boolean) => ({
+  // near-white / near-black TEXT
+  txPri:   dark ? '#e2e8f0' : '#0f172a',    // primary value / heading text
+  txPri2:  dark ? '#e2e8f0' : '#1e293b',    // primary text (softer light)
+  txDash:  dark ? '#1e293b' : '#e2e8f0',    // intentionally faint em-dash placeholder
+  // translucent neutral FILLS / BORDERS — light mirrors black → slate-navy
+  n1:      dark ? 'rgba(255,255,255,0.01)'  : 'rgba(15,23,42,0.01)',
+  n1b:     dark ? 'rgba(255,255,255,0.01)'  : 'rgba(15,23,42,0.02)',   // dropzone rest bg
+  n15:     dark ? 'rgba(255,255,255,0.015)' : 'rgba(15,23,42,0.02)',   // expanded zebra
+  n4:      dark ? 'rgba(255,255,255,0.04)'  : 'rgba(15,23,42,0.04)',
+  n4b:     dark ? 'rgba(255,255,255,0.04)'  : 'rgba(15,23,42,0.03)',   // open-row bg
+  n6:      dark ? 'rgba(255,255,255,0.06)'  : 'rgba(15,23,42,0.06)',
+  n8c:     dark ? 'rgba(255,255,255,0.08)'  : 'rgba(15,23,42,0.06)',   // active tab chip
+  n10c:    dark ? 'rgba(255,255,255,0.1)'   : 'rgba(15,23,42,0.08)',   // active filter pill
+  b7:      dark ? 'rgba(255,255,255,0.07)'  : 'rgba(15,23,42,0.08)',   // card border
+  b8:      dark ? 'rgba(255,255,255,0.08)'  : 'rgba(15,23,42,0.08)',
+  b8d:     dark ? 'rgba(255,255,255,0.08)'  : 'rgba(15,23,42,0.1)',    // dropzone border
+  b10:     dark ? 'rgba(255,255,255,0.1)'   : 'rgba(15,23,42,0.1)',
+  rowBg:   dark ? 'rgba(255,255,255,0.02)'  : 'rgba(15,23,42,0.015)',  // perf table zebra row
+  // genuine WHITE / opaque light surfaces (light stays white — real card fills)
+  cardBg:  dark ? 'rgba(255,255,255,0.03)'  : '#ffffff',
+  surface: dark ? 'rgba(255,255,255,0.03)'  : 'rgba(255,255,255,0.8)',
+  glass:   dark ? 'rgba(255,255,255,0.02)'  : 'rgba(255,255,255,0.7)', // blurred expanded card
+  innerBg: dark ? 'rgba(0,0,0,0.2)'         : 'rgba(255,255,255,0.5)', // inner metric tile
+  sortBg:  dark ? 'rgba(255,255,255,0.08)'  : '#ffffff',              // active sort toggle
+});
+
 const scoreColor = (s: number | null) => {
   if (s === null) return undefined;
   if (s > 0)  return '#22c55e';
@@ -62,7 +100,7 @@ const scoreColor = (s: number | null) => {
   return '#f59e0b';
 };
 const scoreBg = (s: number | null, dark: boolean) => {
-  if (s === null) return dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+  if (s === null) return nt(dark).n4;
   if (s > 0)  return 'rgba(34,197,94,0.12)';
   if (s < 0)  return 'rgba(239,68,68,0.12)';
   return 'rgba(245,158,11,0.12)';
@@ -97,11 +135,12 @@ function KpiDot({ score }: { score: number | null }) {
 
 /* ─── Score chip (expanded detail) ──────────────────────────────────────── */
 function ScoreChip({ label, actual, score, dark }: { label: string; actual: string; score: number | null; dark: boolean }) {
+  const T  = nt(dark);
   const c  = scoreColor(score);
   const bg = scoreBg(score, dark);
   return (
     <div className="flex flex-col items-center gap-1 min-w-[60px] rounded-xl p-2.5"
-      style={{ background: bg, border: `1px solid ${c ? c + '25' : (dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)')}` }}>
+      style={{ background: bg, border: `1px solid ${c ? c + '25' : (T.n6)}` }}>
       <span className="text-[9px] uppercase tracking-wider font-bold"
         style={{ color: dark ? '#64748b' : '#94a3b8' }}>{label}</span>
       <span className="text-[10px] font-medium"
@@ -115,6 +154,7 @@ function ScoreChip({ label, actual, score, dark }: { label: string; actual: stri
 
 /* ─── Podium card (top 3 per function) ──────────────────────────────────── */
 function PodiumCard({ entry, dark }: { entry: Entry; dark: boolean }) {
+  const T    = nt(dark);
   const rank = entry.functionRank ?? 0;
   const m    = medal(rank);
   const netC = scoreColor(entry.netPoints);
@@ -126,15 +166,15 @@ function PodiumCard({ entry, dark }: { entry: Entry; dark: boolean }) {
     <div className={`flex flex-col items-center gap-2 ${orders[rank as 1|2|3] ?? ''}`}>
       <div className="text-2xl">{m}</div>
       <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-lg font-bold"
-        style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+        style={{ background: T.n6,
                  border: `2px solid ${netC ?? '#475569'}40`,
-                 color: dark ? '#e2e8f0' : '#1e293b' }}>
+                 color: T.txPri2 }}>
         {(entry.employeeName || '').split(' ')[0]?.[0]?.toUpperCase()}
         {(entry.employeeName || '').split(' ')[1]?.[0]?.toUpperCase()}
       </div>
       <div className="text-center">
         <div className="text-xs font-semibold max-w-[90px] truncate"
-          style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>
+          style={{ color: T.txPri2 }}>
           {(entry.employeeName || '').split(' ').slice(0, 2).join(' ')}
         </div>
         <div className={`font-black tabular-nums ${sizes[rank as 1|2|3] ?? 'text-lg'}`}
@@ -156,13 +196,14 @@ function PodiumCard({ entry, dark }: { entry: Entry; dark: boolean }) {
 
 /* ─── Employee row ────────────────────────────────────────────────────────── */
 function EmployeeRow({ e, ar, dark, trendDelta }: { e: Entry; ar: boolean; dark: boolean; trendDelta?: number | null }) {
+  const T = nt(dark);
   const [open, setOpen] = useState(false);
   const netC = scoreColor(e.netPoints);
   const m    = medal(e.functionRank);
   const wd   = wdBadge(e.workingDaysPct);
 
   const rowBg = open
-    ? (dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)')
+    ? (T.n4b)
     : undefined;
   const rowHover = dark ? 'hover:bg-white/[0.025]' : 'hover:bg-black/[0.02]';
 
@@ -185,7 +226,7 @@ function EmployeeRow({ e, ar, dark, trendDelta }: { e: Entry; ar: boolean; dark:
         {/* Name + loginId */}
         <td className="py-2.5 px-3">
           <div className="text-sm font-semibold"
-            style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>
+            style={{ color: T.txPri }}>
             {e.employeeName}
           </div>
           <div className="text-[10px]"
@@ -232,7 +273,7 @@ function EmployeeRow({ e, ar, dark, trendDelta }: { e: Entry; ar: boolean; dark:
                 style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>
                 {e.incentiveKd} KD
               </span>
-            : <span style={{ color: dark ? '#1e293b' : '#e2e8f0' }}>—</span>}
+            : <span style={{ color: T.txDash }}>—</span>}
         </td>
 
         {/* Expand */}
@@ -245,12 +286,12 @@ function EmployeeRow({ e, ar, dark, trendDelta }: { e: Entry; ar: boolean; dark:
 
       {/* Expanded KPI detail */}
       {open && (
-        <tr style={{ background: dark ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.02)' }}>
+        <tr style={{ background: T.n15 }}>
           <td colSpan={7} className="pb-4 px-4 pt-1">
             <div className="rounded-2xl p-4"
               style={{
-                background: dark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.7)',
-                border: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
+                background: T.glass,
+                border: `1px solid ${T.n6}`,
                 backdropFilter: 'blur(8px)',
               }}>
               <div className="flex gap-4 text-xs mb-3" style={{ color: dark ? '#475569' : '#94a3b8' }}>
@@ -283,7 +324,7 @@ function EmployeeRow({ e, ar, dark, trendDelta }: { e: Entry; ar: boolean; dark:
               {/* Net score bar */}
               <div className="mt-3 flex items-center gap-3">
                 <div className="flex-1 h-2 rounded-full overflow-hidden"
-                  style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
+                  style={{ background: T.n6 }}>
                   <div className="h-full rounded-full transition-all"
                     style={{
                       width: `${Math.min(100, Math.max(0, ((e.netPoints ?? 0) + 50) / 2))}%`,
@@ -310,6 +351,7 @@ function AgentScoreView({
   entries: Entry[]; myEntry: Entry | null; dark: boolean; ar: boolean;
   batches: Batch[]; selectedBatch: Batch | null; onSelectBatch: (b: Batch) => void;
 }) {
+  const T    = nt(dark);
   const netC = scoreColor(myEntry?.netPoints ?? null);
 
   if (!myEntry) {
@@ -341,7 +383,7 @@ function AgentScoreView({
                 <button key={b.id} onClick={() => onSelectBatch(b)}
                   className={`text-xs px-3 py-1.5 rounded-xl transition-all ${selectedBatch?.id === b.id ? 'ring-1 ring-indigo-500' : ''}`}
                   style={{
-                    background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+                    background: T.n6,
                     color: dark ? '#94a3b8' : '#64748b',
                   }}>
                   {b.periodName}
@@ -383,7 +425,7 @@ function AgentScoreView({
               style={{
                 background: selectedBatch?.id === b.id
                   ? 'rgba(129,140,248,0.15)'
-                  : (dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
+                  : (T.n4),
                 color: selectedBatch?.id === b.id ? '#818cf8' : (dark ? '#475569' : '#94a3b8'),
                 border: selectedBatch?.id === b.id ? '1px solid rgba(129,140,248,0.3)' : '1px solid transparent',
               }}>
@@ -399,7 +441,7 @@ function AgentScoreView({
           background: dark
             ? `linear-gradient(135deg, rgba(15,21,39,0.95), rgba(30,41,59,0.9))`
             : `linear-gradient(135deg, rgba(248,250,252,0.95), rgba(241,245,249,0.9))`,
-          border: `1px solid ${netC ? netC + '30' : (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)')}`,
+          border: `1px solid ${netC ? netC + '30' : (T.b8)}`,
           boxShadow: netC ? `0 8px 32px ${netC}20` : undefined,
         }}>
         {/* Decorative glow */}
@@ -413,15 +455,15 @@ function AgentScoreView({
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-xl font-black flex-shrink-0"
               style={{
-                background: netC ? `${netC}20` : (dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'),
-                border: `2px solid ${netC ? netC + '40' : (dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)')}`,
-                color: netC ?? (dark ? '#e2e8f0' : '#0f172a'),
+                background: netC ? `${netC}20` : (T.n6),
+                border: `2px solid ${netC ? netC + '40' : (T.b10)}`,
+                color: netC ?? T.txPri,
               }}>
               {(myEntry.employeeName || '').split(' ').map(w => w[0]).slice(0, 2).join('')}
             </div>
             <div>
               <h2 className="text-lg font-bold"
-                style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
+                style={{ color: tp(dark) }}>
                 {myEntry.employeeName}
               </h2>
               <div className="flex flex-wrap items-center gap-2 mt-1">
@@ -454,7 +496,7 @@ function AgentScoreView({
             {myEntry.functionRank !== null && (
               <div className="text-center">
                 <div className="text-4xl font-black"
-                  style={{ color: dark ? '#e2e8f0' : '#0f172a' }}>
+                  style={{ color: T.txPri }}>
                   {medal(myEntry.functionRank) ?? `#${myEntry.functionRank}`}
                 </div>
                 <div className="text-xs mt-0.5" style={{ color: dark ? '#475569' : '#94a3b8' }}>
@@ -477,7 +519,7 @@ function AgentScoreView({
         <div className="mt-5 flex items-center gap-3">
           <div className="text-xs" style={{ color: dark ? '#334155' : '#cbd5e1' }}>0</div>
           <div className="flex-1 h-2.5 rounded-full overflow-hidden"
-            style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
+            style={{ background: T.n6 }}>
             <div className="h-full rounded-full transition-all duration-700"
               style={{
                 width: `${scoreBarWidth}%`,
@@ -509,7 +551,7 @@ function AgentScoreView({
               <div key={kpi.label} className="rounded-2xl p-4 flex flex-col gap-2"
                 style={{
                   background: bg,
-                  border: `1px solid ${c ? c + '25' : (dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)')}`,
+                  border: `1px solid ${c ? c + '25' : (T.n6)}`,
                 }}>
                 <div className="text-[10px] uppercase tracking-wider font-bold"
                   style={{ color: dark ? '#64748b' : '#94a3b8' }}>
@@ -536,7 +578,7 @@ function AgentScoreView({
             {ar ? 'ترتيبك في القسم' : 'Your standing in function'}
           </h3>
           <div className="rounded-2xl overflow-hidden"
-            style={{ border: `1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}` }}>
+            style={{ border: `1px solid ${T.n6}` }}>
             {entries
               .filter(e => e.functionName === myEntry.functionName)
               .slice(0, 8)
@@ -549,8 +591,8 @@ function AgentScoreView({
                     style={{
                       background: isSelf
                         ? (dark ? 'rgba(129,140,248,0.08)' : 'rgba(129,140,248,0.06)')
-                        : (i % 2 === 0 ? 'transparent' : (dark ? 'rgba(255,255,255,0.01)' : 'rgba(0,0,0,0.01)')),
-                      borderBottom: i < 7 ? `1px solid ${dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'}` : undefined,
+                        : (i % 2 === 0 ? 'transparent' : (T.n1)),
+                      borderBottom: i < 7 ? `1px solid ${T.n4}` : undefined,
                       borderInlineStart: isSelf ? '3px solid #818cf8' : '3px solid transparent',
                     }}>
                     <span className="text-xs w-6 text-center">{medal(e.functionRank) ?? e.functionRank}</span>
@@ -575,6 +617,7 @@ function AgentScoreView({
 /* ─── Trend badge ─────────────────────────────────────────────────────────── */
 function TrendBadge({ delta }: { delta: number | null }) {
   const { dark } = useUiStore();
+  const T = nt(dark);
   if (delta === null) return null;
   if (delta > 0) return (
     <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
@@ -590,7 +633,7 @@ function TrendBadge({ delta }: { delta: number | null }) {
   );
   return (
     <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
-      style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)', color: '#64748b' }}>
+      style={{ background: T.n6, color: '#64748b' }}>
       <Minus size={7} />0
     </span>
   );
@@ -609,9 +652,10 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
       .finally(() => setLoading(false));
   }, [batchId]);
 
-  const surface   = dark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.8)';
-  const border    = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)';
-  const textPri   = dark ? '#e2e8f0' : '#0f172a';
+  const T         = nt(dark);
+  const surface   = T.surface;
+  const border    = T.b7;
+  const textPri   = T.txPri;
   const textSec   = dark ? '#475569' : '#94a3b8';
 
   if (loading) return (
@@ -667,7 +711,7 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
           </span>
           <span className="text-sm font-bold" style={{ color: passColor }}>{passingPct}%</span>
         </div>
-        <div className="h-3 rounded-full overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
+        <div className="h-3 rounded-full overflow-hidden" style={{ background: T.n6 }}>
           <div className="h-full rounded-full transition-all duration-700"
             style={{ width: `${passingPct}%`, background: `linear-gradient(90deg, ${passColor}99, ${passColor})` }} />
         </div>
@@ -704,7 +748,7 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
                       { label: 'FCR',     value: `${fn.avgFcrPct ?? 0}%`,     color: '#34d399' },
                     ].map(m => (
                       <div key={m.label} className="rounded-xl p-2 text-center"
-                        style={{ background: dark ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.5)' }}>
+                        style={{ background: T.innerBg }}>
                         <div className="text-[9px] uppercase tracking-wide mb-0.5" style={{ color: textSec }}>{m.label}</div>
                         <div className="text-sm font-bold tabular-nums" style={{ color: m.color }}>{m.value}</div>
                       </div>
@@ -715,7 +759,7 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
                       <span>{ar ? 'نسبة النجاح' : 'Pass rate'}</span>
                       <span style={{ color: fnPassPct >= 70 ? '#22c55e' : '#f59e0b' }}>{fnPassPct}%</span>
                     </div>
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)' }}>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: T.n6 }}>
                       <div className="h-full rounded-full" style={{ width: `${fnPassPct}%`, background: fc }} />
                     </div>
                   </div>
@@ -841,6 +885,7 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
 
 /* ─── Upload zone ────────────────────────────────────────────────────────── */
 function UploadZone({ onPreview, dark, ar }: { onPreview: (file: File) => void; dark: boolean; ar: boolean }) {
+  const T = nt(dark);
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   return (
@@ -851,10 +896,10 @@ function UploadZone({ onPreview, dark, ar }: { onPreview: (file: File) => void; 
       onClick={() => fileRef.current?.click()}
       className="cursor-pointer rounded-3xl border-2 border-dashed p-12 flex flex-col items-center justify-center gap-4 transition-all"
       style={{
-        borderColor: drag ? '#818cf8' : (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)'),
+        borderColor: drag ? '#818cf8' : (T.b8d),
         background: drag
           ? 'rgba(129,140,248,0.06)'
-          : (dark ? 'rgba(255,255,255,0.01)' : 'rgba(0,0,0,0.02)'),
+          : (T.n1b),
       }}>
       <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onPreview(f); }} />
@@ -863,7 +908,7 @@ function UploadZone({ onPreview, dark, ar }: { onPreview: (file: File) => void; 
         <Upload size={28} style={{ color: '#818cf8' }} />
       </div>
       <div className="text-center">
-        <div className="text-sm font-semibold" style={{ color: dark ? '#e2e8f0' : '#1e293b' }}>
+        <div className="text-sm font-semibold" style={{ color: T.txPri2 }}>
           {ar ? 'اسحب وأفلت ملف السكوركارد هنا' : 'Drop Scorecard Excel here'}
         </div>
         <div className="text-xs mt-1" style={{ color: dark ? '#475569' : '#94a3b8' }}>
@@ -909,11 +954,12 @@ function PerformanceTab({ dark, ar }: { dark: boolean; ar: boolean }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const textPri = dark ? '#e2e8f0' : '#1e293b';
+  const T = nt(dark);
+  const textPri = T.txPri2;
   const textSec = dark ? '#94a3b8' : '#64748b';
-  const cardBg = dark ? 'rgba(255,255,255,0.03)' : '#ffffff';
-  const border = dark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.06)';
-  const rowBg = dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.015)';
+  const cardBg = T.cardBg;
+  const border = `1px solid ${T.b7}`;
+  const rowBg = T.rowBg;
 
   if (loading) return <div className="text-center py-20" style={{ color: textSec }}>{ar ? 'جارٍ التحليل…' : 'Analyzing…'}</div>;
   const ins = data?.insights || {};
@@ -975,7 +1021,7 @@ function PerformanceTab({ dark, ar }: { dark: boolean; ar: boolean }) {
           <div className="flex gap-1 rounded-lg p-0.5" style={{ background: rowBg }}>
             {[['trend', ar ? 'الاتجاه' : 'Trend'], ['latest', ar ? 'الأحدث' : 'Latest']].map(([k, l]) => (
               <button key={k} onClick={() => setSort(k as any)} className="text-xs px-2.5 py-1 rounded-md"
-                style={{ background: sort === k ? (dark ? 'rgba(255,255,255,0.08)' : '#fff') : 'transparent', color: sort === k ? textPri : textSec, fontWeight: 600 }}>{l}</button>
+                style={{ background: sort === k ? (T.sortBg) : 'transparent', color: sort === k ? textPri : textSec, fontWeight: 600 }}>{l}</button>
             ))}
           </div>
         </div>
@@ -1285,15 +1331,16 @@ export default function ScorecardPage() {
   const withInc = entries.filter(e => e.incentiveKd).length;
 
   /* ─── Theming helpers ─────────────────────────────────────────────────── */
-  const surface   = dark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.8)';
-  const border    = dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)';
-  const textPri   = dark ? '#e2e8f0' : '#0f172a';
+  const T         = nt(dark);
+  const surface   = T.surface;
+  const border    = T.b7;
+  const textPri   = T.txPri;
   const textSec   = dark ? '#475569' : '#94a3b8';
   const textMuted = dark ? '#334155' : '#cbd5e1';
-  const tabActive = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-  const tabText   = dark ? '#e2e8f0' : '#1e293b';
+  const tabActive = T.n8c;
+  const tabText   = T.txPri2;
   const tabMuted  = dark ? '#475569' : '#94a3b8';
-  const filterBg  = dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+  const filterBg  = T.n4;
 
   /* ─── Tabs definition ─────────────────────────────────────────────────── */
   const tabs: Array<{ id: string; label: string; icon: any }> = [
@@ -1669,8 +1716,8 @@ export default function ScorecardPage() {
                     onClick={() => document.getElementById('kpi-file-input')?.click()}
                     className="cursor-pointer rounded-3xl border-2 border-dashed p-10 flex flex-col items-center gap-3 transition-all"
                     style={{
-                      borderColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.1)',
-                      background: dark ? 'rgba(255,255,255,0.01)' : 'rgba(0,0,0,0.02)',
+                      borderColor: T.b8d,
+                      background: T.n1b,
                     }}>
                     <input id="kpi-file-input" type="file" accept=".xlsx,.xls,.csv" className="hidden"
                       onChange={e => { const f = e.target.files?.[0]; if (f) handleKpiPreview(f); }} />
@@ -1851,7 +1898,7 @@ export default function ScorecardPage() {
                   className="text-xs px-3 py-1.5 rounded-full transition-all"
                   style={{
                     background: fnFilter === fn
-                      ? (fn ? `${fnColor(fn)}18` : (dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'))
+                      ? (fn ? `${fnColor(fn)}18` : (T.n10c))
                       : filterBg,
                     color: fnFilter === fn ? (fn ? fnColor(fn) : textPri) : textSec,
                     border: `1px solid ${fnFilter === fn ? (fn ? fnColor(fn) + '40' : border) : 'transparent'}`,

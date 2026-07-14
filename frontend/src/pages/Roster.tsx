@@ -247,7 +247,7 @@ function RangeCalendar({ from, to, ar, onApply }: { from: string; to: string; ar
 }
 
 export default function RosterPage() {
-  const { lang } = useUiStore();
+  const { lang, dark } = useUiStore();
   const ar = lang === 'ar';
   const nav = useNavigate();
   const [data, setData] = useState<Resp | null>(null);
@@ -365,6 +365,19 @@ export default function RosterPage() {
   const presColor = (p: string) => PRES[p]?.c || '#64748b';
   const btn = (extra: string) => `flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${extra}`;
 
+  /* theme-aware neutral tokens — DARK keeps the original white-alpha values byte-for-byte;
+     LIGHT mirrors them to a slate-navy tint so these surfaces/borders no longer depend on the
+     global light-mode CSS net (which, notably, never caught the no-space white borders below).
+     Brand accents, status colors, mid-gray text (var(--text-*)/slate-*) and shadows stay inline.
+     Any residual neutral literal must live only inside this block. */
+  const T = {
+    cardBg:  dark ? 'rgba(255,255,255,0.02)' : 'rgba(15,23,42,0.02)',
+    panelBg: dark ? 'rgba(255,255,255,0.03)' : 'rgba(15,23,42,0.03)',
+    chipBg:  dark ? 'rgba(255,255,255,0.04)' : 'rgba(15,23,42,0.04)',
+    btnBg:   dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,23,42,0.05)',
+    bdr:     dark ? 'rgba(255,255,255,0.07)' : 'rgba(15,23,42,0.1)',
+  };
+
   // quick date presets — pick a whole range in ONE click (relative to today), no more two-input juggling
   const fmtD = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   // WFM week starts SATURDAY → the Saturday on/before a given date
@@ -424,7 +437,7 @@ export default function RosterPage() {
       </div>
 
       {/* filters */}
-      <div className="p-3 rounded-2xl space-y-2.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
+      <div className="p-3 rounded-2xl space-y-2.5" style={{ background:T.panelBg, border:`1px solid ${T.bdr}` }}>
         {/* quick date presets — ONE click sets the whole range (no more picking two inputs) */}
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[10px] font-semibold uppercase tracking-wide me-1" style={{ color:'var(--text-3)' }}>{ar?'اختصار سريع':'Quick range'}</span>
@@ -571,7 +584,7 @@ export default function RosterPage() {
 
       {/* compact table — sticky header */}
       {!loading && data && (<>
-        <div className="rounded-2xl" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)' }}>
+        <div className="rounded-2xl" style={{ background:T.cardBg, border:`1px solid ${T.bdr}` }}>
           <table className="w-full text-xs" style={{ tableLayout:'fixed' }}>
             <colgroup><col style={{width:'11%'}}/><col style={{width:'24%'}}/><col style={{width:'11%'}}/><col style={{width:'12%'}}/><col style={{width:'18%'}}/><col style={{width:'18%'}}/><col style={{width:'6%'}}/></colgroup>
             <thead className="sticky top-0 z-20" style={{ background:'var(--surface-2)', boxShadow:'0 1px 0 var(--border)' }}>
@@ -633,7 +646,7 @@ export default function RosterPage() {
                             { l: ar?'البصمة':'Punch', tag: null as string|null, a: r.punch_in_min, b: r.punch_out_min, c:'#22c55e', total: span(r.punch_in_min, r.punch_out_min), s2a: null as number|null, s2b: null as number|null },
                             { l: ar?'السيستم':'System', tag: r.login_src, a: r.sys_login_min, b: r.sys_logout_min, c:'#06b6d4', total: (r.total_work_sys_min ?? span(r.sys_login_min, r.sys_logout_min)), s2a: r.sys_login2_min ?? null, s2b: r.sys_logout2_min ?? null },
                           ]).map((card,i)=>(
-                            <div key={i} className="px-3 py-2 rounded-xl" style={{ background:'rgba(255,255,255,0.04)' }}>
+                            <div key={i} className="px-3 py-2 rounded-xl" style={{ background:T.chipBg }}>
                               <div className="flex items-center justify-between mb-0.5 gap-2">
                                 <p className="text-[10px] text-slate-500 uppercase font-semibold truncate">{card.l}{card.tag?` · ${card.tag}`:''}</p>
                                 {card.total!=null && card.total>0 && <span className="text-[10px] font-bold whitespace-nowrap" style={{ color:card.c }}>Σ {dur(card.total)}</span>}
@@ -653,7 +666,7 @@ export default function RosterPage() {
             [(r.holiday_ot_min||0)>0?(ar?'OT عطلة':'OT (holiday)'):(r.offday_ot_min||0)>0?(ar?'OT يوم OFF':'OT (off-day)'):'OT', dur(r.total_ot!=null?r.total_ot:r.ot_min), ((r.total_ot??r.ot_min)||0)>0?'#10b981':'#64748b'],
                             [ar?'تأخير بصمة':'Punch late', dur(r.late_min), r.late_min>0?'#f59e0b':'#64748b'],
                           ] as [string,any,string][]).map(([l,v,c],i)=>(
-                            <div key={i} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg" style={{ background:'rgba(255,255,255,0.04)' }}>
+                            <div key={i} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg" style={{ background:T.chipBg }}>
                               <span className="text-[10px] text-slate-400">{l}</span><span className="text-[11px] font-bold" style={{ color:c }}>{v}</span>
                             </div>
                           ))}
@@ -686,7 +699,7 @@ export default function RosterPage() {
                               // (e.g. coded L but it's Hijri New Year). Working a holiday ("Morning Shift · Holiday (worked)") is NOT a conflict.
                               const isLeaveOff = !!sl && /Leave|Day Off|Absent|Comp/i.test(sl.en);
                               const rawDiffers = !!(isLeaveOff && r.status && /holiday/i.test(r.status));
-                              return (<div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:'rgba(255,255,255,0.04)' }}>
+                              return (<div className="px-3 py-1.5 rounded-lg text-[11px]" style={{ background:T.chipBg }}>
                                 <span className="text-slate-500">{ar?'الحالة: ':'Status: '}</span>
                                 {sl && <span className="font-bold text-indigo-200">{ar?sl.ar:sl.en}</span>}
                                 {r.status && <span className="text-slate-400">{sl?'  ·  ':''}{r.status}</span>}
@@ -712,9 +725,9 @@ export default function RosterPage() {
           <div className="flex items-center justify-between px-1">
             <p className="text-[11px] text-slate-500">{ar?`عرض ${page*PER+1}–${Math.min((page+1)*PER, data.total)} من ${data.total}`:`${page*PER+1}–${Math.min((page+1)*PER, data.total)} of ${data.total}`}</p>
             <div className="flex items-center gap-1">
-              <button disabled={page===0} onClick={()=>setPage(p=>p-1)} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:'rgba(255,255,255,0.05)' }}><ChevronLeft size={14} className="text-white"/></button>
+              <button disabled={page===0} onClick={()=>setPage(p=>p-1)} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:T.btnBg }}><ChevronLeft size={14} className="text-white"/></button>
               <span className="text-xs text-slate-300 px-2 font-semibold">{page+1} / {pageCount}</span>
-              <button disabled={page>=pageCount-1} onClick={()=>setPage(p=>p+1)} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:'rgba(255,255,255,0.05)' }}><ChevronRight size={14} className="text-white"/></button>
+              <button disabled={page>=pageCount-1} onClick={()=>setPage(p=>p+1)} className="p-1.5 rounded-lg disabled:opacity-30" style={{ background:T.btnBg }}><ChevronRight size={14} className="text-white"/></button>
             </div>
           </div>
         )}
