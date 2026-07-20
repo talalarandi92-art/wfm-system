@@ -52,6 +52,179 @@ export function cappedLearnedFloor(learnedErl: number, ordersScale: number, ceil
   return Math.min(v, ceil);
 }
 
+/** Normalize raw intraday weights into shares that sum to exactly 1 (all-zero → zeros).
+ *  Pure + unit-tested: the 48 half-hour shares the forecast spreads a day's volume over
+ *  MUST sum to 1 or daily volume silently leaks/inflates. */
+export function normalizeShares(raw: number[]): number[] {
+  const tot = raw.reduce((a, b) => a + b, 0) || 1;
+  return raw.map(v => v / tot);
+}
+
+export type CellParams = Pick<StaffingParams,
+  'model' | 'targetSl' | 'targetAnswerSec' | 'occupancyCap' | 'shrinkage' | 'productivity' | 'concurrency' | 'marginalEff'>;
+
+/**
+ * Steps 3–6 of the chain for ONE function×hour cell, as a pure function so the spec can
+ * hand-verify a real cell end-to-end (volume×AHT → Erlang-C @ SL & occupancy cap →
+ * ÷productivity → ÷(1−shrinkage)). Extracted VERBATIM from the hourlyRequirement loop —
+ * same operations in the same order, so results are bit-identical.
+ * `serverCapacity` = agents × effective servers/agent — occupancy MUST divide by this
+ * (not raw agents) on concurrency channels.
+ */
+export function computeCellRequirement(volume: number, ahtEffSec: number, learnedFloor: number, p: CellParams) {
+  const estimated = (volume * ahtEffSec) / 3600;
+  const learnedApplied = learnedFloor > estimated + 0.05;
+  const erlangs = Math.max(estimated, learnedFloor);
+  let agents = 0, serverCapacity = 0;   // capacity = agents × effective servers/agent
+  if (erlangs > 0) {
+    if (p.model === 'throughput') {
+      agents = Math.ceil(erlangs / p.occupancyCap);   // back-office: workload at capped utilization
+      serverCapacity = agents;
+    } else {
+      const servers = findMinAgents(erlangs, p.targetSl, p.targetAnswerSec, ahtEffSec, p.occupancyCap);
+      if (p.model === 'concurrency') {
+        const eff = effectiveServersPerAgent(p.concurrency, p.marginalEff);
+        agents = Math.ceil(servers / eff);
+        serverCapacity = agents * eff;
+      } else { agents = servers; serverCapacity = servers; }
+    }
+  }
+  const afterProductivity = agents > 0 ? agents / Math.max(p.productivity, 0.1) : 0;
+  const requiredScheduledHc = afterProductivity > 0 ? Math.ceil(afterProductivity / Math.max(1 - p.shrinkage, 0.1)) : 0;
+  return { estimated, erlangs, agentsForSl: agents, serverCapacity, afterProductivity, requiredScheduledHc, learnedApplied };
+}
+
+/* ── forecast-accuracy backtest math (pure, unit-tested) ─────────────────────
+ *  WAPE = Σ|F−A| ÷ ΣA  (volume-weighted absolute error — the buyer's headline)
+ *  bias = Σ(F−A) ÷ ΣA  (signed; positive = we over-forecast / over-staff)     */
+export interface BacktestRow { actual: number; forecast: number }
+export function backtestStats(rows: BacktestRow[]): { n: number; wapePct: number | null; biasPct: number | null } {
+  let sumA = 0, sumAbs = 0, sumSigned = 0;
+  for (const r of rows) {
+    if (!Number.isFinite(r.actual) || !Number.isFinite(r.forecast)) continue;
+    sumA += r.actual; sumAbs += Math.abs(r.forecast - r.actual); sumSigned += r.forecast - r.actual;
+  }
+  if (!rows.length || sumA <= 0) return { n: rows.length, wapePct: null, biasPct: null };
+  return { n: rows.length, wapePct: +((100 * sumAbs) / sumA).toFixed(1), biasPct: +((100 * sumSigned) / sumA).toFixed(1) };
+}
+
+/* ── insight derivation (pure, unit-tested) — verified numbers only, no LLM ── */
+export type InsightSeverity = 'info' | 'warn' | 'critical';
+export interface Insight { id: string; severity: InsightSeverity; metric: Record<string, any>; text: string }
+export interface InsightInput {
+  from: string;
+  dataAnchor: string | null;      // latest measured vol_date (offered > 0)
+  days: any[];                    // hourlyRequirement().days
+  hiringPerFunction: any[];       // hiringNow().perFunction
+  wow: { channel: string; last7: number; prev7: number }[];
+  /** forecastAccuracy().perChannel — when supplied, forecast quality becomes a bullet. */
+  backtest?: { channel: string; wapePct: number | null; biasPct: number | null }[];
+}
+export function deriveInsights(inp: InsightInput): Insight[] {
+  const out: Insight[] = [];
+  // 1 ── data freshness: every downstream number rides on this
+  if (inp.dataAnchor) {
+    const staleDays = Math.round((+new Date(inp.from) - +new Date(inp.dataAnchor)) / 86400000);
+    out.push({
+      id: 'data-freshness',
+      severity: staleDays > 28 ? 'critical' : staleDays > 7 ? 'warn' : 'info',
+      metric: { latestMeasuredDate: inp.dataAnchor, staleDays },
+      text: staleDays > 0
+        ? `Measured volume history ends ${inp.dataAnchor} (${staleDays}d before the plan start) — baseline and AHT ride on the last available 28 days.`
+        : `Measured volume history is current through ${inp.dataAnchor}.`,
+    });
+  } else {
+    out.push({ id: 'data-freshness', severity: 'critical', metric: { latestMeasuredDate: null },
+      text: 'No measured volume history — the requirement is running on defaults.' });
+  }
+  // 2 ── peak day/hour per function + learned cells + hours no current team size can staff
+  const peaks = new Map<string, { date: string; hour: number; required: number }>();
+  const learnedBy = new Map<string, number>(); let learnedTotal = 0;
+  const impossible = new Map<string, number>();
+  const teamOf = new Map(inp.hiringPerFunction.map((f: any) => [f.functionKey, f.currentTeam]));
+  for (const d of inp.days) for (const f of d.functions) for (const h of f.hours) {
+    const cur = peaks.get(f.functionKey);
+    if (!cur || h.requiredScheduledHc > cur.required) peaks.set(f.functionKey, { date: d.date, hour: h.hour, required: h.requiredScheduledHc });
+    if (h.learned) { learnedTotal++; learnedBy.set(f.functionKey, (learnedBy.get(f.functionKey) ?? 0) + 1); }
+    const team = teamOf.get(f.functionKey);
+    if (team != null && h.requiredScheduledHc > team) impossible.set(f.functionKey, (impossible.get(f.functionKey) ?? 0) + 1);
+  }
+  for (const [fn, p] of peaks) {
+    if (p.required <= 0) continue;
+    out.push({ id: `peak:${fn}`, severity: 'info', metric: { functionKey: fn, ...p },
+      text: `${fn}: peak requirement ${p.required} scheduled HC at ${String(p.hour).padStart(2, '0')}:00 on ${p.date}.` });
+  }
+  // 3 ── tightest function: smallest schedulable margin (fieldable bodies/day − bodies needed)
+  let tight: any = null;
+  for (const f of inp.hiringPerFunction) {
+    const margin = +(f.fieldablePerDay - f.scheduleBodiesWorstDay).toFixed(1);
+    if (!tight || margin < tight.margin) {
+      tight = { functionKey: f.functionKey, margin, fieldablePerDay: f.fieldablePerDay,
+                bodiesNeeded: f.scheduleBodiesWorstDay, worstDay: f.coverageWorstDay };
+    }
+  }
+  if (tight) {
+    out.push({ id: 'tightest-function',
+      severity: tight.margin < 0 ? 'critical' : tight.margin < 2 ? 'warn' : 'info',
+      metric: tight,
+      text: tight.margin < 0
+        ? `${tight.functionKey} is the binding team: needs ${tight.bodiesNeeded} bodies/day but can field only ${tight.fieldablePerDay} — short ${Math.abs(tight.margin)}.`
+        : `${tight.functionKey} is the tightest team: ${tight.fieldablePerDay} fieldable bodies/day vs ${tight.bodiesNeeded} needed (margin ${tight.margin}).` });
+  }
+  // 4 ── function-hours the CURRENT team cannot staff even at 100% attendance
+  const impTotal = [...impossible.values()].reduce((a, b) => a + b, 0);
+  if (impTotal > 0) {
+    out.push({ id: 'impossible-hours', severity: 'critical',
+      metric: { hours: impTotal, perFunction: Object.fromEntries(impossible) },
+      text: `${impTotal} function-hour(s) in the range require more scheduled HC than the whole current team — unstaffable without hiring or OT.` });
+  }
+  // 5 ── learned-floor coverage (measurement beating estimation)
+  out.push({ id: 'learned-floor', severity: 'info',
+    metric: { cellsApplied: learnedTotal, perFunction: Object.fromEntries(learnedBy) },
+    text: learnedTotal > 0
+      ? `Measured-load floor (Sprinklr P90) raised ${learnedTotal} cell(s) above the volume×AHT estimate.`
+      : 'No learned-floor cells active — the requirement is purely forecast-driven (a cell needs ≥5 same-weekday measured samples).' });
+  // 6 ── biggest week-over-week move in measured volume
+  let mover: any = null;
+  for (const w of inp.wow) {
+    if (w.prev7 > 0) {
+      const pct = +((100 * (w.last7 - w.prev7)) / w.prev7).toFixed(1);
+      if (!mover || Math.abs(pct) > Math.abs(mover.pct)) mover = { channel: w.channel, pct, last7: w.last7, prev7: w.prev7 };
+    }
+  }
+  if (mover) {
+    out.push({ id: 'wow-volume', severity: Math.abs(mover.pct) >= 20 ? 'warn' : 'info', metric: mover,
+      text: `${mover.channel}: measured volume ${mover.pct >= 0 ? 'up' : 'down'} ${Math.abs(mover.pct)}% week-over-week (${Math.round(mover.prev7)} → ${Math.round(mover.last7)}).` });
+  }
+  // 7 ── forecast quality: how right the SAME baseline has been on the last measured days.
+  //      Bias positive = the baseline over-forecasts (over-hire risk); WAPE ≥50% = the
+  //      baseline is unreliable (regime change, e.g. a channel migration) — the hiring
+  //      verdict must be read with that on the table.
+  if (inp.backtest?.length) {
+    let worstBt: any = null;
+    for (const b of inp.backtest) {
+      if (b.wapePct == null) continue;
+      if (!worstBt || b.wapePct > worstBt.wapePct) worstBt = b;
+    }
+    if (worstBt) {
+      out.push({ id: 'forecast-quality',
+        severity: worstBt.wapePct >= 50 ? 'critical' : worstBt.wapePct >= 25 ? 'warn' : 'info',
+        metric: { worstChannel: worstBt.channel, wapePct: worstBt.wapePct, biasPct: worstBt.biasPct, perChannel: inp.backtest },
+        text: worstBt.wapePct >= 50
+          ? `Baseline forecast is UNRELIABLE right now: ${worstBt.channel} backtests at ${worstBt.wapePct}% WAPE (bias ${worstBt.biasPct! > 0 ? '+' : ''}${worstBt.biasPct}%) — volumes are shifting faster than the 4-week baseline; treat the hiring verdict as an upper bound and re-run after fresh ingest.`
+          : `Forecast backtest: worst channel ${worstBt.channel} at ${worstBt.wapePct}% WAPE (bias ${worstBt.biasPct! > 0 ? '+' : ''}${worstBt.biasPct}%).` });
+    }
+  }
+  // 8 ── overstaffed functions: surplus bodies/day beyond the schedulable need
+  const over = inp.hiringPerFunction.filter((f: any) => f.surplusBodies > 0);
+  if (over.length) {
+    out.push({ id: 'overstaffed', severity: 'info',
+      metric: { perFunction: Object.fromEntries(over.map((f: any) => [f.functionKey, f.surplusBodies])) },
+      text: `Surplus beyond the schedulable need: ${over.map((f: any) => `${f.functionKey} +${f.surplusBodies} bodies/day`).join(', ')} — cross-skill donor candidates.` });
+  }
+  return out;
+}
+
 export interface StaffingParams {
   functionKey: string;
   channelMix: Record<string, number>;
@@ -167,12 +340,26 @@ export class StaffingService implements OnModuleInit {
 
   /* ── measured facts: AHT + volume baseline + intraday profile + CPO ─────── */
   private async channelFacts(tenantId: string, asOf: string) {
-    // 28-day measured AHT per channel (talk seconds / handled)
+    // 28-day measured AHT per channel (talk seconds / handled) — anchored to each
+    // channel's LAST 28 days of AVAILABLE data at/before asOf, NOT a fixed calendar
+    // window. Accuracy-audit fix (2026-07-20): when ingest lags (volume history ended
+    // 2026-06-21 while planning 2026-07-21), the old BETWEEN(asOf−28, asOf) window went
+    // EMPTY and every channel silently fell back to the 300s default AHT — overstating
+    // voice ~2× (real 157s) and understating chat/WA ~3× (real 862/1086s), which skewed
+    // the hiring verdict. The same-weekday volume baseline below already degrades
+    // gracefully (no lower bound); AHT now does too.
     const aht = await this.ds.query(
-      `SELECT channel, (SUM(talk_seconds)::numeric / NULLIF(SUM(handled),0))::numeric(10,1) AS aht
-       FROM contact_volume_daily
-       WHERE tenant_id = $1 AND vol_date BETWEEN ($2::date - 28) AND $2::date
-         AND handled > 0 AND talk_seconds > 0
+      `SELECT channel,
+              (SUM(talk_seconds)::numeric / NULLIF(SUM(handled),0))::numeric(10,1) AS aht,
+              MIN(vol_date)::text AS win_from, MAX(vol_date)::text AS win_to
+       FROM (
+         SELECT channel, vol_date, talk_seconds, handled,
+                MAX(vol_date) OVER (PARTITION BY channel) AS last_day
+         FROM contact_volume_daily
+         WHERE tenant_id = $1 AND vol_date <= $2::date
+           AND handled > 0 AND talk_seconds > 0
+       ) t
+       WHERE vol_date >= last_day - 28
        GROUP BY channel`,
       [tenantId, asOf],
     );
@@ -201,7 +388,11 @@ export class StaffingService implements OnModuleInit {
     ).catch(() => [null]);
 
     const ahtBy: Record<string, number> = {};
-    for (const r of aht) ahtBy[r.channel] = +r.aht;
+    const ahtWindow: Record<string, { from: string; to: string }> = {};
+    for (const r of aht) {
+      ahtBy[r.channel] = +r.aht;
+      ahtWindow[r.channel] = { from: r.win_from, to: r.win_to };
+    }
     const dailyBy: Record<string, Record<number, number>> = {};
     for (const r of daily) (dailyBy[r.channel] = dailyBy[r.channel] || {})[+r.dow] = +r.offered;
     const profBy: Record<string, number[]> = {};
@@ -209,10 +400,9 @@ export class StaffingService implements OnModuleInit {
       (profBy[r.channel] = profBy[r.channel] || new Array(48).fill(0))[+r.interval_idx] = +r.offered;
     }
     for (const ch of Object.keys(profBy)) {
-      const tot = profBy[ch].reduce((a, b) => a + b, 0) || 1;
-      profBy[ch] = profBy[ch].map(v => v / tot);
+      profBy[ch] = normalizeShares(profBy[ch]);   // 48 shares summing to exactly 1 (unit-tested)
     }
-    return { ahtBy, dailyBy, profBy, ordersPeriod: orders ?? null };
+    return { ahtBy, ahtWindow, dailyBy, profBy, ordersPeriod: orders ?? null };
   }
 
   /* ── THE product: per function × hour requirement for a date range ────────── */
@@ -303,37 +493,19 @@ export class StaffingService implements OnModuleInit {
               if (v != null) learnedErl += v * (share as number);
             }
           }
-          const estimated = (volume * ahtEff) / 3600;
-          const learnedFloor = cappedLearnedFloor(learnedErl, ordersScale);
-          const learnedApplied = learnedFloor > estimated + 0.05;
-          const erlangs = Math.max(estimated, learnedFloor);
-          let agents = 0, serverCapacity = 0;   // capacity = agents × effective servers/agent
-          if (erlangs > 0) {
-            if (p.model === 'throughput') {
-              agents = Math.ceil(erlangs / p.occupancyCap);   // back-office: workload at capped utilization
-              serverCapacity = agents;
-            } else {
-              const servers = findMinAgents(erlangs, p.targetSl, p.targetAnswerSec, ahtEff, p.occupancyCap);
-              if (p.model === 'concurrency') {
-                const eff = effectiveServersPerAgent(p.concurrency, p.marginalEff);
-                agents = Math.ceil(servers / eff);
-                serverCapacity = agents * eff;
-              } else { agents = servers; serverCapacity = servers; }
-            }
-          }
-          // 5-6. productivity then shrinkage → the SCHEDULED requirement
-          const afterProd = agents > 0 ? agents / Math.max(p.productivity, 0.1) : 0;
-          const scheduled = afterProd > 0 ? Math.ceil(afterProd / Math.max(1 - p.shrinkage, 0.1)) : 0;
+          // Steps 3–6 live in computeCellRequirement (pure, hand-verified in the spec):
+          // Erlang/concurrency/throughput → ÷productivity → ÷(1−shrinkage).
+          const cell = computeCellRequirement(volume, ahtEff, cappedLearnedFloor(learnedErl, ordersScale), p);
           hours.push({
             hour: h,
             volume: +volume.toFixed(1),
             ahtEffSec: Math.round(ahtEff),
-            erlangs: +erlangs.toFixed(2),
-            agentsForSl: agents,
-            occupancyAtN: serverCapacity > 0 ? +Math.min(erlangs / serverCapacity, 1).toFixed(3) : 0,
-            afterProductivity: +afterProd.toFixed(1),
-            requiredScheduledHc: scheduled,
-            ...(learnedApplied ? { learned: true } : {}),
+            erlangs: +cell.erlangs.toFixed(2),
+            agentsForSl: cell.agentsForSl,
+            occupancyAtN: cell.serverCapacity > 0 ? +Math.min(cell.erlangs / cell.serverCapacity, 1).toFixed(3) : 0,
+            afterProductivity: +cell.afterProductivity.toFixed(1),
+            requiredScheduledHc: cell.requiredScheduledHc,
+            ...(cell.learnedApplied ? { learned: true } : {}),
           });
         }
         return {
@@ -361,8 +533,10 @@ export class StaffingService implements OnModuleInit {
 
     return {
       from, to, ordersScale,
+      basisKind: 'engine-forecast' as const,
       basis: 'forecast: same-weekday 28d offered × intraday profile → effective AHT (talk[measured]+hold+ACW) → Erlang-C @ SL & occupancy cap → ÷productivity → ÷(1−shrinkage)',
       measuredAht: facts.ahtBy,
+      measuredAhtWindow: facts.ahtWindow,   // the exact dates each channel's AHT was measured over (staleness is visible, never silent)
       ordersPeriod: facts.ordersPeriod,
       days: result,
     };
@@ -664,9 +838,10 @@ export class StaffingService implements OnModuleInit {
    * period vs the CURRENT active team per function (live roster). Same math as
    * the event flow; the Excel flow is for events with YOUR OWN volumes/params.
    */
-  async hiringNow(tenantId: string, from: string, to: string, internProductivity = 0.7, otPct = 0) {
+  async hiringNow(tenantId: string, from: string, to: string, internProductivity = 0.7, otPct = 0,
+                  opts?: { ordersScale?: number }) {
     const [req, pools] = await Promise.all([
-      this.hourlyRequirement(tenantId, from, to),
+      this.hourlyRequirement(tenantId, from, to, opts?.ordersScale ? { ordersScale: opts.ordersScale } : undefined),
       this.ds.query(
         `SELECT canon_fn(f.name) AS fn, COUNT(*)::int AS agents
          FROM employees e JOIN functions f ON e.function_id = f.id
@@ -751,6 +926,8 @@ export class StaffingService implements OnModuleInit {
     }).sort((a, b) => b.internsToHire - a.internsToHire || b.gap - a.gap);
     return {
       from, to, internProductivity, otPct,
+      ordersScale: req.ordersScale,
+      basisKind: 'engine-forecast' as const,
       totalInternsToHire: totalInterns,
       totalInternsWithOt,
       totalOtHoursWeekly,
@@ -770,6 +947,155 @@ export class StaffingService implements OnModuleInit {
        FROM forecast_events WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 50`,
       [tenantId],
     );
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+   *  ANALYSIS LAYER (Stage 1A, 2026-07-20) — verified data only, never fabricated.
+   *  1. forecastAccuracy: backtest the SAME same-weekday baseline the engine uses
+   *     against measured actuals → per-channel WAPE/bias ("how right were we").
+   *  2. scenarioCompare: base ×1.0 / surge ×1.2 / quiet ×0.85 / base+OT-10% in one call.
+   *  3. staffingInsights: computed bullets derived from the real requirement/hiring
+   *     numbers (deriveInsights is pure + unit-tested).
+   * ═══════════════════════════════════════════════════════════════════════════ */
+
+  /** The scenario grid scenarioCompare runs — fixed + unit-tested so the UI and the
+   *  Director always see the same definitions. */
+  static readonly SCENARIO_DEFS: ReadonlyArray<{ key: string; ordersScale: number; otPct: number }> = [
+    { key: 'base', ordersScale: 1.0, otPct: 0 },
+    { key: 'surge', ordersScale: 1.2, otPct: 0 },
+    { key: 'quiet', ordersScale: 0.85, otPct: 0 },
+    { key: 'base+ot10', ordersScale: 1.0, otPct: 0.10 },
+  ];
+
+  /**
+   * Backtest: for each of the last N measured days, what the engine's own
+   * same-weekday baseline (mean of the previous ≤4 same-weekday offered, blind to
+   * the day itself) WOULD have forecast, vs the measured offered. Anchored at the
+   * LAST day with actuals — an honest anchor: with stale ingest the backtest still
+   * scores the freshest real data instead of returning an empty window.
+   */
+  async forecastAccuracy(tenantId: string, days = 28, asOf?: string) {
+    const nDays = Math.min(Math.max(Math.round(days) || 28, 7), 120);
+    if (asOf && !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new BadRequestException('asOf must be YYYY-MM-DD');
+    const [{ mx }] = await this.ds.query(
+      `SELECT MAX(vol_date)::text AS mx FROM contact_volume_daily
+       WHERE tenant_id = $1 AND offered > 0 ${asOf ? 'AND vol_date <= $2::date' : ''}`,
+      asOf ? [tenantId, asOf] : [tenantId]);
+    if (!mx) {
+      return { asOf: null, days: nDays, note: 'no measured volume history to backtest', overall: backtestStats([]), perChannel: [], perDay: [] };
+    }
+    const rows = await this.ds.query(
+      `WITH hist AS (
+         SELECT channel, vol_date, offered,
+                AVG(offered) OVER (PARTITION BY channel, EXTRACT(DOW FROM vol_date)
+                                   ORDER BY vol_date ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS fc,
+                COUNT(*)     OVER (PARTITION BY channel, EXTRACT(DOW FROM vol_date)
+                                   ORDER BY vol_date ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) AS n_hist
+         FROM contact_volume_daily
+         WHERE tenant_id = $1 AND offered > 0 AND vol_date <= $2::date
+       )
+       SELECT channel, vol_date::text AS date, offered::float AS actual,
+              ROUND(fc::numeric, 1)::float AS forecast, n_hist::int AS baseline_samples
+       FROM hist
+       WHERE vol_date > $2::date - $3::int AND fc IS NOT NULL
+       ORDER BY channel, vol_date`,
+      [tenantId, mx, nDays]);
+
+    const byCh = new Map<string, any[]>();
+    for (const r of rows) (byCh.get(r.channel) ?? byCh.set(r.channel, []).get(r.channel)!).push(r);
+    const perChannel = [...byCh.entries()].map(([channel, rs]) => {
+      const stats = backtestStats(rs);
+      let worst: any = null;
+      for (const r of rs) {
+        const absErr = Math.abs(r.forecast - r.actual);
+        if (!worst || absErr > worst.absErr) worst = { date: r.date, actual: r.actual, forecast: r.forecast, absErr };
+      }
+      return {
+        channel, ...stats,
+        avgDailyActual: +(rs.reduce((s, r) => s + r.actual, 0) / rs.length).toFixed(1),
+        worstDay: worst ? { date: worst.date, actual: worst.actual, forecast: worst.forecast,
+                            errPct: worst.actual > 0 ? +((100 * (worst.forecast - worst.actual)) / worst.actual).toFixed(1) : null } : null,
+      };
+    }).sort((a, b) => (b.wapePct ?? 0) - (a.wapePct ?? 0));
+
+    return {
+      asOf: mx, days: nDays,
+      basisKind: 'engine-forecast' as const,
+      basis: 'backtest of the engine\'s own baseline: forecast(D) = mean of the previous ≤4 same-weekday measured offered, computed blind to D, vs measured offered (contact_volume_daily). WAPE = Σ|F−A|÷ΣA; bias positive = over-forecast (over-staff), negative = under-forecast (SL risk).',
+      overall: backtestStats(rows),
+      perChannel,
+      perDay: rows,
+    };
+  }
+
+  /** Requirement + hiring verdict under base/surge/quiet/OT — one call, side-by-side. */
+  async scenarioCompare(tenantId: string, from: string, to: string, internProductivity = 0.7) {
+    const defs = StaffingService.SCENARIO_DEFS;
+    const runs = await Promise.all(defs.map(s =>
+      this.hiringNow(tenantId, from, to, internProductivity, s.otPct, { ordersScale: s.ordersScale })));
+    const scenarios = defs.map((s, i) => {
+      const r: any = runs[i];
+      const useOt = s.otPct > 0;   // the OT variant's verdict = hires still needed AFTER the OT allowance
+      return {
+        key: s.key, ordersScale: s.ordersScale, otPct: s.otPct,
+        totalInternsToHire: useOt ? r.totalInternsWithOt : r.totalInternsToHire,
+        totalOtHoursWeekly: useOt ? r.totalOtHoursWeekly : 0,
+        totalSurplusBodies: r.totalSurplusBodies,
+        perFunction: r.perFunction.map((f: any) => ({
+          functionKey: f.functionKey, requiredPeak: f.requiredPeak, currentTeam: f.currentTeam,
+          gap: f.gap, coverageTeamGap: f.coverageTeamGap, bindingConstraint: f.bindingConstraint,
+          internsToHire: useOt ? f.internsWithOt : f.internsToHire,
+          otHoursWeekly: useOt ? f.otHoursWeekly : 0,
+          surplusBodies: f.surplusBodies,
+          worstDay: f.worstDay,
+        })),
+      };
+    });
+    const base = scenarios.find(s => s.key === 'base')!;
+    return {
+      from, to, internProductivity,
+      basisKind: 'engine-forecast' as const,
+      basis: 'same engine chain per scenario: surge/quiet scale forecast volume (ordersScale ×1.2 / ×0.85, CPO held constant); base+ot10 keeps base volume and lets the current team work +10% hours before hiring.',
+      scenarios: scenarios.map(s => ({ ...s, deltaInternsVsBase: s.totalInternsToHire - base.totalInternsToHire })),
+    };
+  }
+
+  /** Computed insight bullets from the real numbers — see deriveInsights (pure). */
+  async staffingInsights(tenantId: string, from: string, to: string) {
+    const [req, hiring, wow, anchorRow, accuracy] = await Promise.all([
+      this.hourlyRequirement(tenantId, from, to),
+      this.hiringNow(tenantId, from, to),
+      this.ds.query(
+        `WITH mx AS (SELECT MAX(vol_date) AS m FROM contact_volume_daily WHERE tenant_id = $1 AND offered > 0)
+         SELECT c.channel,
+                SUM(CASE WHEN c.vol_date >  mx.m - 7 THEN c.offered ELSE 0 END)::float AS last7,
+                SUM(CASE WHEN c.vol_date <= mx.m - 7 AND c.vol_date > mx.m - 14 THEN c.offered ELSE 0 END)::float AS prev7
+         FROM contact_volume_daily c CROSS JOIN mx
+         WHERE c.tenant_id = $1 AND c.offered > 0 AND c.vol_date > mx.m - 14
+         GROUP BY c.channel`, [tenantId]),
+      this.ds.query(
+        `SELECT MAX(vol_date)::text AS anchor FROM contact_volume_daily WHERE tenant_id = $1 AND offered > 0`, [tenantId]),
+      this.forecastAccuracy(tenantId, 28).catch(() => null),
+    ]);
+    const insights = deriveInsights({
+      from,
+      dataAnchor: anchorRow[0]?.anchor ?? null,
+      days: req.days,
+      hiringPerFunction: (hiring as any).perFunction,
+      wow,
+      backtest: accuracy?.perChannel?.map((c: any) => ({ channel: c.channel, wapePct: c.wapePct, biasPct: c.biasPct })),
+    });
+    return {
+      from, to,
+      basisKind: 'engine-forecast' as const,
+      generatedAt: new Date().toISOString(),
+      counts: {
+        critical: insights.filter(i => i.severity === 'critical').length,
+        warn: insights.filter(i => i.severity === 'warn').length,
+        info: insights.filter(i => i.severity === 'info').length,
+      },
+      insights,
+    };
   }
 
   /* ═══════════════════════════════════════════════════════════════════════════

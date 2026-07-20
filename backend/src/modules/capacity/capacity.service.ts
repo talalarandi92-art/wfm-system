@@ -69,6 +69,10 @@ export interface CapacityResult {
   functionName: string;
   channelType: string;
   date: string;
+  /** Provenance badge: these calculators run on USER-TYPED inputs (volumes/AHT/shrinkage),
+   *  unlike /capacity/staffing/* ('engine-forecast', measured baselines) and
+   *  /capacity/live-plan ('measured-live', Sprinklr snapshots). The UI must badge this. */
+  basis: 'manual-inputs';
   totalRequired: number;
   totalScheduled: number;
   totalGap: number;
@@ -253,6 +257,7 @@ export class CapacityService {
     return {
       functionId, functionName: funcInfo?.name ?? '—',
       channelType: 'voice', date,
+      basis: 'manual-inputs',
       totalRequired: totalReq, totalScheduled: totalSched, totalGap,
       avgOccupancy: Math.round(avgOcc * 1000) / 1000,
       slaAtRisk: intervalResults.some(i => i.serviceLevel !== undefined && i.serviceLevel < inputs.targetSL),
@@ -306,11 +311,15 @@ export class CapacityService {
       const effServersNeeded = findMinAgents(
         workload, inputs.targetSL ?? 0.8, inputs.targetResponseSec, aht, inputs.occupancyTarget);
 
-      let rawAgents = Math.ceil(effServersNeeded / effPerAgent);
-      rawAgents = Math.ceil(rawAgents / inputs.internFactor);
+      const pureAgents = Math.ceil(effServersNeeded / effPerAgent);   // bodies before intern adjustment
+      const rawAgents = Math.ceil(pureAgents / inputs.internFactor);
       const hcWithShrinkage = Math.ceil(rawAgents / (1 - inputs.shrinkage));
-      const occ = rawAgents > 0 ? Math.min(workload / (rawAgents * effPerAgent), 1) : 0;
-      const sl  = serviceLevel(rawAgents * effPerAgent, workload, inputs.targetResponseSec, aht);
+      // Occupancy/SL at the PURE staffing point — same basis as voice (minHcPure) and the
+      // staffing engine: load ÷ (agents × effective servers). Accuracy-audit fix (2026-07-20):
+      // this previously used the intern-INFLATED body count, which pretends interns are full
+      // servers — understating displayed occupancy and overstating displayed SL.
+      const occ = pureAgents > 0 ? Math.min(workload / (pureAgents * effPerAgent), 1) : 0;
+      const sl  = serviceLevel(pureAgents * effPerAgent, workload, inputs.targetResponseSec, aht);
 
       const sched = scheduledHc[slotKey] ?? 0;
       const gap   = hcWithShrinkage - sched;
@@ -338,6 +347,7 @@ export class CapacityService {
     return {
       functionId, functionName: funcInfo?.name ?? '—',
       channelType: funcInfo?.channel_type ?? 'chat', date,
+      basis: 'manual-inputs',
       totalRequired: totalReq, totalScheduled: totalSched, totalGap,
       avgOccupancy: Math.round(avgOcc * 1000) / 1000,
       slaAtRisk: totalGap > 0,
@@ -361,7 +371,7 @@ export class CapacityService {
     const scheduledHc = await this.getScheduledHcByInterval(tenantId, functionId, date, inputs.intervalMinutes);
 
     const intervalResults: HcIntervalResult[] = [];
-    let totalReq = 0, totalSched = 0;
+    let totalReq = 0, totalSched = 0, occupancySum = 0, occSlots = 0;
     let runningBacklog = inputs.openingBacklog;
 
     for (const inp of inputs.intervals) {
@@ -393,6 +403,8 @@ export class CapacityService {
 
       totalReq   += rawAgents;
       totalSched += sched;
+      occupancySum += occ;
+      occSlots++;
 
       intervalResults.push({
         intervalStart: inp.intervalStart, intervalEnd,
@@ -409,8 +421,11 @@ export class CapacityService {
     return {
       functionId, functionName: funcInfo?.name ?? '—',
       channelType: 'email', date,
+      basis: 'manual-inputs',
       totalRequired: totalReq, totalScheduled: totalSched, totalGap,
-      avgOccupancy: 0.75,
+      // Accuracy-audit fix (2026-07-20): was a hardcoded 0.75 — a fabricated constant.
+      // Now the real mean of the computed per-interval occupancies.
+      avgOccupancy: occSlots > 0 ? Math.round((occupancySum / occSlots) * 1000) / 1000 : 0,
       slaAtRisk: runningBacklog > 0,
       intervals: intervalResults,
       scenarios: {
@@ -642,6 +657,7 @@ export class CapacityService {
     const measured = intervals.filter(x => x.measured);
     return {
       date,
+      basis: 'measured-live' as const,   // Sprinklr snapshots (measured), not typed inputs
       assumptions: { targetSL, targetAnswerSec: targetSec, ahtSec, shrinkage, occupancyCap,
                      concurrency, effectiveServersPerAgent: +effPerAgent.toFixed(2),
                      method: 'Erlang-C on measured concurrent load (Sprinklr inProgress) + 0.5×waiting' },
@@ -792,7 +808,7 @@ export class CapacityService {
       };
     });
 
-    return { date, functions, hours };
+    return { date, basis: 'measured-live' as const, functions, hours };
   }
 
   /* ── Scenario persistence ───────────────────────────────────────────────── */

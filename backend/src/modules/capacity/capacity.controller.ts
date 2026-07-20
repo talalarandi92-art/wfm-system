@@ -197,6 +197,57 @@ export class CapacityController {
       otPct ? Math.min(Math.max(+otPct, 0), 0.3) : 0);
   }
 
+  /* ── Analysis layer (Stage 1A): backtest / scenarios / insights ─────────── */
+
+  /**
+   * GET /capacity/staffing/forecast-accuracy?days=28&asOf=YYYY-MM-DD
+   * Backtest of the engine's own same-weekday baseline vs measured actuals —
+   * per-channel WAPE/bias + per-day rows. Anchored at the last measured day.
+   */
+  @Get('staffing/forecast-accuracy')
+  forecastAccuracy(
+    @CurrentUser() user: any,
+    @Query('days') days?: string,
+    @Query('asOf') asOf?: string,
+  ) {
+    return this.staffing.forecastAccuracy(this.tid(user), days ? +days : 28, asOf || undefined);
+  }
+
+  /**
+   * GET /capacity/staffing/scenario-compare?from&to&internProductivity=0.7
+   * Requirement + hiring verdict under base ×1.0 / surge ×1.2 / quiet ×0.85 /
+   * base+OT-10% — one call, side-by-side (no 4 round-trips).
+   */
+  @Get('staffing/scenario-compare')
+  scenarioCompare(
+    @CurrentUser() user: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('internProductivity') ip?: string,
+  ) {
+    const d0 = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const d6 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    return this.staffing.scenarioCompare(this.tid(user), from || d0, to || d6,
+      ip ? Math.min(Math.max(+ip, 0.2), 1) : 0.7);
+  }
+
+  /**
+   * GET /capacity/staffing/insights?from&to
+   * Computed insight bullets (peak day/hour per function, tightest team, unstaffable
+   * hours, learned-floor coverage, WoW volume mover, overstaff) — each with a
+   * `metric` + `severity`. Pure derivations from the real numbers, no LLM.
+   */
+  @Get('staffing/insights')
+  staffingInsights(
+    @CurrentUser() user: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const d0 = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const d6 = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    return this.staffing.staffingInsights(this.tid(user), from || d0, to || d6);
+  }
+
   /** What the learning store has learned so far (coverage + per-channel 7×24 P90 heat). */
   @Get('staffing/learned')
   learnedSummary(@CurrentUser() user: any) {
