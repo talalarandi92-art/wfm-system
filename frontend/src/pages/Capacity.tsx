@@ -310,9 +310,12 @@ function ResultsTable({ result, dark, ar }: { result: CapacityResult; dark: bool
 
       {/* Scenarios */}
       <div className={`rounded-xl border p-3 mb-4 ${dark ? 'bg-white/[0.02] border-white/[0.08]' : 'bg-slate-50 border-slate-200'}`}>
-        <div className="text-xs font-semibold mb-3 flex items-center gap-1.5">
+        <div className="text-xs font-semibold flex items-center gap-1.5">
           <BarChart3 size={13} />
           {ar ? 'مقارنة السيناريوهات' : 'Scenario Comparison'}
+        </div>
+        <div className={`text-[10px] mb-3 mt-0.5 ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+          {ar ? 'نفس المدخلات بثلاث فرضيات — كم يتحرك المطلوب مع كل فرضية مقارنة بالأساس' : 'the same inputs under three assumptions — how the requirement moves vs base'}
         </div>
         <div className="grid grid-cols-3 gap-2 text-xs">
           {([
@@ -321,16 +324,24 @@ function ResultsTable({ result, dark, ar }: { result: CapacityResult; dark: bool
               ? { key: 'surge', label: ar ? `ذروة P99 (×${(result.scenarios.surge as any).multiplier})` : `P99 Surge (×${(result.scenarios.surge as any).multiplier})`, sc: result.scenarios.surge, accent: true }
               : { key: 'withOT', label: ar ? 'مع تغطية أوفرتايم (-10%)' : 'With OT Coverage (-10%)',                sc: result.scenarios.withOT!, accent: false },
             { key: 'lean',   label: ar ? 'خطة مقتصدة (+15%)' : 'Lean Plan (+15%)',                          sc: result.scenarios.lean,   accent: false },
-          ] as { key: string; label: string; sc: { required: number; gap: number }; accent: boolean }[]).map(({ key, label, sc, accent }) => (
+          ] as { key: string; label: string; sc: { required: number; gap: number }; accent: boolean }[]).map(({ key, label, sc, accent }) => {
+            const delta = key === 'base' ? 0 : sc.required - result.scenarios.base.required;
+            return (
             <div key={key} className={`rounded-lg p-2 border text-center ${accent ? 'bg-amber-500/10 border-amber-500/40' : dark ? 'bg-white/[0.03] border-white/[0.08]' : 'bg-white border-slate-200'}`}>
               <div className={`text-[10px] mb-1.5 font-medium ${accent ? 'text-amber-400' : dark ? 'text-slate-400' : 'text-slate-500'}`}>{label}</div>
               <div className={`text-lg font-bold ${accent ? 'text-amber-300' : dark ? 'text-white' : 'text-slate-800'}`}>{sc.required}</div>
+              {key !== 'base' && (
+                <div className={`text-[9px] font-bold inline-flex items-center gap-0.5 ${delta > 0 ? 'text-red-400' : delta < 0 ? 'text-emerald-400' : (dark ? 'text-slate-500' : 'text-slate-400')}`}>
+                  {delta > 0 ? <TrendingUp size={9} /> : delta < 0 ? <TrendingDown size={9} /> : <Minus size={9} />}
+                  {delta === 0 ? (ar ? 'مثل الأساس' : 'same as base') : `${delta > 0 ? '+' : '−'}${Math.abs(delta)} ${ar ? 'عن الأساس' : 'vs base'}`}
+                </div>
+              )}
               <div className={`text-[10px] mt-0.5 ${sc.gap > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
                 {sc.gap > 0 ? (ar ? `${sc.gap} نقص` : `${sc.gap} understaffed`) : sc.gap < 0 ? (ar ? `${Math.abs(sc.gap)} فائض` : `${Math.abs(sc.gap)} surplus`) : (ar ? 'متوازن' : 'Balanced')}
-                {key === 'surge' && (result.scenarios.surge as any).extraVsBase > 0 && (ar ? ` · +${(result.scenarios.surge as any).extraVsBase} عن الأساس` : ` · +${(result.scenarios.surge as any).extraVsBase} vs base`)}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -713,6 +724,9 @@ export default function CapacityPage() {
           <span className={`text-[10px] px-2 py-0.5 rounded-full ${dark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'}`}>
             Erlang-C · {ar ? 'سبرينكلر' : 'Sprinklr'}
           </span>
+          <span className={`text-[10px] hidden sm:inline ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+            {ar ? 'مطلوب مقابل مجدول لكل فترة — من الحمل المُقاس فعلاً، ليس من توقع' : 'required vs scheduled per interval — from actually-measured workload, not a forecast'}
+          </span>
           <button onClick={loadLivePlan} disabled={livePlanLoading}
             className={`ms-auto flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold ${dark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
             <RefreshCw size={12} className={livePlanLoading ? 'animate-spin' : ''} />
@@ -808,6 +822,9 @@ export default function CapacityPage() {
           </span>
           <span className={`text-[10px] px-2 py-0.5 rounded-full ${dark ? 'bg-sky-500/15 text-sky-300' : 'bg-sky-50 text-sky-600 border border-sky-200'}`}>
             {ar ? 'مطلوب · مجدول · فعلي · فجوة' : 'Required · Scheduled · Actual · Gap'}
+          </span>
+          <span className={`text-[10px] hidden sm:inline ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+            {ar ? 'أين تقف كل ساعة اليوم — مع أعلى الفنكشنز المساهمة' : 'where every hour of today stands — with the top contributing functions'}
           </span>
           <span className={`ms-auto text-xs ${dark ? 'text-slate-500' : 'text-slate-400'}`}>{fnHourlyOpen ? '▲' : '▼'}</span>
         </button>
