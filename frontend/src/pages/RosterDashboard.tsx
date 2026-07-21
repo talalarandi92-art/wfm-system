@@ -1,189 +1,180 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Users, CalendarDays, ShieldCheck, Clock, LogOut, TimerReset, Timer, Coffee, UserX,
-  ArrowLeft, Search, Building2, ListChecks, TrendingUp, Award,
+  Users, ShieldCheck, Clock, Building2, Timer, TrendingUp, Search, UserX,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { Kpi, KpiRow } from '@/components/kpi';
+import { DateRangeBar } from '@/components/DateRangeBar';
+import { RPAL, nfmt, pct1, dur, hrs, toHrs, adhHue, BasisBadge, useMaybe } from './roster/kit';
+import AttendancePanel from './roster/AttendancePanel';
+import TardinessPanel from './roster/TardinessPanel';
+import OvertimePanel from './roster/OvertimePanel';
+import TrendsPanel from './roster/TrendsPanel';
+import DataQualityPanel, { readDataQuality } from './roster/DataQualityPanel';
+import DetailPanel from './roster/DetailPanel';
 
-const dur = (m: number) => { if (!m) return '0'; const h=Math.floor(m/60), mm=m%60; return h?`${h}h${mm?` ${mm}m`:''}`:`${mm}m`; };
-const adhC = (v: number) => v==null?'#64748b':v>=95?'#22c55e':v>=85?'#06b6d4':v>=70?'#f59e0b':'#f43f5e';
-
+/**
+ * ROSTER ANALYTICS DASHBOARD — the reconciliation output, told as a story.
+ * Executive strip (worked / OT / conformance / tardiness / WFH / data-quality) →
+ * ① attendance → ② tardiness & conformance → ③ overtime → ④ monthly trends →
+ * ⑤ data quality → detailed per-person breakdown (expander). Same shared design
+ * language as the Capacity + Schedule planners: numbered Section cards, <Kpi>
+ * provenance, one-meaning-per-hue palette, AR/EN inline, all three themes, RTL.
+ */
 export default function RosterDashboardPage() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
   const nav = useNavigate();
-  const [f, setF] = useState({ from:'2026-06-01', to:'2026-06-29', functionName:'', role:'', shift:'', teamManager:'', team:'', presence:'', day:'', search:'' });
-  const [tog, setTog] = useState({ includeInactive:false, includeExcludedRoles:false });
+  const h = ar ? 'س' : 'h';
+  const [f, setF] = useState({ from: '2026-06-01', to: '2026-06-29', functionName: '', role: '', shift: '', teamManager: '', team: '', presence: '', day: '', search: '' });
+  const [tog, setTog] = useState({ includeInactive: false, includeExcludedRoles: false });
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
 
   const load = useCallback(() => {
     setLoading(true);
-    const q = new URLSearchParams(Object.entries(f).filter(([,v])=>v) as any); q.set('limit','10');
-    if (tog.includeInactive) q.set('includeInactive','1');
-    if (tog.includeExcludedRoles) q.set('includeExcludedRoles','1');
-    apiClient.get(`/attendance-recon/roster-dashboard?${q}`).then((r:any)=>setD(r.data)).catch(()=>setD(null)).finally(()=>setLoading(false));
+    const q = new URLSearchParams(Object.entries(f).filter(([, v]) => v) as any); q.set('limit', '10');
+    if (tog.includeInactive) q.set('includeInactive', '1');
+    if (tog.includeExcludedRoles) q.set('includeExcludedRoles', '1');
+    apiClient.get(`/attendance-recon/roster-dashboard?${q}`).then((r: any) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
   }, [f, tog]);
   useEffect(() => { const t = setTimeout(load, 300); return () => clearTimeout(t); }, [load]);
 
   const set = (k: string, v: string) => setF(p => ({ ...p, [k]: v }));
   const s = d?.summary; const opt = d?.filterOptions;
-  const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
 
-  // ── Provenance (Director's rule: every number → where it came from + drill) ──
-  // All tiles read the ONE dashboard endpoint (with this page's filters applied);
-  // definitions mirror the SQL in roster-reports.controller.ts rosterDashboard summary.
+  // Data-quality (parallel backend agent) — one fetch feeds BOTH the hero tile and §5.
+  const dqRes = useMaybe<any>(`/attendance-recon/roster-v2/data-quality?from=${f.from}&to=${f.to}`);
+  const dq = useMemo(() => (dqRes.status === 'live' ? readDataQuality(dqRes.data) : null), [dqRes]);
+
+  // ── Provenance (every number → where it came from) ──
   const EP = 'GET /api/v1/attendance-recon/roster-dashboard';
   const pd = `${f.from} → ${f.to}`;
-  const kpis = useMemo(() => s ? [
-    { ic: Users, l: ar?'موظفين':'Agents', v: s.agents, sub: `${s.days} ${ar?'يوم':'days'}`, c:'#6366f1', drill:'/roster?tab=grid',
-      def:'COUNT(DISTINCT person_no) with roster days in the filtered period — canonical persons; inactive ids excluded unless toggled',
-      defAr:'عدد الأشخاص المميزين (person_no) بأيام روستر في الفترة المفلترة — غير النشطين مستثنون ما لم تُفعَّل الإضافة' },
-    { ic: ShieldCheck, l: ar?'كونفورمانس':'Conformance', v: s.conformance!=null?s.conformance+'%':'—', c: adhC(s.conformance), drill:'/attendance?tab=dashboard',
-      def:'ROUND(AVG(adherence_pct),1) over the filtered roster days — conformance folds approved permissions (a permitted late/early still conforms)',
-      defAr:'متوسط adherence_pct على أيام الروستر المفلترة — الكونفورمانس يحتسب الاستئذانات المعتمدة (التأخير المصرّح لا يخصم)' },
-    { ic: Clock, l: ar?'تأخير سيستم':'Late', v: s.late_days, sub: dur(s.late_min), c:'#f59e0b', drill:'/attendance?tab=dashboard',
-      def:'COUNT of days with credited tardiness: sys_late_min BETWEEN 7 AND 240 (system-basis; ≤6 min tolerated, >4h cross-midnight artifacts excluded) — subtitle = SUM of those minutes',
-      defAr:'عدد الأيام بتأخير معتمد: sys_late_min بين 7 و240 دقيقة (على أساس السيستم؛ ≤6 دقائق متسامح بها و>4 ساعات مستثناة كأثر عبور منتصف الليل) — السطر الفرعي مجموع الدقائق' },
-    { ic: LogOut, l: ar?'خروج مبكر':'Early out', v: s.early_days, sub: dur(s.early_min), c:'#f59e0b', drill:'/attendance?tab=dashboard',
-      def:'COUNT of days with credited early-out: sys_early_min BETWEEN 7 AND 240, maternity-7h mothers excluded (their ~2h/day early-out is structural — BR-MAT-001)',
-      defAr:'عدد الأيام بخروج مبكر معتمد: sys_early_min بين 7 و240 دقيقة، مع استثناء أمهات الـ7 ساعات (خروجهن المبكر بنيوي — BR-MAT-001)' },
-    { ic: TimerReset, l: ar?'OT قبل الشفت':'OT before', v: dur(s.ot_before), c:'#10b981', drill:'/roster?tab=ot',
-      def:'SUM(ot_before_min) — before-shift OT minutes only', defAr:'مجموع ot_before_min — أوفرتايم ما قبل الشفت فقط' },
-    { ic: Timer, l: ar?'OT بعد الشفت':'OT after', v: dur(s.ot_after), c:'#10b981', drill:'/roster?tab=ot',
-      def:'SUM(ot_after_min) — after-shift OT minutes only', defAr:'مجموع ot_after_min — أوفرتايم ما بعد الشفت فقط' },
-    { ic: Timer, l: ar?'إجمالي OT':'Total OT', v: dur(s.ot_total), sub: ar?'شامل OFF/عطلة':'incl off/holiday', c:'#22d3ee', drill:'/roster?tab=ot',
-      def:'SUM(TRUE_OT) where TRUE_OT = ot_min + offday_ot_min + holiday_ot_min — the canonical 3 disjoint OT buckets (BR-OT-001)',
-      defAr:'مجموع TRUE_OT حيث TRUE_OT = ot_min + offday_ot_min + holiday_ot_min — فئات الأوفرتايم الثلاث المنفصلة (BR-OT-001)' },
-    { ic: Coffee, l: ar?'سيك':'Sick', v: s.sick, c:'#f59e0b', drill:'/roster?tab=grid',
-      def:"COUNT of roster days with presence = 'sick'", defAr:"عدد أيام الروستر بحالة 'sick'" },
-    { ic: UserX, l: ar?'غياب':'Absent', v: s.absent, c:'#f43f5e', drill:'/roster?tab=grid',
-      def:"COUNT of roster days with presence = 'absent'", defAr:"عدد أيام الروستر بحالة 'absent'" },
-    { ic: ListChecks, l: ar?'استئذانات':'Permissions', v: s.permissions, c:'#8b5cf6', drill:'/requests',
-      def:'COUNT of roster days with permission_type IS NOT NULL', defAr:'عدد أيام الروستر المسجّل لها permission_type' },
-    { ic: Building2, l: ar?'مكتب':'Office', v: s.office, c:'#22c55e', drill:'/roster?tab=grid',
-      def:"COUNT of roster days with presence = 'office'", defAr:"عدد أيام الروستر بحالة 'office'" },
-    { ic: Building2, l: 'WFH', v: s.wfh, c:'#06b6d4', drill:'/roster?tab=grid',
-      def:"COUNT of roster days with presence = 'wfh'", defAr:"عدد أيام الروستر بحالة 'wfh'" },
-    { ic: CalendarDays, l: ar?'أوف':'Off', v: s.off, c:'#64748b', drill:'/roster?tab=grid',
-      def:"COUNT of roster days with presence = 'off'", defAr:"عدد أيام الروستر بحالة 'off'" },
-  ] : [], [s, ar]);
+  const worked = Number(s?.worked || 0);
+  const tardyPct = worked ? (Number(s?.late_days || 0) / worked) * 100 : null;
+  const wfhPct = worked ? (Number(s?.wfh || 0) / worked) * 100 : null;
 
-  const RANKS: { key: string; ar: string; en: string; fmt: (v:any)=>string; color: string }[] = [
-    { key:'mostLate', ar:'الأكثر تأخيراً', en:'Most late', fmt:dur, color:'#f59e0b' },
-    { key:'mostEarly', ar:'الأكثر خروجاً مبكراً', en:'Most early out', fmt:dur, color:'#f59e0b' },
-    { key:'otAfter', ar:'الأكثر OT بعد الشفت', en:'Most OT after', fmt:dur, color:'#10b981' },
-    { key:'otBefore', ar:'الأكثر OT قبل الشفت', en:'Most OT before', fmt:dur, color:'#10b981' },
-    { key:'lowestConformance', ar:'الأقل كونفورمانس', en:'Lowest conformance', fmt:(v)=>`${v}%`, color:'#f43f5e' },
-    { key:'mostAbsent', ar:'الأكثر غياباً', en:'Most absent', fmt:(v)=>`${v}`, color:'#f43f5e' },
-    { key:'mostSick', ar:'الأكثر سيك', en:'Most sick', fmt:(v)=>`${v}`, color:'#f59e0b' },
-    { key:'mostPermissions', ar:'الأكثر استئذاناً', en:'Most permissions', fmt:(v)=>`${v}`, color:'#8b5cf6' },
-  ];
+  const heroes = useMemo(() => s ? [
+    {
+      ic: Users, l: ar ? 'أيام عمل' : 'Worked days', v: nfmt(s.worked), c: RPAL.brand, drill: '/roster?tab=grid',
+      sub: `${nfmt(s.office)} ${ar ? 'مكتب' : 'office'} · ${nfmt(s.wfh)} wfh`,
+      def: "COUNT of roster days present at work (presence IN office/wfh) over the filtered range",
+      defAr: "عدد أيام الروستر بحضور فعلي (office/wfh) في الفترة المفلترة",
+    },
+    {
+      ic: Timer, l: ar ? 'إجمالي OT' : 'TRUE OT', v: hrs(s.ot_total), c: RPAL.ot, drill: '/roster?tab=ot',
+      sub: `${ar ? 'قبل' : 'before'} ${hrs(s.ot_before)} · ${ar ? 'بعد' : 'after'} ${hrs(s.ot_after)}`,
+      def: "SUM(TRUE_OT)/60 where TRUE_OT = ot_min + offday_ot_min + holiday_ot_min — 3 disjoint OT buckets (BR-OT-001)",
+      defAr: "مجموع TRUE_OT بالساعات حيث TRUE_OT = عادي + يوم OFF + عطلة (فئات منفصلة — BR-OT-001)",
+    },
+    {
+      ic: ShieldCheck, l: ar ? 'كونفورمانس' : 'Conformance', v: s.conformance != null ? pct1(s.conformance) : '—', c: adhHue(s.conformance), drill: '/attendance?tab=dashboard',
+      sub: ar ? 'يحتسب الاستئذانات المعتمدة' : 'folds approved permissions',
+      def: "ROUND(AVG(adherence_pct)) over filtered roster days — a permitted late/early still conforms",
+      defAr: "متوسط adherence_pct على أيام الروستر المفلترة — التأخير المصرّح لا يخصم",
+    },
+    {
+      ic: Clock, l: ar ? 'نسبة التأخير' : 'Tardiness %', v: tardyPct != null ? pct1(tardyPct) : '—', c: RPAL.warn, drill: '/roster?tab=ot',
+      sub: `${nfmt(s.late_days)} ${ar ? 'يوم' : 'days'} · ${dur(s.late_min)}`,
+      def: "Credited-tardy days (sys_late_min 7–240) ÷ worked days. ≤6 min tolerated; >4h cross-midnight excluded",
+      defAr: "أيام التأخير المعتمد (7–240 دقيقة) ÷ أيام العمل. ≤6 دقائق متسامح و>4 ساعات مستثناة",
+    },
+    {
+      ic: Building2, l: ar ? 'نسبة WFH' : 'WFH %', v: wfhPct != null ? pct1(wfhPct) : '—', c: RPAL.wfh, drill: '/roster?tab=grid',
+      sub: `${nfmt(s.wfh)}/${nfmt(worked)} ${ar ? 'يوم عمل' : 'worked'}`,
+      def: "WFH roster days ÷ worked days (office+wfh) over the filtered range",
+      defAr: "أيام WFH ÷ أيام العمل (مكتب+WFH) في الفترة المفلترة",
+    },
+  ] : [], [s, ar, tardyPct, wfhPct, worked]);
+
+  // Data-quality hero tile (separate endpoint, awaiting-state until live)
+  const dqTile = useMemo(() => {
+    const missing = dqRes.status !== 'live' || !dq || dq.cleanPct == null;
+    const cp = dq?.cleanPct ?? null;
+    return {
+      ic: ShieldCheck, l: ar ? 'نظافة البيانات' : 'Data-quality',
+      v: missing ? '—' : pct1(cp), drill: '/roster?tab=quality',
+      c: missing ? RPAL.neutral : cp! >= 95 ? RPAL.ok : cp! >= 85 ? RPAL.warn : RPAL.risk,
+      sub: missing ? (dqRes.status === 'loading' ? (ar ? 'جارٍ التحميل…' : 'loading…') : (ar ? 'بانتظار الواجهة' : 'awaiting endpoint'))
+        : `${nfmt(dq!.flaggedDays)}/${nfmt(dq!.totalDays)} ${ar ? 'معلَّم' : 'flagged'}`,
+      def: "Clean roster-days ÷ total (integrity checks passed) — from the roster-v2/data-quality analysis endpoint",
+      defAr: "أيام الروستر النظيفة ÷ الإجمالي (اجتازت فحوص السلامة) — من واجهة roster-v2/data-quality",
+    };
+  }, [dqRes, dq, ar]);
+
+  const inputStyle = { background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' } as React.CSSProperties;
+  const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs outline-none';
 
   return (
     <div className="space-y-4 page-enter">
-      <div className="flex items-center gap-3">
-        <button onClick={()=>nav('/roster')} className="p-2 rounded-xl" style={{ background:'rgba(255,255,255,0.06)' }}><ArrowLeft size={16} className="text-white"/></button>
-        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#6366f1,#8b5cf6)' }}><TrendingUp size={20} className="text-white"/></div>
-        <div><h1 className="text-lg font-bold text-white">{ar?'داشبورد الروستر التفصيلي':'Roster Analytics Dashboard'}</h1>
-          <p className="text-xs text-slate-500">{ar?'ديناميكي بالكامل — فلتر بالتاريخ/الفنكشن/الشفت/التيم ليدر/الجروب/اليوم':'Fully dynamic — filter by date / function / shift / team leader / group / day'}</p></div>
+      {/* header */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', boxShadow: '0 6px 18px rgba(99,102,241,0.35)' }}><TrendingUp size={20} className="text-white" /></div>
+        <div className="flex-1 min-w-[200px]">
+          <h1 className="text-lg font-bold" style={{ color: 'var(--text-1)' }}>{ar ? 'داشبورد الروستر التفصيلي' : 'Roster Analytics Dashboard'}</h1>
+          <div className="flex items-center gap-2 flex-wrap mt-0.5">
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>{ar ? 'ناتج مطابقة الحضور — فلتر بالتاريخ/الفنكشن/الشفت/التيم ليدر' : 'Attendance reconciliation output — filter by date / function / shift / team leader'}</p>
+            <BasisBadge basis="live" ar={ar} />
+            <BasisBadge basis="corrected" ar={ar} />
+          </div>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-        <div className="flex items-center gap-1.5 text-slate-400"><CalendarDays size={14}/>
-          <input type="date" value={f.from} onChange={e=>set('from',e.target.value)} className={inputCls}/>
-          <span className="text-xs">→</span>
-          <input type="date" value={f.to} onChange={e=>set('to',e.target.value)} className={inputCls}/>
-        </div>
-        <div className="flex items-center gap-1.5 flex-1 min-w-[140px]"><Search size={14} className="text-slate-400"/>
-          <input value={f.search} onChange={e=>set('search',e.target.value)} placeholder={ar?'بحث بالاسم/الرقم':'Name / no'} className={`${inputCls} flex-1`}/></div>
-        {([['functionName','functions',ar?'كل الفنكشن':'All functions'],['role','roles',ar?'كل الأدوار':'All roles'],['shift','shifts',ar?'كل الشفتات':'All shifts'],['teamManager','teamManagers',ar?'كل التيم ليدرز':'All team leaders'],['team','teams',ar?'كل الجروبات':'All teams'],['day','days',ar?'كل الأيام':'All days']] as [string,string,string][]).map(([k,o,label])=>(
-          <select key={k} value={(f as any)[k]} onChange={e=>set(k,e.target.value)} className={inputCls}>
+      {/* filter bar */}
+      <div className="flex flex-wrap items-center gap-2 p-3 rounded-2xl" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <DateRangeBar from={f.from} to={f.to} onChange={(a, b) => setF(x => ({ ...x, from: a, to: b }))} fullRange={d?.range} />
+        <div className="flex items-center gap-1.5 flex-1 min-w-[140px]"><Search size={14} style={{ color: 'var(--text-3)' }} />
+          <input value={f.search} onChange={e => set('search', e.target.value)} placeholder={ar ? 'بحث بالاسم/الرقم' : 'Name / no'} className={`${inputCls} flex-1`} style={inputStyle} /></div>
+        {([['functionName', 'functions', ar ? 'كل الفنكشن' : 'All functions'], ['role', 'roles', ar ? 'كل الأدوار' : 'All roles'], ['shift', 'shifts', ar ? 'كل الشفتات' : 'All shifts'], ['teamManager', 'teamManagers', ar ? 'كل التيم ليدرز' : 'All team leaders'], ['team', 'teams', ar ? 'كل الجروبات' : 'All teams'], ['day', 'days', ar ? 'كل الأيام' : 'All days']] as [string, string, string][]).map(([k, o, label]) => (
+          <select key={k} value={(f as any)[k]} onChange={e => set(k, e.target.value)} className={inputCls} style={inputStyle}>
             <option value="">{label}</option>
-            {(opt?.[o]||[]).map((v:string)=><option key={v} value={v}>{v}</option>)}
+            {(opt?.[o] || []).map((v: string) => <option key={v} value={v}>{v}</option>)}
           </select>
         ))}
-        <select value={f.presence} onChange={e=>set('presence',e.target.value)} className={inputCls}>
-          <option value="">{ar?'كل الحالات':'All presence'}</option>
-          {['office','wfh','off','leave','absent','sick'].map(v=><option key={v} value={v}>{v}</option>)}
+        <select value={f.presence} onChange={e => set('presence', e.target.value)} className={inputCls} style={inputStyle}>
+          <option value="">{ar ? 'كل الحالات' : 'All presence'}</option>
+          {['office', 'wfh', 'off', 'leave', 'absent', 'sick'].map(v => <option key={v} value={v}>{v}</option>)}
         </select>
-        {/* enterprise toggles: include inactive / records-only 8h roles */}
-        {([['includeInactive',ar?'+ غير النشطين':'+ Inactive'],['includeExcludedRoles',ar?'+ أدوار 8 ساعات':'+ 8h roles']] as [string,string][]).map(([k,label])=>(
-          <label key={k} className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer select-none px-2 py-1 rounded-lg" style={{ background:(tog as any)[k]?'rgba(99,102,241,0.18)':'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)' }}>
-            <input type="checkbox" checked={(tog as any)[k]} onChange={e=>setTog(p=>({ ...p, [k]: e.target.checked }))} className="accent-indigo-500"/>{label}
+        {([['includeInactive', ar ? '+ غير النشطين' : '+ Inactive'], ['includeExcludedRoles', ar ? '+ أدوار 8 ساعات' : '+ 8h roles']] as [string, string][]).map(([k, label]) => (
+          <label key={k} className="flex items-center gap-1.5 text-[11px] cursor-pointer select-none px-2 py-1 rounded-lg" style={{ color: 'var(--text-2)', background: (tog as any)[k] ? `${RPAL.brand}22` : 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            <input type="checkbox" checked={(tog as any)[k]} onChange={e => setTog(p => ({ ...p, [k]: e.target.checked }))} className="accent-indigo-500" />{label}
           </label>
         ))}
-        <button onClick={()=>nav('/data-quality')} className="text-[11px] text-amber-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5" style={{ background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.25)' }}>
-          <ShieldCheck size={13}/>{ar?'جودة البيانات':'Data Quality'}</button>
       </div>
 
-      {/* Team-leader verification banner — surfaces ex-TLs / unverified team labels */}
-      {!loading && d?.teamLeaders?.some((t:any)=>!t.verified) && (
-        <div className="rounded-2xl p-3 flex items-start gap-2.5" style={{ background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.25)' }}>
-          <UserX size={16} className="text-amber-400 flex-shrink-0 mt-0.5"/>
-          <div className="text-[11px] text-amber-200/90">
-            <span className="font-bold">{ar?'تنبيه جودة بيانات — تيم ليدرز غير حاليين: ':'Data-quality alert — non-current team leaders: '}</span>
-            {d.teamLeaders.filter((t:any)=>!t.verified).map((t:any)=>`${t.name} (${t.status==='left'?(ar?'ترك العمل':'left'):(ar?'غير مؤكد':'unverified')}, ${ar?'آخر ظهور':'last'} ${t.lastSeen})`).join('  ·  ')}
-            <span className="text-amber-300/70">{ar?' — مستبعدون من قائمة التيم ليدرز الحاليين.':' — excluded from the current team-leader list.'}</span>
+      {/* team-leader verification banner */}
+      {!loading && d?.teamLeaders?.some((t: any) => !t.verified) && (
+        <div className="rounded-2xl p-3 flex items-start gap-2.5" style={{ background: `${RPAL.warn}14`, border: `1px solid ${RPAL.warn}44` }}>
+          <UserX size={16} style={{ color: RPAL.warn, flexShrink: 0, marginTop: 2 }} />
+          <div className="text-[11px]" style={{ color: 'var(--text-2)' }}>
+            <span className="font-bold">{ar ? 'تنبيه جودة بيانات — تيم ليدرز غير حاليين: ' : 'Data-quality alert — non-current team leaders: '}</span>
+            {d.teamLeaders.filter((t: any) => !t.verified).map((t: any) => `${t.name} (${t.status === 'left' ? (ar ? 'ترك العمل' : 'left') : (ar ? 'غير مؤكد' : 'unverified')}, ${ar ? 'آخر ظهور' : 'last'} ${t.lastSeen})`).join('  ·  ')}
+            <span style={{ color: 'var(--text-3)' }}>{ar ? ' — مستبعدون من قائمة التيم ليدرز الحاليين.' : ' — excluded from the current team-leader list.'}</span>
           </div>
         </div>
       )}
 
-      {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}
-      {!loading && !d && <p className="text-sm text-rose-400 py-8 text-center">{ar?'تعذّر التحميل':'Failed to load'}</p>}
+      {loading && <p className="text-sm py-8 text-center" style={{ color: 'var(--text-3)' }}>{ar ? 'جارٍ التحميل…' : 'Loading…'}</p>}
+      {!loading && !d && <p className="text-sm py-8 text-center" style={{ color: RPAL.risk }}>{ar ? 'تعذّر التحميل' : 'Failed to load'}</p>}
 
-      {!loading && d && (<>
+      {!loading && d && s && (<>
+        {/* ── Executive strip ── */}
         <KpiRow cols={6}>
-          {kpis.map((x,i)=>(
-            <Kpi key={i} icon={<x.ic size={15}/>} label={x.l} accent={x.c} sub={x.sub} drill={x.drill}
-              value={x.v ?? '—'}
+          {heroes.map((x, i) => (
+            <Kpi key={i} icon={<x.ic size={15} />} label={x.l} accent={x.c} sub={x.sub} drill={x.drill} value={x.v}
               source={{ endpoint: EP, table: 'roster_days', definition: x.def, definitionAr: x.defAr, period: pd }} />
           ))}
+          <Kpi icon={<dqTile.ic size={15} />} label={dqTile.l} accent={dqTile.c} sub={dqTile.sub} drill={dqTile.drill} value={dqTile.v}
+            source={{ endpoint: 'GET /api/v1/attendance-recon/roster-v2/data-quality', table: 'roster_days', definition: dqTile.def, definitionAr: dqTile.defAr, period: pd }} />
         </KpiRow>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {RANKS.map(rk => { const list = d.rankings?.[rk.key] || [];
-            return (
-              <div key={rk.key} className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-                <div className="flex items-center gap-1.5 mb-2.5"><Award size={13} style={{ color:rk.color }}/><h3 className="text-xs font-bold text-white">{ar?rk.ar:rk.en}</h3></div>
-                <div className="space-y-1.5">
-                  {list.length===0 && <p className="text-[11px] text-slate-600">—</p>}
-                  {list.slice(0,8).map((a:any,i:number)=>(
-                    <div key={i} className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-600 w-3">{i+1}</span>
-                      <div className="flex-1 min-w-0"><p className="text-[11px] text-slate-200 font-medium truncate">{a.name}</p>
-                        <p className="text-[9px] text-slate-500 truncate">{a.function_name||'—'}{a.team_manager?` · ${a.team_manager}`:''}</p></div>
-                      <span className="text-[11px] font-bold flex-shrink-0" style={{ color:rk.color }}>{rk.fmt(a.v)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-          {([['byRole',ar?'حسب الدور':'By role'],['byShift',ar?'حسب الشفت':'By shift'],['byFunction',ar?'حسب الفنكشن':'By function'],['byTeamManager',ar?'حسب التيم ليدر':'By team leader']] as [string,string][]).map(([key,title])=>{
-            const list = d.distributions?.[key] || []; const max = Math.max(...list.map((x:any)=>x.n),1);
-            return (
-              <div key={key} className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-                <h3 className="text-xs font-bold text-white mb-2.5">{title}</h3>
-                <div className="space-y-1.5">
-                  {list.slice(0,12).map((x:any,i:number)=>(
-                    <div key={i} className="flex items-center gap-2 text-[11px]">
-                      <span className="w-24 truncate text-slate-300" title={x.k}>{x.k}</span>
-                      <div className="flex-1 h-3.5 rounded overflow-hidden" style={{ background:'rgba(255,255,255,0.04)' }}>
-                        <div className="h-full rounded" style={{ width:`${Math.max(4,100*x.n/max)}%`, background:'linear-gradient(90deg,#6366f1cc,#8b5cf677)' }}/></div>
-                      <span className="text-slate-200 font-semibold w-8 text-end">{x.n}</span>
-                      <span className="w-12 text-end" style={{ color:adhC(x.conformance) }}>{x.conformance!=null?x.conformance+'%':'—'}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        {/* ── Story sections ── */}
+        <AttendancePanel d={d} ar={ar} />
+        <TardinessPanel d={d} ar={ar} />
+        <OvertimePanel from={f.from} to={f.to} functionName={f.functionName} teamManager={f.teamManager} ar={ar} h={h} />
+        <TrendsPanel functionName={f.functionName} ar={ar} h={h} />
+        <DataQualityPanel res={dqRes} ar={ar} />
+        <DetailPanel d={d} ar={ar} />
       </>)}
     </div>
   );
