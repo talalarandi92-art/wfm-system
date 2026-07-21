@@ -9,6 +9,21 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
 import { SHIFT_CAT } from './roster-shared.service';
 
+/** Pure per-function-per-month KPI point (Stage-3A trends). Percentages are derived
+ *  from the raw roster_days counts; `partial` marks a month not fully covered by the
+ *  data range (min-date after the 1st, or max-date before the month-end capped at the
+ *  latest data day / today). Exported so the math is unit-tested independently of SQL. */
+export function monthKpiPoint(r: any, capMax: string) {
+  const daysInMonth = (ym: string) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+  const monthStart = `${r.ym}-01`, monthEnd = `${r.ym}-${String(daysInMonth(r.ym)).padStart(2, '0')}`;
+  const partial = r.mn > monthStart || r.mx < (monthEnd < capMax ? monthEnd : capMax);
+  const pctOf = (n: number, d: number) => d ? Math.round((1000 * n) / d) / 10 : 0;
+  return { ym: r.ym, workedDays: r.worked, agents: r.agents, otHours: r.ot_hrs,
+    tardyPct: pctOf(r.latedays, r.tardy_base), conformancePct: r.conf,
+    wfhPct: pctOf(r.wfh, r.worked), absencePct: pctOf(r.absent, r.worked + r.absent + r.sick),
+    resTer: r.res_ter, transfers: r.transfers, partial };
+}
+
 /* Agent/team analytics (agent-360, team-progress, trends, scores, insights,
  * team-360, scorecard board, agent progress/performance/period-compare) and the
  * Executive Summary export that reuses those engines — split VERBATIM out of the
@@ -110,19 +125,31 @@ export class RosterAnalyticsController {
   }
 
   /** Trends — center-wide KPI movement over weeks or months (conformance, tardiness,
-   *  OT, absence, headcount), filterable by function / team leader. */
+   *  OT, absence, headcount), filterable by function / team leader.
+   *  `months=N` (Stage-3A): anchor the window to the last N calendar months (capped
+   *  <= today) and additionally return the month-over-month per-FUNCTION KPI matrix
+   *  (`functionTrends`) + a center-wide `overall` MoM line + attrition markers, so
+   *  the Director sees DIRECTION per function, not just a snapshot. All added fields
+   *  are additive — the existing `points`/`filterOptions` shape is unchanged. */
   @Get('roster-v2/trends')
   @RequirePermissions('attendance.view_team')
-  @ApiOperation({ summary: 'Weekly/monthly KPI trends (conformance, late, OT, absence, headcount)' })
+  @ApiOperation({ summary: 'KPI trends: weekly/monthly points + (months=N) per-function month-over-month matrix (worked, TRUE_OT, tardy%, conformance%, WFH%, absence%, RES/TER)' })
   async trends(@Req() req: any, @Query('from') from?: string, @Query('to') to?: string,
-    @Query('function') fn?: string, @Query('teamLeader') tl?: string, @Query('interval') interval = 'week') {
+    @Query('function') fn?: string, @Query('teamLeader') tl?: string, @Query('interval') interval = 'week',
+    @Query('months') monthsRaw?: string) {
     const t = req.user.tenantId;
-    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
-    const dFrom = from || range?.a, dTo = to || range?.b;
-    const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active`;
+    // date anchors capped <= CURRENT_DATE (roster_days is reconciled history; defensive cap)
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, LEAST(MAX(work_date), CURRENT_DATE)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    // months=N → window = first-of-month(maxMonth - (N-1)) .. maxDate (both capped <= today)
+    const months = monthsRaw ? Math.max(1, Math.min(36, Number(monthsRaw) || 6)) : null;
+    let dFrom = from || range?.a; const dTo = (to && to <= range?.b ? to : range?.b);
+    if (months && !from && dTo) { const d = new Date(dTo + 'T00:00:00Z'); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - (months - 1)); dFrom = d.toISOString().slice(0, 10); }
+    const p: any[] = [t, dFrom, dTo]; let w = `tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND work_date <= CURRENT_DATE AND is_active`;
     if (fn) { p.push(fn); w += ` AND canon_fn(role_function)=canon_fn($${p.length})`; }
     if (tl) { p.push(tl); w += ` AND team_manager=$${p.length}`; }
     const bucket = interval === 'month' ? 'month_name' : 'week_number';
+    // RES/TER attrition marker (voluntary + involuntary); TRANSFER is an internal move, NOT attrition
+    const MARK = `UPPER(COALESCE(NULLIF(r.shift_code,''), r.attendance_code, ''))`;
     const rows = await this.ds.query(
       `SELECT ${bucket} bucket, MIN(work_date)::text start, MAX(work_date)::text "end",
               COUNT(DISTINCT person_no)::int agents,
@@ -131,15 +158,58 @@ export class RosterAnalyticsController {
               COUNT(*) FILTER (WHERE ${CRED_LATE})::int latedays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int latemin,
               COALESCE(SUM(${TRUE_OT}),0)::int otmin, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf
          FROM roster_days r WHERE ${w} GROUP BY ${bucket} ORDER BY MIN(work_date)`, p);
+
+    // ── Month-over-month per-function KPI matrix (Stage-3A). Grouped by canonical
+    //    function × calendar month; percentages computed in JS from the raw counts.
+    const fnRows = await this.ds.query(
+      `SELECT canon_fn(role_function) fn, to_char(work_date,'YYYY-MM') ym,
+              MIN(work_date)::text mn, MAX(work_date)::text mx,
+              COUNT(DISTINCT person_no)::int agents,
+              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
+              COUNT(*) FILTER (WHERE presence='wfh')::int wfh,
+              COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
+              COUNT(*) FILTER (WHERE ${CRED_LATE} AND include_tardiness)::int latedays,
+              COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND include_tardiness)::int tardy_base,
+              ROUND(SUM(${TRUE_OT})/60.0,1)::float ot_hrs,
+              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1)::float conf,
+              COUNT(*) FILTER (WHERE ${MARK} IN ('RES','TER'))::int res_ter,
+              COUNT(*) FILTER (WHERE ${MARK}='TRANSFER')::int transfers
+         FROM roster_days r WHERE ${w} AND canon_fn(role_function) IS NOT NULL
+         GROUP BY 1,2 ORDER BY 1,2`, p);
+    const today = range?.b; // capped max = today-or-last-data-day
+    const fnMap = new Map<string, any[]>();
+    for (const r of fnRows) { if (!fnMap.has(r.fn)) fnMap.set(r.fn, []); fnMap.get(r.fn)!.push(monthKpiPoint(r, today)); }
+    const dir = (a: number | null, b: number | null, eps = 0.5) => (a == null || b == null) ? 'flat' : (b - a > eps ? 'up' : b - a < -eps ? 'down' : 'flat');
+    const functionTrends = [...fnMap.entries()].map(([f, months2]) => {
+      const first = months2[0], last = months2[months2.length - 1];
+      return { function: f, months: months2,
+        trend: { conformance: dir(first.conformancePct, last.conformancePct), tardiness: dir(last.tardyPct, first.tardyPct), ot: dir(first.otHours, last.otHours, 1) },
+        totalResTer: months2.reduce((s: number, m: any) => s + m.resTer, 0) };
+    }).sort((a, b) => a.function.localeCompare(b.function));
+
+    // center-wide MoM line (all functions folded)
+    const overallMap = new Map<string, any>();
+    for (const r of fnRows) { const g = overallMap.get(r.ym) || { ym: r.ym, worked: 0, wfh: 0, absent: 0, sick: 0, latedays: 0, tardy_base: 0, ot_hrs: 0, res_ter: 0, confNum: 0, confDen: 0 };
+      g.worked += r.worked; g.wfh += r.wfh; g.absent += r.absent; g.sick += r.sick; g.latedays += r.latedays; g.tardy_base += r.tardy_base;
+      g.ot_hrs += r.ot_hrs; g.res_ter += r.res_ter; if (r.conf != null) { g.confNum += r.conf * r.tardy_base; g.confDen += r.tardy_base; } overallMap.set(r.ym, g); }
+    const overall = [...overallMap.values()].sort((a, b) => a.ym.localeCompare(b.ym)).map((g: any) => {
+      const pctOf = (n: number, d: number) => d ? Math.round((1000 * n) / d) / 10 : 0;
+      return { ym: g.ym, workedDays: g.worked, otHours: Math.round(g.ot_hrs * 10) / 10, tardyPct: pctOf(g.latedays, g.tardy_base),
+        conformancePct: g.confDen ? Math.round((10 * g.confNum) / g.confDen) / 10 : null, wfhPct: pctOf(g.wfh, g.worked),
+        absencePct: pctOf(g.absent, g.worked + g.absent + g.sick), resTer: g.res_ter };
+    });
+
     // options for the filters
     const [functions, teamLeaders] = await Promise.all([
       this.ds.query(`SELECT DISTINCT canon_fn(role_function) v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t]),
       this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]),
     ]);
     const label = (r: any) => interval === 'month' ? r.bucket : `W${r.bucket}`;
-    return { from: dFrom, to: dTo, interval, range,
+    return { from: dFrom, to: dTo, interval, months, range,
              points: rows.map((r: any) => ({ ...r, label: label(r) })),
-             filterOptions: { functions: functions.map((x: any) => x.v), teamLeaders: teamLeaders.map((x: any) => x.v) } };
+             overall, functionTrends,
+             filterOptions: { functions: functions.map((x: any) => x.v), teamLeaders: teamLeaders.map((x: any) => x.v) },
+             note: 'functionTrends/overall are month-over-month; a month flagged partial:true is not fully covered by the data range (verify before reading direction). Attrition = RES/TER markers (TRANSFER excluded).' };
   }
 
   /** Attendance & Adherence Score — a transparent composite (0-100, grade A-D) per

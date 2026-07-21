@@ -552,6 +552,150 @@ export class RosterReportsController {
     return { pages, code, assistants, migrations: migrations.map((m: any) => m.filename), health: health[0], dataQuality: dq, recentChanges };
   }
 
+  /* ── Roster data-quality taxonomy (Stage-3A). One CASE folds the free-text
+   *    `data_quality` column + the structured flag booleans/mismatch into a small
+   *    set of named categories. REVIEW = an actionable data gap a human should
+   *    verify (never an HR/disciplinary trigger). INFO = an artefact the recon
+   *    engine ALREADY handled correctly (cross-midnight bleed capped, excluded-role
+   *    record-only OT, transfer marker) — surfaced for transparency, not action. */
+  private static readonly DQ_CAT = `
+    CASE
+      WHEN COALESCE(r.missing_punch,false) AND COALESCE(r.missing_system,false) THEN 'missing-both'
+      WHEN r.data_quality ILIKE '%no-show%' OR r.data_quality ILIKE 'No punch & no system%' THEN 'no-show'
+      WHEN COALESCE(r.missing_system,false) OR r.mismatch='no-system' OR r.data_quality='missing-system' THEN 'missing-system'
+      WHEN COALESCE(r.missing_punch,false) OR r.mismatch='no-punch' THEN 'missing-punch'
+      WHEN r.mismatch='punch<>system' OR r.data_quality='punch-system-mismatch' THEN 'punch-system-mismatch'
+      WHEN r.data_quality ILIKE '%bleed%' OR r.data_quality ILIKE '%capped%' THEN 'tardiness-bleed-capped'
+      WHEN r.data_quality ILIKE 'roster-shift!=actual%' OR r.data_quality ILIKE '%no-shift-match%' THEN 'shift-mismatch'
+      WHEN COALESCE(r.off_worked_hr_review,false) OR r.data_quality ILIKE 'Scheduled OFF but worked%' THEN 'off-worked-review'
+      WHEN r.data_quality ILIKE 'ot-suspect%' OR r.data_quality ILIKE 'OFF/holiday OT on system-login%' THEN 'ot-suspect'
+      WHEN COALESCE(r.ot_record_only,false) OR r.data_quality ILIKE 'OT record-only%' THEN 'ot-record-only'
+      WHEN r.data_quality='transfer-marker' THEN 'transfer-marker'
+      WHEN r.data_quality IS NOT NULL THEN 'other-flagged'
+      ELSE NULL
+    END`;
+  private static readonly DQ_META: Record<string, { severity: 'review' | 'info'; label: string }> = {
+    'missing-both':           { severity: 'review', label: 'No punch & no system login — verify (not auto-absent)' },
+    'no-show':                { severity: 'review', label: 'Scheduled but no attendance evidence — verify' },
+    'missing-system':         { severity: 'review', label: 'Fingerprint present, no Ameyo/Sprinklr session' },
+    'missing-punch':          { severity: 'review', label: 'System session present, no biometric punch' },
+    'punch-system-mismatch':  { severity: 'review', label: 'Punch and system times disagree' },
+    'shift-mismatch':         { severity: 'review', label: 'Roster-scheduled shift ≠ shift actually worked' },
+    'off-worked-review':      { severity: 'review', label: 'Worked a scheduled OFF day — HR clarify (not auto-paid)' },
+    'ot-suspect':             { severity: 'review', label: 'Suspicious OT tail (likely forgotten logout) — not credited' },
+    'other-flagged':          { severity: 'review', label: 'Other engine data-quality note — verify' },
+    'tardiness-bleed-capped': { severity: 'info',   label: 'Cross-midnight bleed — tardiness already capped at 240m (handled)' },
+    'ot-record-only':         { severity: 'info',   label: 'Excluded-role OT — recorded, not payable (handled)' },
+    'transfer-marker':        { severity: 'info',   label: 'Internal transfer marker (not an error)' },
+  };
+  private static readonly DQ_REVIEW_SET =
+    `('missing-both','no-show','missing-system','missing-punch','punch-system-mismatch','shift-mismatch','off-worked-review','ot-suspect','other-flagged')`;
+
+  /** Roster HEALTH / data-quality summary over roster_days — "how clean is the
+   *  roster?". Folds the free-text data_quality + structured flags into named
+   *  categories (review vs engine-handled info), with a clean-% score, per-function
+   *  and per-week breakdowns, an OT>300-min/day watch-list, and the top offending
+   *  person-days FOR VERIFICATION ONLY (never an HR/disciplinary action). */
+  @Get('roster-v2/data-quality')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Roster data-quality / health: clean-% score, flag categories, per-function & per-week, OT>300 watch, top offending person-days (review only)' })
+  async dataQuality(
+    @Req() req: any,
+    @Query('from') from?: string, @Query('to') to?: string,
+    @Query('functionName') functionName?: string,
+    @Query('includeInactive') includeInactive?: string,
+    @Query('limit') limit = '50',
+  ) {
+    const t = req.user.tenantId;
+    const CAT = RosterReportsController.DQ_CAT, REV = RosterReportsController.DQ_REVIEW_SET;
+    // date anchors capped <= CURRENT_DATE (roster_days is reconciled history; defensive cap)
+    const range = (await this.ds.query(`SELECT MIN(work_date)::text a, LEAST(MAX(work_date), CURRENT_DATE)::text b FROM roster_days WHERE tenant_id=$1`, [t]))[0];
+    const dFrom = from || range?.a, dTo = (to && to <= range?.b ? to : range?.b);
+    const p: any[] = [t, dFrom, dTo];
+    let w = `r.tenant_id=$1 AND r.work_date BETWEEN $2 AND $3 AND r.work_date <= CURRENT_DATE`;
+    if (includeInactive !== '1') w += ` AND r.is_active`;
+    if (functionName) { p.push(functionName); w += ` AND canon_fn(r.role_function)=canon_fn($${p.length})`; }
+    const lim = Math.min(Number(limit) || 50, 500);
+
+    // headline: rows / clean / review / info / ot>300 person-days
+    const [tot] = await this.ds.query(
+      `SELECT COUNT(*)::int rows,
+              COUNT(*) FILTER (WHERE (${CAT}) IS NULL)::int clean_rows,
+              COUNT(*) FILTER (WHERE (${CAT}) IN ${REV})::int review_rows,
+              COUNT(*) FILTER (WHERE (${CAT}) IS NOT NULL AND (${CAT}) NOT IN ${REV})::int info_rows,
+              COUNT(*) FILTER (WHERE (${TRUE_OT}) > 300)::int ot300_days
+         FROM roster_days r WHERE ${w}`, p);
+    const pct = (n: number) => tot.rows ? Math.round((1000 * n) / tot.rows) / 10 : 0;
+
+    // by category
+    const cats = await this.ds.query(
+      `SELECT (${CAT}) category, COUNT(*)::int n, COUNT(*) FILTER (WHERE (${TRUE_OT}) > 300)::int ot300
+         FROM roster_days r WHERE ${w} AND (${CAT}) IS NOT NULL GROUP BY 1 ORDER BY n DESC`, p);
+    const categories = cats.map((c: any) => {
+      const m = RosterReportsController.DQ_META[c.category] || { severity: 'review', label: c.category };
+      return { category: c.category, severity: m.severity, label: m.label, n: c.n, pct: pct(c.n), ot300: c.ot300 };
+    });
+
+    // per function: clean-% among that function's rows
+    const byFunction = await this.ds.query(
+      `SELECT canon_fn(COALESCE(r.role_function, r.function_name, '—')) fn, COUNT(*)::int rows,
+              COUNT(*) FILTER (WHERE (${CAT}) IN ${REV})::int review_flags,
+              COUNT(*) FILTER (WHERE (${CAT}) IS NOT NULL AND (${CAT}) NOT IN ${REV})::int info_flags,
+              ROUND(100.0 * COUNT(*) FILTER (WHERE (${CAT}) IS NULL) / NULLIF(COUNT(*),0), 1)::float clean_pct
+         FROM roster_days r WHERE ${w} GROUP BY 1 ORDER BY clean_pct ASC, rows DESC`, p);
+
+    // per week (Saturday-week number carried on the row)
+    const byWeek = await this.ds.query(
+      `SELECT r.week_number week, MIN(r.work_date)::text start, MAX(r.work_date)::text "end", COUNT(*)::int rows,
+              COUNT(*) FILTER (WHERE (${CAT}) IN ${REV})::int review_flags,
+              ROUND(100.0 * COUNT(*) FILTER (WHERE (${CAT}) IS NULL) / NULLIF(COUNT(*),0), 1)::float clean_pct
+         FROM roster_days r WHERE ${w} AND r.week_number IS NOT NULL GROUP BY r.week_number ORDER BY MIN(r.work_date)`, p);
+
+    // OT > 300 min/day watch-list (may be legitimate holiday/off-day OT — verify, not action)
+    const ot300Top = await this.ds.query(
+      `SELECT COALESCE(r.person_no, r.employee_no) person_no, COALESCE(r.clean_name, r.name) name,
+              canon_fn(COALESCE(r.role_function,'—')) fn, r.work_date::text date, r.shift_code,
+              ROUND((${TRUE_OT})/60.0,1)::float ot_hrs,
+              CASE WHEN COALESCE(r.holiday_ot_min,0)>0 THEN 'holiday' WHEN COALESCE(r.offday_ot_min,0)>0 THEN 'off-day' ELSE 'regular' END ot_kind,
+              r.data_quality dq
+         FROM roster_days r WHERE ${w} AND (${TRUE_OT}) > 300 ORDER BY (${TRUE_OT}) DESC LIMIT ${lim}`, p);
+    const [ot300Agg] = await this.ds.query(
+      `SELECT COUNT(*)::int days, COUNT(DISTINCT COALESCE(r.person_no,r.employee_no))::int agents FROM roster_days r WHERE ${w} AND (${TRUE_OT}) > 300`, p);
+
+    // top offending person-days — REVIEW list only (verify vs raw files; never HR action)
+    const topOffenders = await this.ds.query(
+      `SELECT COALESCE(r.person_no, r.employee_no) person_no, COALESCE(r.clean_name, r.name) name,
+              canon_fn(COALESCE(r.role_function,'—')) fn, r.work_date::text date, r.day_name,
+              (${CAT}) category, r.shift_code, r.presence, r.sys_late_min, r.sys_early_min,
+              ROUND((${TRUE_OT})/60.0,1)::float ot_hrs, r.data_quality dq
+         FROM roster_days r WHERE ${w} AND (${CAT}) IN ${REV}
+        ORDER BY r.work_date DESC, r.person_no LIMIT ${lim}`, p);
+
+    // people with the most review flags (coaching the DATA, not the person)
+    const byPerson = await this.ds.query(
+      `SELECT COALESCE(r.person_no, r.employee_no) person_no, mode() WITHIN GROUP (ORDER BY COALESCE(r.clean_name,r.name)) name,
+              mode() WITHIN GROUP (ORDER BY canon_fn(r.role_function)) fn,
+              COUNT(*) FILTER (WHERE (${CAT}) IN ${REV})::int review_flags
+         FROM roster_days r WHERE ${w} AND (${CAT}) IN ${REV} AND COALESCE(r.person_no,r.employee_no) IS NOT NULL
+         GROUP BY 1 ORDER BY review_flags DESC LIMIT ${lim}`, p);
+
+    const functionOpts = (await this.ds.query(`SELECT DISTINCT canon_fn(role_function) v FROM roster_days WHERE tenant_id=$1 AND role_function IS NOT NULL ORDER BY 1`, [t])).map((x: any) => x.v);
+
+    return {
+      from: dFrom, to: dTo, range,
+      totals: {
+        rows: tot.rows, cleanRows: tot.clean_rows, cleanPct: pct(tot.clean_rows),
+        reviewRows: tot.review_rows, reviewPct: pct(tot.review_rows),
+        infoRows: tot.info_rows, infoPct: pct(tot.info_rows), ot300Days: tot.ot300_days,
+      },
+      categories, byFunction, byWeek,
+      ot300: { days: ot300Agg?.days || 0, agents: ot300Agg?.agents || 0, top: ot300Top },
+      topOffenders, byPerson,
+      filterOptions: { functions: functionOpts },
+      note: 'REVIEW-ONLY: data-quality flags are for verification against the raw Ameyo/Sprinklr/Odoo files — never an HR or disciplinary action. cleanPct = rows with no flag at all; INFO categories (tardiness-bleed-capped / ot-record-only / transfer-marker) are artefacts the recon engine already handled correctly and are excluded from the review score. OT>300min/day is a watch-list (may be legitimate holiday/off-day OT).',
+    };
+  }
+
   /** Multi-sheet Excel MASTER export — the connected star-schema workbook:
    *  assumptions, Employee_Master_Clean, Role_Working_Hours, Duplicate/Inactive
    *  audits, Fact_Attendance_Daily, Data_Quality, Weekly_Validation_Log, plus
