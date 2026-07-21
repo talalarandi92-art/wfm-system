@@ -4,8 +4,9 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
-import { shiftCategoryFromCode } from '@common/shift-category';
+import { shiftCategoryFromCode, shiftCategoryCaseSql } from '@common/shift-category';
 import { RosterSharedService } from './roster-shared.service';
+import { scoreScheduleQuality, QualityRow } from '../schedule-generator/verdict.engine';
 
 /* Schedule generators (ladder / demand mix / weekly assignment), drafts and
  * publish/unpublish, split VERBATIM out of the monolithic ReconController
@@ -537,6 +538,99 @@ export class RosterGenerateController {
     const skipped = rows.length - written;
     return { ok: true, weekStart, function: wk.function, written, skipped, unmappedPeople: noEmp, note,
       message: skipped > 0 ? `${skipped} cell(s) already had a schedule and were preserved (not overwritten).` : (written ? `published ${written} cells into week ${weekStart}.` : 'nothing to publish.') };
+  }
+
+  /** SCHEDULE QUALITY (Stage 2A) — grade an EXISTING saved/published window the same way the
+   *  generate verdict grades a preview: coverage vs the observed 28-day baseline, fairness
+   *  (the classic engine's calcFairness — the ONE scoring), rule compliance (female-night,
+   *  rest≥10h, 2-OFF/week, ≤6 consecutive) recounted from real roster_days schedule rows, and
+   *  the shift-mix distribution. Verified data only; read-only. Default window = the last
+   *  COMPLETE Sat→Fri week inside the data. */
+  @Get('roster-v2/schedule-quality')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Grade a saved/published schedule window: coverage, fairness, rule compliance, shift mix (read-only)' })
+  async scheduleQuality(
+    @Req() req: any,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('function') functionName?: string,
+  ) {
+    const t = req.user.tenantId;
+    const ISO = /^\d{4}-\d{2}-\d{2}$/;
+    let dFrom = ISO.test(from ?? '') ? from! : undefined;
+    let dTo = ISO.test(to ?? '') ? to! : undefined;
+    if (!dFrom || !dTo) {
+      const [{ mx }] = await this.ds.query(
+        `SELECT MAX(work_date)::text mx FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
+      if (!mx) throw new BadRequestException('No roster data available.');
+      // last complete Sat→Fri week ≤ the data frontier
+      const d = new Date(mx + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() - 5 + 7) % 7));   // most recent Friday ≤ mx
+      dTo = dTo ?? d.toISOString().slice(0, 10);
+      const f = new Date(dTo + 'T00:00:00Z');
+      f.setUTCDate(f.getUTCDate() - 6);
+      dFrom = dFrom ?? f.toISOString().slice(0, 10);
+    }
+    if (dFrom > dTo) throw new BadRequestException('from must be ≤ to');
+    const span = Math.round((Date.parse(dTo) - Date.parse(dFrom)) / 86400e3) + 1;
+    if (span > 35) throw new BadRequestException('window too large — max 35 days');
+    const dates: string[] = [];
+    { const d = new Date(dFrom + 'T00:00:00Z'); for (let i = 0; i < span; i++) { dates.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); } }
+
+    const p: any[] = [t, dFrom, dTo];
+    let fnW = '';
+    if (functionName) { p.push(functionName.replace(/^\s*[Ii]nternship\s+/, '')); fnW = ` AND canon_fn(COALESCE(role_function,function_name))=canon_fn($${p.length})`; }
+
+    // The window's schedule rows — canonical roster spine, deduped via is_active.
+    const catExpr = shiftCategoryCaseSql('shift_category,shift_code');
+    const rows: QualityRow[] = await this.ds.query(
+      `SELECT person_no AS "personNo", COALESCE(clean_name,name) AS name,
+              LOWER(COALESCE(gender,'')) AS gender,
+              canon_fn(COALESCE(role_function,function_name)) AS fn,
+              work_date::text AS date, shift_code AS code, ${catExpr} AS category,
+              shift_start_min AS ss, shift_end_min AS se, presence
+         FROM roster_days
+        WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3
+          AND person_no IS NOT NULL${fnW}
+        ORDER BY person_no, work_date`, p);
+    if (!rows.length) {
+      return { window: { from: dFrom, to: dTo, days: span }, people: 0, score: null,
+        error: 'no schedule rows in this window' };
+    }
+
+    // Observed baseline: avg scheduled HC per fn × hour over the 28 days BEFORE the
+    // window (same basis as the generator's hourly health — disclosed, not Erlang).
+    const bp: any[] = [t, dFrom];
+    let bFnW = '';
+    if (functionName) { bp.push(functionName.replace(/^\s*[Ii]nternship\s+/, '')); bFnW = ` AND canon_fn(COALESCE(role_function,function_name))=canon_fn($${bp.length})`; }
+    const baseRows = await this.ds.query(`
+      WITH h AS (SELECT generate_series(0,23) hh),
+      r AS (SELECT canon_fn(COALESCE(role_function,function_name)) fn, shift_start_min ss, shift_end_min se
+              FROM roster_days
+             WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+               AND work_date >= ($2::date - 28) AND work_date < $2::date${bFnW}),
+      d AS (SELECT GREATEST(COUNT(DISTINCT work_date),1)::int n FROM roster_days
+             WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL
+               AND work_date >= ($2::date - 28) AND work_date < $2::date)
+      SELECT r.fn, h.hh AS "hour",
+        (COUNT(*) FILTER (WHERE ((r.ss%1440+1440)%1440) < h.hh*60+60
+             AND LEAST(((r.ss%1440+1440)%1440)+(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END),1440) > h.hh*60
+             OR ((((r.ss%1440+1440)%1440)+(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END))>1440
+                 AND ((((r.ss%1440+1440)%1440)+(CASE WHEN r.se<=r.ss THEN r.se+1440-r.ss ELSE r.se-r.ss END))-1440) > h.hh*60)))::float
+          / (SELECT n FROM d) AS baseline
+      FROM r CROSS JOIN h GROUP BY r.fn, h.hh`, bp).catch(() => []);
+    const baseline: Record<string, number[]> = {};
+    for (const b of baseRows) {
+      if (!baseline[b.fn]) baseline[b.fn] = new Array(24).fill(0);
+      baseline[b.fn][b.hour] = +(+b.baseline || 0);
+    }
+
+    const quality = scoreScheduleQuality({
+      rows, dates,
+      minRestHours: 10, offDaysPerWeek: 2,     // business rules 6.6 / weekly OFF allowance
+      baseline: Object.keys(baseline).length ? baseline : null,
+    });
+    return { function: functionName ?? null, ...quality };
   }
 
   /** Reverse a publish: delete ONLY the generated rows for a week (tagged in notes). Safe. */

@@ -11,6 +11,7 @@ import {
 } from './generator.types';
 import { generateWeeklySchedule, buildWeekDates } from './generator.engine';
 import { computeShiftMix, assignRoster } from './demand.engine';
+import { buildGenerateVerdict, fairnessFromDistributions } from './verdict.engine';
 import { CapacityService } from '../capacity/capacity.service';
 import { StaffingService } from '../capacity/staffing.service';
 import { shiftCategoryFromCode } from '@common/shift-category';
@@ -308,8 +309,28 @@ export class GeneratorService {
       };
     });
 
+    // ── VERDICT (Stage 2A) — the UI-ready analysis block that makes the result
+    //    sell itself: coverage per day/function, fairness (REUSING the classic
+    //    engine's calcFairness on the pre-swap YTD already loaded above), and
+    //    rule-compliance counters RECOUNTED from the final grid (self-verifying).
+    const fairness = fairnessFromDistributions(
+      pool.map(e => ({ id: e.id, name: e.name, gender: e.gender })),
+      ytdDist,
+    );
+    const verdict = buildGenerateVerdict({
+      dates,
+      grid,
+      days,
+      unfilled: roster.unfilled,
+      warnings: roster.warnings,
+      offDaysPerWeek: options.offDaysPerWeek,
+      minRestHours: options.minRestHours,
+      fairness,
+    });
+
     return {
       weekStart, weekEnd: dates[6], mode: 'demand-driven',
+      verdict,
       currentContext: {
         activeEmployees: pool.length,
         liveOnlineNow: liveAgents.filter((a: any) =>

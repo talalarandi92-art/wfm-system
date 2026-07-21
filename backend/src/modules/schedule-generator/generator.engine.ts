@@ -507,7 +507,9 @@ function collectViolations(schedules: EmployeeSchedule[]): GeneratorViolation[] 
 
 // ─── Fairness Report ─────────────────────────────────────────────────────────
 
-function calcFairness(schedules: EmployeeSchedule[]): FairnessReport {
+// Exported (Stage 2A): the verdict/quality layer REUSES this exact scoring —
+// one fairness definition across generate-preview and saved-week grading.
+export function calcFairness(schedules: EmployeeSchedule[]): FairnessReport {
   const details = schedules
     .filter((es) => es.ytdDist.total > 0)
     .map((es) => {
