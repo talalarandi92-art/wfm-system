@@ -374,6 +374,13 @@ describe('query-compiler PARITY (live wfm_db)', () => {
 
   const FROM = '2026-06-01', TO = '2026-06-30';
 
+  /* These tests each run REAL queries over a month of live wfm_db — the
+     "EVERY source" one walks all sources × all metrics. Jest's 5s default is a
+     stopwatch on the database, not on the code: it made the gate fail
+     intermittently whenever the DB was busy (a suite that cries wolf gets
+     ignored). 60s is generous for correctness work and still catches a hang. */
+  jest.setTimeout(60_000);
+
   it('overtime TRUE_OT (min) matches a direct canonical query', async () => {
     if (!up) { console.warn('DB down — parity skipped'); return; }
     const c = compile({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'], dateFrom: FROM, dateTo: TO });
