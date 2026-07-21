@@ -260,13 +260,25 @@ export class SprinklrService {
 
     // Latest adherence/conformance per agent.
     const adhRows = await this.dataSource.query(
-      `SELECT DISTINCT ON (sprinklr_agent_id) sprinklr_agent_id, adherence_pct, conformance_pct
+      `SELECT DISTINCT ON (sprinklr_agent_id) sprinklr_agent_id, stat_date::text AS stat_date,
+              adherence_pct, conformance_pct
          FROM adherence_daily
         WHERE tenant_id = $1 AND sprinklr_agent_id IS NOT NULL
         ORDER BY sprinklr_agent_id, stat_date DESC`,
       [tenantId],
     ).catch(() => []);
     const adhMap = new Map<string, any>(adhRows.map((r: any) => [r.sprinklr_agent_id, r]));
+
+    /* Both enrichment queries take the NEWEST row per agent whatever its date —
+       so contacts / AHT / adherence can be days old while the status column is
+       live. Carrying the date makes that visible instead of letting a 5-day-old
+       number render as "today". Same age definition as /rta/intraday. */
+    const [todayRow] = await this.dataSource.query(`SELECT CURRENT_DATE::text AS d`).catch(() => [{}]);
+    const today: string | null = todayRow?.d ?? null;
+    const ageOf = (statDate?: string | null): number | null =>
+      statDate && today
+        ? Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${statDate}T00:00:00Z`)) / 86400000)
+        : null;
 
     // Base the board on the live agents (who is on right now), enriched with stats.
     const liveAgents = snap?.agents ?? [];
@@ -296,12 +308,35 @@ export class SprinklrService {
           workingMin: d?.total_working_minutes ?? null,
           adherencePct: adh?.adherence_pct != null ? Number(adh.adherence_pct) : null,
           conformancePct: adh?.conformance_pct != null ? Number(adh.conformance_pct) : null,
+          // Provenance of the enrichment columns above — NOT of `status`, which is live.
+          statDate: d?.stat_date ?? null,
+          statsAgeDays: ageOf(d?.stat_date),
+          adhDate: adh?.stat_date ?? null,
+          adhAgeDays: ageOf(adh?.stat_date),
         };
       });
 
     const order: Record<string, number> = { available: 0, idle: 1, busy: 2, break: 3, away: 3, offline: 4, unknown: 5 };
     board.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || String(a.name).localeCompare(String(b.name)));
-    return { capturedAt: snap?.capturedAt ?? null, isStale: snap?.isStale ?? true, count: board.length, agents: board };
+
+    /* A capture whose every agent is 'unknown' is a BLIND board, not an idle
+       floor. Say so on the payload so the UI cannot render it as a real state
+       breakdown. Same rule as the /rta/alerts `agent_status_blind` check. */
+    const knownStatusAgents = board.filter(a => a.status && a.status !== 'unknown').length;
+    const statDates = board.map(a => a.statDate).filter(Boolean) as string[];
+    const statsAsOf = statDates.length ? statDates.reduce((a, b) => (a > b ? a : b)) : null;
+
+    return {
+      capturedAt: snap?.capturedAt ?? null,
+      isStale: snap?.isStale ?? true,
+      count: board.length,
+      knownStatusAgents,
+      statusBlind: board.length > 0 && knownStatusAgents === 0,
+      statsAsOf,
+      statsAgeDays: ageOf(statsAsOf),
+      today,
+      agents: board,
+    };
   }
 
   // ── Get latest cached snapshot (memory first, DB fallback after restart) ───

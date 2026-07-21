@@ -184,6 +184,13 @@ interface BoardRow {
   contacts: number | null; ahtSec: number | null; frtSec: number | null;
   idleMin: number | null; holdMin: number | null; busyMin: number | null; breakMin: number | null; workingMin: number | null;
   adherencePct: number | null; conformancePct: number | null;
+  /* Provenance of the STAT columns only — `status` is live, these may be days old. */
+  statDate: string | null; statsAgeDays: number | null;
+  adhDate: string | null; adhAgeDays: number | null;
+}
+interface BoardMeta {
+  count: number; knownStatusAgents: number; statusBlind: boolean;
+  statsAsOf: string | null; statsAgeDays: number | null;
 }
 const BOARD_FILTERS: { key: string; ar: string; en: string; c: string; match: (s: string) => boolean }[] = [
   { key: 'all', ar: 'الكل', en: 'All', c: '#94a3b8', match: () => true },
@@ -202,14 +209,23 @@ export function AgentBoard({ ar, big, keepDark, onSelectAgent }: { ar: boolean; 
     ? { bdr: 'rgba(255,255,255,0.07)', bdr2: 'rgba(255,255,255,0.06)', bdrRow: 'rgba(255,255,255,0.03)', panel: 'rgba(255,255,255,0.03)', wrapBg: 'rgba(255,255,255,0.02)', inputBg: 'rgba(255,255,255,0.05)', inputBdr: 'rgba(255,255,255,0.08)', text: '#e2e8f0', name: '#e8edf7', func: '#64748b', faint: '#475569', fainter: '#334155', statBg: 'rgba(0,0,0,0.18)', confTrack: 'rgba(255,255,255,0.08)', toggleActFg: '#a5b4fc' }
     : { bdr: T.bdr, bdr2: T.bdr, bdrRow: T.bdr, panel: T.panel, wrapBg: T.panel, inputBg: T.panel, inputBdr: T.bdr, text: tp(dark), name: tp(dark), func: tsColor(dark), faint: T.faint, fainter: T.faint, statBg: dark ? 'rgba(0,0,0,0.18)' : 'rgba(15,23,42,0.04)', confTrack: dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.1)', toggleActFg: dark ? '#a5b4fc' : '#6366f1' };
   const [rows, setRows] = useState<BoardRow[]>([]);
+  const [meta, setMeta] = useState<BoardMeta | null>(null);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
   const [view, setView] = useState<'table' | 'cards'>('table');
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let alive = true;
-    const load = () => apiClient.get<{ agents: BoardRow[] }>('/integrations/sprinklr/agent-board')
-      .then(r => { if (alive) setRows(r.data.agents || []); }).catch(() => {}).finally(() => { if (alive) setLoading(false); });
+    const load = () => apiClient.get<{ agents: BoardRow[] } & BoardMeta>('/integrations/sprinklr/agent-board')
+      .then(r => {
+        if (!alive) return;
+        setRows(r.data.agents || []);
+        setMeta({
+          count: r.data.count ?? 0, knownStatusAgents: r.data.knownStatusAgents ?? 0,
+          statusBlind: !!r.data.statusBlind, statsAsOf: r.data.statsAsOf ?? null,
+          statsAgeDays: r.data.statsAgeDays ?? null,
+        });
+      }).catch(() => {}).finally(() => { if (alive) setLoading(false); });
     load(); const t = setInterval(load, 25000); return () => { alive = false; clearInterval(t); };
   }, []);
   const counts: Record<string, number> = {}; for (const f of BOARD_FILTERS) counts[f.key] = rows.filter(r => f.match(r.status)).length;
@@ -220,6 +236,34 @@ export function AgentBoard({ ar, big, keepDark, onSelectAgent }: { ar: boolean; 
   const fz = big ? 13 : 11;
   return (
     <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${C.bdr}`, background: big ? C.wrapBg : 'transparent' }}>
+      {/* ── Honesty strip ──────────────────────────────────────────────────
+          Two independent truths, never blurred together:
+          • statusBlind — the capture carries NO usable status, so the state
+            counters below are blindness, not an idle floor.
+          • statsAgeDays — contacts / AHT / conformance are the newest row per
+            agent whatever its DATE; a days-old number must not read as today. */}
+      {meta && (meta.statusBlind || meta.knownStatusAgents < meta.count || (meta.statsAgeDays ?? 0) >= 1) && (
+        <div className="flex flex-col gap-1 px-3 py-2 text-[10px]"
+          style={{ borderBottom: `1px solid ${C.bdr2}`, background: meta.statusBlind ? 'rgba(239,68,68,0.07)' : 'rgba(251,191,36,0.07)' }}>
+          {meta.statusBlind ? (
+            <span style={{ color: '#f87171' }}>
+              {ar ? `⚠ لا توجد حالة معروفة لأي من الـ${meta.count} وكيل في هذه اللقطة — التوزيع أدناه يعني "غير معلوم"، لا "غير متصل".`
+                  : `⚠ None of the ${meta.count} captured agents has a known status — the breakdown below means UNKNOWN, not offline.`}
+            </span>
+          ) : meta.knownStatusAgents < meta.count && (
+            <span style={{ color: '#fbbf24' }}>
+              {ar ? `⚠ ${meta.knownStatusAgents} من ${meta.count} فقط لديهم حالة معروفة — العدد المباشر حدّ أدنى.`
+                  : `⚠ Only ${meta.knownStatusAgents} of ${meta.count} have a known status — live headcount is a floor.`}
+            </span>
+          )}
+          {(meta.statsAgeDays ?? 0) >= 1 && (
+            <span style={{ color: '#fbbf24' }}>
+              {ar ? `الأرقام (كونتاكت / AHT / كونفورمانس) بتاريخ ${meta.statsAsOf} — عمرها ${meta.statsAgeDays} يوم، ليست أرقام اليوم.`
+                  : `Stats (contacts / AHT / conformance) are as of ${meta.statsAsOf} — ${meta.statsAgeDays} day(s) old, not today's numbers.`}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex items-center gap-2 p-2 flex-wrap" style={{ borderBottom: `1px solid ${C.bdr2}` }}>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder={ar ? 'بحث عن إيجنت...' : 'Search agent...'}
           className="rounded-lg text-xs py-1.5 px-3 outline-none" style={{ background: C.inputBg, border: `1px solid ${C.inputBdr}`, color: C.text, minWidth: 150 }} />
