@@ -13,6 +13,7 @@ import { apiClient } from '@/api/client';
 import { fmtLocalDate, weekStartSat } from '@/utils/format';
 import { useUiStore } from '@/store/ui.store';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import WeekQualityStrip from '@/pages/schedule/WeekQualityStrip';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DayEntry {
@@ -213,15 +214,15 @@ function ShiftCell({ day, onCellClick, onHistoryClick, date, emp, colWidth, isSe
         } as any}
       >
         {/* Shift code */}
-        <span className="text-[11px] font-bold leading-none tracking-wide" style={{ color: style.text }}>
+        <span className="text-[11.5px] font-extrabold leading-none" style={{ color: style.text, letterSpacing: '0.04em' }}>
           {day.code}
         </span>
 
         {/* Time range */}
         {timeRange && colWidth >= 70 && (
           <span
-            className="text-[8px] leading-none font-medium px-1 py-0.5 rounded"
-            style={{ color: style.text, opacity: 0.75, background: 'rgba(0,0,0,0.25)', letterSpacing: '0.01em' }}
+            className="text-[8px] leading-none font-semibold px-1.5 py-0.5 rounded-md"
+            style={{ color: style.text, opacity: 0.8, background: 'rgba(0,0,0,0.22)', letterSpacing: '0.01em', fontVariantNumeric: 'tabular-nums' }}
           >
             {timeRange}
           </span>
@@ -1907,8 +1908,56 @@ export default function SchedulePage() {
         </div>
       </div>
 
+      {/* ── Compact always-on legend (shift families + leave codes) ───────── */}
+      <div className="flex items-center gap-1.5 flex-wrap px-1" style={{ fontSize: 10 }}>
+        {([
+          ['morning',  'M·AM',   ar ? 'صباحي'       : 'Morning'],
+          ['between',  'B·C',    ar ? 'بين'          : 'Between'],
+          ['night',    'N·E·EE', ar ? 'مسائي'        : 'Night'],
+          ['midnight', 'MD·MN',  ar ? 'منتصف الليل' : 'Midnight'],
+          ['off',      'OFF',    ar ? 'إجازة أسبوعية' : 'Day off'],
+          ['leave',    'L',      ar ? 'سنوية'        : 'Leave'],
+          ['sick',     'S',      ar ? 'مرضية'        : 'Sick'],
+          ['absent',   'A',      ar ? 'غياب'          : 'Absent'],
+          ['holiday',  'H',      ar ? 'عطلة'          : 'Holiday'],
+        ] as [string, string, string][]).map(([cat, codes, label]) => {
+          const s = CATEGORY_STYLE[cat];
+          return (
+            <span key={cat} title={label}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-bold"
+              style={{ background: s.bg, color: s.text, border: `1px solid ${s.border}` }}>
+              {codes}
+              <span className="font-medium opacity-70 hidden md:inline">{label}</span>
+            </span>
+          );
+        })}
+        <span className="inline-flex items-center gap-1" style={{ color: 'var(--text-3)' }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />{ar ? 'تأخير' : 'late'}
+        </span>
+        <span className="inline-flex items-center gap-1" style={{ color: 'var(--text-3)' }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />OT
+        </span>
+        <span className="inline-flex items-center gap-1" style={{ color: 'var(--text-3)' }}>🏠 {ar ? 'من البيت' : 'WFH'}</span>
+        <button onClick={() => setShowLegend(!showLegend)}
+          className="underline transition-colors hover:opacity-80"
+          style={{ color: 'var(--text-3)' }}>
+          {showLegend ? (ar ? 'إخفاء التفاصيل' : 'hide details') : (ar ? 'كل التفاصيل…' : 'full legend…')}
+        </button>
+      </div>
+
       {/* ── Coverage Bar ──────────────────────────────────────────────────── */}
       {gridData && <CoverageBar cov={gridData.coverage} dates={gridData.dates} lang={lang} />}
+
+      {/* ── Per-day staffed-vs-required chips (hide-on-404 until the
+             /roster-v2/schedule-quality endpoint is deployed) ──────────────── */}
+      {gridData && (
+        <WeekQualityStrip
+          from={gridData.weekStart}
+          to={gridData.weekEnd}
+          dates={gridData.dates}
+          ar={ar}
+        />
+      )}
 
       {/* ── Absence Analysis Panel ────────────────────────────────────────── */}
       {showAbsence && (
@@ -1989,35 +2038,41 @@ export default function SchedulePage() {
                   </div>
                 </button>
 
-                {/* Grid table */}
+                {/* Grid table — horizontal scroll + capped height so the day
+                    header and employee column stay pinned on long groups */}
                 {expanded && (
-                  <div className="overflow-x-auto" style={{ background: 'var(--surface-2)' }}>
+                  <div className="overflow-x-auto" style={{ background: 'var(--surface-2)', maxHeight: '70vh', overflowY: 'auto' }}>
                     <table className="w-full border-collapse" style={{ minWidth: 700 }}>
                       <thead>
-                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                          {/* Employee column */}
+                        <tr>
+                          {/* Employee column — pinned to both the start edge and the top */}
                           <th
-                            className="text-start px-3 py-2.5 sticky start-0 z-10"
+                            className="text-start px-3 py-2.5 sticky start-0 top-0"
                             style={{
                               minWidth: 160,
+                              zIndex: 30,
                               background: 'var(--surface)',
                               borderInlineEnd: '1px solid var(--border)',
+                              boxShadow: 'inset 0 -1px 0 var(--border)',
                             }}
                           >
                             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                               {ar ? 'الموظف' : 'Employee'}
                             </span>
                           </th>
-                          {/* Date columns */}
+                          {/* Date columns — pinned to the top */}
                           {gridData.dates.map(d => {
                             const info = fmtDate(d, lang);
                             return (
                               <th
                                 key={d}
-                                className="text-center px-1 py-2"
+                                className="text-center px-1 py-2 sticky top-0"
                                 style={{
                                   minWidth: colWidth,
+                                  zIndex: 20,
+                                  background: 'var(--surface)',
                                   borderInlineEnd: '1px solid var(--border)',
+                                  boxShadow: 'inset 0 -1px 0 var(--border)',
                                 }}
                               >
                                 <div

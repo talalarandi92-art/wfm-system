@@ -1,9 +1,10 @@
 import { useSearchParams } from 'react-router-dom';
-import { Calendar, Zap, Shuffle, Megaphone, CalendarCog, Clock, Wand2, Waves, Layers, Activity, Sparkles } from 'lucide-react';
+import { Calendar, Zap, Shuffle, Megaphone, CalendarCog, Clock, Wand2, Waves, Layers, Activity, Sparkles, BadgeCheck } from 'lucide-react';
 import GroupedTabs, { TabGroupDef, GroupedTabDef } from '@/components/GroupedTabs';
 import { useAuthStore } from '@/store/auth.store';
 import SchedulePage from '@/pages/Schedule';
-import ScheduleGeneratorPage from '@/pages/ScheduleGenerator';
+import GeneratorPanel from '@/pages/schedule/GeneratorPanel';
+import QualityPanel from '@/pages/schedule/QualityPanel';
 import ShiftRotationPage from '@/pages/ShiftRotation';
 import CampaignsPage from '@/pages/Campaigns';
 import ScheduleChangesPage from '@/pages/ScheduleChanges';
@@ -12,7 +13,7 @@ import ScheduleDemandPage from '@/pages/ScheduleDemand';
 import ForecastWeekPage from '@/pages/ForecastWeek';
 import LadderRotationPage from '@/pages/LadderRotation';
 
-type HubTab = 'schedule' | 'generator' | 'ladder' | 'forecast' | 'hourly' | 'demand' | 'rotation' | 'campaigns' | 'changes';
+type HubTab = 'schedule' | 'generator' | 'ladder' | 'forecast' | 'hourly' | 'quality' | 'demand' | 'rotation' | 'campaigns' | 'changes';
 
 type GatedTab = GroupedTabDef & { permission: string };
 type GatedGroup = Omit<TabGroupDef, 'tabs'> & { tabs: GatedTab[] };
@@ -46,6 +47,9 @@ const GROUPS: GatedGroup[] = [
     tabs: [
       { key: 'forecast', label: 'Week Forecast', labelAr: 'توقّع الأسبوع', icon: Waves, permission: 'attendance.view_team' },
       { key: 'hourly',   label: 'Hourly HC',     labelAr: 'HC بالساعة',    icon: Clock, permission: 'attendance.view_team' },
+      // Stage 2B: grade an existing week (coverage/fairness/compliance) — panel
+      // graceful-hides its score until /roster-v2/schedule-quality is deployed.
+      { key: 'quality',  label: 'Schedule Quality', labelAr: 'جودة الجدول', icon: BadgeCheck, permission: 'schedule.view' },
     ],
   },
   {
@@ -94,10 +98,11 @@ export default function SchedulingHub() {
       )}
 
       {tab === 'schedule'  && <SchedulePage />}
-      {tab === 'generator' && <ScheduleGeneratorPage />}
+      {tab === 'generator' && <GeneratorPanel />}
       {tab === 'ladder'    && <LadderRotationPage />}
       {tab === 'forecast'  && <ForecastWeekPage />}
       {tab === 'hourly'    && <HourlyAnalyticsPage />}
+      {tab === 'quality'   && <QualityPanel />}
       {tab === 'demand'    && <ScheduleDemandPage />}
       {tab === 'rotation'  && <ShiftRotationPage />}
       {tab === 'changes'   && <ScheduleChangesPage />}
