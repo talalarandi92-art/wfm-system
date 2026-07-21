@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Radio, WifiOff, ArrowRight, AlertTriangle, Coffee, Shield,
   UserCheck, Clock, CheckCircle2, Activity, BarChart3, Timer,
@@ -11,6 +11,7 @@ import {
   ST_COLOR, pctColor, fmtMin, fmtTime, stLabel,
 } from './types';
 import { AgentRow, EmptyState, tok } from './shared';
+import { foldCoverage } from './kit';
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  STATION PANEL — faithful mirror of the Sprinklr Supervisor right-rail       */
@@ -517,6 +518,12 @@ export function PermissionsPanel({ breakData, ar }: { breakData: BreakTracker | 
 export function CoveragePanel({ coverage, live, ar }: { coverage: Coverage | null; live: SpLive | null; ar: boolean }) {
   const { dark } = useUiStore();
   const T = tok(dark);
+  /* The coverage feed is ONE ROW PER FUNCTION per interval — listing it raw
+     showed each function's numbers as if they were the whole floor. Fold to a
+     floor total through the shared helper (same one the Command Center uses). */
+  const cov = useMemo(() => foldCoverage(coverage?.intervals), [coverage]);
+  const covToday = !!cov?.date && cov.date === new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+
   const lsp = coverage?.liveSprinklr ?? (live ? {
     available:    (live.agents).filter(a => a.status === 'available').length,
     busy:         (live.agents).filter(a => a.status === 'busy').length,
@@ -586,13 +593,25 @@ export function CoveragePanel({ coverage, live, ar }: { coverage: Coverage | nul
         </div>
       )}
 
-      {coverage?.intervals && coverage.intervals.length > 0 && (
+      {cov && cov.rows.length > 0 && (
         <div className="rounded-2xl overflow-hidden" style={{ border: `1px solid ${T.bdr}` }}>
-          <div className="px-3 py-2 flex items-center gap-2"
+          <div className="px-3 py-2 flex items-center gap-2 flex-wrap"
             style={{ background: T.panel, borderBottom: `1px solid ${T.bdr}` }}>
             <Timer size={12} style={{ color: tsColor(dark) }} />
             <span className="text-xs font-semibold" style={{ color: tsColor(dark) }}>
               {ar ? 'مقارنة HC بالفترات' : 'HC by Interval'}
+            </span>
+            {/* Say WHICH day and WHICH basis — a stale snapshot must never read as "now". */}
+            {cov.date && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded"
+                style={{ color: covToday ? '#22c55e' : '#fbbf24', background: covToday ? 'rgba(34,197,94,0.08)' : 'rgba(251,191,36,0.10)' }}>
+                {covToday ? (ar ? 'اليوم' : 'today') : cov.date}
+              </span>
+            )}
+            <span className="text-[10px]" style={{ color: T.faint }}>
+              {cov.liveUsable
+                ? (ar ? '· الفرق مقابل الحي' : '· gap vs live')
+                : (ar ? '· لا تغذية حية — الفرق مقابل المجدول' : '· no live feed — gap vs scheduled')}
             </span>
           </div>
           <div className="grid text-[10px] font-semibold px-3 py-1.5"
@@ -604,18 +623,19 @@ export function CoveragePanel({ coverage, live, ar }: { coverage: Coverage | nul
             <span className="text-center">{ar ? 'فرق' : 'Gap'}</span>
           </div>
           <div className="max-h-56 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-            {coverage.intervals.map((iv, i) => {
-              const gap = iv.live_hc - iv.required_hc;
-              const gc = gap >= 0 ? '#22c55e' : gap >= -2 ? '#fbbf24' : '#f87171';
+            {cov.rows.map((iv, i) => {
+              const gc = iv.gap >= 0 ? '#22c55e' : iv.gap >= -2 ? '#fbbf24' : '#f87171';
               return (
-                <div key={i} className="grid items-center px-3 py-1.5 text-xs"
-                  style={{ gridTemplateColumns: '55px 1fr 1fr 1fr 55px', borderBottom: i < coverage.intervals.length - 1 ? `1px solid ${T.bdr}` : 'none', background: gap < -2 ? 'rgba(239,68,68,0.03)' : 'transparent' }}>
-                  <span className="font-mono text-[10px]" style={{ color: tsColor(dark) }}>{iv.interval_start.slice(0, 5)}</span>
-                  <span className="text-center" style={{ color: tsColor(dark) }}>{iv.required_hc}</span>
-                  <span className="text-center" style={{ color: tsColor(dark) }}>{iv.scheduled_hc}</span>
-                  <span className="text-center font-semibold" style={{ color: '#22d3ee' }}>{iv.live_hc || '—'}</span>
+                <div key={iv.key} className="grid items-center px-3 py-1.5 text-xs"
+                  style={{ gridTemplateColumns: '55px 1fr 1fr 1fr 55px', borderBottom: i < cov.rows.length - 1 ? `1px solid ${T.bdr}` : 'none', background: iv.gap < -2 ? 'rgba(239,68,68,0.03)' : 'transparent' }}>
+                  <span className="font-mono text-[10px]" style={{ color: tsColor(dark) }}>{iv.at}</span>
+                  <span className="text-center" style={{ color: tsColor(dark) }}>{iv.req}</span>
+                  <span className="text-center" style={{ color: tsColor(dark) }}>{iv.sched}</span>
+                  <span className="text-center font-semibold" style={{ color: iv.stale ? T.faint : '#22d3ee' }}>
+                    {iv.live > 0 && !iv.stale ? iv.live : '—'}
+                  </span>
                   <span className="text-center font-bold" style={{ color: gc }}>
-                    {iv.live_hc > 0 ? (gap > 0 ? `+${gap}` : gap) : '—'}
+                    {iv.gap > 0 ? `+${iv.gap}` : iv.gap}
                   </span>
                 </div>
               );

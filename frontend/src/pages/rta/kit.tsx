@@ -61,6 +61,55 @@ export const hhmm = (v: string | null | undefined): string => {
   return Number.isNaN(d.getTime()) ? String(v) : d.toTimeString().slice(0, 5);
 };
 
+/* ── Coverage folding — ONE definition of "the floor at this interval" ─────
+   /integrations/sprinklr/coverage returns ONE ROW PER FUNCTION per interval
+   (~480 rows for a day). Reading a single row — or listing the raw rows —
+   silently reports ONE function's coverage as the whole floor. Every consumer
+   folds through here so no two panels can disagree. */
+export interface CoverageIntervalRow {
+  interval_start: string;
+  required_hc: number; scheduled_hc: number; live_hc: number;
+  live_stale?: boolean;
+}
+export interface FoldedCoverageRow {
+  key: string; at: string;
+  req: number; sched: number; live: number; stale: boolean;
+  /** The honest "what we actually have": live when the bridge is usable, else scheduled. */
+  have: number; gap: number;
+}
+export interface FoldedCoverage {
+  rows: FoldedCoverageRow[];
+  /** The snapshot date the rows belong to — may NOT be today; show it. */
+  date: string | null;
+  /** false ⇒ `have` is the SCHEDULED column and must be labelled as such. */
+  liveUsable: boolean;
+}
+export function foldCoverage(intervals: CoverageIntervalRow[] | null | undefined): FoldedCoverage | null {
+  if (!intervals?.length) return null;
+  const m = new Map<string, { req: number; sched: number; live: number; stale: boolean }>();
+  for (const x of intervals) {
+    const k = String(x.interval_start);
+    const e = m.get(k) ?? { req: 0, sched: 0, live: 0, stale: false };
+    e.req   += Number(x.required_hc)  || 0;
+    e.sched += Number(x.scheduled_hc) || 0;
+    e.live  += Number(x.live_hc)      || 0;
+    e.stale = e.stale || !!x.live_stale;
+    m.set(k, e);
+  }
+  const rows = [...m.entries()]
+    .map(([key, v]) => ({ key, at: hhmm(key), ...v }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+  const liveUsable = rows.some(r => !r.stale && r.live > 0);
+  return {
+    rows: rows.map(r => {
+      const have = liveUsable ? r.live : r.sched;
+      return { ...r, have, gap: have - r.req };
+    }),
+    date: rows[0]?.key.slice(0, 10) ?? null,
+    liveUsable,
+  };
+}
+
 /* ── Semantic palette — one meaning per hue across mission control ────────── */
 export const QPAL = {
   ok:        '#22c55e',   // green  — on-track / available / covered

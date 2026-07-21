@@ -28,7 +28,7 @@ import {
   SpLive, BreakTracker, Coverage, ViolationsReport, AdherenceReport, slaColor,
 } from './types';
 import {
-  QPAL, nfmt, pctFmt, hhmm, riskHue, fmtAgo, ink,
+  QPAL, nfmt, pctFmt, hhmm, riskHue, fmtAgo, ink, foldCoverage,
   Section, Awaiting, Degraded, FreshChip, Pulse, MiniBar, HeatCell,
   useMaybe, readIntraday, readAlerts, alertHue, sevRank,
   type RtaAlert,
@@ -80,34 +80,11 @@ export default function CommandCenter({
     [live?.queues]);
 
   /* ── coverage curve ───────────────────────────────────────────────────────
-     /integrations/sprinklr/coverage returns ONE ROW PER FUNCTION per interval
-     (480 rows for a day). Reading a single row would silently report one
-     function's coverage as the whole floor — so fold to the floor total first.
-     `liveUsable` decides the honest basis: the live bridge column, or (when it
-     is stale/empty) the SCHEDULED column, explicitly labelled as such. */
-  const covCurve = useMemo(() => {
-    const iv = coverage?.intervals ?? [];
-    if (!iv.length) return null;
-    const m = new Map<string, { req: number; sched: number; live: number; stale: boolean }>();
-    for (const x of iv) {
-      const k = String(x.interval_start);
-      const e = m.get(k) ?? { req: 0, sched: 0, live: 0, stale: false };
-      e.req += Number(x.required_hc) || 0;
-      e.sched += Number(x.scheduled_hc) || 0;
-      e.live += Number(x.live_hc) || 0;
-      e.stale = e.stale || !!x.live_stale;
-      m.set(k, e);
-    }
-    const rows = [...m.entries()]
-      .map(([key, v]) => ({ key, at: hhmm(key), ...v }))
-      .sort((a, b) => a.key.localeCompare(b.key));
-    const liveUsable = rows.some(r => !r.stale && r.live > 0);
-    const rowsWithHave = rows.map(r => {
-      const have = liveUsable ? r.live : r.sched;
-      return { ...r, have, gap: have - r.req };
-    });
-    return { rows: rowsWithHave, date: rows[0]?.key.slice(0, 10) ?? null, liveUsable };
-  }, [coverage]);
+     Folded through the shared `foldCoverage` (kit.tsx) so this panel and the
+     Coverage station cannot disagree: per-function rows summed to a floor
+     total, and `liveUsable` deciding the honest basis (live bridge, or the
+     SCHEDULED column explicitly labelled as such when live is stale/empty). */
+  const covCurve = useMemo(() => foldCoverage(coverage?.intervals), [coverage]);
 
   /* the interval containing the current hour (Asia/Kuwait) */
   const covNow = useMemo(() => {
