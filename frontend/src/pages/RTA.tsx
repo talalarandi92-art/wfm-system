@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
-import { tp, useInjectDsStyles } from '@/components/ds';
+import { useInjectDsStyles } from '@/components/ds';
 import {
   SpLive, BreakTracker, AgentTimeline, Coverage, QueueDetail,
   IncidentReport, SkillDispatchForm,
@@ -20,7 +20,8 @@ import { LiveAgentsPanel, Agent360Drawer, QueueDetailPanel } from './rta/LivePan
 import { BreaksPanel, PermissionsPanel, CoveragePanel, AgentHoursPanel } from './rta/StationPanels';
 import { ReportIncidentModal, UnauthorizedBreakAlert, CrossSkillAlertPanel, SkillDispatchModal } from './rta/IncidentsCrossSkill';
 import { DailyReportPanel, AdherencePanel, CompliancePanel } from './rta/ReportPanels';
-import { Wallboard, ExecutiveOverview } from './rta/WallboardPanels';
+import { Wallboard } from './rta/WallboardPanels';
+import CommandCenter from './rta/CommandCenter';
 
 export default function RTAPage() {
   const { lang, dark } = useUiStore();
@@ -35,7 +36,8 @@ export default function RTAPage() {
   const [selectedQueue, setSelectedQueue] = useState<string | null>(null);
   const [agent360Id, setAgent360Id] = useState<string | null>(null);
   const [tvMode, setTvMode] = useState(false);
-  const [tab, setTab]   = useState<'overview' | 'queues' | 'liveagents' | 'breaks' | 'permissions' | 'coverage' | 'agents' | 'daily' | 'compliance' | 'adherence'>('queues');
+  // Command Center is the landing view — mission control first, drill-downs after.
+  const [tab, setTab]   = useState<'overview' | 'queues' | 'liveagents' | 'breaks' | 'permissions' | 'coverage' | 'agents' | 'daily' | 'compliance' | 'adherence'>('overview');
   const [violations, setViolations] = useState<ViolationsReport | null>(null);
   const [adherence, setAdherence]   = useState<AdherenceReport | null>(null);
   const [intraday, setIntraday]     = useState<IntradayData | null>(null);
@@ -215,17 +217,17 @@ export default function RTAPage() {
 
       {/* ── HEADER ─────────────────────────────────────────────────────────── */}
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-2.5 gap-3 flex-wrap"
-        style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(0,0,0,0.25)' }}>
+        style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center"
             style={{ background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.2)' }}>
-            <Radio size={14} style={{ color: '#22d3ee' }} />
+            <Radio size={14} style={{ color: '#06b6d4' }} />
           </div>
           <div>
-            <h1 className="text-sm font-bold leading-none" style={{ color: tp(dark) }}>
+            <h1 className="text-sm font-bold leading-none" style={{ color: 'var(--text-1)' }}>
               {ar ? 'مراقبة الوقت الحقيقي' : 'Real-Time Monitoring'}
             </h1>
-            <p className="text-[10px] mt-0.5" style={{ color: '#334155' }}>
+            <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-3)' }}>
               {now.toLocaleTimeString('en-u-nu-latn', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
               {' · '}{now.toLocaleDateString('en-u-nu-latn', { weekday: 'short', day: 'numeric', month: 'short' })}
             </p>
@@ -257,14 +259,18 @@ export default function RTAPage() {
           </button>
           <button onClick={() => { setLoading(true); loadLive(); loadBreaks(); loadTimeline(); loadCoverage(); }}
             className="p-1.5 rounded-lg hover:opacity-70"
-            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-            <RefreshCw size={12} style={{ color: '#64748b' }} className={loading ? 'animate-spin' : ''} />
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+            <RefreshCw size={12} style={{ color: 'var(--text-3)' }} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
       {/* ── BRIDGE-OFFLINE BANNER (stale data self-explains) ───────────────── */}
-      {isStale && live && (
+      {/* PRESERVED verbatim for every drill-down tab. On the Command Center tab it
+          is suppressed only because that view restates the SAME honesty more
+          richly (posture chip + §3 degraded card + a severity-sorted alert) —
+          the warning is never lost, just told once instead of three times. */}
+      {isStale && live && tab !== 'overview' && (
         <div className="flex-shrink-0 mx-4 mt-2 flex items-start gap-2.5 px-3 py-2.5 rounded-xl text-[11px]"
           style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.28)', color: '#fbbf24' }}>
           <WifiOff size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -283,7 +289,9 @@ export default function RTAPage() {
       )}
 
       {/* ── KPI STRIP ──────────────────────────────────────────────────────── */}
-      {s && (
+      {/* Hidden on the Command Center tab — that view carries its own richer
+          <Kpi> provenance strip, so we never show two competing hero rows. */}
+      {s && tab !== 'overview' && (
         <div className="flex-shrink-0 grid grid-cols-5 gap-2 px-4 pt-2.5 pb-2">
           <KpiCard label={ar ? 'إجمالي الانتظار' : 'Waiting'}  val={s.totalWaiting}   color="#f59e0b" icon={Clock} />
           <KpiCard label={ar ? 'قيد التنفيذ'     : 'Active'}   val={s.totalInProgress} color="#818cf8" icon={Activity} />
@@ -299,7 +307,9 @@ export default function RTAPage() {
       )}
 
       {/* ── QUEUE-FEED-MISSING BANNER (degraded feed self-explains) ─────────── */}
-      {live && live.queueFeedMissing && (
+      {/* PRESERVED verbatim (the committed honesty fix). Suppressed on the Command
+          Center tab only — §3 there carries the identical UNKNOWN-not-zero card. */}
+      {live && live.queueFeedMissing && tab !== 'overview' && (
         <div className="flex-shrink-0 mx-4 mt-2 flex items-start gap-2.5 px-3 py-2.5 rounded-xl text-[11px]"
           style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
           <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -358,8 +368,8 @@ export default function RTAPage() {
       <div className="flex-shrink-0 flex items-center gap-1 px-4 pb-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {(() => {
           const groups: { groupAr: string; groupEn: string; dot: string; items: { key: typeof tab; label: string; alert: number }[] }[] = [
-            { groupAr: 'تنفيذي', groupEn: 'Executive', dot: '#eab308', items: [
-              { key: 'overview',    label: ar ? 'نظرة تنفيذية' : 'Overview',    alert: (live?.atRisk.length ?? 0) + (violations?.summary.open ?? 0) },
+            { groupAr: 'مركز القيادة', groupEn: 'Command', dot: '#eab308', items: [
+              { key: 'overview',    label: ar ? 'مركز القيادة' : 'Command Center', alert: (live?.atRisk.length ?? 0) + (violations?.summary.open ?? 0) },
             ] },
             { groupAr: 'مباشر', groupEn: 'Live', dot: '#22c55e', items: [
               { key: 'queues',      label: ar ? 'الكيوز'      : 'Queues',      alert: live?.atRisk.length ?? 0 },
@@ -377,17 +387,17 @@ export default function RTAPage() {
           ];
           return groups.map((g, gi) => (
             <div key={g.groupEn} className="flex items-center gap-1 flex-shrink-0">
-              {gi > 0 && <div className="mx-1.5 self-stretch" style={{ width: 1, background: 'rgba(255,255,255,0.1)' }} />}
-              <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider me-0.5" style={{ color: '#475569' }}>
+              {gi > 0 && <div className="mx-1.5 self-stretch" style={{ width: 1, background: 'var(--border)' }} />}
+              <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider me-0.5" style={{ color: 'var(--text-3)' }}>
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: g.dot }} />{ar ? g.groupAr : g.groupEn}
               </span>
               {g.items.map(t => (
                 <button key={t.key} onClick={() => setTab(t.key)}
                   className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all flex-shrink-0"
                   style={{
-                    background: tab === t.key ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-                    color: tab === t.key ? '#818cf8' : '#475569',
-                    border: tab === t.key ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                    background: tab === t.key ? 'rgba(99,102,241,0.18)' : 'var(--surface-2)',
+                    color: tab === t.key ? '#6366f1' : 'var(--text-3)',
+                    border: tab === t.key ? '1px solid rgba(99,102,241,0.35)' : '1px solid var(--border)',
                   }}>
                   {t.label}
                   {t.alert > 0 && <span className="px-1 rounded text-[9px] font-bold" style={{ background: '#ef444428', color: '#f87171' }}>{t.alert}</span>}
@@ -403,24 +413,25 @@ export default function RTAPage() {
 
         {/* QUEUES TAB — grid left + detail right */}
         {tab === 'overview' && (
-          <ExecutiveOverview live={live} breakData={breakData} coverage={coverage}
-            violations={violations} adherence={adherence} fc={fc} ar={ar}
-            onSelectQueue={(id) => { setSelectedQueue(id); setTab('queues'); }} />
+          <CommandCenter live={live} breakData={breakData} coverage={coverage}
+            violations={violations} adherence={adherence} ar={ar} pulse={pulse}
+            onSelectQueue={(id) => { setSelectedQueue(id); setTab('queues'); }}
+            onSelectAgent={setAgent360Id} />
         )}
 
         {tab === 'queues' && (
           <>
             {/* LEFT — queue grid (3 cols) */}
             <div className="flex flex-col"
-              style={{ flex: selectedQueueObj ? '0 0 55%' : '1 1 auto', minWidth: 0, width: selectedQueueObj ? '55%' : '100%', transition: 'flex-basis 0.25s ease, width 0.25s ease', borderInlineEnd: selectedQueueObj ? '1px solid rgba(255,255,255,0.07)' : 'none', overflow: 'hidden' }}>
+              style={{ flex: selectedQueueObj ? '0 0 55%' : '1 1 auto', minWidth: 0, width: selectedQueueObj ? '55%' : '100%', transition: 'flex-basis 0.25s ease, width 0.25s ease', borderInlineEnd: selectedQueueObj ? '1px solid var(--border)' : 'none', overflow: 'hidden' }}>
 
               {/* Search + channel filter */}
               <div className="flex items-center gap-2 px-3 py-2 flex-shrink-0">
                 <input value={qFilter} onChange={e => setQFilter(e.target.value)}
                   placeholder={ar ? 'بحث عن طابور...' : 'Search queue...'}
                   className="flex-1 rounded-xl text-xs py-1.5 outline-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: '#e2e8f0', paddingInlineStart: 10 }} />
-                <span className="text-[10px] flex-shrink-0" style={{ color: '#334155' }}>
+                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)', paddingInlineStart: 10 }} />
+                <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--text-3)' }}>
                   {filteredQueues.length} {ar ? 'طابور' : 'queues'}
                 </span>
               </div>
@@ -429,8 +440,8 @@ export default function RTAPage() {
               <div className="flex-1 overflow-y-auto px-3 pb-3" style={{ scrollbarWidth: 'thin' }}>
                 {!live ? (
                   <div className="flex flex-col items-center justify-center h-40">
-                    <WifiOff size={28} className="mb-2" style={{ color: '#1e293b' }} />
-                    <p className="text-xs" style={{ color: '#334155' }}>{ar ? 'لا توجد بيانات سبرينكلر' : 'No Sprinklr data'}</p>
+                    <WifiOff size={28} className="mb-2" style={{ color: 'var(--text-3)', opacity: 0.5 }} />
+                    <p className="text-xs" style={{ color: 'var(--text-3)' }}>{ar ? 'لا توجد بيانات سبرينكلر' : 'No Sprinklr data'}</p>
                   </div>
                 ) : (
                   <div style={{ display: 'grid', gridTemplateColumns: selectedQueueObj ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: 8 }}>
