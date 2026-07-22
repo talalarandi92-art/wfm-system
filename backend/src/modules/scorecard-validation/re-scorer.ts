@@ -12,11 +12,25 @@ const kpiByCode = new Map(SEED_KPIS.map((k) => [k.code, k]));
  *  KPI default. Exported so the comparator classifies against the same band the
  *  scorer used — classifying against the generic band mislabels every function
  *  that has an override (m089 gave AHT/RT/QUALITY per-function bands). */
-export function bandFor(kpiCode: string, functionName: string): KpiBand | null {
+export function bandFor(kpiCode: string, functionName: string, periodDate?: string | null): KpiBand | null {
   const kpi = kpiByCode.get(kpiCode);
   if (!kpi) return null;
-  const ov = kpi.functionOverrides?.find((o) => o.functionName.toLowerCase() === functionName.toLowerCase());
-  return (ov?.band ?? kpi.band) ?? null;
+  const mine = (kpi.functionOverrides ?? []).filter((o) => o.functionName.toLowerCase() === functionName.toLowerCase());
+  if (!mine.length) return kpi.band ?? null;
+
+  /* A dated override wins for dates inside its window (D-081: May-26 Internship
+     Inbound was deliberately email-shaped while Jan/June used the inbound band).
+     With no date to judge by we fall back to the undated override — never to a
+     period rule that may not apply. */
+  if (periodDate) {
+    const scoped = mine.find((o) =>
+      (o.appliesFrom || o.appliesTo) &&
+      (!o.appliesFrom || periodDate >= o.appliesFrom) &&
+      (!o.appliesTo || periodDate <= o.appliesTo));
+    if (scoped) return scoped.band ?? null;
+  }
+  const undated = mine.find((o) => !o.appliesFrom && !o.appliesTo);
+  return (undated?.band ?? kpi.band) ?? null;
 }
 
 export interface RescoredRow {
@@ -40,14 +54,14 @@ const CELL_TO_KPI_CODE: Record<ScoreKpi, string> = {
   RESPONSE_TIME: 'RESPONSE_TIME',
 };
 
-export function rescoreRow(row: ScRow): RescoredRow {
+export function rescoreRow(row: ScRow, periodDate?: string | null): RescoredRow {
   const ourPoints = {} as Record<ScoreKpi, number | null>;
 
   for (const sc of SCORE_CELLS) {
     const cell = row.cells[sc.kpi];
     const raw = cell.raw;
     const code = CELL_TO_KPI_CODE[sc.kpi];
-    const band = bandFor(code, row.functionName);
+    const band = bandFor(code, row.functionName, periodDate);
 
     if (band === null) {
       ourPoints[sc.kpi] = null;

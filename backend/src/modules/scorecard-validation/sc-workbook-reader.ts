@@ -64,6 +64,8 @@ export interface ScRow {
 export interface ScWorkbook {
   filePath: string;
   monthLabel: string; // e.g. "Jan 26"
+  /** First day of the workbook's month, ISO — the key for period-scoped bands (D-081). */
+  periodDate: string | null;
   sheetName: string;
   rows: ScRow[];
   /** anything we could not confidently read — reported, never guessed */
@@ -86,6 +88,19 @@ function cellV(ws: XLSX.WorkSheet, col: string, row: number): number | string | 
   return null;
 }
 
+/** "May 26" → "2026-05-01". Null when the label is not a recognisable month —
+ *  a wrong guess would silently apply the wrong period band, so we return null
+ *  and let the caller fall back to the undated rule. */
+export function periodDateFromLabel(label: string): string | null {
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const m = /^([A-Za-z]{3})[a-z]*\.?\s*(\d{2}|\d{4})/.exec(label.trim());
+  if (!m) return null;
+  const mi = MONTHS.indexOf(m[1].toLowerCase());
+  if (mi < 0) return null;
+  const yy = m[2].length === 2 ? 2000 + Number(m[2]) : Number(m[2]);
+  return `${yy}-${String(mi + 1).padStart(2, '0')}-01`;
+}
+
 export function monthLabelFromFile(filePath: string): string {
   const base = path.basename(filePath);
   const m = /^\d+\.\s*(.+?)\s*SC/i.exec(base);
@@ -100,7 +115,7 @@ export function readScWorkbook(filePath: string): ScWorkbook {
   const rows: ScRow[] = [];
 
   if (!ws || !ws['!ref']) {
-    return { filePath, monthLabel: monthLabelFromFile(filePath), sheetName, rows, skipped: ['sheet unreadable'], cellValue: () => null };
+    return { filePath, monthLabel: monthLabelFromFile(filePath), periodDate: periodDateFromLabel(monthLabelFromFile(filePath)), sheetName, rows, skipped: ['sheet unreadable'], cellValue: () => null };
   }
 
   // Sanity: header row must carry the expected anchor labels
@@ -108,7 +123,7 @@ export function readScWorkbook(filePath: string): ScWorkbook {
   const hNet = cellV(ws, 'H', HEADER_ROW);
   if (String(hAgent ?? '').trim() !== 'Agent' || !/net/i.test(String(hNet ?? ''))) {
     skipped.push(`header row ${HEADER_ROW} does not match expected layout (B="${hAgent}", H="${hNet}") — sheet skipped entirely`);
-    return { filePath, monthLabel: monthLabelFromFile(filePath), sheetName, rows, skipped, cellValue: (c, r) => cellV(ws, c, r) };
+    return { filePath, monthLabel: monthLabelFromFile(filePath), periodDate: periodDateFromLabel(monthLabelFromFile(filePath)), sheetName, rows, skipped, cellValue: (c, r) => cellV(ws, c, r) };
   }
 
   const range = XLSX.utils.decode_range(ws['!ref']!);
@@ -160,6 +175,7 @@ export function readScWorkbook(filePath: string): ScWorkbook {
   return {
     filePath,
     monthLabel: monthLabelFromFile(filePath),
+    periodDate: periodDateFromLabel(monthLabelFromFile(filePath)),
     sheetName,
     rows,
     skipped,

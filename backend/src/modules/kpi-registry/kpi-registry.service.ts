@@ -22,7 +22,11 @@ export class KpiRegistryService {
               r.created_at, r.updated_at,
               COALESCE(json_agg(json_build_object(
                 'id', c.id, 'function_name', c.function_name, 'weight', c.weight,
-                'target', c.target, 'band', c.band, 'applies_from', c.applies_from
+                'target', c.target, 'band', c.band,
+                -- ::text on purpose. A DATE comes back as a JS Date at LOCAL midnight and
+                -- JSON-serialises through UTC, which shifted every window a day earlier
+                -- (2026-05-01 was served as 2026-04-30) and would resolve the wrong period.
+                'applies_from', c.applies_from::text, 'applies_to', c.applies_to::text
               ) ORDER BY c.function_key, c.applies_from DESC)
                 FILTER (WHERE c.id IS NOT NULL), '[]') AS configs
          FROM kpi_registry r
@@ -43,7 +47,9 @@ export class KpiRegistryService {
     );
     if (!kpi) throw new NotFoundException(`KPI '${code}' not found in registry`);
     const configs = await this.ds.query(
-      `SELECT id, function_name, weight, target, band, applies_from, created_at, updated_at
+      `SELECT id, function_name, weight, target, band,
+              applies_from::text AS applies_from, applies_to::text AS applies_to,
+              created_at, updated_at
          FROM kpi_function_config WHERE kpi_id = $1
         ORDER BY function_key, applies_from DESC`,
       [kpi.id],

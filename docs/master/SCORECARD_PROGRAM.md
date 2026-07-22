@@ -36,9 +36,9 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
   **Headline: 171 of 458 Final rows carry a HAND-TYPED score cell** (the workbook's cached value
   disagrees with its own formula), which no engine can reproduce — so the gate is now judged on the
   **287 formula-derivable rows** (raw all-rows figure 57.21% was measuring the typist).
-  After D-079 landed the same day: **engine accuracy 92.33%** — Jan 98.78 · Feb 95.83 · Mar **100** ·
-  Apr 100 · **May 39.29** · Jun 98.53, with the `rounding` variance class at ZERO in every month.
-  Gate ≥98% NOT MET, and the entire remaining gap is MAY — the residue needs a Director ruling, not code
+  After D-079 + D-081a landed the same day: **engine accuracy 95.47%** — Jan 98.78 · Feb 95.83 ·
+  Mar **100** · Apr **100** · May 71.43 · Jun 98.53, `rounding` variance ZERO in every month.
+  Gate ≥98% still short by **13 of 287 rows**, and 11 of those are the ONE open ruling below (F3)
   (see “B7 findings” below). Report: `new folder/Scorecard 2026/Historical_Validation_Report.xlsx`.
 - **B8 Sprinklr bridge queue-discovery repair** ⚠ needs extension repo location (parallel-safe).
 - **B9 UI**: unified roster+daily-performance view, recon/unauthorized/survey/ranking/incentive pages (§25).
@@ -47,7 +47,7 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
 
 Pure-backend: B0–B8 · UI: B9–B11 · credential-gated: B3/B4/B8.
 
-## B7 findings — what stands between 92.33% and the gate (Director rulings, NOT code)
+## B7 findings — what stands between 95.47% and the gate (ONE ruling left)
 
 **F1 ✅ RESOLVED (D-079, Director 2026-07-22 — option (c) executed).** Round-half-up is now DISPLAY
 ONLY; bands compare the raw %. The `rounding` variance class is ZERO in every month and engine
@@ -69,14 +69,22 @@ your own sheet does (May CH-WA 88.90% was awarded 0 there), but it means a 90.5%
 while a 90.0% performer scores 10. If that is not intended, the band needs RANGES (`≥90`, `≥89`)
 instead of equalities. Nothing changed — this is a band-design question, not a rounding one.
 
-**F2 May-26 `Internship Inbound` block (45 RT cells + 9 AHT).** m089 seeded that function from the
-Jan+June MAJORITY (inbound band; RT not scored), and flagged May as an email-shaped outlier. May's
-sheet does score its RT (15 pts). Ruling needed: was May's Internship-Inbound block deliberately
-scored as email, or is the May sheet the outlier? This one block is most of May's 39.29%.
+**F2 ✅ RESOLVED (D-081a, Director 2026-07-22 — "May was deliberately email").** Verified against the
+sheet formulas before implementing: Jan AHT = inbound 6-band / RT not scored · **May AHT =
+`IF(P*24<=48,10,-10)` + RT = email 1h/2h/4h, all 45 rows carrying the formula** · June = back to the
+inbound band, RT empty. So May is a genuine PERIOD, not an outlier — and applying it globally would
+have broken Jan and June. Implemented as period-scoped bands: `appliesFrom`/`appliesTo` on a function
+config (m091 adds `applies_to`; `bandFor()` picks a dated rule only for dates inside its window, and
+falls back to the undated rule when there is no period to judge by). **May 39.29% → 71.43%, overall
+92.33% → 95.47%.**
 
-**F3 `Offline` / `Internship Offline` QUALITY (40 cells, May + Feb).** Your 2026-07-11 rule says
-Offline QA is **not applicable**; the Feb and May sheets predate that rule and scored it (10 pts at
-80%). Expected and harmless — confirm the rule applies **forward only** and these months stay as-is.
+**F3 ⚠ THE LAST ONE — `Offline` / `Internship Offline` QUALITY.** Your 2026-07-11 rule says Offline QA
+is **not applicable**; the Feb and May sheets predate that rule and scored it (10 pts at 80%, 30 at
+97.5%). This is now **11 of the 13 remaining misses** — May 8 rows, Feb 3. Confirm the rule is
+**forward-only** and it becomes a period-scoped band exactly like D-081a (info band from 2026-07-11,
+the normal QUALITY band before it) — which would put the gate at ~99% and MET. The other 2 misses are
+not fixable: Jan Social-Media RT hits the sheet's own wrong-row formula bug, and one June Inbound row
+has QA = 0 where your own 2026-07-11 "blank/0 = not evaluated" rule protects the agent from a −20.
 
 **F4 (context, no ruling) — 171/458 rows are partly hand-typed.** Mar 42 · Apr 46 · **May 75** rows
 contain a score cell that contradicts the sheet's own formula, concentrated in CH-WA / Inbound

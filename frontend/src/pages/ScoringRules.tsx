@@ -290,15 +290,15 @@ export default function ScoringRules() {
                     : 'Settled 2026-07-22: rounding is DISPLAY only, bands compare the raw % — matching your workbook formulas. The old basis disagreed on 71 cells, 68 of them paying MORE (+550 net points). After the change the rounding variance class is zero in every month and engine accuracy went 91.29% → 92.33%.'}
                 </div>
                 <div style={{ marginTop: 5 }}>
-                  <b>D-081 — {ar ? 'نطاق:' : 'scope:'}</b>{' '}
+                  <b>D-081a ✅ — {ar ? 'باند مايو (محسوم):' : 'the May band (settled):'}</b>{' '}
                   {ar
-                    ? 'باند AHT/RT لـ Internship Inbound في مايو (٥٤ خلية)، وهل قاعدة «جودة Offline غير منطبقة» تسري للأمام فقط (٤٠ خلية).'
-                    : 'the May Internship-Inbound AHT/RT band (54 cells), and whether "Offline QA not applicable" applies forward-only (40 cells).'}
+                    ? 'مايو ٢٠٢٦ لوظيفة Internship Inbound يُحتسب على شكل الإيميل — قاعدة فترة، لا شذوذ. يناير ويونيو يبقيان على باند الـinbound. النتيجة: مايو ٣٩٫٢٩٪ ← ٧١٫٤٣٪.'
+                    : 'May 2026 for Internship Inbound is scored on the email shape — a PERIOD rule, not an outlier. Jan and June keep the inbound band. Result: May 39.29% → 71.43%.'}
                 </div>
                 <div style={{ marginTop: 6, color: dark ? '#94a3b8' : '#64748b', fontSize: 11.5 }}>
                   {ar
-                    ? 'دقة المحرّك الحالية مقابل الدفاتر: ٩٢٫٣٣٪ على الصفوف المشتقّة من معادلات (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها). كل الفجوة المتبقية في مايو وحده.'
-                    : 'Current engine accuracy vs the workbooks: 92.33% on formula-derivable rows (171 of 458 rows contain hand-typed cells no engine can reproduce). The entire remaining gap is May alone.'}
+                    ? 'دقة المحرّك الحالية مقابل الدفاتر: ٩٥٫٤٧٪ على الصفوف المشتقّة من معادلات (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها). المتبقي ١٣ صفًا فقط، ١١ منها معلّقة على قرار واحد: هل قاعدة «جودة Offline غير منطبقة» تسري للأمام فقط؟'
+                    : 'Current engine accuracy vs the workbooks: 95.47% on formula-derivable rows (171 of 458 rows contain hand-typed cells no engine can reproduce). Only 13 rows remain, 11 of them on one open ruling: is the Offline-QA-not-applicable rule forward-only?'}
                 </div>
               </div>
             </div>

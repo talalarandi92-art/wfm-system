@@ -314,6 +314,10 @@ describe('KPI Registry — migrations 088 + 089 deep-equal kpi-seed.ts (what the
     path.join(__dirname, '../../../../database/migrations/089_kpi_aht_rt_function_bands.sql'),
     'utf8',
   );
+  const sql091 = fs.readFileSync(
+    path.join(__dirname, '../../../../database/migrations/091_kpi_period_scoped_bands.sql'),
+    'utf8',
+  );
 
   const extract = (sql: string, marker: string): Record<string, any> => {
     const out: Record<string, any> = {};
@@ -349,16 +353,27 @@ describe('KPI Registry — migrations 088 + 089 deep-equal kpi-seed.ts (what the
     for (const k of SEED_KPIS) expect(out[k.code]).toBe(k.weight);
   });
 
-  it('089 carries EVERY functionOverride of QUALITY/AHT/RESPONSE_TIME with byte-equal band JSON + weight', () => {
+  it('089 + 091 carry EVERY functionOverride of QUALITY/AHT/RESPONSE_TIME with byte-equal band JSON + weight', () => {
+    // A PERIOD-scoped override (D-081) lives in 091 and its markers carry the
+    // window start, so the undated and dated rules for one function never collide.
     for (const code of ['QUALITY', 'AHT', 'RESPONSE_TIME']) {
       const kpi = SEED_KPIS.find((k) => k.code === code)!;
       for (const ov of kpi.functionOverrides!) {
         const escFn = ov.functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        expect(sql089).toMatch(new RegExp(`-- OV ${code} ${escFn} ${ov.weight}`));
-        const m = new RegExp(`-- OVBAND ${code} ${escFn}\\s*\\n\\s*'((?:[^']|'')*)'::jsonb`).exec(sql089);
+        const scoped = !!(ov.appliesFrom || ov.appliesTo);
+        const sql = scoped ? sql091 : sql089;
+        const key = scoped ? `${escFn}@${ov.appliesFrom}` : escFn;
+        expect(sql).toMatch(new RegExp(`-- OV ${code} ${key} ${ov.weight}`));
+        const m = new RegExp(`-- OVBAND ${code} ${key}\\s*\\n\\s*'((?:[^']|'')*)'::jsonb`).exec(sql);
         expect(m).toBeTruthy();
         expect(JSON.parse(m![1].replace(/''/g, "'"))).toEqual(ov.band);
+        // A period rule must be bounded on BOTH sides in SQL, or it leaks forward.
+        if (scoped) expect(sql).toContain(`DATE '${ov.appliesFrom}', DATE '${ov.appliesTo}'`);
       }
     }
+  });
+
+  it('091 adds applies_to so a period rule cannot leak past its window', () => {
+    expect(sql091).toMatch(/ALTER TABLE kpi_function_config ADD COLUMN IF NOT EXISTS applies_to DATE/);
   });
 });

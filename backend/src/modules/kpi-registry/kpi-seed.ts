@@ -41,6 +41,16 @@ export interface SeedKpiFunctionConfig {
   weight: number;
   target: number | null;
   band: KpiBand | null;
+  /**
+   * Optional PERIOD scope (inclusive ISO dates). A function's band is not always
+   * constant over time — the Director's May-26 `Internship Inbound` block was
+   * deliberately scored on the email shape while Jan and June used the inbound
+   * band (D-081, confirmed 2026-07-22, proven by the sheet formulas themselves).
+   * A dated override wins over an undated one for dates inside its window;
+   * outside it the undated override (or the KPI default) applies.
+   */
+  appliesFrom?: string;
+  appliesTo?: string;
 }
 
 export interface SeedKpi {
@@ -259,8 +269,11 @@ export const SEED_KPIS: SeedKpi[] = [
       { functionName: 'Internship CH - WA', weight: 15, target: 540 / 3600, band: CHAT_AHT_BAND() },
       // ── Inbound (SC!Q 6-branch, $O$2..$O$8: 2:30/3:00/4:00/4:30/5:00) — <2:30→−10, <3:00→5, 3:00–4:00→15, ≤4:30→10, <5:00→0, ≥5:00→blank(0)
       { functionName: 'Inbound', weight: 15, target: 240 / 3600, band: INBOUND_AHT_BAND() },
-      // majority band = Inbound (Jan+June); May 26 sheet used the email 48h shape for this block — OUTLIER, flagged in definition
       { functionName: 'Internship Inbound', weight: 15, target: 240 / 3600, band: INBOUND_AHT_BAND() },
+      // May 2026 ONLY: the sheet scored this block on the email 48h shape
+      // (`IF(P*24<=48,10,-10)`) while Jan and June used the inbound 6-band.
+      // Director confirmed 2026-07-22 (D-081) that May was deliberate.
+      { functionName: 'Internship Inbound', weight: 10, target: 48, band: EMAIL_AHT_BAND(), appliesFrom: '2026-05-01', appliesTo: '2026-05-31' },
       // ── OMT (SC!Q, $O$3/$O$5: 3:00 / 2:00) — <2:00→10, 2:00–3:00→5, >3:00→−5 (max 10)
       { functionName: 'OMT', weight: 10, target: 120 / 3600, band: OMT_AHT_BAND() },
       // ── Email-shaped 48h case-SLA blocks (max 10)
@@ -394,6 +407,14 @@ export const SEED_KPIS: SeedKpi[] = [
       { functionName: 'Social Media', weight: 15, target: 600 / 3600, band: SM_RT_BAND() },
       { functionName: 'Inbound', weight: 0, target: null, band: { type: 'info', note: 'Response Time not scored for Inbound (AG cells empty in all 6 workbooks)' } },
       { functionName: 'Internship Inbound', weight: 0, target: null, band: { type: 'info', note: 'Response Time not scored for Internship Inbound (AG cells empty where the inbound band applies)' } },
+      // May 2026 ONLY: that month's block DOES score RT, on the email 1h/2h/4h
+      // shape (`IF(AF<=TIME(1,0,0),15, <=2h→10, <=4h→5, else −15)`), all 45 rows
+      // carrying the formula. Jan + June leave AG empty. D-081, Director 2026-07-22.
+      {
+        functionName: 'Internship Inbound', weight: 15, target: 1,
+        band: { type: 'threshold_hours', transform: 'dayfrac_to_hours', bands: [{ lte: 1, points: 15 }, { lte: 2, points: 10 }, { lte: 4, points: 5 }], default: -15 },
+        appliesFrom: '2026-05-01', appliesTo: '2026-05-31',
+      },
       { functionName: 'OMT', weight: 0, target: null, band: { type: 'info', note: 'Response Time not scored for OMT (AG cells empty in all 6 workbooks)' } },
       { functionName: 'Refund', weight: 0, target: null, band: { type: 'info', note: 'Response Time not scored for Refund (AG cells empty in all 6 workbooks)' } },
     ],

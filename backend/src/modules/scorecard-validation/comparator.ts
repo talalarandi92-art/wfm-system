@@ -105,8 +105,10 @@ export function classifyCell(args: {
   rowRefBug: boolean;
   /** The row's function — the band MUST be resolved the same way the scorer did. */
   functionName?: string;
+  /** The workbook's month — period-scoped bands (D-081) resolve differently per month. */
+  periodDate?: string | null;
 }): { cls: VarianceClass; note: string } {
-  const { kpi, raw, wbPoints, ourPoints, sheetFormulaPoints, hasFormula, rowRefBug, functionName } = args;
+  const { kpi, raw, wbPoints, ourPoints, sheetFormulaPoints, hasFormula, rowRefBug, functionName, periodDate } = args;
   const wb = wbPoints ?? 0;
   const ours = ourPoints ?? 0;
 
@@ -141,7 +143,7 @@ export function classifyCell(args: {
   }
 
   const band = functionName
-    ? bandFor(CELL_TO_KPI_CODE[kpi], functionName)
+    ? bandFor(CELL_TO_KPI_CODE[kpi], functionName, periodDate)
     : bandByKpiCode.get(CELL_TO_KPI_CODE[kpi]) ?? null;
   if (band && band.type === 'threshold_pct') {
     const unrounded = scoreThresholdPctUnrounded(band, raw);
@@ -162,7 +164,7 @@ export function classifyCell(args: {
 export function compareWorkbook(wb: ScWorkbook): RowComparison[] {
   const out: RowComparison[] = [];
   for (const row of wb.rows) {
-    const { ourPoints, ourNet } = rescoreRow(row);
+    const { ourPoints, ourNet } = rescoreRow(row, wb.periodDate);
     const cellVariances: CellVariance[] = [];
 
     for (const sc of SCORE_CELLS) {
@@ -186,6 +188,7 @@ export function compareWorkbook(wb: ScWorkbook): RowComparison[] {
         hasFormula: cell.formula !== null,
         rowRefBug,
         functionName: row.functionName,
+        periodDate: wb.periodDate,
       });
 
       cellVariances.push({

@@ -4,9 +4,10 @@
  * `node scripts/scorecard-validate.js` (SELECT-nothing, file-only).
  */
 import { classifyCell, toPoints, denseRank } from './comparator';
-import { rescoreRow } from './re-scorer';
+import { rescoreRow, bandFor } from './re-scorer';
 import { evalExcelFormula, formulaReferencesOtherRow } from './excel-formula-eval';
-import { ScRow, SCORE_CELLS, ScoreKpi } from './sc-workbook-reader';
+import { scoreBand } from '../kpi-registry/score-band';
+import { ScRow, SCORE_CELLS, ScoreKpi, periodDateFromLabel } from './sc-workbook-reader';
 
 function emptyCells(): ScRow['cells'] {
   const cells = {} as ScRow['cells'];
@@ -128,6 +129,38 @@ describe('comparator classification', () => {
     const r = classifyCell({ ...base, kpi: 'AHT', raw: 0.0104, wbPoints: -5, ourPoints: 10, sheetFormulaPoints: -5 });
     expect(r.cls).toBe('formula-mismatch');
     expect(r.note).toContain('KNOWN');
+  });
+
+  it('D-081 period band: May-26 Internship Inbound scores on the EMAIL shape, Jan/June do NOT', () => {
+    const dayfrac = (sec: number) => sec / 86400;
+    const fourMin = dayfrac(240);        // 4:00 — inbound band → 15, email band → 10 (well under 48h)
+    const oneHour = dayfrac(3600);       // 1:00 RT — email band → 15, otherwise not scored
+
+    // AHT: May uses the email 48h band; the other months keep the inbound 6-band.
+    expect(bandFor('AHT', 'Internship Inbound', '2026-05-01')!.bands![0].lte).toBe(48);
+    expect(bandFor('AHT', 'Internship Inbound', '2026-01-01')!.bands!.length).toBeGreaterThan(1);
+    expect(bandFor('AHT', 'Internship Inbound', '2026-06-01')!.bands!.length).toBeGreaterThan(1);
+    expect(scoreBand(bandFor('AHT', 'Internship Inbound', '2026-05-01'), fourMin)).toBe(10);
+    expect(scoreBand(bandFor('AHT', 'Internship Inbound', '2026-06-01'), fourMin)).toBe(15);
+
+    // RESPONSE_TIME: scored in May only; an info band (null) in Jan/June.
+    expect(scoreBand(bandFor('RESPONSE_TIME', 'Internship Inbound', '2026-05-01'), oneHour)).toBe(15);
+    expect(scoreBand(bandFor('RESPONSE_TIME', 'Internship Inbound', '2026-06-01'), oneHour)).toBeNull();
+    expect(scoreBand(bandFor('RESPONSE_TIME', 'Internship Inbound', '2026-01-01'), oneHour)).toBeNull();
+
+    // The rule must not leak: no period ⇒ fall back to the UNDATED rule, never guess.
+    expect(scoreBand(bandFor('RESPONSE_TIME', 'Internship Inbound'), oneHour)).toBeNull();
+    // …and a function with no period rule is unaffected by passing a date.
+    expect(scoreBand(bandFor('AHT', 'Inbound', '2026-05-01'), fourMin)).toBe(15);
+  });
+
+  it('a workbook month label resolves to the period date that selects the band', () => {
+    expect(periodDateFromLabel('May 26')).toBe('2026-05-01');
+    expect(periodDateFromLabel('Jan 26')).toBe('2026-01-01');
+    expect(periodDateFromLabel('June 26')).toBe('2026-06-01');
+    expect(periodDateFromLabel('April 26')).toBe('2026-04-01');
+    // unparseable ⇒ null, so bandFor falls back to the undated rule instead of guessing
+    expect(periodDateFromLabel('Sheet1')).toBeNull();
   });
 
   it('not-applicable — our rulebook scores the KPI N/A for this function, the sheet awarded points', () => {

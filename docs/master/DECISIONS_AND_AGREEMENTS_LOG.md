@@ -532,12 +532,25 @@
   engine `null` ("not applicable to this function") was mislabelled *rounding*/*formula-mismatch* —
   the new **`not-applicable`** class isolates 110 such cells.
 
-### D-081 — Two scope questions the residue depends on
-- **Status:** ⚠ Needs Approval. (1) **May-26 `Internship Inbound`**: m089 seeded it from the Jan+June
-  majority (inbound band, RT not scored) and flagged May as an email-shaped outlier; May's sheet does
-  score RT (45 cells) — was that deliberate, or is May the outlier? This one block is most of May's
-  39.29%. (2) **`Offline` QUALITY**: your 2026-07-11 rule says Offline QA is not applicable, but the
-  Feb + May sheets scored it (40 cells) — confirm the rule applies **forward only**.
+### D-081a — May-2026 `Internship Inbound` is scored on the EMAIL shape (a PERIOD rule)
+- **Status:** ✅ **Confirmed + EXECUTED (2026-07-22, Director: "مايو كان مقصود email").**
+- **Verified before implementing** (the sheets, not the assumption): Jan AHT = inbound 6-band, RT not
+  scored · May AHT = `IF(P*24<=48,10,-10)` and RT = email 1h/2h/4h with all 45 rows carrying the
+  formula · June = inbound band again, RT empty. May is therefore a genuine PERIOD; applying the
+  email shape globally would have broken Jan and June.
+- **Mechanism (new):** period-scoped band configs. `SeedKpiFunctionConfig` gains
+  `appliesFrom`/`appliesTo`; **m091** adds `kpi_function_config.applies_to` (NULL = open-ended) and
+  seeds the two May-only rows; `bandFor(code, fn, periodDate)` prefers a dated rule whose window
+  contains the period, else the undated rule — with no period it never guesses a dated rule.
+  The workbook's month drives it (`periodDateFromLabel`).
+- **Effect:** May 39.29% → **71.43%**, overall engine accuracy 92.33% → **95.47%**. Tests pin that the
+  May rule does NOT leak into June.
+
+### D-081b — `Offline` QUALITY: is the not-applicable rule forward-only?
+- **Status:** ⚠ **Needs Approval — the last thing between the engine and the ≥98% gate.** The
+  2026-07-11 rule says Offline/Internship-Offline QA is not applicable, but the Feb and May sheets
+  (which predate it) scored it. That is **11 of the 13 remaining misses**. If forward-only is
+  confirmed, it becomes a period-scoped band exactly like D-081a and the gate reaches ~99%.
 
 ---
 
