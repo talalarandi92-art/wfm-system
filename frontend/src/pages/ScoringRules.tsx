@@ -271,6 +271,39 @@ export default function ScoringRules() {
             <StatTile icon={Info} label={ar ? 'للمتابعة فقط' : 'Tracked / inactive'} num={tracked.length} color={STATUS.neutral} />
           </div>
 
+          {/* ── Open rulings (B7, 2026-07-22) ──────────────────────────────────
+              A rulebook that hides its disputes is a brochure. These are the
+              points where the CONFIRMED rule and the Director's own SC workbooks
+              disagree, measured over the 6 real 2026 workbooks. Nothing here has
+              been executed — changing a confirmed rule needs his approval. */}
+          <NxCard dark={dark} style={{ marginBottom: 14, borderInlineStart: '3px solid #f59e0b' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <CircleSlash size={16} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
+              <div style={{ fontSize: 12.5, lineHeight: 1.65, color: dark ? '#cbd5e1' : '#334155' }}>
+                <b style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
+                  {ar ? 'قرارات معلَّقة تؤثر على كل تقييم قادم' : 'Open rulings that affect every future score'}
+                </b>
+                <div style={{ marginTop: 6 }}>
+                  <b>D-079 — {ar ? 'أساس التقريب:' : 'rounding basis:'}</b>{' '}
+                  {ar
+                    ? 'القاعدة المعتمدة تقرّب النسبة أولًا ثم تطبّق الشريحة، بينما معادلات دفاتر السكوركارد تطبّق الشريحة على القيمة الخام. تختلفان في ٧١ خلية، و٦٨ منها تمنح نقاطًا أكثر من الدفتر (+٥٥٠ نقطة). مثال: جودة ٧٩٫٨٠٪ ← القاعدة ١٠ نقاط، الدفتر −١٠.'
+                    : 'the confirmed rule rounds the % first, then bands it; the SC workbooks band the RAW fraction. They disagree on 71 cells — 68 award MORE than the workbook (+550 net points). e.g. QA 79.80% → rule 10 pts, workbook −10.'}
+                </div>
+                <div style={{ marginTop: 5 }}>
+                  <b>D-081 — {ar ? 'نطاق:' : 'scope:'}</b>{' '}
+                  {ar
+                    ? 'باند AHT/RT لـ Internship Inbound في مايو (٥٤ خلية)، وهل قاعدة «جودة Offline غير منطبقة» تسري للأمام فقط (٤٠ خلية).'
+                    : 'the May Internship-Inbound AHT/RT band (54 cells), and whether "Offline QA not applicable" applies forward-only (40 cells).'}
+                </div>
+                <div style={{ marginTop: 6, color: dark ? '#94a3b8' : '#64748b', fontSize: 11.5 }}>
+                  {ar
+                    ? 'لم يُنفَّذ أي تغيير. دقة المحرّك الحالية مقابل الدفاتر: ٩١٫٢٩٪ على الصفوف المشتقّة من معادلات (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها).'
+                    : 'Nothing was changed. Current engine accuracy vs the workbooks: 91.29% on formula-derivable rows (171 of 458 rows contain hand-typed cells no engine can reproduce).'}
+                </div>
+              </div>
+            </div>
+          </NxCard>
+
           <NxCard dark={dark} style={{ marginBottom: 14, borderInlineStart: '3px solid #6366f1' }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
               <ShieldCheck size={16} style={{ color: '#6366f1', flexShrink: 0, marginTop: 2 }} />
