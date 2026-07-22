@@ -284,10 +284,10 @@ export default function ScoringRules() {
                   {ar ? 'قرارات معلَّقة تؤثر على كل تقييم قادم' : 'Open rulings that affect every future score'}
                 </b>
                 <div style={{ marginTop: 6 }}>
-                  <b>D-079 — {ar ? 'أساس التقريب:' : 'rounding basis:'}</b>{' '}
+                  <b>D-079 ✅ — {ar ? 'أساس التقريب (محسوم):' : 'rounding basis (settled):'}</b>{' '}
                   {ar
-                    ? 'القاعدة المعتمدة تقرّب النسبة أولًا ثم تطبّق الشريحة، بينما معادلات دفاتر السكوركارد تطبّق الشريحة على القيمة الخام. تختلفان في ٧١ خلية، و٦٨ منها تمنح نقاطًا أكثر من الدفتر (+٥٥٠ نقطة). مثال: جودة ٧٩٫٨٠٪ ← القاعدة ١٠ نقاط، الدفتر −١٠.'
-                    : 'the confirmed rule rounds the % first, then bands it; the SC workbooks band the RAW fraction. They disagree on 71 cells — 68 award MORE than the workbook (+550 net points). e.g. QA 79.80% → rule 10 pts, workbook −10.'}
+                    ? 'محسوم ٢٢ يوليو ٢٠٢٦: التقريب للعرض فقط، والشرائح تُقارَن بالقيمة الخام — مطابقةً لمعادلات دفاترك. كان الفرق ٧١ خلية، ٦٨ منها تمنح نقاطًا أكثر من الدفتر (+٥٥٠ نقطة). بعد التطبيق: صنف «التقريب» صفر في كل الشهور، ودقة المحرّك ٩١٫٢٩٪ ← ٩٢٫٣٣٪.'
+                    : 'Settled 2026-07-22: rounding is DISPLAY only, bands compare the raw % — matching your workbook formulas. The old basis disagreed on 71 cells, 68 of them paying MORE (+550 net points). After the change the rounding variance class is zero in every month and engine accuracy went 91.29% → 92.33%.'}
                 </div>
                 <div style={{ marginTop: 5 }}>
                   <b>D-081 — {ar ? 'نطاق:' : 'scope:'}</b>{' '}
@@ -297,8 +297,8 @@ export default function ScoringRules() {
                 </div>
                 <div style={{ marginTop: 6, color: dark ? '#94a3b8' : '#64748b', fontSize: 11.5 }}>
                   {ar
-                    ? 'لم يُنفَّذ أي تغيير. دقة المحرّك الحالية مقابل الدفاتر: ٩١٫٢٩٪ على الصفوف المشتقّة من معادلات (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها).'
-                    : 'Nothing was changed. Current engine accuracy vs the workbooks: 91.29% on formula-derivable rows (171 of 458 rows contain hand-typed cells no engine can reproduce).'}
+                    ? 'دقة المحرّك الحالية مقابل الدفاتر: ٩٢٫٣٣٪ على الصفوف المشتقّة من معادلات (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها). كل الفجوة المتبقية في مايو وحده.'
+                    : 'Current engine accuracy vs the workbooks: 92.33% on formula-derivable rows (171 of 458 rows contain hand-typed cells no engine can reproduce). The entire remaining gap is May alone.'}
                 </div>
               </div>
             </div>

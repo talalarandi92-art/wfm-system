@@ -43,11 +43,11 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
   it('QUALITY: ≥95→30 · 90–94→20 · 80–89→10 · 65–79→−10 · 1–64→−20 · blank/0 → NOT EVALUATED (null)', () => {
     const b = band('QUALITY');
     expect(scoreBand(b, 0.95)).toBe(30);
-    expect(scoreBand(b, 0.945)).toBe(30);   // 94.5 → 95 (half-up boundary)
+    expect(scoreBand(b, 0.945)).toBe(20);   // D-079: 94.5% is NOT 95% — banding is on the raw %
     expect(scoreBand(b, 0.94)).toBe(20);
     expect(scoreBand(b, 0.90)).toBe(20);
-    expect(scoreBand(b, 0.895)).toBe(20);   // 89.5 → 90
-    expect(scoreBand(b, 0.894)).toBe(10);   // 89.4 → 89
+    expect(scoreBand(b, 0.895)).toBe(10);   // D-079: 89.5% stays in the 80–89 band
+    expect(scoreBand(b, 0.894)).toBe(10);
     expect(scoreBand(b, 0.80)).toBe(10);
     expect(scoreBand(b, 0.79)).toBe(-10);
     expect(scoreBand(b, 0.65)).toBe(-10);
@@ -72,7 +72,7 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
   it('FCR: ≥85→20 · 80–84→10 · 75–79→5 · <75→−10', () => {
     const b = band('FCR');
     expect(scoreBand(b, 0.85)).toBe(20);
-    expect(scoreBand(b, 0.845)).toBe(20);   // 84.5 → 85
+    expect(scoreBand(b, 0.845)).toBe(10);   // D-079: 84.5% is below the 85 bar
     expect(scoreBand(b, 0.84)).toBe(10);
     expect(scoreBand(b, 0.80)).toBe(10);
     expect(scoreBand(b, 0.79)).toBe(5);
@@ -83,7 +83,11 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
   it('PRODUCTIVITY: ≥91→15 · =90→10 · =89→5 · 87–88→0 · ≤86→−15 (discrete steps)', () => {
     const b = band('PRODUCTIVITY');
     expect(scoreBand(b, 0.91)).toBe(15);
-    expect(scoreBand(b, 0.905)).toBe(15);   // 90.5 → 91
+    // D-079 + the sheet's DISCRETE productivity steps (=90, =89): a value between the
+    // integer steps matches no band and falls to 0 — exactly what the Director's own
+    // sheet does (May CH-WA 88.90% was awarded 0 there). Flagged in SCORECARD_PROGRAM §F5.
+    expect(scoreBand(b, 0.905)).toBe(0);
+    expect(scoreBand(b, 0.889)).toBe(0);
     expect(scoreBand(b, 0.90)).toBe(10);
     expect(scoreBand(b, 0.89)).toBe(5);
     expect(scoreBand(b, 0.88)).toBe(0);
@@ -96,8 +100,8 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
     const b = band('CTR');
     expect(scoreBand(b, 0.95)).toBe(10);
     expect(scoreBand(b, 0.94)).toBe(5);
-    expect(scoreBand(b, 0.895)).toBe(5);    // 89.5 → 90
-    expect(scoreBand(b, 0.894)).toBe(-10);  // 89.4 → 89
+    expect(scoreBand(b, 0.895)).toBe(-10);  // D-079: 89.5% is below the 90 bar
+    expect(scoreBand(b, 0.894)).toBe(-10);
   });
 
   it('QUIZ (template IF): >95→10 · 90–95→5 · <90→−10', () => {
@@ -172,10 +176,11 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
   it('PRR gate: 2.5 per cell iff BRR≥80% AND RES≥10% (RES=responses÷contacts gate, half-up)', () => {
     const b = band('PRR');
     expect(scoreBand(b, 0, { PRR: 0.80, SURVEY_RR: 0.10 })).toBe(2.5);
-    expect(scoreBand(b, 0, { PRR: 0.795, SURVEY_RR: 0.10 })).toBe(2.5);  // 79.5 → 80
-    expect(scoreBand(b, 0, { PRR: 0.799, SURVEY_RR: 0.50 })).toBe(2.5);   // BRR 79.9 → 80 passes
+    expect(scoreBand(b, 0, { PRR: 0.795, SURVEY_RR: 0.10 })).toBe(0);     // D-079: 79.5% does not clear an 80% gate
+    expect(scoreBand(b, 0, { PRR: 0.799, SURVEY_RR: 0.50 })).toBe(0);     // 79.9% likewise
     expect(scoreBand(b, 0, { PRR: 0.79, SURVEY_RR: 0.50 })).toBe(0);      // BRR 79 < 80 bar → fail
-    expect(scoreBand(b, 0, { PRR: 0.90, SURVEY_RR: 0.094 })).toBe(0);     // RES 9.4 → 9 < 10 gate fails
+    expect(scoreBand(b, 0, { PRR: 0.90, SURVEY_RR: 0.094 })).toBe(0);     // RES 9.4% < 10% gate fails
+    expect(scoreBand(b, 0, { PRR: 0.80, SURVEY_RR: 0.10 })).toBe(2.5);    // exact edges still pass (float-noise tolerance)
     // both cells (Points + Bonus) passing = 5 total
     const cell = scoreBand(b, 0, { PRR: 0.85, SURVEY_RR: 0.12 })!;
     expect(cell * 2).toBe(5);

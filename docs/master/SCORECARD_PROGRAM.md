@@ -35,9 +35,10 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
   isolates 110 such cells; (3) the gate was measured over rows the sheet itself contradicts.
   **Headline: 171 of 458 Final rows carry a HAND-TYPED score cell** (the workbook's cached value
   disagrees with its own formula), which no engine can reproduce — so the gate is now judged on the
-  **287 formula-derivable rows: engine accuracy 91.29%** (raw all-rows figure 57.21% was measuring
-  the typist). Per month (formula-only): Jan 98.78 · Feb 94.44 · Mar 92.0 · Apr 100 · **May 39.29** · Jun 98.53.
-  Gate ≥98% NOT MET — the residue is concentrated and each piece needs a Director ruling, not code
+  **287 formula-derivable rows** (raw all-rows figure 57.21% was measuring the typist).
+  After D-079 landed the same day: **engine accuracy 92.33%** — Jan 98.78 · Feb 95.83 · Mar **100** ·
+  Apr 100 · **May 39.29** · Jun 98.53, with the `rounding` variance class at ZERO in every month.
+  Gate ≥98% NOT MET, and the entire remaining gap is MAY — the residue needs a Director ruling, not code
   (see “B7 findings” below). Report: `new folder/Scorecard 2026/Historical_Validation_Report.xlsx`.
 - **B8 Sprinklr bridge queue-discovery repair** ⚠ needs extension repo location (parallel-safe).
 - **B9 UI**: unified roster+daily-performance view, recon/unauthorized/survey/ranking/incentive pages (§25).
@@ -46,19 +47,27 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
 
 Pure-backend: B0–B8 · UI: B9–B11 · credential-gated: B3/B4/B8.
 
-## B7 findings — the 3 things standing between 91.29% and the gate (Director rulings, NOT code)
+## B7 findings — what stands between 92.33% and the gate (Director rulings, NOT code)
 
-**F1 ⚠ ROUNDING BASIS — a confirmed rule contradicts your own workbooks (Recommended, not executed).**
+**F1 ✅ RESOLVED (D-079, Director 2026-07-22 — option (c) executed).** Round-half-up is now DISPLAY
+ONLY; bands compare the raw %. The `rounding` variance class is ZERO in every month and engine
+accuracy went 91.29% → **92.33%** (Mar 92% → 100%). Original finding kept below for the record.
+
+**F1 (original) — a confirmed rule contradicted the workbooks.**
 `WFM_RULES_AND_DECISIONS.md` §KPI says **round-half-up all %** *then* band it. Your SC sheets' own
 formulas band the **RAW fraction**. They disagree on **71 cells**, and it is nearly one-directional:
 **68 of 71 award MORE points than your sheet, +550 net points in total.** Examples: QA 94.75% → rule
 30 pts / sheet 20 · QA 89.60% → rule 20 / sheet 10 · QA **79.80% → rule 10 / sheet −10** (a 20-point
 swing at the band edge) · productivity 88.90% → rule 5 / sheet 0. Affected KPIs: PRODUCTIVITY 64,
 QUALITY 7. **Nothing was changed** — flipping the comparison basis is a rule change (BR-APP-006).
-Options: (a) keep round-half-up and accept the engine scores slightly higher than the historical
-sheets; (b) band the raw fraction to match the sheets, and correct the rule doc; (c) round-half-up
-for DISPLAY only, band on raw. Recommendation: **(c)** — it matches the sheets and keeps the
-familiar displayed %.
+Options were (a) keep the rule, (b) band raw everywhere, (c) round for display only + band raw.
+**The Director chose (c) on 2026-07-22 and it is implemented.**
+
+**F5 (new, needs a ruling) — the productivity band uses DISCRETE steps.** `=90` / `=89` only match
+exact integer percentages, so a raw 88.90% matches no band and scores **0** — which is precisely what
+your own sheet does (May CH-WA 88.90% was awarded 0 there), but it means a 90.5% performer scores 0
+while a 90.0% performer scores 10. If that is not intended, the band needs RANGES (`≥90`, `≥89`)
+instead of equalities. Nothing changed — this is a band-design question, not a rounding one.
 
 **F2 May-26 `Internship Inbound` block (45 RT cells + 9 AHT).** m089 seeded that function from the
 Jan+June MAJORITY (inbound band; RT not scored), and flagged May as an email-shaped outlier. May's

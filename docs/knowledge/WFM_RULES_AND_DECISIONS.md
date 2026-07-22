@@ -127,8 +127,15 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
   edit/swap. Exclude OFF/H/L/S/A/COMP from the working distribution.
 
 ## 9. Scorecard & Net Points
-- Per-function KPI bands; **round-half-up** all %; productivity formula confirmed; sick-day penalty (1 sick −2%,
-  2+ −5%); quiz-commitment −5 on unsolved-quiz weeks.
+- Per-function KPI bands; **round-half-up all % is DISPLAY ONLY — scoring bands the RAW percentage**
+  (D-079, Director 2026-07-22). Rounding first promoted values across band edges and paid MORE than the
+  Director's own SC workbooks on 71 cells (68 higher, +550 net points; QA 79.80% paid 10 by the old
+  path and −10 by his sheet). Enforced in `kpi-registry/score-band.ts` (`bandPct`, threshold_pct +
+  gate); the hour bands never rounded and keep their exact edges. Productivity formula confirmed;
+  sick-day penalty (1 sick −2%, 2+ −5%); quiz-commitment −5 on unsolved-quiz weeks.
+  **Consequence to watch:** the productivity band uses DISCRETE steps (`=90`, `=89`), so a raw value
+  between the integer steps (e.g. 88.90%) matches no band and scores 0 — which is exactly what the
+  Director's sheet does today, but it is a band-design question, not a rounding one.
 - `scorecard_entries` = 1 month only; `scorecard_monthly` = Net Points only; `fcr.employee_id` is a uuid.
 - **⚠ DRIFT TO FIX (audit):** in the Custom Report Builder, the `sc` (scorecard) CTE is joined 1:N onto per-day
   roster rows, so a grouped `AVG(sc.net)` is **day-weighted, not person-weighted** (a 22-day agent outweighs an

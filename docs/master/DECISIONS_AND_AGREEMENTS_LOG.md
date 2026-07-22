@@ -497,8 +497,17 @@
 
 ## Era 7 — 2026-07-22 (scorecard B7 validation)
 
-### D-079 — Scoring band basis: round-half-up (rule) vs raw fraction (your workbooks)
-- **Status:** ⚠ **NEEDS APPROVAL — nothing executed.** Recommended option (c).
+### D-079 — Scoring band basis: round-half-up is DISPLAY ONLY; bands compare the RAW %
+- **Status:** ✅ **Confirmed + EXECUTED (2026-07-22, Director chose option (c)).**
+  `kpi-registry/score-band.ts`: `threshold_pct` and `gate` compare `bandPct(v) = v*100` with a 1e-6
+  float-noise tolerance; `roundHalfUpPct` survives for DISPLAY only. Hour bands were left strict —
+  they never rounded and their exact edges carry sheet meaning (9:30 belongs to the next band).
+  **Measured effect on the 6 real workbooks: the `rounding` variance class went to ZERO in every
+  month; engine accuracy 91.29% → 92.33%** (Mar 92% → 100%, Feb 94.44% → 95.83%). Rulebook doc +
+  Scoring Rules page updated; 29 registry tests re-pinned to the new basis.
+- **Watch (F5):** the productivity band uses DISCRETE steps (`=90`, `=89`), so a raw value between the
+  integer steps (88.90%) matches no band and scores 0. That is what the Director's sheet does today —
+  but it is a band-DESIGN question, worth a separate ruling if unintended.
 - **The conflict:** `WFM_RULES_AND_DECISIONS.md` (Confirmed) says round-half-up every % **then** band
   it. The SC workbooks' own IF formulas band the **RAW fraction**. Measured across the 6 real 2026
   workbooks: **71 cells disagree, 68 of them award MORE than your sheet, +550 net points total**
