@@ -281,7 +281,7 @@ export default function ScoringRules() {
               <CircleSlash size={16} style={{ color: '#f59e0b', flexShrink: 0, marginTop: 2 }} />
               <div style={{ fontSize: 12.5, lineHeight: 1.65, color: dark ? '#cbd5e1' : '#334155' }}>
                 <b style={{ color: dark ? '#f1f5f9' : '#0f172a' }}>
-                  {ar ? 'قرارات معلَّقة تؤثر على كل تقييم قادم' : 'Open rulings that affect every future score'}
+                  {ar ? 'قرارات التقييم المحسومة (٢٢ يوليو ٢٠٢٦)' : 'Settled scoring rulings (2026-07-22)'}
                 </b>
                 <div style={{ marginTop: 6 }}>
                   <b>D-079 ✅ — {ar ? 'أساس التقريب (محسوم):' : 'rounding basis (settled):'}</b>{' '}
@@ -290,15 +290,15 @@ export default function ScoringRules() {
                     : 'Settled 2026-07-22: rounding is DISPLAY only, bands compare the raw % — matching your workbook formulas. The old basis disagreed on 71 cells, 68 of them paying MORE (+550 net points). After the change the rounding variance class is zero in every month and engine accuracy went 91.29% → 92.33%.'}
                 </div>
                 <div style={{ marginTop: 5 }}>
-                  <b>D-081a ✅ — {ar ? 'باند مايو (محسوم):' : 'the May band (settled):'}</b>{' '}
+                  <b>D-081 ✅ — {ar ? 'قواعد الفترات (محسومة):' : 'period rules (settled):'}</b>{' '}
                   {ar
-                    ? 'مايو ٢٠٢٦ لوظيفة Internship Inbound يُحتسب على شكل الإيميل — قاعدة فترة، لا شذوذ. يناير ويونيو يبقيان على باند الـinbound. النتيجة: مايو ٣٩٫٢٩٪ ← ٧١٫٤٣٪.'
-                    : 'May 2026 for Internship Inbound is scored on the email shape — a PERIOD rule, not an outlier. Jan and June keep the inbound band. Result: May 39.29% → 71.43%.'}
+                    ? 'مايو ٢٠٢٦ لوظيفة Internship Inbound يُحتسب على شكل الإيميل (قاعدة فترة، لا شذوذ — يناير ويونيو على باند الـinbound)، وقاعدة «جودة Offline غير منطبقة» تسري من ١١ يوليو للأمام فقط فتبقى فبراير ومايو مُقيَّمتين. النتيجة: مايو ٣٩٫٢٩٪ ← ١٠٠٪.'
+                    : 'May 2026 for Internship Inbound is scored on the email shape (a PERIOD rule, not an outlier — Jan and June keep the inbound band), and the Offline-QA-not-applicable rule runs forward only from 2026-07-11, so Feb and May stay scored. Result: May 39.29% → 100%.'}
                 </div>
                 <div style={{ marginTop: 6, color: dark ? '#94a3b8' : '#64748b', fontSize: 11.5 }}>
                   {ar
-                    ? 'دقة المحرّك الحالية مقابل الدفاتر: ٩٥٫٤٧٪ على الصفوف المشتقّة من معادلات (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها). المتبقي ١٣ صفًا فقط، ١١ منها معلّقة على قرار واحد: هل قاعدة «جودة Offline غير منطبقة» تسري للأمام فقط؟'
-                    : 'Current engine accuracy vs the workbooks: 95.47% on formula-derivable rows (171 of 458 rows contain hand-typed cells no engine can reproduce). Only 13 rows remain, 11 of them on one open ruling: is the Offline-QA-not-applicable rule forward-only?'}
+                    ? 'دقة المحرّك مقابل الدفاتر: ٩٨٫٢٦٪ على الصفوف المشتقّة من معادلات — بوابة الـ٩٨٪ محقّقة. (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها.) الفروقات المتبقية ٥ صفوف فقط، ولا واحد منها خطأ محرّك.'
+                    : 'Engine accuracy vs the workbooks: 98.26% on formula-derivable rows — the 98% gate is MET. (171 of 458 rows carry hand-typed cells no engine can reproduce.) Just 5 rows still differ, and none of them is an engine error.'}
                 </div>
               </div>
             </div>

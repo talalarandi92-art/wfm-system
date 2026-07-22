@@ -18,17 +18,22 @@ export function bandFor(kpiCode: string, functionName: string, periodDate?: stri
   const mine = (kpi.functionOverrides ?? []).filter((o) => o.functionName.toLowerCase() === functionName.toLowerCase());
   if (!mine.length) return kpi.band ?? null;
 
-  /* A dated override wins for dates inside its window (D-081: May-26 Internship
-     Inbound was deliberately email-shaped while Jan/June used the inbound band).
-     With no date to judge by we fall back to the undated override — never to a
-     period rule that may not apply. */
-  if (periodDate) {
-    const scoped = mine.find((o) =>
-      (o.appliesFrom || o.appliesTo) &&
-      (!o.appliesFrom || periodDate >= o.appliesFrom) &&
-      (!o.appliesTo || periodDate <= o.appliesTo));
-    if (scoped) return scoped.band ?? null;
-  }
+  /* A dated override wins for dates inside its window (D-081a: May-26 Internship
+     Inbound was deliberately email-shaped while Jan/June used the inbound band;
+     D-081b: the Offline QA not-applicable rule only starts 2026-07-11).
+     Asked WITHOUT a period, the rulebook answers "as of today" — the rule in
+     force now — not "ignore every dated rule". Falling back to today keeps a
+     caller that forgets the period on the CURRENT rule instead of a stale one. */
+  const at = periodDate || new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10); // Kuwait
+  const scoped = mine.find((o) =>
+    (o.appliesFrom || o.appliesTo) &&
+    (!o.appliesFrom || at >= o.appliesFrom) &&
+    (!o.appliesTo || at <= o.appliesTo));
+  if (scoped) return scoped.band ?? null;
+
+  /* Outside every window: the undated override, else the KPI default. A rule that
+     starts on a date has NO pre-history here by design — before it, the KPI's own
+     band applies, which is exactly what "forward-only" means. */
   const undated = mine.find((o) => !o.appliesFrom && !o.appliesTo);
   return (undated?.band ?? kpi.band) ?? null;
 }

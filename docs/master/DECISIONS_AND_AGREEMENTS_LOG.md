@@ -546,11 +546,19 @@
 - **Effect:** May 39.29% → **71.43%**, overall engine accuracy 92.33% → **95.47%**. Tests pin that the
   May rule does NOT leak into June.
 
-### D-081b — `Offline` QUALITY: is the not-applicable rule forward-only?
-- **Status:** ⚠ **Needs Approval — the last thing between the engine and the ≥98% gate.** The
-  2026-07-11 rule says Offline/Internship-Offline QA is not applicable, but the Feb and May sheets
-  (which predate it) scored it. That is **11 of the 13 remaining misses**. If forward-only is
-  confirmed, it becomes a period-scoped band exactly like D-081a and the gate reaches ~99%.
+### D-081b — the `Offline` QUALITY not-applicable rule is FORWARD-ONLY
+- **Status:** ✅ **Confirmed + EXECUTED (2026-07-22, Director: "اي للأمام فقط").**
+- **Rule:** Offline / Internship Offline have no QA evaluation **from 2026-07-11 onward**. m089 had
+  back-dated it to 2026-01-01, which retroactively un-scored months that were already published —
+  the Feb and May 2026 sheets DO score those blocks (10 pts at 80%, 30 at 97.5%). A rule starts the
+  day it was made; it cannot un-score a month that already went out.
+- **Mechanism:** **m092** re-dates the window to 2026-07-11. There is deliberately no undated row for
+  those functions, so any earlier date falls through to the KPI's own QUALITY band — that is what
+  forward-only means. `bandFor` asked without a period answers **as of today**, so current scoring is
+  unchanged. Only `Offline` + `Internship Offline` were re-dated: the other functions named in the
+  same rule never appear as scored blocks in the 6 workbooks, so scoping them would invent history.
+- **Effect: May 71.43% → 100%, overall engine accuracy 95.47% → 98.26% — the ≥98% GATE IS MET.**
+  5 of 287 rows still differ and none is an engine error (SCORECARD_PROGRAM §F6).
 
 ---
 

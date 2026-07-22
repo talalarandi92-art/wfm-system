@@ -154,6 +154,28 @@ describe('comparator classification', () => {
     expect(scoreBand(bandFor('AHT', 'Inbound', '2026-05-01'), fourMin)).toBe(15);
   });
 
+  it('D-081b forward-only: Offline QA is scored BEFORE 2026-07-11 and not-applicable after', () => {
+    // A rule cannot un-score months that were already published. The Feb + May
+    // sheets scored these blocks, so before the rule date the normal QUALITY band
+    // applies; from the rule date on, QA is not evaluated for these functions.
+    expect(scoreBand(bandFor('QUALITY', 'Offline', '2026-05-01'), 0.8)).toBe(10);
+    expect(scoreBand(bandFor('QUALITY', 'Offline', '2026-02-01'), 0.975)).toBe(30);
+    expect(scoreBand(bandFor('QUALITY', 'Internship Offline', '2026-05-01'), 0.8)).toBe(10);
+
+    expect(scoreBand(bandFor('QUALITY', 'Offline', '2026-07-11'), 0.99)).toBeNull();      // the day it starts
+    expect(scoreBand(bandFor('QUALITY', 'Offline', '2026-08-01'), 0.99)).toBeNull();
+    expect(scoreBand(bandFor('QUALITY', 'Internship Offline', '2026-08-01'), 0.99)).toBeNull();
+
+    // Asked with no period the rulebook answers as of TODAY — the rule is in force.
+    expect(scoreBand(bandFor('QUALITY', 'Offline'), 0.99)).toBeNull();
+
+    // Functions the ruling did not cover keep their undated not-applicable rule.
+    expect(scoreBand(bandFor('QUALITY', 'Support', '2026-05-01'), 0.99)).toBeNull();
+    expect(scoreBand(bandFor('QUALITY', 'Customer Care', '2026-05-01'), 0.99)).toBeNull();
+    // …and a scored function is untouched by any of this.
+    expect(scoreBand(bandFor('QUALITY', 'CH - WA', '2026-05-01'), 0.95)).toBe(30);
+  });
+
   it('a workbook month label resolves to the period date that selects the band', () => {
     expect(periodDateFromLabel('May 26')).toBe('2026-05-01');
     expect(periodDateFromLabel('Jan 26')).toBe('2026-01-01');

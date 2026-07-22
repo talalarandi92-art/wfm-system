@@ -185,8 +185,16 @@ export const SEED_KPIS: SeedKpi[] = [
     band: { type: 'threshold_pct', rounding: 'half_up_pct', bands: [{ gte: 95, points: 30 }, { gte: 90, points: 20 }, { gte: 80, points: 10 }, { gte: 65, points: -10 }, { gte: 1, points: -20 }] },
     functionOverrides: [
       { functionName: 'Support', weight: 0, target: null, band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11)' } },
-      { functionName: 'Offline', weight: 0, target: null, band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11)' } },
-      { functionName: 'Internship Offline', weight: 0, target: null, band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11)' } },
+      // FORWARD-ONLY (D-081b, Director 2026-07-22): the rule starts the day it was made.
+      // Feb + May 2026 sheets scored this block (10 pts at 80%, 30 at 97.5%) and stay scored —
+      // a rule cannot un-score months that were already published. No undated override, so
+      // any date before 2026-07-11 falls through to the normal QUALITY band.
+      { functionName: 'Offline', weight: 0, target: null, appliesFrom: '2026-07-11', band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11, forward-only per D-081b)' } },
+      // FORWARD-ONLY (D-081b, Director 2026-07-22): the rule starts the day it was made.
+      // Feb + May 2026 sheets scored this block (10 pts at 80%, 30 at 97.5%) and stay scored —
+      // a rule cannot un-score months that were already published. No undated override, so
+      // any date before 2026-07-11 falls through to the normal QUALITY band.
+      { functionName: 'Internship Offline', weight: 0, target: null, appliesFrom: '2026-07-11', band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11, forward-only per D-081b)' } },
       { functionName: 'Team Leader', weight: 0, target: null, band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11)' } },
       { functionName: 'Customer Care', weight: 0, target: null, band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11)' } },
       { functionName: 'Administrative', weight: 0, target: null, band: { type: 'info', note: 'QUALITY not applicable — no QA evaluation (Director rule 2026-07-11)' } },

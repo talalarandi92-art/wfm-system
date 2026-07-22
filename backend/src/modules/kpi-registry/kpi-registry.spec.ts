@@ -318,6 +318,13 @@ describe('KPI Registry — migrations 088 + 089 deep-equal kpi-seed.ts (what the
     path.join(__dirname, '../../../../database/migrations/091_kpi_period_scoped_bands.sql'),
     'utf8',
   );
+  const sql092 = fs.readFileSync(
+    path.join(__dirname, '../../../../database/migrations/092_quality_offline_forward_only.sql'),
+    'utf8',
+  );
+  /** Every migration that can carry a PERIOD-scoped override row. */
+  const scopedSql = `${sql091}
+${sql092}`;
 
   const extract = (sql: string, marker: string): Record<string, any> => {
     const out: Record<string, any> = {};
@@ -361,14 +368,18 @@ describe('KPI Registry — migrations 088 + 089 deep-equal kpi-seed.ts (what the
       for (const ov of kpi.functionOverrides!) {
         const escFn = ov.functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const scoped = !!(ov.appliesFrom || ov.appliesTo);
-        const sql = scoped ? sql091 : sql089;
+        const sql = scoped ? scopedSql : sql089;
         const key = scoped ? `${escFn}@${ov.appliesFrom}` : escFn;
         expect(sql).toMatch(new RegExp(`-- OV ${code} ${key} ${ov.weight}`));
-        const m = new RegExp(`-- OVBAND ${code} ${key}\\s*\\n\\s*'((?:[^']|'')*)'::jsonb`).exec(sql);
+        // The band literal follows the marker either bare (INSERT … SELECT) or as
+        // `band = '…'` (the UPDATE form m092 uses to re-date an existing rule).
+        const m = new RegExp(`-- OVBAND ${code} ${key}\\s*\\n\\s*(?:band\\s*=\\s*)?'((?:[^']|'')*)'::jsonb`).exec(sql);
         expect(m).toBeTruthy();
         expect(JSON.parse(m![1].replace(/''/g, "'"))).toEqual(ov.band);
-        // A period rule must be bounded on BOTH sides in SQL, or it leaks forward.
-        if (scoped) expect(sql).toContain(`DATE '${ov.appliesFrom}', DATE '${ov.appliesTo}'`);
+        // A CLOSED window must be bounded on both sides in SQL, or it leaks forward.
+        // An OPEN-ended rule (forward-only, no appliesTo) just needs its start date.
+        if (scoped && ov.appliesTo) expect(sql).toContain(`DATE '${ov.appliesFrom}', DATE '${ov.appliesTo}'`);
+        else if (scoped) expect(sql).toContain(`DATE '${ov.appliesFrom}'`);
       }
     }
   });
