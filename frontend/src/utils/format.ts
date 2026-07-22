@@ -255,3 +255,25 @@ export function conformanceGrade(pct: number | null | undefined): { grade: strin
   if (pct >= 70) return { grade: 'D',  ar: 'مقبول', en: 'Fair', color: '#fb923c' };
   return { grade: 'E', ar: 'يحتاج تحسين', en: 'Needs improvement', color: '#ef4444' };
 }
+
+/**
+ * The ONE guard against handing a non-scalar to the UI.
+ *
+ * Several endpoints carry a differently-shaped OBJECT under a scalar-sounding key
+ * (`metric` on /capacity/staffing/insights and on /rta/alerts). Rendering one
+ * straight into JSX threw React #31 and blanked the Capacity page; coercing one
+ * with String() instead printed a literal "[object Object]" 14 times on the RTA
+ * page. Both are the same mistake — a type that promised a scalar and a payload
+ * that never was one.
+ *
+ * A compact chip may only ever show a scalar. An object is already spelled out in
+ * the accompanying sentence, so there is nothing to invent: return null and show
+ * no chip.
+ */
+export function scalarLabel(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : null;
+  if (typeof v === 'string') return v.trim() || null;
+  if (typeof v === 'boolean') return String(v);
+  return null;   // object / array → the sentence carries it
+}

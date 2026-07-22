@@ -7,6 +7,7 @@
 import { useMemo } from 'react';
 import { Lightbulb } from 'lucide-react';
 import { Section, sevPal, PAL, type Maybe } from './kit';
+import { scalarLabel } from '@/utils/format';
 
 /* `metric` is NOT a string. The endpoint carries a different shape per insight
    kind ({staleDays}, {functionKey,date,hour,required}, {wapePct,perChannel}, …),
@@ -15,15 +16,9 @@ import { Section, sevPal, PAL, type Maybe } from './kit';
    Typed `unknown` so the compiler can never be told a comfortable lie again. */
 interface Bullet { metric?: unknown; severity?: string; text_en?: string; text_ar?: string; text?: string }
 
-/** A metric chip only ever shows a SCALAR. An object metric is already spelled
- *  out in the bullet's sentence, so there is nothing to invent — show nothing. */
-export function metricLabel(m: unknown): string | null {
-  if (m === null || m === undefined) return null;
-  if (typeof m === 'number') return Number.isFinite(m) ? String(m) : null;
-  if (typeof m === 'string') return m.trim() || null;
-  if (typeof m === 'boolean') return String(m);
-  return null;   // object / array → the sentence carries it
-}
+/** A metric chip only ever shows a SCALAR — delegates to the ONE shared guard
+ *  (utils/format.scalarLabel) so Capacity and RTA cannot drift apart. */
+export const metricLabel = scalarLabel;
 
 /** Same guard for the sentence itself: never hand React a non-string. */
 function asText(v: unknown): string | null {

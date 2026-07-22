@@ -32,6 +32,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Hourglass, AlertTriangle } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { scalarLabel } from '@/utils/format';
 
 /* ── Number & time formatting ─────────────────────────────────────────────── */
 /** Thin-space thousands, max one decimal: 69429 → "69 429", 6.87 → "6.9". */
@@ -453,7 +454,12 @@ export function readAlerts(data: unknown): RtaAlert[] | null {
       type: String(a.type ?? a.kind ?? 'alert'),
       text,
       textAr: String(a.text_ar ?? a.textAr ?? text).trim(),
-      metric: a.metric == null ? null : String(a.metric),
+      // NOT String(): /rta/alerts carries an OBJECT here (per alert type —
+      // {staleSec,staleMin,capturedAt}, {agentCount,knownStatusAgents}, the whole
+      // intraday-gap record…). String() turned all 14 live alerts into a literal
+      // "[object Object]" on screen. The alert's own sentence already states the
+      // numbers, so a non-scalar metric simply shows no chip.
+      metric: scalarLabel(a.metric),
     };
   }).filter(a => a.text);
   return out.sort((x, y) => sevRank(x.severity) - sevRank(y.severity));

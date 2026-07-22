@@ -7,8 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   fmtLocalDate, weekStartSat, fmtTime, fmtDuration,
-  fixEncoding, conformanceGrade,
-} from './format';
+  fixEncoding, conformanceGrade, scalarLabel } from './format';
 
 describe('fmtLocalDate — local YYYY-MM-DD, never UTC-shifted', () => {
   it('formats a local date without timezone shifting', () => {
@@ -76,5 +75,32 @@ describe('conformanceGrade — banded letter grades', () => {
     expect(conformanceGrade(70).grade).toBe('D');
     expect(conformanceGrade(69).grade).toBe('E');
     expect(conformanceGrade(null).grade).toBe('—');
+  });
+});
+
+describe('scalarLabel — the ONE guard against rendering a non-scalar', () => {
+  it('passes scalars through', () => {
+    expect(scalarLabel(42)).toBe('42');
+    expect(scalarLabel(0)).toBe('0');
+    expect(scalarLabel('CH - WA')).toBe('CH - WA');
+    expect(scalarLabel(false)).toBe('false');
+  });
+
+  it('returns null for the real object shapes both endpoints send', () => {
+    // /capacity/staffing/insights
+    expect(scalarLabel({ latestMeasuredDate: '2026-06-21', staleDays: 32 })).toBeNull();
+    expect(scalarLabel({ functionKey: 'CH - WA', date: '2026-07-27', hour: 16, required: 22 })).toBeNull();
+    // /rta/alerts — these printed "[object Object]" 14x on the live RTA page
+    expect(scalarLabel({ queueCount: 0, agentCount: 180 })).toBeNull();
+    expect(scalarLabel({ staleSec: 900, staleMin: 15, capturedAt: 'x' })).toBeNull();
+    expect(scalarLabel({ agentCount: 180, knownStatusAgents: 0 })).toBeNull();
+    expect(scalarLabel([1, 2])).toBeNull();
+  });
+
+  it('never emits junk for empty or non-finite input', () => {
+    expect(scalarLabel(null)).toBeNull();
+    expect(scalarLabel(undefined)).toBeNull();
+    expect(scalarLabel('  ')).toBeNull();
+    expect(scalarLabel(NaN)).toBeNull();
   });
 });
