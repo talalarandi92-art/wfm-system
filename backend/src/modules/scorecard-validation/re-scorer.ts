@@ -2,40 +2,17 @@
  * Wave B7 — run one SC-sheet row's RAW KPI values through OUR committed engine
  * (kpi-registry scoreBand + SEED_KPIS). Bands are IMPORTED, never re-implemented.
  */
-import { scoreBand } from '../kpi-registry/score-band';
+import { scoreBand, resolveBand } from '../kpi-registry/score-band';
 import { SEED_KPIS, KpiBand } from '../kpi-registry/kpi-seed';
 import { ScRow, ScoreKpi, SCORE_CELLS } from './sc-workbook-reader';
 
 const kpiByCode = new Map(SEED_KPIS.map((k) => [k.code, k]));
 
-/** Resolve the band the engine ACTUALLY scores with: per-function override, else the
- *  KPI default. Exported so the comparator classifies against the same band the
- *  scorer used — classifying against the generic band mislabels every function
- *  that has an override (m089 gave AHT/RT/QUALITY per-function bands). */
+/** Delegates to the registry's ONE resolution definition (score-band.resolveBand)
+ *  so the scorer, the comparator and the specs can never disagree about which
+ *  rule is in force for a function at a point in time. */
 export function bandFor(kpiCode: string, functionName: string, periodDate?: string | null): KpiBand | null {
-  const kpi = kpiByCode.get(kpiCode);
-  if (!kpi) return null;
-  const mine = (kpi.functionOverrides ?? []).filter((o) => o.functionName.toLowerCase() === functionName.toLowerCase());
-  if (!mine.length) return kpi.band ?? null;
-
-  /* A dated override wins for dates inside its window (D-081a: May-26 Internship
-     Inbound was deliberately email-shaped while Jan/June used the inbound band;
-     D-081b: the Offline QA not-applicable rule only starts 2026-07-11).
-     Asked WITHOUT a period, the rulebook answers "as of today" — the rule in
-     force now — not "ignore every dated rule". Falling back to today keeps a
-     caller that forgets the period on the CURRENT rule instead of a stale one. */
-  const at = periodDate || new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10); // Kuwait
-  const scoped = mine.find((o) =>
-    (o.appliesFrom || o.appliesTo) &&
-    (!o.appliesFrom || at >= o.appliesFrom) &&
-    (!o.appliesTo || at <= o.appliesTo));
-  if (scoped) return scoped.band ?? null;
-
-  /* Outside every window: the undated override, else the KPI default. A rule that
-     starts on a date has NO pre-history here by design — before it, the KPI's own
-     band applies, which is exactly what "forward-only" means. */
-  const undated = mine.find((o) => !o.appliesFrom && !o.appliesTo);
-  return (undated?.band ?? kpi.band) ?? null;
+  return resolveBand(SEED_KPIS, kpiCode, functionName, periodDate);
 }
 
 export interface RescoredRow {

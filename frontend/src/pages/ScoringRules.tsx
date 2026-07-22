@@ -292,13 +292,13 @@ export default function ScoringRules() {
                 <div style={{ marginTop: 5 }}>
                   <b>D-081 ✅ — {ar ? 'قواعد الفترات (محسومة):' : 'period rules (settled):'}</b>{' '}
                   {ar
-                    ? 'مايو ٢٠٢٦ لوظيفة Internship Inbound يُحتسب على شكل الإيميل (قاعدة فترة، لا شذوذ — يناير ويونيو على باند الـinbound)، وقاعدة «جودة Offline غير منطبقة» تسري من ١١ يوليو للأمام فقط فتبقى فبراير ومايو مُقيَّمتين. النتيجة: مايو ٣٩٫٢٩٪ ← ١٠٠٪.'
-                    : 'May 2026 for Internship Inbound is scored on the email shape (a PERIOD rule, not an outlier — Jan and June keep the inbound band), and the Offline-QA-not-applicable rule runs forward only from 2026-07-11, so Feb and May stay scored. Result: May 39.29% → 100%.'}
+                    ? 'مايو ٢٠٢٦ لوظيفة Internship Inbound على شكل الإيميل · فبراير ٢٠٢٦ لوظيفة Offline على باند الـinbound (المعادلة تشير لـ$O$، لا الشات) · وقاعدة «جودة Offline غير منطبقة» تسري من ١١ يوليو للأمام فقط. النتيجة: مايو ١٠٠٪ وفبراير ٩٨٫٦١٪.'
+                    : 'May 2026 Internship Inbound uses the email shape · Feb 2026 Offline uses the INBOUND band (its formula references $O$, not the chat $N$) · and the Offline-QA-not-applicable rule runs forward only from 2026-07-11. Result: May 100%, Feb 98.61%.'}
                 </div>
                 <div style={{ marginTop: 6, color: dark ? '#94a3b8' : '#64748b', fontSize: 11.5 }}>
                   {ar
-                    ? 'دقة المحرّك مقابل الدفاتر: ٩٨٫٢٦٪ على الصفوف المشتقّة من معادلات — بوابة الـ٩٨٪ محقّقة. (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها.) الفروقات المتبقية ٥ صفوف فقط، ولا واحد منها خطأ محرّك.'
-                    : 'Engine accuracy vs the workbooks: 98.26% on formula-derivable rows — the 98% gate is MET. (171 of 458 rows carry hand-typed cells no engine can reproduce.) Just 5 rows still differ, and none of them is an engine error.'}
+                    ? 'دقة المحرّك مقابل الدفاتر: ٩٨٫٩٥٪ على الصفوف المشتقّة من معادلات — بوابة الـ٩٨٪ محقّقة. (١٧١ من ٤٥٨ صفًا تحتوي خلايا مكتوبة يدويًا لا يمكن لأي محرّك إعادة إنتاجها.) الفروقات المتبقية ٣ صفوف فقط، ولا واحد منها خطأ محرّك.'
+                    : 'Engine accuracy vs the workbooks: 98.95% on formula-derivable rows — the 98% gate is MET. (171 of 458 rows carry hand-typed cells no engine can reproduce.) Just 3 rows still differ, and none of them is an engine error.'}
                 </div>
               </div>
             </div>

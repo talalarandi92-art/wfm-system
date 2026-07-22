@@ -558,7 +558,22 @@
   unchanged. Only `Offline` + `Internship Offline` were re-dated: the other functions named in the
   same rule never appear as scored blocks in the 6 workbooks, so scoping them would invent history.
 - **Effect: May 71.43% → 100%, overall engine accuracy 95.47% → 98.26% — the ≥98% GATE IS MET.**
-  5 of 287 rows still differ and none is an engine error (SCORECARD_PROGRAM §F6).
+
+### D-081c — Feb-2026 `Offline` AHT is scored on the INBOUND band (not email, and not chat)
+- **Status:** ✅ **Confirmed + EXECUTED (2026-07-22, Director: "فبراير كان مقصود شات").**
+- **⚠ The sheet corrected the label, and it mattered.** The Director said *chat*; the February formula
+  references **`$O$2..$O$8` — the INBOUND 6-band** (`$N$` would be chat). The awarded points settle it:
+  **2:35 → 5**, which the chat band pays **15**. Implementing the spoken label literally would have
+  scored those agents ABOVE the Director's own workbook — so the sheet was followed and the difference
+  reported, per the standing rule that the workbooks are the authority.
+- **Mechanism:** **m093** seeds the inbound band for `Offline`, **February 2026 only**
+  (`2026-02-01..2026-02-28`), on the same period machinery as D-081a. May's Offline block is
+  email-shaped and keeps the undated rule; no other 2026 workbook carries an Offline block.
+- **Effect: Feb 95.83% → 98.61%, overall 98.26% → **98.95%**.** 3 of 287 rows still differ, none an
+  engine error (SCORECARD_PROGRAM §F6).
+- **Refactor landed with it:** band RESOLUTION moved to `kpi-registry/score-band.ts` (`resolveBand`) —
+  it is registry logic, not validation logic. The scorer, the comparator and both spec files now share
+  ONE definition; a second, period-blind copy in the registry spec had already started disagreeing.
 
 ---
 

@@ -154,6 +154,21 @@ describe('comparator classification', () => {
     expect(scoreBand(bandFor('AHT', 'Inbound', '2026-05-01'), fourMin)).toBe(15);
   });
 
+  it('D-081c: Feb-26 Offline AHT uses the INBOUND band (what the sheet proves), other months email', () => {
+    const dayfrac = (sec: number) => sec / 86400;
+    // 2:35 is the discriminator: inbound pays 5, chat would pay 15, email would pay 10.
+    expect(scoreBand(bandFor('AHT', 'Offline', '2026-02-01'), dayfrac(155))).toBe(5);
+    expect(scoreBand(bandFor('AHT', 'Offline', '2026-02-01'), dayfrac(194))).toBe(15);  // 3:14
+    expect(scoreBand(bandFor('AHT', 'Offline', '2026-02-01'), dayfrac(149))).toBe(-10); // 2:29
+
+    // May's Offline block is email-shaped and must NOT inherit February's rule.
+    expect(scoreBand(bandFor('AHT', 'Offline', '2026-05-01'), dayfrac(155))).toBe(10);
+    expect(scoreBand(bandFor('AHT', 'Offline', '2026-01-01'), dayfrac(155))).toBe(10);
+    expect(scoreBand(bandFor('AHT', 'Offline', '2026-03-01'), dayfrac(155))).toBe(10);
+    // Internship Offline was never voice-scored — untouched.
+    expect(scoreBand(bandFor('AHT', 'Internship Offline', '2026-02-01'), dayfrac(155))).toBe(10);
+  });
+
   it('D-081b forward-only: Offline QA is scored BEFORE 2026-07-11 and not-applicable after', () => {
     // A rule cannot un-score months that were already published. The Feb + May
     // sheets scored these blocks, so before the rule date the normal QUALITY band

@@ -284,6 +284,13 @@ export const SEED_KPIS: SeedKpi[] = [
       { functionName: 'Internship Inbound', weight: 10, target: 48, band: EMAIL_AHT_BAND(), appliesFrom: '2026-05-01', appliesTo: '2026-05-31' },
       // ── OMT (SC!Q, $O$3/$O$5: 3:00 / 2:00) — <2:00→10, 2:00–3:00→5, >3:00→−5 (max 10)
       { functionName: 'OMT', weight: 10, target: 120 / 3600, band: OMT_AHT_BAND() },
+      /* FEB 2026 ONLY — the Offline block was scored on a VOICE band that month
+         (D-081c, Director 2026-07-22: "فبراير كان مقصود"). The sheet decides WHICH:
+         its formula references $O$2..$O$8, i.e. the INBOUND 6-band, not the chat
+         ($N$) one — and the awarded points prove it (2:35 → 5, which the chat band
+         would have paid 15). May's Offline block is email-shaped and stays on the
+         undated rule; no other month carries an Offline block at all. */
+      { functionName: 'Offline', weight: 15, target: 240 / 3600, band: INBOUND_AHT_BAND(), appliesFrom: '2026-02-01', appliesTo: '2026-02-28' },
       // ── Email-shaped 48h case-SLA blocks (max 10)
       { functionName: 'Mail & NPS', weight: 10, target: 48, band: EMAIL_AHT_BAND() },
       { functionName: 'Social Media & Email', weight: 10, target: 48, band: EMAIL_AHT_BAND() },

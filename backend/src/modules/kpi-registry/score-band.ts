@@ -6,7 +6,7 @@
  * NOTHING in the live scoring path uses this yet (B6 will) — it exists so the
  * registry's rulebook is executable and provably equal to the skill.
  */
-import { KpiBand } from './kpi-seed';
+import { KpiBand, SeedKpiFunctionConfig } from './kpi-seed';
 
 /**
  * Round-half-up a fraction (0.895 → 90). Matches the skill's `Math.round(v*100)`.
@@ -105,4 +105,41 @@ export function scoreBand(band: KpiBand | null | undefined, value: number, aux?:
     default:
       return null;
   }
+}
+
+/* ── Band RESOLUTION — which band applies to a function at a point in time ────
+   Lives here, next to the scoring engine, because it is registry logic: the
+   rulebook decides which rule is in force, the scorer only applies it. Every
+   consumer (re-scorer, comparator, specs) must go through this one definition or
+   they will silently disagree about period-scoped rules. */
+export function resolveBand(
+  kpis: { code: string; band: KpiBand | null; functionOverrides?: SeedKpiFunctionConfig[] }[],
+  kpiCode: string,
+  functionName: string,
+  periodDate?: string | null,
+): KpiBand | null {
+  const kpi = kpis.find((k) => k.code === kpiCode);
+  if (!kpi) return null;
+  const mine = (kpi.functionOverrides ?? []).filter(
+    (o) => o.functionName.toLowerCase() === functionName.toLowerCase());
+  if (!mine.length) return kpi.band ?? null;
+
+  /* A dated override wins for dates inside its window (D-081a: May-26 Internship
+     Inbound was email-shaped; D-081c: Feb-26 Offline was voice-scored; D-081b:
+     the Offline QA not-applicable rule only starts 2026-07-11).
+     Asked WITHOUT a period the rulebook answers "as of today" — the rule in force
+     now — so a caller that forgets the period gets the current rule, not a stale
+     one. */
+  const at = periodDate || new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10); // Kuwait
+  const scoped = mine.find((o) =>
+    (o.appliesFrom || o.appliesTo) &&
+    (!o.appliesFrom || at >= o.appliesFrom) &&
+    (!o.appliesTo || at <= o.appliesTo));
+  if (scoped) return scoped.band ?? null;
+
+  /* Outside every window: the undated override, else the KPI default. A rule that
+     starts on a date has NO pre-history by design — before it, the KPI's own band
+     applies, which is exactly what "forward-only" means. */
+  const undated = mine.find((o) => !o.appliesFrom && !o.appliesTo);
+  return (undated?.band ?? kpi.band) ?? null;
 }

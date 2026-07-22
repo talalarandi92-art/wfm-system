@@ -36,10 +36,10 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
   **Headline: 171 of 458 Final rows carry a HAND-TYPED score cell** (the workbook's cached value
   disagrees with its own formula), which no engine can reproduce — so the gate is now judged on the
   **287 formula-derivable rows** (raw all-rows figure 57.21% was measuring the typist).
-  After D-079 + D-081a + D-081b all landed the same day: **engine accuracy 98.26% — the ≥98% GATE IS
-  MET** — Jan 98.78 · Feb 95.83 · Mar **100** · Apr **100** · May **100** · Jun 98.53, with the
-  `rounding` variance class at ZERO in every month. Only **5 of 287 rows** still differ, and none of
-  them is an engine error (see F6)
+  After D-079 + D-081a/b/c all landed the same day: **engine accuracy 98.95% — the ≥98% GATE IS MET**
+  — Jan 98.78 · Feb 98.61 · Mar **100** · Apr **100** · May **100** · Jun 98.53, with the `rounding`
+  variance class at ZERO in every month. Only **3 of 287 rows** still differ, and none of them is an
+  engine error (see F6)
   (see “B7 findings” below). Report: `new folder/Scorecard 2026/Historical_Validation_Report.xlsx`.
 - **B8 Sprinklr bridge queue-discovery repair** ⚠ needs extension repo location (parallel-safe).
 - **B9 UI**: unified roster+daily-performance view, recon/unauthorized/survey/ranking/incentive pages (§25).
@@ -48,7 +48,7 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
 
 Pure-backend: B0–B8 · UI: B9–B11 · credential-gated: B3/B4/B8.
 
-## B7 findings — the gate is MET (98.26%); history of what got it there
+## B7 findings — the gate is MET (98.95%); history of what got it there
 
 **F1 ✅ RESOLVED (D-079, Director 2026-07-22 — option (c) executed).** Round-half-up is now DISPLAY
 ONLY; bands compare the raw %. The `rounding` variance class is ZERO in every month and engine

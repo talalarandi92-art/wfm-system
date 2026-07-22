@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { SEED_KPIS, KpiBand, NET_POINTS_MAX } from './kpi-seed';
-import { scoreBand, roundHalfUpPct } from './score-band';
+import { scoreBand, roundHalfUpPct, resolveBand } from './score-band';
 
 const band = (code: string): KpiBand => {
   const k = SEED_KPIS.find((s) => s.code === code);
@@ -20,11 +20,10 @@ const band = (code: string): KpiBand => {
   return k.band;
 };
 
-/** Per-function band (functionOverrides), same resolution the re-scorer uses. */
-const fnBand = (code: string, fn: string): KpiBand => {
-  const k = SEED_KPIS.find((s) => s.code === code);
-  const ov = k?.functionOverrides?.find((o) => o.functionName.toLowerCase() === fn.toLowerCase());
-  const b = ov?.band ?? k?.band;
+/** Per-function band — THE resolution the engine uses (period-aware). Passing no
+ *  date asks "what is the rule today", which is what a period-less caller means. */
+const fnBand = (code: string, fn: string, at?: string): KpiBand => {
+  const b = resolveBand(SEED_KPIS, code, fn, at);
   if (!b) throw new Error(`no band for ${code}/${fn}`);
   return b;
 };
@@ -164,7 +163,10 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
       const b = fnBand('AHT', fn);
       expect(scoreBand(b, 48 / 24)).toBe(10);
       expect(scoreBand(b, 49 / 24)).toBe(-10);
-      expect(aht.functionOverrides!.find((o) => o.functionName === fn)!.weight).toBe(10);
+      // the STANDING rule's weight — a period rule (Feb-26 Offline, D-081c) is a
+      // window, not the function's normal max, so it must not be picked up here
+      const standing = aht.functionOverrides!.find((o) => o.functionName === fn && !o.appliesFrom && !o.appliesTo)!;
+      expect(standing.weight).toBe(10);
     }
   });
 
@@ -322,9 +324,14 @@ describe('KPI Registry — migrations 088 + 089 deep-equal kpi-seed.ts (what the
     path.join(__dirname, '../../../../database/migrations/092_quality_offline_forward_only.sql'),
     'utf8',
   );
+  const sql093 = fs.readFileSync(
+    path.join(__dirname, '../../../../database/migrations/093_feb_offline_aht_band.sql'),
+    'utf8',
+  );
   /** Every migration that can carry a PERIOD-scoped override row. */
   const scopedSql = `${sql091}
-${sql092}`;
+${sql092}
+${sql093}`;
 
   const extract = (sql: string, marker: string): Record<string, any> => {
     const out: Record<string, any> = {};
