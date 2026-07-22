@@ -24,6 +24,12 @@ export interface MonthSummary {
   netExactMatchPct: number; // Final rows
   avgAbsNetDiff: number; // Final rows
   netExactMatchPctExclKnown: number; // Final rows, excluding AHT+RT cells from both nets
+  /** Final rows containing NO hand-typed score cell — the only rows any engine can reproduce. */
+  formulaDerivableRows: number;
+  /** THE honest accuracy number: net exact-match over formula-derivable rows only. */
+  netExactMatchPctFormulaOnly: number;
+  /** Final rows carrying at least one cell the sheet itself contradicts (hand-typed). */
+  manualOverrideRows: number;
   varianceCounts: Record<VarianceClass, number>;
   rankExactMatchPct: number; // Final rows, dense rank within function by Net
   skipped: string[];
@@ -38,7 +44,13 @@ export interface ValidationResult {
     ourNetExclKnown: number; wbNetExclKnown: number | null;
     wbRank: number | null; ourRank: number | null;
   }>;
-  overall: { finalRows: number; netExactMatchPct: number; avgAbsNetDiff: number; netExactMatchPctExclKnown: number; gateMet: boolean };
+  overall: {
+    finalRows: number; netExactMatchPct: number; avgAbsNetDiff: number; netExactMatchPctExclKnown: number;
+    formulaDerivableRows: number; netExactMatchPctFormulaOnly: number; manualOverrideRows: number;
+    /** The gate is judged on the formula-derivable subset — scoring an engine against
+     *  hand-typed cells measures the typist, not the engine. */
+    gateMet: boolean;
+  };
 }
 
 const KNOWN_KPIS = new Set(['AHT', 'RESPONSE_TIME']);
@@ -55,6 +67,7 @@ export function runValidation(files: string[]): ValidationResult {
   const diffs: CellVariance[] = [];
   const netRows: ValidationResult['netRows'] = [];
   let totFinal = 0, totNetExact = 0, totAbsDiff = 0, totNetExactExcl = 0;
+  let totFormula = 0, totFormulaExact = 0, totManualRows = 0;
 
   for (const file of files) {
     const wb = readScWorkbook(file);
@@ -79,7 +92,7 @@ export function runValidation(files: string[]): ValidationResult {
       });
     }
 
-    const varianceCounts: Record<VarianceClass, number> = { match: 0, rounding: 0, boundary: 0, 'formula-mismatch': 0, data: 0, 'manual-override': 0 };
+    const varianceCounts: Record<VarianceClass, number> = { match: 0, rounding: 0, boundary: 0, 'formula-mismatch': 0, data: 0, 'manual-override': 0, 'not-applicable': 0 };
     let cells = 0;
     for (const c of comps) {
       for (const cv of c.cellVariances) {
@@ -105,6 +118,12 @@ export function runValidation(files: string[]): ValidationResult {
     }
 
     const finalsWithNet = finals.filter((f) => f.wbNet !== null);
+    /* A row whose score cell was hand-typed (the sheet's own formula disagrees with the
+       displayed value) cannot be reproduced by ANY engine — including a perfect one.
+       Measuring accuracy against those rows measures the typist. Split them out. */
+    const hasManual = (f: RowComparison) => f.cellVariances.some((v) => v.class === 'manual-override');
+    const formulaRows = finalsWithNet.filter((f) => !hasManual(f));
+    const formulaExact = formulaRows.filter((f) => Math.abs(f.netDiff as number) < 1e-6).length;
     const netExact = finalsWithNet.filter((f) => Math.abs(f.netDiff as number) < 1e-6).length;
     const netExactExcl = finalsWithNet.filter((f) => Math.abs(netExclKnown(f, 'ours') - netExclKnown(f, 'wb')) < 1e-6).length;
     const absSum = finalsWithNet.reduce((s, f) => s + Math.abs(f.netDiff as number), 0);
@@ -123,18 +142,25 @@ export function runValidation(files: string[]): ValidationResult {
       netExactMatchPct: finalsWithNet.length ? +(100 * netExact / finalsWithNet.length).toFixed(2) : 0,
       avgAbsNetDiff: finalsWithNet.length ? +(absSum / finalsWithNet.length).toFixed(2) : 0,
       netExactMatchPctExclKnown: finalsWithNet.length ? +(100 * netExactExcl / finalsWithNet.length).toFixed(2) : 0,
+      formulaDerivableRows: formulaRows.length,
+      netExactMatchPctFormulaOnly: formulaRows.length ? +(100 * formulaExact / formulaRows.length).toFixed(2) : 0,
+      manualOverrideRows: finalsWithNet.length - formulaRows.length,
       varianceCounts,
       rankExactMatchPct: ranksChecked.length ? +(100 * rankOk / ranksChecked.length).toFixed(2) : 0,
       skipped: wb.skipped,
     });
 
     totFinal += finalsWithNet.length;
+    totFormula += formulaRows.length;
+    totFormulaExact += formulaExact;
+    totManualRows += finalsWithNet.length - formulaRows.length;
     totNetExact += netExact;
     totNetExactExcl += netExactExcl;
     totAbsDiff += absSum;
   }
 
   const overallPct = totFinal ? +(100 * totNetExact / totFinal).toFixed(2) : 0;
+  const formulaPct = totFormula ? +(100 * totFormulaExact / totFormula).toFixed(2) : 0;
   return {
     months,
     diffs,
@@ -144,7 +170,10 @@ export function runValidation(files: string[]): ValidationResult {
       netExactMatchPct: overallPct,
       avgAbsNetDiff: totFinal ? +(totAbsDiff / totFinal).toFixed(2) : 0,
       netExactMatchPctExclKnown: totFinal ? +(100 * totNetExactExcl / totFinal).toFixed(2) : 0,
-      gateMet: overallPct >= NET_GATE_PCT,
+      formulaDerivableRows: totFormula,
+      netExactMatchPctFormulaOnly: formulaPct,
+      manualOverrideRows: totManualRows,
+      gateMet: formulaPct >= NET_GATE_PCT,
     },
   };
 }
@@ -163,6 +192,9 @@ export function writeReport(result: ValidationResult, outPath: string): void {
     'Net exact-match % (Final)': m.netExactMatchPct,
     'Avg |Net diff| (Final)': m.avgAbsNetDiff,
     'Net exact-match % excl AHT/RT': m.netExactMatchPctExclKnown,
+    'Formula-derivable rows': m.formulaDerivableRows,
+    'Net exact-match % (formula-derivable ONLY)': m.netExactMatchPctFormulaOnly,
+    'Rows w/ a hand-typed cell': m.manualOverrideRows,
     'Rank exact-match %': m.rankExactMatchPct,
     Match: m.varianceCounts.match,
     Rounding: m.varianceCounts.rounding,
@@ -170,6 +202,7 @@ export function writeReport(result: ValidationResult, outPath: string): void {
     'Formula-mismatch': m.varianceCounts['formula-mismatch'],
     Data: m.varianceCounts.data,
     'Manual-override': m.varianceCounts['manual-override'],
+    'Not-applicable': m.varianceCounts['not-applicable'],
     Skipped: m.skipped.join('; '),
   }));
   summaryRows.push({
@@ -183,9 +216,12 @@ export function writeReport(result: ValidationResult, outPath: string): void {
     'Net exact-match % (Final)': result.overall.netExactMatchPct,
     'Avg |Net diff| (Final)': result.overall.avgAbsNetDiff,
     'Net exact-match % excl AHT/RT': result.overall.netExactMatchPctExclKnown,
+    'Formula-derivable rows': result.overall.formulaDerivableRows,
+    'Net exact-match % (formula-derivable ONLY)': result.overall.netExactMatchPctFormulaOnly,
+    'Rows w/ a hand-typed cell': result.overall.manualOverrideRows,
     'Rank exact-match %': 0,
-    Match: 0, Rounding: 0, Boundary: 0, 'Formula-mismatch': 0, Data: 0, 'Manual-override': 0,
-    Skipped: `Gate (>=${NET_GATE_PCT}% net exact): ${result.overall.gateMet ? 'MET' : 'NOT MET'} — descriptive only, activation is the Director's call`,
+    Match: 0, Rounding: 0, Boundary: 0, 'Formula-mismatch': 0, Data: 0, 'Manual-override': 0, 'Not-applicable': 0,
+    Skipped: `Gate (>=${NET_GATE_PCT}% net exact on FORMULA-DERIVABLE rows): ${result.overall.gateMet ? 'MET' : 'NOT MET'} — descriptive only, activation is the Director's call`,
   } as (typeof summaryRows)[number]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
 

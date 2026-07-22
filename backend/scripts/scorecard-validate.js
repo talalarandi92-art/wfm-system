@@ -41,20 +41,26 @@ console.log('Re-scoring 6 SC workbooks through the committed kpi-registry engine
 const result = runValidation(FILES);
 
 const pad = (s, n) => String(s).padEnd(n);
-console.log(pad('Month', 10) + pad('Emp', 5) + pad('Final', 7) + pad('Net=% ', 8) + pad('avg|Δ|', 8) + pad('Net=% exclAHT/RT', 18) + pad('Cell=%', 8) + pad('Rank=%', 8) + 'Variances (rnd/bnd/frm/data/manual)');
+console.log(pad('Month', 10) + pad('Emp', 5) + pad('Final', 7) + pad('Net=%', 7) + pad('FORMULA-ONLY', 14) + pad('hand-typed', 12) + pad('avg|Δ|', 8) + pad('Cell=%', 8) + pad('Rank=%', 8) + 'Variances (rnd/bnd/frm/data/manual/N-A)');
 for (const m of result.months) {
   const v = m.varianceCounts;
   console.log(
     pad(m.month, 10) + pad(m.employees, 5) + pad(m.finalRowsCompared, 7) +
-    pad(m.netExactMatchPct, 8) + pad(m.avgAbsNetDiff, 8) + pad(m.netExactMatchPctExclKnown, 18) +
-    pad(m.cellExactMatchPct, 8) + pad(m.rankExactMatchPct, 8) +
-    `${v.rounding}/${v.boundary}/${v['formula-mismatch']}/${v.data}/${v['manual-override']}`,
+    pad(m.netExactMatchPct, 7) +
+    pad(`${m.netExactMatchPctFormulaOnly}% (${m.formulaDerivableRows})`, 14) +
+    pad(m.manualOverrideRows, 12) +
+    pad(m.avgAbsNetDiff, 8) + pad(m.cellExactMatchPct, 8) + pad(m.rankExactMatchPct, 8) +
+    `${v.rounding}/${v.boundary}/${v['formula-mismatch']}/${v.data}/${v['manual-override']}/${v['not-applicable']}`,
   );
   if (m.skipped.length) console.log('   SKIPPED: ' + m.skipped.slice(0, 5).join(' | ') + (m.skipped.length > 5 ? ` (+${m.skipped.length - 5} more)` : ''));
 }
-console.log('\nOVERALL (Final rows): net exact-match ' + result.overall.netExactMatchPct + '% | avg |net diff| ' + result.overall.avgAbsNetDiff +
-  ' | excl known AHT/RT simplification: ' + result.overall.netExactMatchPctExclKnown + '%');
-console.log('Suggested >=' + NET_GATE_PCT + '% net-points gate: ' + (result.overall.gateMet ? 'MET' : 'NOT MET') +
+const o = result.overall;
+console.log('\nOVERALL — all ' + o.finalRows + ' Final rows: net exact-match ' + o.netExactMatchPct + '% | avg |net diff| ' + o.avgAbsNetDiff);
+console.log('  ' + o.manualOverrideRows + ' of those rows carry a HAND-TYPED score cell (the sheet contradicts its own formula).');
+console.log('  No engine can reproduce a hand-typed number, so the honest accuracy measure is the rest:');
+console.log('  ENGINE ACCURACY on the ' + o.formulaDerivableRows + ' formula-derivable rows: ' + o.netExactMatchPctFormulaOnly + '%' +
+  '   (excl. the known AHT/RT simplification: ' + o.netExactMatchPctExclKnown + '% of all rows)');
+console.log('Suggested >=' + NET_GATE_PCT + '% gate, judged on formula-derivable rows: ' + (o.gateMet ? 'MET' : 'NOT MET') +
   ' (descriptive only — auto-scoring activation stays the Director\'s call)');
 
 const out = path.join(DIR, 'Historical_Validation_Report.xlsx');

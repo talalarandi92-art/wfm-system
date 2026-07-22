@@ -12,14 +12,17 @@
  *   data             — raw value unreadable/missing while the sheet still carries points
  *   manual-override  — the workbook cell's cached value disagrees with its OWN formula,
  *                      or the score cell is a hand-typed constant (no formula)
+ *   not-applicable   — our committed rulebook scores this KPI as N/A for this FUNCTION
+ *                      (info band / not evaluated) while the sheet awarded points —
+ *                      a scope difference, not a wrong number
  */
 import { KpiBand, SEED_KPIS } from '../kpi-registry/kpi-seed';
 import { roundHalfUpPct } from '../kpi-registry/score-band';
 import { evalExcelFormula, formulaReferencesOtherRow, ExcelValue } from './excel-formula-eval';
 import { ScRow, ScWorkbook, ScoreKpi, SCORE_CELLS } from './sc-workbook-reader';
-import { rescoreRow } from './re-scorer';
+import { rescoreRow, bandFor } from './re-scorer';
 
-export type VarianceClass = 'match' | 'rounding' | 'boundary' | 'formula-mismatch' | 'data' | 'manual-override';
+export type VarianceClass = 'match' | 'rounding' | 'boundary' | 'formula-mismatch' | 'data' | 'manual-override' | 'not-applicable';
 
 export interface CellVariance {
   month: string;
@@ -100,8 +103,10 @@ export function classifyCell(args: {
   sheetFormulaPoints: number | null;
   hasFormula: boolean;
   rowRefBug: boolean;
+  /** The row's function — the band MUST be resolved the same way the scorer did. */
+  functionName?: string;
 }): { cls: VarianceClass; note: string } {
-  const { kpi, raw, wbPoints, ourPoints, sheetFormulaPoints, hasFormula, rowRefBug } = args;
+  const { kpi, raw, wbPoints, ourPoints, sheetFormulaPoints, hasFormula, rowRefBug, functionName } = args;
   const wb = wbPoints ?? 0;
   const ours = ourPoints ?? 0;
 
@@ -124,7 +129,20 @@ export function classifyCell(args: {
     return { cls: 'formula-mismatch', note: 'SHEET BUG: score formula references a different row (e.g. Social Media RT block reading row 34)' };
   }
 
-  const band = bandByKpiCode.get(CELL_TO_KPI_CODE[kpi]) ?? null;
+  /* Our engine returning NULL means "the committed rulebook says this KPI does not
+     apply to this function" (info band / not-evaluated) — NOT "we scored zero".
+     Folding it into rounding/formula-mismatch hid 130 cells behind the wrong
+     cause; they are a rulebook-vs-sheet SCOPE difference and need their own class. */
+  if (ourPoints === null && wbPoints !== null) {
+    return {
+      cls: 'not-applicable',
+      note: `our rulebook marks ${kpi} as not applicable for ${functionName ?? 'this function'} (no band / not evaluated) but the sheet awards ${wb}`,
+    };
+  }
+
+  const band = functionName
+    ? bandFor(CELL_TO_KPI_CODE[kpi], functionName)
+    : bandByKpiCode.get(CELL_TO_KPI_CODE[kpi]) ?? null;
   if (band && band.type === 'threshold_pct') {
     const unrounded = scoreThresholdPctUnrounded(band, raw);
     if (unrounded !== null && eq(unrounded, wb)) {
@@ -167,6 +185,7 @@ export function compareWorkbook(wb: ScWorkbook): RowComparison[] {
         sheetFormulaPoints,
         hasFormula: cell.formula !== null,
         rowRefBug,
+        functionName: row.functionName,
       });
 
       cellVariances.push({

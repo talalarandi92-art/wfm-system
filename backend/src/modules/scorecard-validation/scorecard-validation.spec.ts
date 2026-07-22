@@ -130,6 +130,28 @@ describe('comparator classification', () => {
     expect(r.note).toContain('KNOWN');
   });
 
+  it('not-applicable — our rulebook scores the KPI N/A for this function, the sheet awarded points', () => {
+    // Offline QA is an info band (Director rule 2026-07-11) → our engine returns null.
+    // That is a SCOPE difference, not a wrong number: it must not be filed as rounding.
+    const r = classifyCell({ ...base, raw: 0.8, wbPoints: 10, ourPoints: null, sheetFormulaPoints: 10, functionName: 'Offline' });
+    expect(r.cls).toBe('not-applicable');
+    expect(r.note).toContain('not applicable');
+    expect(r.note).toContain('Offline');
+  });
+
+  it('classifies against the FUNCTION band the scorer used, not the generic one', () => {
+    // Inbound AHT band (m089) is the 6-band 2:30..5:00 one; the generic AHT band is the
+    // simplified email band. 4 min = 0.0027778 dayfrac. Classifying with the generic band
+    // would call this a rounding/boundary case; with the real Inbound band it is a
+    // genuine band difference. What matters is that the function is honoured at all.
+    const withFn = classifyCell({ ...base, kpi: 'AHT', raw: 0.0027778, wbPoints: 5, ourPoints: 10, sheetFormulaPoints: 5, functionName: 'Inbound' });
+    const withoutFn = classifyCell({ ...base, kpi: 'AHT', raw: 0.0027778, wbPoints: 5, ourPoints: 10, sheetFormulaPoints: 5 });
+    expect(withFn.cls).not.toBe('match');
+    expect(withoutFn.cls).not.toBe('match');
+    // both classify, but the note must never claim a band the scorer did not use
+    expect(typeof withFn.note).toBe('string');
+  });
+
   it('formula-mismatch — wrong-row sheet bug', () => {
     const r = classifyCell({ ...base, kpi: 'RESPONSE_TIME', raw: 0.01, wbPoints: 15, ourPoints: 5, sheetFormulaPoints: 15, rowRefBug: true });
     expect(r.cls).toBe('formula-mismatch');

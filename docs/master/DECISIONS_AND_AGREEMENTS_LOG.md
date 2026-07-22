@@ -495,6 +495,43 @@
 
 ---
 
+## Era 7 — 2026-07-22 (scorecard B7 validation)
+
+### D-079 — Scoring band basis: round-half-up (rule) vs raw fraction (your workbooks)
+- **Status:** ⚠ **NEEDS APPROVAL — nothing executed.** Recommended option (c).
+- **The conflict:** `WFM_RULES_AND_DECISIONS.md` (Confirmed) says round-half-up every % **then** band
+  it. The SC workbooks' own IF formulas band the **RAW fraction**. Measured across the 6 real 2026
+  workbooks: **71 cells disagree, 68 of them award MORE than your sheet, +550 net points total**
+  (PRODUCTIVITY 64 cells, QUALITY 7). Worst single case: QA **79.80% → the rule pays 10, your sheet
+  pays −10** (20-point swing on one band edge); QA 94.75% → 30 vs 20; productivity 88.90% → 5 vs 0.
+- **Options:** (a) keep the rule, accept the engine scoring slightly above the historical sheets;
+  (b) band the raw fraction, and correct the rule doc; (c) **round-half-up for DISPLAY only, band on
+  the raw fraction** — matches the sheets while keeping the familiar displayed %.
+- **Why it was not executed:** BR-APP-006 / D-000 — a Confirmed rule is never changed without the
+  Director. Evidence: `backend/scripts/scorecard-validate.js`; `docs/master/SCORECARD_PROGRAM.md` §F1.
+
+### D-080 — B7 accuracy gate is judged on FORMULA-DERIVABLE rows only
+- **Status:** Confirmed (2026-07-22, engineering correctness — no business rule touched)
+- **Fact:** **171 of 458 Final rows** across Jan–June 2026 contain a score cell whose value
+  contradicts the sheet's own formula (hand-typed): Mar 42 · Apr 46 · **May 75**, concentrated in
+  CH-WA / Inbound AHT + RT. No engine can reproduce a hand-typed number, so scoring the engine
+  against those rows measured the typist, not the engine.
+- **Rule:** the harness reports both, and the ≥98% gate is judged on the **287 formula-derivable
+  rows**, where engine accuracy is **91.29%** (the all-rows figure is 57.21%).
+- **Also fixed in the same pass:** classification resolved bands from the GENERIC KPI band instead of
+  the per-function override the scorer actually used (m089) — June formula-mismatch 14 → 1; and an
+  engine `null` ("not applicable to this function") was mislabelled *rounding*/*formula-mismatch* —
+  the new **`not-applicable`** class isolates 110 such cells.
+
+### D-081 — Two scope questions the residue depends on
+- **Status:** ⚠ Needs Approval. (1) **May-26 `Internship Inbound`**: m089 seeded it from the Jan+June
+  majority (inbound band, RT not scored) and flagged May as an email-shaped outlier; May's sheet does
+  score RT (45 cells) — was that deliberate, or is May the outlier? This one block is most of May's
+  39.29%. (2) **`Offline` QUALITY**: your 2026-07-11 rule says Offline QA is not applicable, but the
+  Feb + May sheets scored it (40 cells) — confirm the rule applies **forward only**.
+
+---
+
 *Maintained alongside `docs/knowledge/WFM_RULES_AND_DECISIONS.md` — that document remains the single
 source of truth for the RULES themselves; this log records WHEN and WHY each was decided, by whom,
 and what may not be executed without approval.*

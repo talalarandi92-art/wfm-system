@@ -27,14 +27,53 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
 - **B4 Odoo fingerprint (hr.attendance) + request propagation** ⚠ needs Odoo scope decision.
 - **B5 tri-source reconciliation + authorized/unauthorized engine** (8 statuses; adherence vs conformance versioned).
 - **B6 daily performance record + auto daily/weekly/monthly scoring** + explainability + publish/freeze.
-- **B7 historical validation harness** — system-vs-Excel over the 6 workbooks (Jan–Apr mandatory, May–Jun bonus);
-  variance classification; accuracy gate before auto-scoring activation.
+- **B7 historical validation harness** ✅ built 2026-07-11, **RUN + corrected 2026-07-22** —
+  `node scripts/scorecard-validate.js` over all 6 workbooks. Three harness defects fixed on the run:
+  (1) classification used the GENERIC band, not the per-function band the scorer actually used
+  (m089 overrides) — June formula-mismatch 14 → 1; (2) an engine `null` ("KPI not applicable to this
+  function") was filed as *rounding* / *formula-mismatch* — new **`not-applicable`** class now
+  isolates 110 such cells; (3) the gate was measured over rows the sheet itself contradicts.
+  **Headline: 171 of 458 Final rows carry a HAND-TYPED score cell** (the workbook's cached value
+  disagrees with its own formula), which no engine can reproduce — so the gate is now judged on the
+  **287 formula-derivable rows: engine accuracy 91.29%** (raw all-rows figure 57.21% was measuring
+  the typist). Per month (formula-only): Jan 98.78 · Feb 94.44 · Mar 92.0 · Apr 100 · **May 39.29** · Jun 98.53.
+  Gate ≥98% NOT MET — the residue is concentrated and each piece needs a Director ruling, not code
+  (see “B7 findings” below). Report: `new folder/Scorecard 2026/Historical_Validation_Report.xlsx`.
 - **B8 Sprinklr bridge queue-discovery repair** ⚠ needs extension repo location (parallel-safe).
 - **B9 UI**: unified roster+daily-performance view, recon/unauthorized/survey/ranking/incentive pages (§25).
 - **B10 ⭐ BUILDER v2 — Report Builder + Dashboard Builder + Filter Builder (PROMOTED, Director 2026-07-11 "لا تنسى الريبورت بلدر v2")** — the true Sprinklr-replacement surface. Base exists: `ReportBuilder.tsx` + `DashboardBuilder.tsx` + `roster-reports report-builder` endpoint. Grounded in the LIVE Sprinklr capture (docs/master/SPRINKLR_LIVE_REPORTING_FINDINGS.md) + the 9 screenshots. Parity targets: **tabbed sections per dashboard** · **metric/dimension LIBRARY picker** (screenshot 6) · **visual widget builder** (source→visualization→columns→add; screenshot 5) · **relative date controls** (Last month/28/30/60/90/120/180, This/Last Year, Lifetime, Dynamic, Custom; screenshot 7) · **filter builder** (Select Filter/Type/Value + per-widget filter badge; screenshot 2) · **calculated metrics** · per-widget granularity + chart-type toggle + column config · drill-down (every number → provenance, ties to R0 <Kpi>) · data-freshness · Excel export. Same-report-per-widget rule. DESIGN = original WFM (dazzle/ds kit), NOT a Sprinklr clone. Can start on EXISTING data (roster_days/scorecard_monthly/agent_daily_stats) and widen as B2-B7 + Auto-Ingest add sources — so it is NOT blocked; sequence it as its own sub-program in parallel once Auto-Ingest wave 1 lands (or immediately on current data if Director prioritizes).
 - **B11 hardening**: DQ statuses, bridge-health, backfill UI, immutable audit, RBAC, docs.
 
 Pure-backend: B0–B8 · UI: B9–B11 · credential-gated: B3/B4/B8.
+
+## B7 findings — the 3 things standing between 91.29% and the gate (Director rulings, NOT code)
+
+**F1 ⚠ ROUNDING BASIS — a confirmed rule contradicts your own workbooks (Recommended, not executed).**
+`WFM_RULES_AND_DECISIONS.md` §KPI says **round-half-up all %** *then* band it. Your SC sheets' own
+formulas band the **RAW fraction**. They disagree on **71 cells**, and it is nearly one-directional:
+**68 of 71 award MORE points than your sheet, +550 net points in total.** Examples: QA 94.75% → rule
+30 pts / sheet 20 · QA 89.60% → rule 20 / sheet 10 · QA **79.80% → rule 10 / sheet −10** (a 20-point
+swing at the band edge) · productivity 88.90% → rule 5 / sheet 0. Affected KPIs: PRODUCTIVITY 64,
+QUALITY 7. **Nothing was changed** — flipping the comparison basis is a rule change (BR-APP-006).
+Options: (a) keep round-half-up and accept the engine scores slightly higher than the historical
+sheets; (b) band the raw fraction to match the sheets, and correct the rule doc; (c) round-half-up
+for DISPLAY only, band on raw. Recommendation: **(c)** — it matches the sheets and keeps the
+familiar displayed %.
+
+**F2 May-26 `Internship Inbound` block (45 RT cells + 9 AHT).** m089 seeded that function from the
+Jan+June MAJORITY (inbound band; RT not scored), and flagged May as an email-shaped outlier. May's
+sheet does score its RT (15 pts). Ruling needed: was May's Internship-Inbound block deliberately
+scored as email, or is the May sheet the outlier? This one block is most of May's 39.29%.
+
+**F3 `Offline` / `Internship Offline` QUALITY (40 cells, May + Feb).** Your 2026-07-11 rule says
+Offline QA is **not applicable**; the Feb and May sheets predate that rule and scored it (10 pts at
+80%). Expected and harmless — confirm the rule applies **forward only** and these months stay as-is.
+
+**F4 (context, no ruling) — 171/458 rows are partly hand-typed.** Mar 42 · Apr 46 · **May 75** rows
+contain a score cell that contradicts the sheet's own formula, concentrated in CH-WA / Inbound
+AHT+RT. That is *why* the raw match rate looked catastrophic. Worth knowing on its own: for those
+three months, the official scores were partly manual, so no engine — ours or a rebuilt Excel — can
+reproduce them exactly.
 
 ## Open questions for the Director (blocking marked)
 1. ⚠ Sprinklr reporting-API **key + X-PARTNER-ID + base URL** (blocks B3; the txt is only a request body).

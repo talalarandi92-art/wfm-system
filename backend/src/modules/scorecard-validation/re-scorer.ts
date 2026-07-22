@@ -8,7 +8,11 @@ import { ScRow, ScoreKpi, SCORE_CELLS } from './sc-workbook-reader';
 
 const kpiByCode = new Map(SEED_KPIS.map((k) => [k.code, k]));
 
-function bandFor(kpiCode: string, functionName: string): KpiBand | null {
+/** Resolve the band the engine ACTUALLY scores with: per-function override, else the
+ *  KPI default. Exported so the comparator classifies against the same band the
+ *  scorer used — classifying against the generic band mislabels every function
+ *  that has an override (m089 gave AHT/RT/QUALITY per-function bands). */
+export function bandFor(kpiCode: string, functionName: string): KpiBand | null {
   const kpi = kpiByCode.get(kpiCode);
   if (!kpi) return null;
   const ov = kpi.functionOverrides?.find((o) => o.functionName.toLowerCase() === functionName.toLowerCase());
