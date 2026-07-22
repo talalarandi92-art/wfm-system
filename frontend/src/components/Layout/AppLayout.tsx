@@ -1,4 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Bell, Moon, Sun, Sparkles, Globe, LogOut, ChevronDown, Search, X, CheckCheck, KeyRound } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Sidebar from './Sidebar';
@@ -515,10 +516,17 @@ export default function AppLayout() {
           </div>
         )}
 
-        {/* ── Page content — keyed by route for a soft enter transition ──── */}
+        {/* ── Page content — keyed by route for a soft enter transition ────
+            Wrapped in an ErrorBoundary keyed by route: a render crash inside one
+            page shows an honest error card and leaves the sidebar/header usable,
+            instead of unmounting the whole app to a white screen (which is what
+            a single object-rendered-as-JSX did to Capacity). Re-keying on the
+            path also clears a previous page's error when navigating away. */}
         <main className="flex-1 p-6">
           <div key={location.pathname} className="page-enter">
-            <Outlet />
+            <ErrorBoundary label={location.pathname} ar={ar}>
+              <Outlet />
+            </ErrorBoundary>
           </div>
         </main>
       </div>
