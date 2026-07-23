@@ -1168,6 +1168,40 @@ export class SprinklrService {
    *    f.lastname@boutiqaat.com — first initial + surname must BOTH match the
    *    employee record, and the match must be unique.
    */
+  /**
+   * Persist a newly-resolved agent→employee link AND heal the history behind it.
+   *
+   * Why the second half exists: the stats upsert fills employee_id via
+   * `COALESCE(EXCLUDED.employee_id, existing)`, which only fires when the SAME
+   * (tenant, stat_date, agent) row is written again. Yesterday's rows are never
+   * rewritten, so an identity resolved today left every earlier day orphaned
+   * FOREVER. Proven on live data: every orphan row for a mapped agent is dated
+   * strictly BEFORE that agent's first linked day (e.g. Hassan Saad — 7 orphan
+   * days ending 2026-06-19, first linked 2026-07-03, same person throughout).
+   *
+   * Backfilling only touches rows whose employee_id IS NULL, so it can never
+   * overwrite an attribution that already exists — it fills blanks, it does not
+   * re-decide anything.
+   */
+  private async persistAgentLink(tenantId: string, agentId: string, employeeId: string): Promise<void> {
+    await this.dataSource.query(
+      `UPDATE sprinklr_agent_map SET employee_id = $3, last_seen = NOW()
+        WHERE tenant_id = $1 AND sprinklr_agent_id = $2 AND employee_id IS DISTINCT FROM $3`,
+      [tenantId, agentId, employeeId],
+    ).catch(() => undefined);
+
+    const healed = await this.dataSource.query(
+      `UPDATE agent_daily_stats SET employee_id = $3
+        WHERE tenant_id = $1 AND sprinklr_agent_id = $2 AND employee_id IS NULL
+        RETURNING 1`,
+      [tenantId, agentId, employeeId],
+    ).catch(() => []);
+    const n = Array.isArray(healed) ? healed.length : 0;
+    if (n > 0) {
+      this.logger.log(`identity backfill: agent ${agentId} → employee ${employeeId} healed ${n} historical stat row(s)`);
+    }
+  }
+
   private async resolveEmployeeId(tenantId: string, email: string, agentName: string): Promise<string | null> {
     if (!email) return null;
 
@@ -1275,6 +1309,8 @@ export class SprinklrService {
              last_seen   = NOW()`,
           [tenantId, a.agentId, a.agentName, a.email || '', userId, employeeId],
         );
+        // A link learned here must reach the history too, not just today forward.
+        if (employeeId) await this.persistAgentLink(tenantId, a.agentId, employeeId);
       } catch (e: any) {
         this.logger.warn(`Agent map upsert failed for ${a.agentId}: ${e.message}`);
       }
@@ -1469,12 +1505,8 @@ export class SprinklrService {
       } else if (g.email) {
         employeeId = await this.resolveEmployeeId(tenantId, g.email, g.name);
         if (employeeId) {
-          // Persist the resolved link so future lookups are instant
-          await this.dataSource.query(
-            `UPDATE sprinklr_agent_map SET employee_id = $3, last_seen = NOW()
-             WHERE tenant_id = $1 AND sprinklr_agent_id = $2`,
-            [tenantId, agentId, employeeId],
-          ).catch(() => undefined);
+          // Persist the link AND heal the days that were written before it existed.
+          await this.persistAgentLink(tenantId, agentId, employeeId);
         }
       }
 
