@@ -121,7 +121,11 @@ export class AutoScoringReadinessService {
       [months],
     );
 
-    /* ── the probes. Each one asks the DB, so the report cannot go stale. ── */
+    /* ── the probes. Each one asks the DB, so the report cannot go stale. ──
+       The Sprinklr probes count DISTINCT employee_id, never sprinklr_agent_id:
+       the denominator is roster PEOPLE, so counting agent ids compared two
+       different populations — and a stat row with no employee link cannot be
+       attributed to anyone, so it is worth nothing to scoring however rich it is. */
     const rosterProd = await this.probe(
       `SELECT COUNT(*) AS rows, COUNT(DISTINCT person_no) AS people, MAX(work_date)::text AS latest
          FROM roster_days
@@ -135,19 +139,19 @@ export class AutoScoringReadinessService {
       [tenantId, win.from],
     );
     const aht = await this.probe(
-      `SELECT COUNT(*) AS rows, COUNT(DISTINCT sprinklr_agent_id) AS people, MAX(stat_date)::text AS latest
+      `SELECT COUNT(*) AS rows, COUNT(DISTINCT employee_id) AS people, MAX(stat_date)::text AS latest
          FROM agent_daily_stats
         WHERE tenant_id = $1 AND stat_date >= $2::date AND aht_seconds IS NOT NULL`,
       [tenantId, win.from],
     );
     const frt = await this.probe(
-      `SELECT COUNT(*) AS rows, COUNT(DISTINCT sprinklr_agent_id) AS people, MAX(stat_date)::text AS latest
+      `SELECT COUNT(*) AS rows, COUNT(DISTINCT employee_id) AS people, MAX(stat_date)::text AS latest
          FROM agent_daily_stats
         WHERE tenant_id = $1 AND stat_date >= $2::date AND avg_response_seconds IS NOT NULL`,
       [tenantId, win.from],
     );
     const contacts = await this.probe(
-      `SELECT COUNT(*) AS rows, COUNT(DISTINCT sprinklr_agent_id) AS people, MAX(stat_date)::text AS latest
+      `SELECT COUNT(*) AS rows, COUNT(DISTINCT employee_id) AS people, MAX(stat_date)::text AS latest
          FROM agent_daily_stats
         WHERE tenant_id = $1 AND stat_date >= $2::date AND contacts_received IS NOT NULL`,
       [tenantId, win.from],
