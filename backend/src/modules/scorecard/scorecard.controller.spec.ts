@@ -59,7 +59,7 @@ describe('ScorecardController.exportBatch — row-level scope (IDOR)', () => {
 
   it('agent-scoped caller (empNos=[]) exports ZERO rows', async () => {
     const ds = makeDs();
-    const c = new ScorecardController(ds as any, {} as any, {} as any);
+    const c = new ScorecardController(ds as any, {} as any, {} as any, {} as any);
     // Agent: view_own only, no linked employee → resolveScope returns empNos=[]
     const agent = { tenantId: 't1', employeeId: null, permissionCodes: ['scorecard.view_own'] };
     const sf = await c.exportBatch(batchId, agent, 'Final', res as any);
@@ -71,7 +71,7 @@ describe('ScorecardController.exportBatch — row-level scope (IDOR)', () => {
 
   it('admin (scorecard.view_all) exports ALL rows, no scope filter', async () => {
     const ds = makeDs();
-    const c = new ScorecardController(ds as any, {} as any, {} as any);
+    const c = new ScorecardController(ds as any, {} as any, {} as any, {} as any);
     const admin = { tenantId: 't1', employeeId: 'e-admin', permissionCodes: ['scorecard.view_all'] };
     const sf = await c.exportBatch(batchId, admin, 'Final', res as any);
     expect(await exportedDataRowCount(sf)).toBe(FIXTURE.length);

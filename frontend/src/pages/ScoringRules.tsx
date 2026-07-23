@@ -8,6 +8,7 @@ import {
   useInjectDsStyles, NxPageHeader, NxLoading, NxError, NxCard, card, STATUS,
 } from '@/components/ds';
 import { StatTile } from '@/components/dazzle';
+import AutoScoringReadiness from '@/pages/AutoScoringReadiness';
 
 /* ─── Types (mirror /scorecard/scoring-rules) ─────────────────────────────── */
 interface KpiBandDef {
@@ -303,6 +304,11 @@ export default function ScoringRules() {
               </div>
             </div>
           </NxCard>
+
+          {/* Can the engine score without a human? A live probe per KPI, each
+              missing feed priced in Net Points. Graceful-hides if the endpoint
+              is not deployed — the rulebook below never depends on it. */}
+          <AutoScoringReadiness />
 
           <NxCard dark={dark} style={{ marginBottom: 14, borderInlineStart: '3px solid #6366f1' }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>

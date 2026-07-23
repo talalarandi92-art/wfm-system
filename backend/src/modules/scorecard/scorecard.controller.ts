@@ -16,6 +16,7 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { ScorecardUploadService } from './scorecard-upload.service';
 import { ScorecardScoringService } from './scorecard-scoring.service';
+import { AutoScoringReadinessService } from './auto-scoring-readiness.service';
 
 /* ─── incentive tiers per function (KD) ─────────────────────────────────── */
 const INCENTIVE_TIERS = [
@@ -35,6 +36,7 @@ export class ScorecardController {
     @InjectDataSource() private readonly ds: DataSource,
     private readonly uploadSvc: ScorecardUploadService,
     private readonly scoringSvc: ScorecardScoringService,
+    private readonly readinessSvc: AutoScoringReadinessService,
   ) {}
 
   /**
@@ -837,6 +839,21 @@ export class ScorecardController {
      proved at 98.47%. Neither mutates data nor auto-scores a month — AUTO-scoring
      activation stays the Director's call.
   ════════════════════════════════════════════════════════════════════════ */
+
+  /**
+   * Can the engine score WITHOUT a human uploading a workbook — and if not, what
+   * exactly is missing and what is it worth in Net Points?
+   *
+   * B7 proved the engine is correct (98.95%); this proves whether it has anything
+   * to be correct ABOUT. Every verdict is a live COUNT over the real tables, so it
+   * re-answers itself the day a feed lands. READ-ONLY.
+   */
+  @Get('auto-scoring-readiness')
+  @ApiOperation({ summary: 'Per-KPI live-feed readiness for auto-scoring, with each missing feed priced in Net Points (read-only)' })
+  async autoScoringReadiness(@CurrentUser() user: any, @Query('months') months?: string) {
+    const m = Math.min(12, Math.max(1, Number(months) || 3));
+    return this.readinessSvc.report(user.tenantId, m);
+  }
 
   /** Read-only rulebook for the Scoring-Rules transparency viewer. */
   @Get('scoring-rules')

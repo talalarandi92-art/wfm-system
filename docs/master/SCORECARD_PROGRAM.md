@@ -26,7 +26,23 @@ unauthorized-record table, ~60-col daily performance record, auto-scoring from l
   (USER_AVAILABILITY_SLA_REPORT_V2), agent perf, survey; staging + refresh ledger.
 - **B4 Odoo fingerprint (hr.attendance) + request propagation** ⚠ needs Odoo scope decision.
 - **B5 tri-source reconciliation + authorized/unauthorized engine** (8 statuses; adherence vs conformance versioned).
-- **B6 daily performance record + auto daily/weekly/monthly scoring** + explainability + publish/freeze.
+- **B6 daily performance record + auto daily/weekly/monthly scoring** — ⚠ **BLOCKED ON DATA, not code
+  (measured 2026-07-23).** With B7 met, the engine is proven; the missing half is the INPUTS. New
+  `GET /scorecard/auto-scoring-readiness` probes every KPI against the live tables and prices each
+  missing feed in Net Points. **Verdict today: only 15 of 132.5 Net Points (11.3%) are computable
+  from live feeds** — PRODUCTIVITY alone (97.7% people coverage). Building an auto-scorer on that
+  would produce a scorecard that is 89% holes. The report re-answers itself as feeds land, so this
+  wave un-blocks by DATA arriving, not by more code. Surfaced in `/scorecard?tab=rules`.
+  What each missing feed is worth:
+  | feed | +Net Points | KPIs |
+  |---|---|---|
+  | Sprinklr Case-Assignments | **+35** | FCR, RESPONSE_TIME |
+  | QA monthly file (manual) | **+30** | QUALITY |
+  | Sprinklr agent performance / Ameyo voice | +15 | AHT |
+  | TL/QA mistake log (manual) | +15 | COMMON_MISTAKES |
+  | Sprinklr / Ameyo contacts-vs-tickets | +10 | CTR |
+  | MS-Forms quiz export (manual) | +10 | QUIZ |
+  | Sprinklr survey export | +2.5 | PRR |
 - **B7 historical validation harness** ✅ built 2026-07-11, **RUN + corrected 2026-07-22** —
   `node scripts/scorecard-validate.js` over all 6 workbooks. Three harness defects fixed on the run:
   (1) classification used the GENERIC band, not the per-function band the scorer actually used
