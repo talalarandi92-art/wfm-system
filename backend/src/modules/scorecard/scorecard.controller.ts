@@ -849,7 +849,13 @@ export class ScorecardController {
    * re-answers itself the day a feed lands. READ-ONLY.
    */
   @Get('auto-scoring-readiness')
-  @ApiOperation({ summary: 'Per-KPI live-feed readiness for auto-scoring, with each missing feed priced in Net Points (read-only)' })
+  // The class gate is scorecard.view_own (an AGENT-level permission) because most
+  // endpoints here are row-scoped per person. This one is not: it has no per-person
+  // rows to scope, and it exposes table names, row counts and the size of the
+  // workforce. That is operational detail an agent has no business reading, so it
+  // is raised to the WFM/admin permission explicitly.
+  @RequirePermissions('scorecard.view_all')
+  @ApiOperation({ summary: 'Per-KPI live-feed readiness for auto-scoring, with each missing feed priced in Net Points (read-only, WFM/admin)' })
   async autoScoringReadiness(@CurrentUser() user: any, @Query('months') months?: string) {
     const m = Math.min(12, Math.max(1, Number(months) || 3));
     return this.readinessSvc.report(user.tenantId, m);

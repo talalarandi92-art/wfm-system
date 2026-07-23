@@ -28,6 +28,9 @@ try {
   step('frontend type-check', 'npx tsc --noEmit', FE);
   step('backend lint (correctness rules)', 'npx eslint src', BE);
   step('frontend lint (correctness + hooks)', 'npx eslint src', FE);
+  // Deny-by-default is a P0 property, not a one-off cleanup: a new route that
+  // forgets its gate must fail the build the day it is written, not months later.
+  step('RBAC gate audit (every route has an explicit decision)', 'node scripts/scan-rbac.cjs', BE);
   step('backend unit tests (jest)', 'npx jest --silent', BE);
   step('frontend smoke tests (vitest)', 'npx vitest run', FE);
   if (process.env.SKIP_GOLDEN === '1') console.log('\n▶ golden master — SKIPPED (SKIP_GOLDEN=1)');
