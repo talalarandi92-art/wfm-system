@@ -49,6 +49,18 @@ export function useCountUp(target: number, ms = 900, run = true) {
     raf.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf.current);
   }, [target, ms, run, reduced]);
+
+  /* Truth beats decoration. A tile that mounts BEFORE its data (num=0) and is
+     later handed the real value was observed rendering a stale 0 while the rows
+     underneath it showed 31 — a wrong number on screen is worse than no
+     animation. This guarantees the displayed value can never lag its target:
+     once the animation window has passed, snap to the truth. */
+  useEffect(() => {
+    if (v === target) return;
+    const t = setTimeout(() => setV((cur) => (cur === target ? cur : target)), ms + 120);
+    return () => clearTimeout(t);
+  }, [target, ms, v]);
+
   return v;
 }
 
