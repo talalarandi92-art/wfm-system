@@ -79,20 +79,28 @@ describe('KPI Registry — scoring reproduces the skill 1:1', () => {
     expect(scoreBand(b, 0.74)).toBe(-10);
   });
 
-  it('PRODUCTIVITY: ≥91→15 · =90→10 · =89→5 · 87–88→0 · ≤86→−15 (discrete steps)', () => {
+  it('PRODUCTIVITY (D-082): RANGES at the top, the sheet own edge at the bottom', () => {
     const b = band('PRODUCTIVITY');
     expect(scoreBand(b, 0.91)).toBe(15);
-    // D-079 + the sheet's DISCRETE productivity steps (=90, =89): a value between the
-    // integer steps matches no band and falls to 0 — exactly what the Director's own
-    // sheet does (May CH-WA 88.90% was awarded 0 there). Flagged in SCORECARD_PROGRAM §F5.
-    expect(scoreBand(b, 0.905)).toBe(0);
-    expect(scoreBand(b, 0.889)).toBe(0);
     expect(scoreBand(b, 0.90)).toBe(10);
     expect(scoreBand(b, 0.89)).toBe(5);
     expect(scoreBand(b, 0.88)).toBe(0);
     expect(scoreBand(b, 0.87)).toBe(0);
     expect(scoreBand(b, 0.86)).toBe(-15);
     expect(scoreBand(b, 0.50)).toBe(-15);
+
+    // THE FIX: the sheet wrote =90/=89 as exact integer matches, so once D-079 made
+    // banding compare the RAW %, 90.5 matched nothing and fell to 0 while 90.0 got
+    // 10 — a better performer scoring worse. `gte` removes that cliff.
+    expect(scoreBand(b, 0.905)).toBe(10);
+    expect(scoreBand(b, 0.895)).toBe(5);
+    expect(scoreBand(b, 0.889)).toBe(0);
+
+    // THE GUARD: the BOTTOM edge stays `lte: 86`, exactly as the sheet wrote it.
+    // Widening it to `< 87` was measured against the 6 real workbooks and would
+    // have dropped 8 real people sitting at 86.2–86.99% from 0 to −15 — the sheet
+    // itself gives them 0. The ask was to fix the cliff, not harden the penalty.
+    for (const v of [0.8618, 0.8631, 0.8663, 0.8673, 0.8699]) expect(scoreBand(b, v)).toBe(0);
   });
 
   it('CTR: ≥95→10 · 90–94→5 · <90→−10', () => {
@@ -328,6 +336,10 @@ describe('KPI Registry — migrations 088 + 089 deep-equal kpi-seed.ts (what the
     path.join(__dirname, '../../../../database/migrations/093_feb_offline_aht_band.sql'),
     'utf8',
   );
+  const sql094 = fs.readFileSync(
+    path.join(__dirname, '../../../../database/migrations/094_productivity_range_band.sql'),
+    'utf8',
+  );
   /** Every migration that can carry a PERIOD-scoped override row. */
   const scopedSql = `${sql091}
 ${sql092}
@@ -341,7 +353,7 @@ ${sql093}`;
     return out;
   };
   /** 088 map with 089 rows overlaid (what the DB holds after both applied). */
-  const overlaid = (marker: string) => ({ ...extract(sql088, marker), ...extract(sql089, marker) });
+  const overlaid = (marker: string) => ({ ...extract(sql088, marker), ...extract(sql089, marker), ...extract(sql094, marker) });
 
   it('every NULL-function band in SQL (088 overlaid by 089) deep-equals the TS constant', () => {
     const sqlBands = overlaid('BAND');

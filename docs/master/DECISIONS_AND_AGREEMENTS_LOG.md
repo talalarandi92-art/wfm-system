@@ -575,6 +575,24 @@
   it is registry logic, not validation logic. The scorer, the comparator and both spec files now share
   ONE definition; a second, period-blind copy in the registry spec had already started disagreeing.
 
+### D-082 — PRODUCTIVITY band uses RANGES at the top (not exact integer steps)
+- **Status:** ✅ **Confirmed + EXECUTED (2026-07-23, Director: "اي خليها مدى ≥90").**
+- **The bug it fixes:** the SC sheet wrote the middle steps as EXACT matches (`=90`, `=89`). That
+  worked only while every % was rounded to a whole number first. **D-079 made the engine band the RAW
+  percentage — and from that moment 90.5% matched NOTHING and fell through to 0 while 90.0% scored
+  10.** A better performer scored worse. `gte` removes the cliff.
+- **Deliberately NOT changed — and this is the important half:** the bottom edge stays `lte: 86`,
+  exactly as the sheet wrote it. My first cut widened it to `< 87`, which reads natural but was
+  **measured against the 6 real workbooks first and would have dropped 8 real people sitting at
+  86.18–86.99% from 0 to −15** (Maryam Mubarak, Ali Suliman, Illaf Alloubab, Afnan Ajaimi…). The
+  sheet itself gives them 0. The ruling was to fix the cliff, not to harden the penalty band —
+  so the widening was reverted before it shipped.
+- **Measured impact (2,247 productivity cells across all 6 workbooks):** 50 cells change ·
+  **50 BETTER for the employee · 0 worse** · +360 points · **0 Final rows move**, so no published Net
+  Points changes. B7 engine accuracy unchanged at **98.95%** — the gate still passes.
+- **Mechanism:** m094 (overlays the m088 band), `kpi-seed.ts` is the source of truth, jest asserts
+  SQL↔TS parity. Registry `formula_text` and an append-only formula version updated with it.
+
 ---
 
 *Maintained alongside `docs/knowledge/WFM_RULES_AND_DECISIONS.md` — that document remains the single

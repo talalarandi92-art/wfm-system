@@ -331,7 +331,7 @@ export const SEED_KPIS: SeedKpi[] = [
       on_leave_week: 'WD=0 week = on leave → not scored (blank inputs + WFM note)',
       maternity_agents: 'named mothers on *7 codes: Shaima Saoud, Haya Mohanna',
     },
-    formulaText: 'Z = (WD-hours − ShortBreak) ÷ WD-hours; sick penalty: 1→−2%, 2→−5%, >2→none (sheet quirk, replicated as-is); round-half-up; band: ≥91→15, =90→10, =89→5, 87–88→0, ≤86→−15',
+    formulaText: 'Z = (WD-hours − ShortBreak) ÷ WD-hours; sick penalty: 1→−2%, 2→−5%, >2→none (sheet quirk, replicated as-is); round-half-up; band (D-082, RANGES not exact steps): ≥91→15, ≥90→10, ≥89→5, ≥87→0, <87→−15',
     direction: 'higher_better',
     unit: '%',
     source: 'Schedule/Productivity WD blocks + Ameyo AGENT_Session_Details / Sprinklr break export (per function)',
@@ -339,7 +339,16 @@ export const SEED_KPIS: SeedKpi[] = [
     active: true,
     weight: 15,
     target: 91,
-    band: { type: 'threshold_pct', rounding: 'half_up_pct', bands: [{ gte: 91, points: 15 }, { eq: 90, points: 10 }, { eq: 89, points: 5 }, { lte: 86, points: -15 }], default: 0 },
+    /* D-082 (Director 2026-07-23): RANGES, not discrete steps — at the TOP only.
+       The sheet wrote =90 / =89 as exact integer matches, which only worked while
+       everything was rounded to a whole percent. Since D-079 the engine bands the
+       RAW %, so 90.5 matched NOTHING and fell through to 0 while 90.0 scored 10 —
+       a better performer scoring worse. `gte` removes that cliff.
+       The BOTTOM edge is deliberately left as the sheet wrote it (`lte: 86`), NOT
+       widened to `< 87`. Measured: widening it would have dropped 8 real people
+       sitting at 86.2–86.99% from 0 to −15, and the sheet itself gives them 0.
+       The ask was to fix the cliff, not to harden the penalty band. */
+    band: { type: 'threshold_pct', rounding: 'half_up_pct', bands: [{ gte: 91, points: 15 }, { gte: 90, points: 10 }, { gte: 89, points: 5 }, { gte: 87, points: 0 }, { lte: 86, points: -15 }], default: 0 },
   },
   {
     code: 'CTR',

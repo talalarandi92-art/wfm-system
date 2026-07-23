@@ -133,9 +133,10 @@ collapsed in `schedule.service`, different again in `Schedule.tsx`). A 14:00 shi
   path and −10 by his sheet). Enforced in `kpi-registry/score-band.ts` (`bandPct`, threshold_pct +
   gate); the hour bands never rounded and keep their exact edges. Productivity formula confirmed;
   sick-day penalty (1 sick −2%, 2+ −5%); quiz-commitment −5 on unsolved-quiz weeks.
-  **Consequence to watch:** the productivity band uses DISCRETE steps (`=90`, `=89`), so a raw value
-  between the integer steps (e.g. 88.90%) matches no band and scores 0 — which is exactly what the
-  Director's sheet does today, but it is a band-design question, not a rounding one.
+  **Resolved (D-082, 2026-07-23):** the productivity band now uses RANGES at the top
+  (`≥91→15, ≥90→10, ≥89→5, ≥87→0`) instead of the sheet's exact `=90`/`=89` steps, which under D-079
+  left 90.5% scoring 0 while 90.0% scored 10. The BOTTOM edge stays `≤86→−15` exactly as the sheet
+  wrote it — widening it to `<87` was measured and would have cost 8 real people 15 points each.
 - `scorecard_entries` = 1 month only; `scorecard_monthly` = Net Points only; `fcr.employee_id` is a uuid.
 - **⚠ DRIFT TO FIX (audit):** in the Custom Report Builder, the `sc` (scorecard) CTE is joined 1:N onto per-day
   roster rows, so a grouped `AVG(sc.net)` is **day-weighted, not person-weighted** (a 22-day agent outweighs an
