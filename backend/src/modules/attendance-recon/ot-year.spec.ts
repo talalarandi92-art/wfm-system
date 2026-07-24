@@ -104,6 +104,42 @@ describe('OT year-to-date', () => {
     });
   });
 
+  describe('a date the file never stated', () => {
+    /* `Israa Wal Miraj Jan CC Overtime 2026` gives no date column. The ingester resolves it
+       from the file's own weekday header plus the roster's holiday evidence and marks it
+       'derived'. Here: a derived date behaves as a real day, but must never be passed off
+       as one the workbook stated. */
+    it('a derived date lands on its day, is marked, and is reported separately from defects', async () => {
+      const r = await build([
+        row({ work_date: '2026-01-18', date_precision: 'derived', period_month: '2026-01', hours: 8,
+              occasion: 'Israa Wal Miraj Jan 2026', source_file: 'Israa.xlsx',
+              data_quality: 'date derived from evidence: it names weekday "Sun" …' }),
+      ]);
+      const p = r.people[0];
+      expect(p.months[0]).toBe(8);                 // counted in January like any other day
+      expect(p.days[0].derived).toBe(true);        // …but flagged as resolved, not stated
+      expect(r.totals.undated).toBe(0);
+      expect(r.derivedDates).toHaveLength(1);
+      expect(r.derivedDates[0]).toMatchObject({ date: '2026-01-18', rows: 1, hours: 8 });
+      expect(r.derivedDates[0].why).toContain('derived');
+      // provenance, not a defect — it must not pollute the data-quality list
+      expect(r.dataQuality).toEqual([]);
+    });
+
+    it('several derived rows on one day roll up to a single entry', async () => {
+      const rows = Array.from({ length: 5 }, (_, i) => row({
+        person_no: String(100 + i), employee_name: `P${i}`, work_date: '2026-01-18',
+        date_precision: 'derived', period_month: '2026-01', hours: 8,
+        source_file: 'Israa.xlsx', data_quality: 'date derived from evidence …',
+      }));
+      const r = await build(rows);
+      expect(r.derivedDates).toHaveLength(1);
+      expect(r.derivedDates[0].rows).toBe(5);
+      expect(r.derivedDates[0].hours).toBe(40);
+      expect(r.totals.total).toBe(40);
+    });
+  });
+
   describe('a day is never invented', () => {
     it('undated rows are carried at MONTH level and kept out of the day grid', async () => {
       const r = await build([row({ work_date: null, date_precision: 'month', period_month: '2026-01', hours: 8 })]);

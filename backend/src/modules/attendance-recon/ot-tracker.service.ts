@@ -114,7 +114,38 @@ export interface OtTrackerReport {
   provenance: string;
 }
 
+/** The whole year as ONE day grid — the monthly tracker × 12, same cells, same rules. */
+export interface OtYearGridDay { date: string; day: number; month: number; weekday: string; isWeekend: boolean }
+export interface OtYearGridPerson {
+  personNo: string; name: string; functionName: string | null;
+  /** keyed by ISO date — sparse, only days that carry payable overtime */
+  cells: Record<string, { hours: number; type: OtType; pendingHours: number; flag?: string | null }>;
+  /** 12 slots, index 0 = January */
+  monthHours: number[];
+  rawNormal: number; rawOffday: number; rawHoliday: number; rawTotal: number;
+  paidNormal: number; paidOffday: number; paidHoliday: number; paidTotal: number;
+  days: number; pendingHours: number;
+}
+export interface OtYearGrid {
+  year: number;
+  days: OtYearGridDay[];
+  monthLabels: string[];
+  people: OtYearGridPerson[];
+  rates: typeof OT_RATES;
+  base: typeof OT_BASE;
+  rounding: { stepHours: number; mode: string };
+  totals: {
+    people: number; monthHours: number[];
+    rawNormal: number; rawOffday: number; rawHoliday: number; rawTotal: number;
+    paidNormal: number; paidOffday: number; paidHoliday: number; paidTotal: number;
+    days: number; pendingHours: number; roundedOutDays: number; roundedOutHours: number;
+  };
+  provenance: string;
+}
+
 const r2 = (n: number) => Math.round(n * 100) / 100;
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
 
 @Injectable()
 export class OtTrackerService {
@@ -148,6 +179,121 @@ export class OtTrackerService {
     return rows.map((r: any) => ({
       month: r.month, label: String(r.label).trim(), people: r.people, rawHours: r2(Number(r.raw_hours)),
     }));
+  }
+
+  /**
+   * THE WHOLE YEAR IN ONE GRID — every employee down, all 365 days across.
+   *
+   * Deliberately the same engine, cells and rounding as the monthly tracker, just
+   * over twelve months instead of one: the same day in the January sheet and in
+   * this grid must read identically, or the two sheets start arguing. Sparse by
+   * design — a person-day with no payable overtime has no cell at all.
+   */
+  async buildYearGrid(tenantId: string, year: number): Promise<OtYearGrid> {
+    const from = `${year}-01-01`, to = `${year}-12-31`;
+
+    const days: OtYearGridDay[] = (await this.ds.query(
+      `SELECT d::date::text AS date, EXTRACT(DAY FROM d)::int AS day,
+              EXTRACT(MONTH FROM d)::int AS month, to_char(d, 'Dy') AS weekday,
+              (EXTRACT(ISODOW FROM d) IN (5, 6)) AS is_weekend
+         FROM generate_series($1::date, $2::date, INTERVAL '1 day') d ORDER BY d`,
+      [from, to],
+    )).map((r: any) => ({ date: r.date, day: r.day, month: r.month, weekday: String(r.weekday).trim(), isWeekend: r.is_weekend }));
+
+    const rows = await this.ds.query(
+      `WITH rv AS (
+         SELECT person_no, work_date,
+                SUM(minutes) FILTER (WHERE status = 'acknowledged') AS ack_min,
+                SUM(minutes) FILTER (WHERE status = 'pending')      AS pend_min
+           FROM ot_review_flags
+          WHERE tenant_id = $1 AND work_date BETWEEN $2::date AND $3::date
+          GROUP BY person_no, work_date
+       )
+       SELECT rd.person_no, rd.work_date::text AS work_date,
+              MAX(rd.clean_name)     AS name,
+              MAX(rd.role_function)  AS function_name,
+              SUM(COALESCE(rd.ot_min, 0))          AS ot_min,
+              SUM(COALESCE(rd.offday_ot_min, 0))   AS offday_min,
+              SUM(COALESCE(rd.holiday_ot_min, 0))  AS holiday_min,
+              MAX(COALESCE(rv.ack_min, 0))         AS ack_min,
+              MAX(COALESCE(rv.pend_min, 0))        AS pend_min,
+              MAX(NULLIF(rd.data_quality, ''))     AS flag
+         FROM roster_days rd
+         LEFT JOIN rv ON rv.person_no = rd.person_no AND rv.work_date = rd.work_date
+        WHERE rd.tenant_id = $1 AND rd.work_date BETWEEN $2::date AND $3::date
+          AND (COALESCE(rd.ot_min,0) + COALESCE(rd.offday_ot_min,0) + COALESCE(rd.holiday_ot_min,0)
+               + COALESCE(rv.ack_min,0)) > 0
+        GROUP BY rd.person_no, rd.work_date
+        ORDER BY rd.person_no, rd.work_date`,
+      [tenantId, from, to],
+    ).catch(() => []);
+
+    const byPerson = new Map<string, OtYearGridPerson>();
+    let roundedOutDays = 0, roundedOutMin = 0;
+    for (const r of rows) {
+      const key = String(r.person_no);
+      let p = byPerson.get(key);
+      if (!p) {
+        p = {
+          personNo: key, name: r.name ?? key, functionName: r.function_name ?? null,
+          cells: {}, monthHours: Array(12).fill(0),
+          rawNormal: 0, rawOffday: 0, rawHoliday: 0, rawTotal: 0,
+          paidNormal: 0, paidOffday: 0, paidHoliday: 0, paidTotal: 0,
+          days: 0, pendingHours: 0,
+        };
+        byPerson.set(key, p);
+      }
+      const nMin = Number(r.ot_min), oMin = Number(r.offday_min), hMin = Number(r.holiday_min);
+      const ack = Number(r.ack_min) || 0, pend = Number(r.pend_min) || 0;
+      const type: OtType = hMin > 0 ? 'H' : oMin > 0 ? 'O' : 'N';
+      const payMin = payableOtMin({ regularMin: nMin, offdayMin: oMin, holidayMin: hMin, ackReviewMin: ack });
+      const hours = roundHours(payMin / 60);
+      if (pend > 0) p.pendingHours += pend / 60;
+      if (hours <= 0) { if (payMin > 0) { roundedOutDays++; roundedOutMin += payMin; } continue; }
+
+      p.cells[r.work_date] = { hours, type, pendingHours: r2(pend / 60), flag: r.flag ?? null };
+      p.monthHours[Number(r.work_date.slice(5, 7)) - 1] += hours;
+      if (type === 'N') p.rawNormal += hours; else if (type === 'O') p.rawOffday += hours; else p.rawHoliday += hours;
+      p.days++;
+    }
+
+    /* Same rule as the monthly sheet: a person stays only if they have a payable day
+       or hours held in review. A row that rounded away to nothing must not sit there
+       as 365 empty columns. */
+    const people = [...byPerson.values()].filter((p) => p.days > 0 || p.pendingHours > 0).map((p) => {
+      p.monthHours = p.monthHours.map(r2);
+      p.rawNormal = r2(p.rawNormal); p.rawOffday = r2(p.rawOffday); p.rawHoliday = r2(p.rawHoliday);
+      p.rawTotal = r2(p.rawNormal + p.rawOffday + p.rawHoliday);
+      p.paidNormal = r2(p.rawNormal * OT_RATES.normal);
+      p.paidOffday = r2(p.rawOffday * OT_RATES.offday);
+      p.paidHoliday = r2(p.rawHoliday * OT_RATES.holiday);
+      p.paidTotal = r2(p.paidNormal + p.paidOffday + p.paidHoliday);
+      p.pendingHours = r2(p.pendingHours);
+      return p;
+    }).sort((a, b) => b.rawTotal - a.rawTotal || a.name.localeCompare(b.name));
+
+    const sum = (f: (p: OtYearGridPerson) => number) => r2(people.reduce((s, p) => s + f(p), 0));
+    const monthHours = Array(12).fill(0);
+    for (const p of people) p.monthHours.forEach((h, i) => { monthHours[i] += h; });
+
+    return {
+      year, days, monthLabels: MONTH_NAMES, people,
+      rates: OT_RATES, base: OT_BASE, rounding: { stepHours: OT_ROUNDING.stepHours, mode: OT_ROUNDING.mode },
+      totals: {
+        people: people.length, monthHours: monthHours.map(r2),
+        rawNormal: sum((p) => p.rawNormal), rawOffday: sum((p) => p.rawOffday),
+        rawHoliday: sum((p) => p.rawHoliday), rawTotal: sum((p) => p.rawTotal),
+        paidNormal: sum((p) => p.paidNormal), paidOffday: sum((p) => p.paidOffday),
+        paidHoliday: sum((p) => p.paidHoliday), paidTotal: sum((p) => p.paidTotal),
+        days: people.reduce((s, p) => s + p.days, 0), pendingHours: sum((p) => p.pendingHours),
+        roundedOutDays, roundedOutHours: r2(roundedOutMin / 60),
+      },
+      provenance:
+        `Every day of ${year} from roster_days, on exactly the same rules as the monthly tracker: ` +
+        'payable OT (three disjoint buckets + acknowledged review minutes only), each day rounded to the ' +
+        `nearest ${OT_ROUNDING.stepHours} h, totals summed from the rounded days. A day with no payable ` +
+        'overtime has no cell. Read-only.',
+    };
   }
 
   async build(tenantId: string, month: string): Promise<OtTrackerReport> {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, CalendarClock, Users, Coins, TimerReset, AlertTriangle, Search } from 'lucide-react';
+import { Download, CalendarClock, CalendarRange, Users, Coins, TimerReset, AlertTriangle, Search } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile } from '@/components/dazzle';
@@ -50,11 +50,21 @@ export default function OtTrackerPage() {
       .then((r: any) => setD(r.data)).catch(() => setD(null)).finally(() => setLoading(false));
   }, [month]);
 
-  const exportXlsx = () => {
-    apiClient.get(`/attendance-recon/roster-v2/ot-tracker/export?month=${month}`, { responseType: 'blob' }).then((r: any) => {
-      const url = URL.createObjectURL(new Blob([r.data])); const a = document.createElement('a');
-      a.href = url; a.download = `Monthly_Overtime_Tracker_${month}.xlsx`; a.click(); URL.revokeObjectURL(url);
+  const download = (url: string, filename: string) =>
+    apiClient.get(url, { responseType: 'blob' }).then((r: any) => {
+      const u = URL.createObjectURL(new Blob([r.data])); const a = document.createElement('a');
+      a.href = u; a.download = filename; a.click(); URL.revokeObjectURL(u);
     });
+
+  const exportXlsx = () => download(
+    `/attendance-recon/roster-v2/ot-tracker/export?month=${month}`, `Monthly_Overtime_Tracker_${month}.xlsx`);
+
+  const year = month.slice(0, 4);
+  const [busyYear, setBusyYear] = useState(false);
+  const exportFullYear = () => {
+    setBusyYear(true);
+    download(`/attendance-recon/roster-v2/ot-tracker/export-full-year?year=${year}`, `Overtime_${year}_Full_Year.xlsx`)
+      .finally(() => setBusyYear(false));
   };
 
   const functions = useMemo(
@@ -107,7 +117,13 @@ export default function OtTrackerPage() {
         </select>
         <button onClick={exportXlsx} disabled={!d} className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
           style={{ background: 'linear-gradient(135deg,#f59e0b,#ef4444)', color: '#fff' }}>
-          <Download size={14} />{ar ? 'تصدير Excel' : 'Export Excel'}
+          <Download size={14} />{ar ? 'تصدير الشهر' : 'Export month'}
+        </button>
+        <button onClick={exportFullYear} disabled={busyYear} className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 disabled:opacity-60"
+          style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff' }}
+          title={ar ? 'كل أيام السنة بشيت واحد — نفس الخلايا ونفس الألوان' : 'Every day of the year in one sheet — same cells, same colours'}>
+          <CalendarRange size={14} />
+          {busyYear ? (ar ? 'جارِ التحضير…' : 'Preparing…') : (ar ? `كل سنة ${year} بشيت واحد` : `Full year ${year} — one sheet`)}
         </button>
       </div>
 

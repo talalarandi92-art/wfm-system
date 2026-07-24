@@ -28,7 +28,11 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 
-export interface OtYearDay { date: string; hours: number; occasion: string; shiftCode: string | null; conflict: boolean }
+export interface OtYearDay {
+  date: string; hours: number; occasion: string; shiftCode: string | null; conflict: boolean;
+  /** true when the workbook stated no date and the roster's holiday evidence identified it. */
+  derived?: boolean;
+}
 
 export interface OtYearPerson {
   personNo: string;
@@ -62,6 +66,8 @@ export interface OtYearReport {
   }[];
   sources: { file: string; occasion: string; rows: number; people: number; stackedHours: number; undated: number; flagged: number }[];
   dataQuality: { personNo: string; name: string; date: string | null; note: string; file: string; sheet: string }[];
+  /** Dates the workbooks never stated, resolved from roster evidence — shown, never implied. */
+  derivedDates: { date: string; occasion: string; file: string; rows: number; hours: number; why: string }[];
   /** Hours if someone stacked the sheets, vs the truth — the headline of this page. */
   dedup: { stacked: number; deduped: number; avoided: number; personDays: number; agreed: number; disagreed: number };
   ingestedAt: string | null;
@@ -112,23 +118,34 @@ export class OtYearService {
     for (const i of idents) ident.set(String(i.person_no), { name: i.name, fn: i.fn ?? null, engine: Number(i.engine_hours) || 0 });
 
     /* ── group by person-day (or person-month for undated rows) ───────────── */
-    type Cand = { hours: number; sheet: string; file: string; occasion: string; shift: string | null };
-    const groups = new Map<string, { personNo: string; name: string; date: string | null; month: string; cands: Cand[] }>();
+    type Cand = { hours: number; sheet: string; file: string; occasion: string; shift: string | null; derived: boolean };
+    const groups = new Map<string, { personNo: string; name: string; date: string | null; month: string; derived: boolean; cands: Cand[] }>();
     const sources = new Map<string, { file: string; occasion: string; rows: number; people: Set<string>; hours: number; undated: number; flagged: number }>();
     const dataQuality: OtYearReport['dataQuality'] = [];
+    const derivedAgg = new Map<string, { date: string; occasion: string; file: string; rows: number; hours: number; why: string }>();
 
     for (const r of raw) {
       const personNo = String(r.person_no);
+      const isDerived = r.date_precision === 'derived';
       const key = `${personNo}|${r.work_date || r.period_month}`;
       let g = groups.get(key);
-      if (!g) { g = { personNo, name: r.employee_name || personNo, date: r.work_date, month: r.period_month, cands: [] }; groups.set(key, g); }
-      g.cands.push({ hours: Number(r.hours), sheet: r.source_sheet, file: r.source_file, occasion: r.occasion, shift: r.shift_code });
+      if (!g) { g = { personNo, name: r.employee_name || personNo, date: r.work_date, month: r.period_month, derived: isDerived, cands: [] }; groups.set(key, g); }
+      if (isDerived) g.derived = true;
+      g.cands.push({ hours: Number(r.hours), sheet: r.source_sheet, file: r.source_file, occasion: r.occasion, shift: r.shift_code, derived: isDerived });
 
       let s = sources.get(r.source_file);
       if (!s) { s = { file: r.source_file, occasion: r.occasion, rows: 0, people: new Set(), hours: 0, undated: 0, flagged: 0 }; sources.set(r.source_file, s); }
       s.rows++; s.people.add(personNo); s.hours += Number(r.hours);
       if (r.date_precision === 'month') s.undated++;
-      if (r.data_quality) {
+
+      if (isDerived) {
+        /* A resolved date is PROVENANCE, not a defect — it belongs in its own summary
+           rather than flooding the data-quality list with 43 copies of one explanation. */
+        const k = `${r.source_file}|${r.work_date}`;
+        const agg = derivedAgg.get(k) || { date: r.work_date, occasion: r.occasion, file: r.source_file, rows: 0, hours: 0, why: r.data_quality || '' };
+        agg.rows++; agg.hours += Number(r.hours);
+        derivedAgg.set(k, agg);
+      } else if (r.data_quality) {
         s.flagged++;
         dataQuality.push({ personNo, name: r.employee_name || personNo, date: r.work_date, note: r.data_quality, file: r.source_file, sheet: r.source_sheet });
       }
@@ -162,7 +179,7 @@ export class OtYearService {
         const mi = Number(g.date.slice(5, 7)) - 1;
         p.months[mi] += chosen;
         const win = g.cands.find((c) => Math.abs(c.hours - chosen) < 1e-9)!;
-        p.days.push({ date: g.date, hours: r2(chosen), occasion: win.occasion, shiftCode: win.shift, conflict: isConflict });
+        p.days.push({ date: g.date, hours: r2(chosen), occasion: win.occasion, shiftCode: win.shift, conflict: isConflict, derived: g.derived || undefined });
       } else {
         p.undatedByMonth[g.month] = r2((p.undatedByMonth[g.month] || 0) + chosen);
         p.undatedTotal += chosen;
@@ -214,6 +231,7 @@ export class OtYearService {
         .map((s) => ({ file: s.file, occasion: s.occasion, rows: s.rows, people: s.people.size, stackedHours: r2(s.hours), undated: s.undated, flagged: s.flagged }))
         .sort((a, b) => b.stackedHours - a.stackedHours),
       dataQuality,
+      derivedDates: [...derivedAgg.values()].map((x) => ({ ...x, hours: r2(x.hours) })).sort((a, b) => a.date.localeCompare(b.date)),
       dedup: { stacked: r2(stacked), deduped: r2(deduped), avoided: r2(stacked - deduped), personDays: groups.size, agreed, disagreed },
       ingestedAt: ing?.at ?? null,
       provenance:

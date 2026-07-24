@@ -48,6 +48,205 @@ export class OtTrackerController {
     return this.tracker.build(req.user.tenantId, this.month(month));
   }
 
+  /** THE WHOLE YEAR IN ONE SHEET — every employee, all 365 days, same cells as the month. */
+  @Get('roster-v2/ot-tracker/export-full-year')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Full-year daily overtime grid → .xlsx (one sheet, 365 day columns)' })
+  async exportFullYear(@Req() req: any, @Res() res: Response, @Query('year') year?: string) {
+    const y = this.parseYear(year);
+    const d = await this.tracker.buildYearGrid(req.user.tenantId, y);
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'WFM System';
+    const colLetter = (i: number) => { let s = ''; let n = i; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; };
+
+    const ws = wb.addWorksheet(`OT ${y}`);
+    const ID_COLS = 3;                                   // name · id · function
+    const firstDayCol = ID_COLS + 1;
+    const lastDayCol = ID_COLS + d.days.length;
+    const C = colLetter(firstDayCol), LAST = colLetter(lastDayCol);
+
+    /* Two header rows: month names banded over their own days, then day numbers.
+     * 365 bare numbers with nothing above them is a wall — the band is what makes
+     * this readable as a year rather than a spill. */
+    const monthRow = ws.addRow([]);
+    const dayRow = ws.addRow([]);
+    monthRow.getCell(1).value = `OVERTIME ${y}`;
+    dayRow.getCell(1).value = 'Agent Name'; dayRow.getCell(2).value = 'ID'; dayRow.getCell(3).value = 'Function';
+
+    const BAND = ['FFF3F4F6', 'FFE8EAF0'];               // alternating month tint
+    d.days.forEach((x, i) => {
+      const col = firstDayCol + i;
+      dayRow.getCell(col).value = x.day;
+      dayRow.getCell(col).alignment = { horizontal: 'center' };
+      dayRow.getCell(col).font = { size: 8, bold: x.isWeekend };
+      dayRow.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BAND[x.month % 2] } };
+      monthRow.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BAND[x.month % 2] } };
+      ws.getColumn(col).width = 4.2;
+    });
+    // one merged label per month
+    let start = 0;
+    for (let i = 1; i <= d.days.length; i++) {
+      if (i === d.days.length || d.days[i].month !== d.days[start].month) {
+        const a = firstDayCol + start, b = firstDayCol + i - 1;
+        if (b > a) ws.mergeCells(1, a, 1, b);
+        const cell = monthRow.getCell(a);
+        cell.value = d.monthLabels[d.days[start].month - 1];
+        cell.alignment = { horizontal: 'center' };
+        cell.font = { bold: true, size: 10 };
+        start = i;
+      }
+    }
+    ws.getColumn(1).width = 26; ws.getColumn(2).width = 10; ws.getColumn(3).width = 20;
+
+    // totals block, after the days
+    const TOTALS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+      .map((m) => `${m} hrs`)
+      .concat(['Normal HRS', 'Off Day HRS', 'Holiday HRS', 'TOTAL HRS', 'TOTAL PAID HRS', 'OT days']);
+    TOTALS.forEach((label, i) => {
+      const col = lastDayCol + 1 + i;
+      const cell = dayRow.getCell(col);
+      cell.value = label;
+      cell.font = { bold: true, size: 9 };
+      cell.alignment = { horizontal: 'center', wrapText: true };
+      ws.getColumn(col).width = i < 12 ? 8 : 14;
+    });
+    monthRow.getCell(lastDayCol + 1).value = 'MONTHLY TOTALS';
+    ws.mergeCells(1, lastDayCol + 1, 1, lastDayCol + 12);
+    monthRow.getCell(lastDayCol + 1).alignment = { horizontal: 'center' };
+    monthRow.getCell(lastDayCol + 1).font = { bold: true };
+    monthRow.getCell(lastDayCol + 13).value = 'YEAR TOTALS';
+    ws.mergeCells(1, lastDayCol + 13, 1, lastDayCol + 18);
+    monthRow.getCell(lastDayCol + 13).alignment = { horizontal: 'center' };
+    monthRow.getCell(lastDayCol + 13).font = { bold: true };
+    dayRow.font = { bold: true };
+    ws.views = [{ state: 'frozen', xSplit: 3, ySplit: 2 }];
+
+    /* The hidden type mirror again — same reason as the monthly sheet: visible cells
+     * are plain hours, so the per-type totals need a place to read N/O/H from, and
+     * SUMPRODUCT over it evaluates where the template's array formula did not. */
+    const tw = wb.addWorksheet('_types');
+    tw.state = 'veryHidden';
+    tw.addRow(['type mirror — do not edit']); tw.addRow([]);
+
+    const TINT: Record<string, string> = { N: 'FFFFF6D8', O: 'FFDDEEFF', H: 'FFFFE0E0' };
+    const FONT: Record<string, string> = { N: 'FF8A6D00', O: 'FF14539A', H: 'FFA31515' };
+    const dateCol = new Map(d.days.map((x, i) => [x.date, firstDayCol + i]));
+
+    d.people.forEach((p) => {
+      const row = ws.addRow([]);
+      const r = row.number;
+      row.getCell(1).value = p.name; row.getCell(2).value = p.personNo; row.getCell(3).value = p.functionName || '';
+      const typeRow = tw.getRow(r);
+      for (const [date, c] of Object.entries(p.cells)) {
+        const col = dateCol.get(date); if (!col) continue;
+        const cell = row.getCell(col);
+        cell.value = c.hours;
+        cell.numFmt = '0.##';
+        cell.alignment = { horizontal: 'center' };
+        cell.font = { color: { argb: FONT[c.type] }, bold: true, size: 9 };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TINT[c.type] } };
+        cell.note = [`${date} · ${c.type === 'H' ? 'Public holiday OT' : c.type === 'O' ? 'Off-day OT' : 'Normal-day OT'}`,
+          c.pendingHours ? `${c.pendingHours}h awaiting review — not counted` : '',
+          c.flag ? `Engine flag: ${c.flag}` : ''].filter(Boolean).join('\n');
+        typeRow.getCell(col).value = c.type;
+      }
+      typeRow.commit?.();
+
+      // monthly totals — live SUM over that month's own day columns
+      let s = 0;
+      for (let m = 0; m < 12; m++) {
+        const idx = d.days.findIndex((x) => x.month === m + 1);
+        const end = d.days.length - 1 - [...d.days].reverse().findIndex((x) => x.month === m + 1);
+        const cell = row.getCell(lastDayCol + 1 + m);
+        if (idx >= 0) {
+          const a = colLetter(firstDayCol + idx), b = colLetter(firstDayCol + end);
+          cell.value = { formula: `SUM(${a}${r}:${b}${r})`, result: p.monthHours[m] } as any;
+        } else cell.value = 0;
+        cell.numFmt = '0.##';
+        s += p.monthHours[m];
+      }
+      // year totals per type, then the two headline numbers
+      const f = (t: string) => `SUMPRODUCT((_types!${C}${r}:${LAST}${r}="${t}")*(${C}${r}:${LAST}${r}))`;
+      row.getCell(lastDayCol + 13).value = { formula: f('N'), result: p.rawNormal } as any;
+      row.getCell(lastDayCol + 14).value = { formula: f('O'), result: p.rawOffday } as any;
+      row.getCell(lastDayCol + 15).value = { formula: f('H'), result: p.rawHoliday } as any;
+      const L = (i: number) => colLetter(lastDayCol + i);
+      row.getCell(lastDayCol + 16).value = { formula: `${L(13)}${r}+${L(14)}${r}+${L(15)}${r}`, result: p.rawTotal } as any;
+      row.getCell(lastDayCol + 17).value = {
+        formula: `${L(13)}${r}*${OT_RATES.normal}+${L(14)}${r}*${OT_RATES.offday}+${L(15)}${r}*${OT_RATES.holiday}`,
+        result: p.paidTotal,
+      } as any;
+      row.getCell(lastDayCol + 18).value = p.days;
+      for (let i = 13; i <= 17; i++) row.getCell(lastDayCol + i).numFmt = '0.##';
+      row.getCell(lastDayCol + 16).font = { bold: true };
+      row.getCell(lastDayCol + 17).font = { bold: true };
+      void s;
+    });
+
+    // grand total row
+    if (d.people.length) {
+      const t = ws.addRow([]);
+      t.getCell(1).value = 'TOTAL'; t.getCell(2).value = `${d.totals.people} people`;
+      t.font = { bold: true };
+      const first = 3, last = 2 + d.people.length;
+      for (let i = 1; i <= 18; i++) {
+        const L = colLetter(lastDayCol + i);
+        const cell = t.getCell(lastDayCol + i);
+        const known = i <= 12 ? d.totals.monthHours[i - 1]
+          : i === 13 ? d.totals.rawNormal : i === 14 ? d.totals.rawOffday : i === 15 ? d.totals.rawHoliday
+          : i === 16 ? d.totals.rawTotal : i === 17 ? d.totals.paidTotal : d.totals.days;
+        cell.value = { formula: `SUM(${L}${first}:${L}${last})`, result: known } as any;
+        cell.numFmt = '0.##';
+      }
+    }
+
+    /* Legend + the honest footnotes. */
+    ws.addRow([]);
+    const lg = ws.addRow([]); lg.getCell(1).value = 'LEGEND'; lg.font = { bold: true };
+    ([['Normal-day OT', 'N', OT_RATES.normal], ['Off-day OT', 'O', OT_RATES.offday], ['Public-holiday OT', 'H', OT_RATES.holiday]] as [string, string, number][])
+      .forEach(([label, t, rate]) => {
+        const row = ws.addRow([]);
+        row.getCell(1).value = label;
+        const c = row.getCell(2);
+        c.value = `×${rate}`;
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TINT[t] } };
+        c.font = { color: { argb: FONT[t] }, bold: true };
+        c.alignment = { horizontal: 'center' };
+      });
+    [`Cells are hours only, rounded to the nearest ${d.rounding.stepHours} h; the colour is the type. Totals are summed from the rounded days, so the sheet reconciles with its own cells.`,
+     `Hourly pay base: monthly salary ÷ ${d.base.workDaysPerMonth} days ÷ ${d.base.hoursPerDay} hours.`,
+     d.totals.pendingHours ? `${d.totals.pendingHours} h of before/after-shift overtime is still awaiting review and is NOT included.` : '',
+     d.totals.roundedOutDays ? `${d.totals.roundedOutDays} day(s) (${d.totals.roundedOutHours} h) fell under the rounding step and carry no cell.` : '',
+     d.provenance].filter(Boolean).forEach((text) => {
+      const row = ws.addRow([]); row.getCell(1).value = text; row.font = { italic: true, size: 9 };
+    });
+
+    /* Sheet 2 — one row per OT day, for anyone who wants to pivot it. */
+    const raw = wb.addWorksheet('Days');
+    raw.columns = [
+      { header: 'ID', key: 'id', width: 10 }, { header: 'Agent Name', key: 'name', width: 26 },
+      { header: 'Function', key: 'fn', width: 20 }, { header: 'Date', key: 'date', width: 12 },
+      { header: 'Month', key: 'month', width: 10 }, { header: 'Type', key: 'type', width: 7 },
+      { header: 'Hours', key: 'hours', width: 9 }, { header: 'Rate', key: 'rate', width: 8 },
+      { header: 'Paid hours', key: 'paid', width: 11 },
+      { header: 'Pending (not paid)', key: 'pend', width: 17 }, { header: 'Engine flag', key: 'flag', width: 28 },
+    ];
+    const rateOf = { N: OT_RATES.normal, O: OT_RATES.offday, H: OT_RATES.holiday } as const;
+    d.people.forEach((p) => Object.entries(p.cells).forEach(([date, c]) => raw.addRow({
+      id: p.personNo, name: p.name, fn: p.functionName || '', date, month: date.slice(0, 7), type: c.type,
+      hours: c.hours, rate: rateOf[c.type], paid: Math.round(c.hours * rateOf[c.type] * 100) / 100,
+      pend: c.pendingHours || '', flag: c.flag || '',
+    })));
+    raw.getRow(1).font = { bold: true };
+    raw.views = [{ state: 'frozen', ySplit: 1 }];
+
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="Overtime_${y}_Full_Year.xlsx"`,
+    });
+    res.end(Buffer.from(await wb.xlsx.writeBuffer()));
+  }
+
   /* ══════════════════════════════════════════════════════════════════════════
    *  YEAR-TO-DATE over the Director's OWN overtime workbooks (ot_source_rows).
    *  A different question from the month tracker above: that one asks "what did
@@ -166,6 +365,10 @@ export class OtTrackerController {
       ['— PROVENANCE —', ''],
       ['Workbooks ingested', d.sources.length],
       ['Last ingest', d.ingestedAt || '—'],
+      ...(d.derivedDates || []).map((x) => [
+        `Date resolved from evidence — ${x.occasion}`,
+        `${x.date} · ${x.rows} rows · ${x.hours} h — ${x.why}`,
+      ] as [string, any]),
       ['Source', d.provenance],
     ] as [string, any][]).forEach(([m, v]) => sum.addRow({ m, v }));
     bold(sum);

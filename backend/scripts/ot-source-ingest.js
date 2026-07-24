@@ -13,8 +13,12 @@
  * WHAT IT HANDLES, because the real files are not uniform:
  *   • the hours column is `OV` in some workbooks and `OT` in others
  *   • dates arrive as Excel dates AND as `d/m/yyyy` text (National Day)
- *   • one workbook (Israa Wal Miraj) has NO date column — those rows are stored
- *     at MONTH precision rather than having a day invented for them
+ *   • one workbook (Israa Wal Miraj) has NO date column. Rather than invent a day
+ *     OR leave the hours stranded in an "Undated" bucket, the ROSTER is asked:
+ *     which day in that month carries holiday evidence for these exact people?
+ *     If exactly one day answers, the rows become date_precision='derived' with
+ *     the evidence written into data_quality; if the answer is ambiguous they
+ *     stay at month precision. A day is never invented without evidence.
  *   • every row's date is cross-checked against the file's own `Day` column;
  *     a disagreement is flagged, never corrected silently
  *
@@ -63,11 +67,37 @@ function monthFromName(file) {
   return mo ? `${y}-${M[mo.toLowerCase()]}` : null;
 }
 
+/**
+ * When a workbook has no date column its calculation sheet still names the weekday:
+ * `Israa Wal Miraj`'s header row reads `… Department | Sun | Total Hours …`, one
+ * column per day of the occasion. That is the FILE's own statement about which day
+ * it covers, so it is evidence, not a guess — and it is what separates the Israa
+ * Sunday from New Year's Day, which falls in the same month on a Thursday.
+ * Returns 0-6 (Sun..Sat) or null.
+ */
+function weekdayHintFromWorkbook(wb) {
+  const NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const hits = new Set();
+  for (const sheet of wb.SheetNames) {
+    const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { header: 1, defval: null });
+    for (const row of grid.slice(0, 12)) {
+      for (const cell of row || []) {
+        if (typeof cell !== 'string') continue;
+        const i = NAMES.indexOf(cell.trim().slice(0, 3).toLowerCase());
+        // only a bare day name is a hint — "Sunday 12" or a sentence is not
+        if (i >= 0 && cell.trim().length <= 9) hits.add(i);
+      }
+    }
+  }
+  return hits.size === 1 ? [...hits][0] : null;   // several weekdays named ⇒ no single hint
+}
+
 function parseWorkbook(file, full) {
   const wb = XLSX.readFile(full, { cellDates: true });
   const out = [], skipped = [];
   const occasion = occasionOf(file);
   const fallbackMonth = monthFromName(file);
+  const weekdayHint = weekdayHintFromWorkbook(wb);
 
   for (const sheet of wb.SheetNames) {
     const objs = XLSX.utils.sheet_to_json(wb.Sheets[sheet], { defval: null });
@@ -103,10 +133,68 @@ function parseWorkbook(file, full) {
         location: locCol ? String(o[locCol] ?? '').trim() || null : null,
         note: noteCol ? String(o[noteCol] ?? '').trim() || null : null,
         occasion, sourceFile: file, sourceSheet: sheet, sourceRow: i + 2, dataQuality: dq,
+        weekdayHint,
       });
     });
   }
   return { rows: out, skipped };
+}
+
+/**
+ * Ask the roster which day an undated sheet belongs to.
+ *
+ * The workbook named an occasion and a month but no date. The roster records, per
+ * person per day, whether the day was an official holiday and whether holiday OT
+ * was earned. If exactly ONE day in that month carries that evidence for these
+ * people — and it covers a decisive share of them — that is the day, and it is
+ * recorded WITH its evidence. Anything less stays unresolved rather than guessed.
+ */
+async function resolveUndatedMonth(client, tenantId, month, personNos, weekdayHint) {
+  const all = (await client.query(
+    `SELECT work_date::text AS d, to_char(work_date, 'Dy') AS dow,
+            EXTRACT(DOW FROM work_date)::int AS dow_num,
+            COUNT(*) FILTER (WHERE hr_code = 'H' OR shift_code = 'H')::int AS holiday_coded,
+            COUNT(*) FILTER (WHERE COALESCE(holiday_ot_min, 0) > 0)::int   AS holiday_ot
+       FROM roster_days
+      WHERE tenant_id = $1
+        AND work_date >= ($2 || '-01')::date
+        AND work_date <  (($2 || '-01')::date + INTERVAL '1 month')
+        AND person_no = ANY($3)
+      GROUP BY work_date
+     HAVING COUNT(*) FILTER (WHERE hr_code = 'H' OR shift_code = 'H') > 0
+         OR COUNT(*) FILTER (WHERE COALESCE(holiday_ot_min, 0) > 0) > 0
+      ORDER BY 5 DESC, 4 DESC`,
+    [tenantId, month, personNos])).rows;
+  if (!all.length) return { date: null, why: 'no holiday evidence in the roster for that month' };
+
+  /* The file's own weekday statement narrows the field FIRST. Without it, a month
+     holding two occasions (January has New Year on the 1st AND Israa wal Miraj)
+     is genuinely ambiguous and must stay unresolved. */
+  const hinted = weekdayHint == null ? null : all.filter((r) => r.dow_num === weekdayHint);
+  const rows = hinted && hinted.length ? hinted : all;
+  const constrained = Boolean(hinted && hinted.length);
+
+  const best = rows[0];
+  const share = best.holiday_ot / personNos.length;
+  // A second day with comparable evidence means the field is still not decided.
+  const bestScore = Math.max(best.holiday_ot, best.holiday_coded);
+  const runnerUp = rows[1] ? Math.max(rows[1].holiday_ot, rows[1].holiday_coded) : 0;
+  if (share < 0.5 || runnerUp > bestScore * 0.5) {
+    return {
+      date: null,
+      why: `ambiguous — candidates: ${rows.slice(0, 3).map((r) => `${r.d} ${r.dow} (${r.holiday_ot} holiday-OT)`).join(', ')}` +
+           (weekdayHint == null ? '; the file names no weekday to narrow them' : ''),
+    };
+  }
+  const others = all.filter((r) => r.d !== best.d);
+  return {
+    date: best.d,
+    why: `date derived from evidence, not stated by the file: it names weekday "${best.dow}"` +
+         `${constrained ? '' : ' (no weekday hint)'}, and ${best.d} is the ` +
+         `${constrained ? `only ${best.dow} in ${month} with holiday evidence` : `strongest day in ${month}`} — ` +
+         `${best.holiday_ot} of ${personNos.length} people earned holiday OT that day, ${best.holiday_coded} coded H` +
+         (others.length ? `. Other holiday days in the month (different occasions): ${others.map((r) => `${r.d} ${r.dow}`).join(', ')}` : ''),
+  };
 }
 
 (async () => {
@@ -128,6 +216,29 @@ function parseWorkbook(file, full) {
     all.push(...rows); allSkipped.push(...skipped);
   }
 
+  /* ── resolve undated sheets against the roster before anything else uses them ── */
+  const conn = () => new Client({ host: process.env.POSTGRES_HOST || 'localhost', port: +(process.env.POSTGRES_PORT || 5432),
+    database: process.env.POSTGRES_DB, user: process.env.POSTGRES_USER, password: process.env.POSTGRES_PASSWORD });
+  const undatedRows = all.filter((r) => r.datePrecision === 'month');
+  if (undatedRows.length) {
+    const byMonth = new Map();
+    for (const r of undatedRows) (byMonth.get(r.periodMonth) || byMonth.set(r.periodMonth, []).get(r.periodMonth)).push(r);
+    const rc = conn(); await rc.connect();
+    for (const [m, rows] of byMonth) {
+      const ids = [...new Set(rows.map((r) => r.personNo))];
+      const hint = rows.find((r) => r.weekdayHint != null)?.weekdayHint ?? null;
+      const res = await resolveUndatedMonth(rc, TENANT, m, ids, hint).catch((e) => ({ date: null, why: e.message }));
+      if (res && res.date) {
+        rows.forEach((r) => { r.workDate = res.date; r.datePrecision = 'derived'; r.dataQuality = res.why; });
+        console.log(`\n  RESOLVED ${rows.length} undated row(s) in ${m} → ${res.date}`);
+        console.log(`     ${res.why}`);
+      } else {
+        console.log(`\n  ${rows.length} undated row(s) in ${m} stay at month precision — ${res?.why || 'no roster evidence'}`);
+      }
+    }
+    await rc.end();
+  }
+
   // What the ledger will look like once read back with one value per person-day.
   const g = new Map();
   for (const r of all) {
@@ -145,8 +256,7 @@ function parseWorkbook(file, full) {
 
   if (DRY) { console.log('\n[DRY RUN] nothing written.'); return; }
 
-  const c = new Client({ host: process.env.POSTGRES_HOST || 'localhost', port: +(process.env.POSTGRES_PORT || 5432),
-    database: process.env.POSTGRES_DB, user: process.env.POSTGRES_USER, password: process.env.POSTGRES_PASSWORD });
+  const c = conn();
   await c.connect();
   try {
     await c.query('BEGIN');

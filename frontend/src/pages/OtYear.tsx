@@ -14,7 +14,7 @@ import { StatTile } from '@/components/dazzle';
  * ONE value per person-day; where the sheets contradict each other the largest is
  * shown and the day is listed under Conflicts rather than quietly resolved.
  */
-type Day = { date: string; hours: number; occasion: string; shiftCode: string | null; conflict: boolean };
+type Day = { date: string; hours: number; occasion: string; shiftCode: string | null; conflict: boolean; derived?: boolean };
 type Person = {
   personNo: string; name: string; functionName: string | null;
   months: number[]; undatedByMonth: Record<string, number>; undatedTotal: number;
@@ -154,6 +154,13 @@ export default function OtYearPage() {
                 {ar ? `${d.totals.undated} ${h} بدون تاريخ يوم — محسوبة على الشهر` : `${d.totals.undated}${h} with no day in the source — counted at month level`}
               </span>
             )}
+            {(d.derivedDates || []).map((x: any, i: number) => (
+              <span key={i} className="px-2.5 py-1 rounded-lg text-[11px]"
+                style={{ background: '#8b5cf618', color: '#8b5cf6', border: '1px solid #8b5cf655' }} title={x.why}>
+                {ar ? `${x.occasion}: الملف ما فيه تاريخ — انحدد ${x.date} من دليل الروستر (${x.rows} سطر · ${x.hours} س)`
+                    : `${x.occasion}: the file gave no date — resolved to ${x.date} from roster evidence (${x.rows} rows · ${x.hours}${h})`}
+              </span>
+            ))}
           </div>
         </div>
       )}
@@ -329,8 +336,8 @@ export default function OtYearPage() {
                           <div className="flex flex-wrap gap-1.5">
                             {p.days.map((c, k) => (
                               <span key={k} className="px-2 py-1 rounded-lg text-[10px]"
-                                style={{ background: 'var(--surface)', border: `1px solid ${c.conflict ? '#ef4444' : 'var(--border)'}`, color: 'var(--text-1)' }}
-                                title={`${c.occasion}${c.shiftCode ? ` · ${c.shiftCode}` : ''}${c.conflict ? (ar ? ' · الشيتات مختلفة على هذا اليوم' : ' · the sheets disagree on this day') : ''}`}>
+                                style={{ background: 'var(--surface)', border: `1px solid ${c.conflict ? '#ef4444' : c.derived ? '#8b5cf6' : 'var(--border)'}`, color: 'var(--text-1)' }}
+                                title={`${c.occasion}${c.shiftCode ? ` · ${c.shiftCode}` : ''}${c.conflict ? (ar ? ' · الشيتات مختلفة على هذا اليوم' : ' · the sheets disagree on this day') : ''}${c.derived ? (ar ? ' · التاريخ مستنتج من دليل الروستر — الملف ما ذكره' : ' · date resolved from roster evidence — the file stated none') : ''}`}>
                                 <b>{c.date.slice(5)}</b> · {c.hours}{h}
                                 {c.shiftCode ? <span style={{ color: 'var(--text-3)' }}> · {c.shiftCode}</span> : null}
                               </span>
