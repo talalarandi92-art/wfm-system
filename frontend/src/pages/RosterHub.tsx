@@ -1,9 +1,10 @@
 import { useSearchParams } from 'react-router-dom';
-import { Users, LayoutDashboard, Clock, CalendarRange, Home, ShieldCheck, FileSearch, GitCompareArrows, Wrench, LayoutGrid, FileBarChart } from 'lucide-react';
+import { Users, LayoutDashboard, Clock, CalendarClock, CalendarRange, Home, ShieldCheck, FileSearch, GitCompareArrows, Wrench, LayoutGrid, FileBarChart } from 'lucide-react';
 import GroupedTabs, { TabGroupDef } from '@/components/GroupedTabs';
 import RosterPage from '@/pages/Roster';
 import RosterDashboardPage from '@/pages/RosterDashboard';
 import OtExceptionsPage from '@/pages/OtExceptions';
+import OtTrackerPage from '@/pages/OtTracker';
 import ScheduleAnalysisPage from '@/pages/ScheduleAnalysis';
 import WfhHrReportPage from '@/pages/WfhHrReport';
 import DataQualityPage from '@/pages/DataQuality';
@@ -12,7 +13,7 @@ import ScheduleChangeLogPage from '@/pages/ScheduleChangeLog';
 import ReportBuilderPage from '@/pages/ReportBuilder';
 import DashboardBuilderPage from '@/pages/DashboardBuilder';
 
-type HubTab = 'grid' | 'dashboard' | 'ot' | 'analysis' | 'wfh' | 'quality' | 'audit' | 'changes' | 'report-builder' | 'dashboard-builder';
+type HubTab = 'grid' | 'dashboard' | 'ot' | 'ot-tracker' | 'analysis' | 'wfh' | 'quality' | 'audit' | 'changes' | 'report-builder' | 'dashboard-builder';
 
 /**
  * The 10 former flat tabs regrouped into 5 groups (R1 rollout).
@@ -36,7 +37,8 @@ const GROUPS: TabGroupDef[] = [
   {
     key: 'reports', label: 'Reports', labelAr: 'التقارير', icon: FileBarChart,
     tabs: [
-      { key: 'ot',      label: 'OT & Exceptions', labelAr: 'OT والاستثناءات', icon: Clock },
+      { key: 'ot',         label: 'OT & Exceptions',  labelAr: 'OT والاستثناءات', icon: Clock },
+      { key: 'ot-tracker', label: 'OT Tracker',       labelAr: 'تراكر الأوفر تايم', icon: CalendarClock },
       { key: 'wfh',     label: 'WFH HR Report',   labelAr: 'تقرير WFH',       icon: Home },
       { key: 'quality', label: 'Data Quality',    labelAr: 'جودة البيانات',   icon: ShieldCheck },
       { key: 'audit',   label: 'System Audit',    labelAr: 'تدقيق الأنظمة',   icon: FileSearch },
@@ -79,6 +81,7 @@ export default function RosterHub() {
       {tab === 'grid'              && <RosterPage />}
       {tab === 'dashboard'         && <RosterDashboardPage />}
       {tab === 'ot'                && <OtExceptionsPage />}
+      {tab === 'ot-tracker'        && <OtTrackerPage />}
       {tab === 'analysis'          && <ScheduleAnalysisPage />}
       {tab === 'wfh'               && <WfhHrReportPage />}
       {tab === 'quality'           && <DataQualityPage />}

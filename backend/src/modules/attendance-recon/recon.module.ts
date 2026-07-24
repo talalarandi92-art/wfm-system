@@ -7,9 +7,11 @@ import { RosterAnalyticsController } from './roster-analytics.controller';
 import { WfhReportController } from './wfh-report.controller';
 import { ScheduleOpsController } from './schedule-ops.controller';
 import { RosterReportsController } from './roster-reports.controller';
+import { OtTrackerController } from './ot-tracker.controller';
 import { ReconService } from './recon.service';
 import { RosterIngestionService } from './roster-ingestion.service';
 import { RosterSharedService } from './roster-shared.service';
+import { OtTrackerService } from './ot-tracker.service';
 
-@Module({ controllers: [ReconController, RosterFairnessController, RosterHourlyController, RosterGenerateController, RosterAnalyticsController, WfhReportController, ScheduleOpsController, RosterReportsController], providers: [ReconService, RosterIngestionService, RosterSharedService] })
+@Module({ controllers: [ReconController, RosterFairnessController, RosterHourlyController, RosterGenerateController, RosterAnalyticsController, WfhReportController, ScheduleOpsController, RosterReportsController, OtTrackerController], providers: [ReconService, RosterIngestionService, RosterSharedService, OtTrackerService] })
 export class ReconModule {}

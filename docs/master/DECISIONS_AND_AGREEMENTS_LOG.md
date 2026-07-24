@@ -593,6 +593,37 @@
 - **Mechanism:** m094 (overlays the m088 band), `kpi-seed.ts` is the source of truth, jest asserts
   SQL↔TS parity. Registry `formula_text` and an append-only formula version updated with it.
 
+### D-083 — Monthly OT Tracker: the OT PAY MULTIPLIERS and hourly base are **NEEDS APPROVAL**
+- **Status:** ⚠ **Needs Approval (raised 2026-07-24).** The tracker itself is built and live
+  (`/roster?tab=ot-tracker`, `roster-v2/ot-tracker*`); it is READ-ONLY and writes no pay data.
+- **What was derived, not agreed:** `OT_RATES = { normal 1.25, offday 1.5, holiday 2.0 }` and
+  `OT_BASE = salary ÷ 26 days ÷ 8 hours`. Both were **read out of the Director's own files** — the
+  multipliers from the total-column formulas in `Monthly_Overtime_Tracker_Aug_2026.xlsx`
+  (`…LEFT(...,SEARCH("/N",...)-1))…)*1.25`, `*1.5`, `*2`) and the base from
+  `All Data/Overtime 2026/OV CALCULATION.xlsx`. **Neither appears in
+  `WFM_RULES_AND_DECISIONS.md`.** They are exposed as named exported constants with a jest test
+  pinning them, so a change can only ever be deliberate — but they must be CONFIRMED before the
+  tracker is used for anything that reaches payroll.
+- **The finding that shaped the design — his workbooks and the engine measure different things.**
+  Compared the engine against `SS, Arafat Day and Eid Al Adha May 26 CC Overtime..xlsx` per
+  person-day (date parse self-checked against his own `Day` column: 1544/1544 weekdays agree).
+  Result: **exact 9.7% · within 30 min 39.7%**; 785 person-days (1307 hrs) the engine detects and his
+  sheet has none; 84 the reverse. Causes, in order of size: (1) **his OV is quantised — 1380 whole +
+  161 half hours, 0 finer**, against the engine's exact minutes; (2) his sheet is a **curated,
+  approved list for one occasion** (109 people vs the engine's 121, and 178 of the engine-only
+  person-days belong to people his sheet never lists); (3) he books a **flat 10 or 12 h** for an event
+  day where the engine measures the actual excess. **Detection ≠ approval — so the tracker must never
+  be read as "what he underpaid".**
+- **Consequence, already implemented:** the tracker's hours are **PAYABLE OT** per the platform's own
+  existing definition (`payableOtMin`, D-2026-07-11 #1/#2) — the three disjoint buckets **plus only
+  ACKNOWLEDGED** before/after-shift review minutes. Pending minutes are displayed (tile, dashed cell
+  border, per-person marker) and **never paid**; a worked OFF day stays non-payable. Had it used raw
+  detection it would have disagreed with the OT & Exceptions report on the same numbers.
+- **Still open for the Director:** (a) confirm the two constants; (b) decide whether the tracker
+  should adopt his **rounding convention** (nearest whole/half hour) for pay display — that is a rule
+  change and is NOT implemented; (c) decide whether flat event entitlements (10/12 h) are a policy the
+  engine should express, or a manual approval that stays outside it.
+
 ---
 
 *Maintained alongside `docs/knowledge/WFM_RULES_AND_DECISIONS.md` — that document remains the single
