@@ -20,6 +20,7 @@ type Person = {
   rawNormal: number; rawOffday: number; rawHoliday: number; rawTotal: number;
   paidNormal: number; paidOffday: number; paidHoliday: number; paidTotal: number;
   detectedTotal: number; reviewHours: number; pendingHours: number; flaggedDays: number;
+  ytdHours: number; ytdPaid: number; ytdDays: number;
 };
 
 const TYPE_COLOR: Record<Cell['type'], string> = { N: '#f59e0b', O: '#3b82f6', H: '#ef4444' };
@@ -134,9 +135,21 @@ export default function OtTrackerPage() {
           </div>
         ))}
         <div className="flex-1" />
-        <div className="text-[11px]" style={{ color: 'var(--text-3)' }}>
-          {ar ? 'أساس الساعة: الراتب الشهري ÷ ' : 'Hourly base: monthly salary ÷ '}{d?.base?.workDaysPerMonth ?? 26}
-          {ar ? ' يوم ÷ ' : ' days ÷ '}{d?.base?.hoursPerDay ?? 8}{ar ? ' ساعات' : ' hours'}
+        <div className="text-[11px] text-end" style={{ color: 'var(--text-3)' }}>
+          <div>
+            {ar ? 'أساس الساعة: الراتب الشهري ÷ ' : 'Hourly base: monthly salary ÷ '}{d?.base?.workDaysPerMonth ?? 26}
+            {ar ? ' يوم ÷ ' : ' days ÷ '}{d?.base?.hoursPerDay ?? 8}{ar ? ' ساعات' : ' hours'}
+          </div>
+          <div>
+            {ar ? `الخلية = ساعات فقط، مقرّبة لأقرب ${d?.rounding?.stepHours ?? 0.5} ساعة — واللون هو النوع`
+                : `A cell is hours only, rounded to the nearest ${d?.rounding?.stepHours ?? 0.5} h — the colour is the type`}
+          </div>
+          {d?.totals?.roundedOutDays > 0 && (
+            <div title={ar ? 'قبل التقريب' : 'before rounding'}>
+              {ar ? `${d.totals.roundedOutDays} يوم أقل من ربع ساعة (${d.totals.roundedOutHours} س) ما ظهروا بالتقريب`
+                  : `${d.totals.roundedOutDays} days under 15 min (${d.totals.roundedOutHours}${h}) fall below the step and are not shown`}
+            </div>
+          )}
         </div>
       </div>
 
@@ -187,17 +200,18 @@ export default function OtTrackerPage() {
                     <div style={{ fontSize: 8, opacity: .7 }}>{dd.weekday}</div>
                   </th>
                 ))}
-                {[['N', ar ? 'عادي' : 'Normal'], ['O', ar ? 'أوف' : 'Off'], ['H', ar ? 'عطلة' : 'Holiday'], ['T', ar ? 'الإجمالي' : 'Total']].map(([k, l]) => (
+                {[['N', ar ? 'عادي' : 'Normal'], ['O', ar ? 'أوف' : 'Off'], ['H', ar ? 'عطلة' : 'Holiday'],
+                  ['T', ar ? 'إجمالي الشهر' : 'Month total'], ['Y', ar ? 'من بداية السنة' : 'YTD hours']].map(([k, l]) => (
                   <th key={k} className="px-2 py-2 text-center font-semibold whitespace-nowrap"
-                    style={{ color: k === 'T' ? 'var(--text-1)' : 'var(--text-3)', fontSize: 10, textTransform: 'uppercase',
+                    style={{ color: k === 'T' || k === 'Y' ? 'var(--text-1)' : 'var(--text-3)', fontSize: 10, textTransform: 'uppercase',
                       borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>{l}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={days.length + 6} className="px-3 py-8 text-center text-xs" style={{ color: 'var(--text-3)' }}>{ar ? 'جارِ التحميل…' : 'Loading…'}</td></tr>}
+              {loading && <tr><td colSpan={days.length + 7} className="px-3 py-8 text-center text-xs" style={{ color: 'var(--text-3)' }}>{ar ? 'جارِ التحميل…' : 'Loading…'}</td></tr>}
               {!loading && people.length === 0 && (
-                <tr><td colSpan={days.length + 6} className="px-3 py-8 text-center text-xs" style={{ color: 'var(--text-3)' }}>
+                <tr><td colSpan={days.length + 7} className="px-3 py-8 text-center text-xs" style={{ color: 'var(--text-3)' }}>
                   {ar ? 'لا يوجد أوفر تايم في هذا الشهر' : 'No overtime in this month'}</td></tr>
               )}
               {people.map((p, i) => {
@@ -227,8 +241,8 @@ export default function OtTrackerPage() {
                           <span className="inline-block px-1 py-0.5 rounded text-[10px] font-bold w-full"
                             style={{ background: `${TYPE_COLOR[c.type]}1f`, color: TYPE_COLOR[c.type],
                               border: c.pendingHours ? '1px dashed #ef4444' : c.flag ? '1px dotted var(--text-3)' : `1px solid ${TYPE_COLOR[c.type]}44` }}>
-                            {c.hours}/{c.type}
-                          </span>
+                            {c.hours}
+</span>
                         </td>
                       );
                     })}
@@ -236,6 +250,11 @@ export default function OtTrackerPage() {
                     <td className="px-2 py-1.5 text-[11px] text-center" style={{ color: 'var(--text-2)', background: 'var(--surface-2)' }}>{p.paidOffday}</td>
                     <td className="px-2 py-1.5 text-[11px] text-center" style={{ color: 'var(--text-2)', background: 'var(--surface-2)' }}>{p.paidHoliday}</td>
                     <td className="px-2 py-1.5 text-xs text-center font-extrabold" style={{ color: 'var(--text-1)', background: 'var(--surface-2)' }}>{p.paidTotal}</td>
+                    <td className="px-2 py-1.5 text-center" style={{ background: 'var(--surface-2)' }}
+                      title={ar ? `${p.ytdDays} يوم أوفر تايم من ${d?.ytdFrom}` : `${p.ytdDays} OT days since ${d?.ytdFrom}`}>
+                      <div className="text-xs font-extrabold" style={{ color: '#8b5cf6' }}>{p.ytdHours}</div>
+                      <div className="text-[9px]" style={{ color: 'var(--text-3)' }}>{p.ytdPaid} {ar ? 'بالمعامل' : 'paid'}</div>
+                    </td>
                   </tr>
                 );
               })}

@@ -203,47 +203,74 @@ export class OtTrackerController {
     ws.columns = [
       { key: 'name', width: 26 },
       { key: 'id', width: 10 },
-      ...d.days.map((x) => ({ key: `d${x.day}`, width: 7 })),
+      ...d.days.map((x) => ({ key: `d${x.day}`, width: 6 })),
       { key: 'tN', width: 20 }, { key: 'tO', width: 18 }, { key: 'tH', width: 18 }, { key: 'tP', width: 16 },
+      { key: 'yH', width: 20 }, { key: 'yP', width: 22 },
     ];
 
     const header = ws.addRow([
       'Agent Name', 'ID', ...d.days.map((x) => x.day),
       'Total Normal Days HRS', 'Total Off Day HRS', 'Total Holiday HRS', 'Total Paid HRS',
+      `YTD Hours (from ${d.ytdFrom})`, 'YTD Paid HRS (from 1 Jan)',
     ]);
     header.font = { bold: true };
-    header.alignment = { horizontal: 'center', vertical: 'middle' };
+    header.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     ws.views = [{ state: 'frozen', xSplit: 2, ySplit: 1 }];
 
     // Weekend day columns get a light tint so the OFF/holiday cells read at a glance.
     d.days.forEach((x, i) => {
       if (!x.isWeekend) return;
-      ws.getColumn(firstDayCol + i).eachCell?.({ includeEmpty: true }, () => undefined);
       header.getCell(firstDayCol + i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFEFEF' } };
     });
 
+    /* A hidden mirror of the grid holding each day's TYPE letter. The visible cells are
+     * now plain numbers (Director 2026-07-24: "بدي ساعات ما بدي أحرف"), so the per-type
+     * totals need somewhere to read the type from. SUMPRODUCT over this mirror is a
+     * normal formula — unlike the array formula the template used, which Excel evaluated
+     * by implicit intersection when written programmatically and returned 0.00 for every
+     * row. The sheet stays live: edit an hours cell and the totals still move. */
+    const tw = wb.addWorksheet('_types');
+    tw.state = 'veryHidden';
+    tw.addRow(['type mirror — do not edit; drives the total columns on the tracker sheet']);
+
     const TINT: Record<string, string> = { N: 'FFFFF6D8', O: 'FFDDEEFF', H: 'FFFFE0E0' };
+    const FONT: Record<string, string> = { N: 'FF8A6D00', O: 'FF14539A', H: 'FFA31515' };
     d.people.forEach((p) => {
       const row = ws.addRow({ name: p.name, id: p.personNo });
       const r = row.number;
+      const typeRow = tw.getRow(r);
       for (const c of p.cells) {
         const cell = row.getCell(2 + c.day);
-        cell.value = `${c.hours}/${c.type}`;          // the template's own cell grammar
+        cell.value = c.hours;                                     // hours only — the colour carries the type
+        cell.numFmt = '0.##';
         cell.alignment = { horizontal: 'center' };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TINT[c.type] } };
-        if (c.flag) cell.note = `Engine flag: ${c.flag}`;   // never hidden, never silently dropped
+        cell.font = { color: { argb: FONT[c.type] }, bold: true };
+        const tip = [
+          c.type === 'H' ? 'Public holiday OT' : c.type === 'O' ? 'Off-day OT' : 'Normal-day OT',
+          c.pendingHours ? `${c.pendingHours}h still awaiting review — not counted` : '',
+          c.flag ? `Engine flag: ${c.flag}` : '',
+        ].filter(Boolean).join('\n');
+        cell.note = tip;
+        typeRow.getCell(2 + c.day).value = c.type;
+        if (c.pendingHours) cell.border = { top: { style: 'dashed', color: { argb: 'FFEF4444' } }, bottom: { style: 'dashed', color: { argb: 'FFEF4444' } }, left: { style: 'dashed', color: { argb: 'FFEF4444' } }, right: { style: 'dashed', color: { argb: 'FFEF4444' } } };
       }
-      /* The four totals carry HIS formulas verbatim (so the sheet stays live and editable)
-       * AND our computed result, so the numbers are right the moment it opens. */
-      const f = (suffix: string, rate: number) =>
-        `SUM(IFERROR(VALUE(LEFT(${C}${r}:${AG}${r},SEARCH("/${suffix}",${C}${r}:${AG}${r})-1)),0))*${rate}`;
+      typeRow.commit?.();
+
+      /* Live per-type totals that actually evaluate. */
+      const f = (t: string, rate: number) =>
+        `SUMPRODUCT((_types!${C}${r}:${AG}${r}="${t}")*(${C}${r}:${AG}${r}))*${rate}`;
       row.getCell(lastDayCol + 1).value = { formula: f('N', OT_RATES.normal), result: p.paidNormal } as any;
       row.getCell(lastDayCol + 2).value = { formula: f('O', OT_RATES.offday), result: p.paidOffday } as any;
       row.getCell(lastDayCol + 3).value = { formula: f('H', OT_RATES.holiday), result: p.paidHoliday } as any;
-      const tp = `${colLetter(lastDayCol + 1)}${r}+${colLetter(lastDayCol + 2)}${r}+${colLetter(lastDayCol + 3)}${r}`;
-      row.getCell(lastDayCol + 4).value = { formula: `SUM(${tp})`, result: p.paidTotal } as any;
-      for (let i = 1; i <= 4; i++) row.getCell(lastDayCol + i).numFmt = '0.00';
+      const L = (i: number) => colLetter(lastDayCol + i);
+      row.getCell(lastDayCol + 4).value = { formula: `${L(1)}${r}+${L(2)}${r}+${L(3)}${r}`, result: p.paidTotal } as any;
+      // YTD is a value, not a formula — this sheet holds one month, the year lives outside it.
+      row.getCell(lastDayCol + 5).value = p.ytdHours;
+      row.getCell(lastDayCol + 6).value = p.ytdPaid;
+      for (let i = 1; i <= 6; i++) row.getCell(lastDayCol + i).numFmt = '0.##';
       row.getCell(lastDayCol + 4).font = { bold: true };
+      row.getCell(lastDayCol + 6).font = { bold: true };
     });
 
     // Grand total row — the number the payroll conversation actually starts from.
@@ -251,14 +278,39 @@ export class OtTrackerController {
       const t = ws.addRow({ name: 'TOTAL', id: `${d.totals.people} people` });
       t.font = { bold: true };
       const firstRow = 2, lastRow = 1 + d.people.length;
-      const totals = [d.totals.paidNormal, d.totals.paidOffday, d.totals.paidHoliday, d.totals.paidTotal];
-      totals.forEach((v, i) => {
+      [d.totals.paidNormal, d.totals.paidOffday, d.totals.paidHoliday, d.totals.paidTotal,
+       d.totals.ytdHours, d.totals.ytdPaid].forEach((v, i) => {
         const L = colLetter(lastDayCol + 1 + i);
         const c = t.getCell(lastDayCol + 1 + i);
         c.value = { formula: `SUM(${L}${firstRow}:${L}${lastRow})`, result: v } as any;
-        c.numFmt = '0.00';
+        c.numFmt = '0.##';
       });
+      // Day columns get a per-day total too, so a column can be checked at a glance.
+      for (let i = 0; i < d.daysInMonth; i++) {
+        const L = colLetter(firstDayCol + i);
+        const dayTot = d.people.reduce((a, p) => a + (p.cells.find((c) => c.day === i + 1)?.hours || 0), 0);
+        if (dayTot <= 0) continue;
+        const c = t.getCell(firstDayCol + i);
+        c.value = { formula: `SUM(${L}${firstRow}:${L}${lastRow})`, result: Math.round(dayTot * 100) / 100 } as any;
+        c.numFmt = '0.##';
+      }
     }
+
+    /* A legend, because the colour is now the only thing carrying the type. */
+    ws.addRow([]);
+    const lg = ws.addRow(['LEGEND']);
+    lg.font = { bold: true };
+    ([['Normal-day OT', 'N'], ['Off-day OT', 'O'], ['Public-holiday OT', 'H']] as [string, string][])
+      .forEach(([label, t]) => {
+        const r = ws.addRow([label]);
+        const c = r.getCell(2);
+        c.value = `×${t === 'N' ? OT_RATES.normal : t === 'O' ? OT_RATES.offday : OT_RATES.holiday}`;
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TINT[t] } };
+        c.font = { color: { argb: FONT[t] }, bold: true };
+        c.alignment = { horizontal: 'center' };
+      });
+    const note = ws.addRow([`Cells are hours only, rounded to the nearest ${d.rounding.stepHours} h; the colour is the type. A dashed red cell has hours still awaiting review that are NOT counted.`]);
+    note.font = { italic: true, size: 9 };
 
     /* ── Sheet 2: Raw — one row per person-day, the audit trail behind every cell. */
     const raw = wb.addWorksheet('Raw');
@@ -300,6 +352,14 @@ export class OtTrackerController {
       [`Holiday ×${OT_RATES.holiday}`, d.totals.paidHoliday], ['TOTAL PAID HRS', d.totals.paidTotal],
       ['— PAY BASE —', ''],
       ['Hourly base', `monthly salary ÷ ${d.base.workDaysPerMonth} days ÷ ${d.base.hoursPerDay} hours`],
+      ['— YEAR TO DATE —', ''],
+      [`Hours from ${d.ytdFrom} to the end of this month`, d.totals.ytdHours],
+      ['Hours after rate, year to date', d.totals.ytdPaid],
+      ['OT days year to date', d.totals.ytdDays],
+      ['— ROUNDING —', ''],
+      ['Each day rounded to the nearest', `${d.rounding.stepHours} h (${d.rounding.mode})`],
+      ['Measured before rounding (hrs)', d.totals.detectedTotal],
+      ['Days too short to survive rounding', `${d.totals.roundedOutDays} (${d.totals.roundedOutHours} h)`],
       ['— REVIEW —', ''],
       ['Person-days carrying an engine flag', d.totals.flaggedDays],
       ['Source', d.provenance],

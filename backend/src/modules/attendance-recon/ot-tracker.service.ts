@@ -33,6 +33,25 @@ export const OT_RATES = { normal: 1.25, offday: 1.5, holiday: 2.0 } as const;
 /** Hourly base = monthly salary ÷ WORK_DAYS ÷ DAY_HOURS (OV CALCULATION.xlsx). */
 export const OT_BASE = { workDaysPerMonth: 26, hoursPerDay: 8 } as const;
 
+/**
+ * DISPLAY ROUNDING (Director 2026-07-24: "بدي أرقام ثابتة ما بدي 2.2 وهيك").
+ *
+ * The engine measures to the minute, which produces cells like 2.03 / 4.07 / 12.65 —
+ * unreadable on a sheet meant to be scanned. His own workbooks are already quantised:
+ * of 1,541 hand-entered OV values, 1,380 are whole hours and 161 are half hours, and
+ * NOT ONE is finer. So the step is his own, not invented: **nearest half hour**.
+ *
+ * NEAREST, never floor — rounding down would quietly shave minutes off people every
+ * single day. And the cells are rounded FIRST, with the totals summed from the rounded
+ * cells, so the sheet visibly adds up; a sheet whose columns don't reconcile with its
+ * own cells is worse than one with ugly decimals.
+ */
+export const OT_ROUNDING = { stepHours: 0.5, mode: 'nearest' as const };
+export const roundHours = (h: number): number => {
+  const s = OT_ROUNDING.stepHours;
+  return Math.round((Math.round(h / s) * s) * 100) / 100;
+};
+
 export type OtType = 'N' | 'O' | 'H';
 
 export interface OtCell {
@@ -62,6 +81,8 @@ export interface OtPersonRow {
   paidNormal: number; paidOffday: number; paidHoliday: number; paidTotal: number;
   /** Transparency: what the engine detected, and what review has/has not released. */
   detectedTotal: number; reviewHours: number; pendingHours: number; pendingDays: number;
+  /** 1 Jan of this year → the end of this month, same payable definition. */
+  ytdHours: number; ytdPaid: number; ytdDays: number;
   /** Rows the engine flagged for review inside this month (never hidden). */
   flaggedDays: number;
 }
@@ -81,7 +102,14 @@ export interface OtTrackerReport {
     paidNormal: number; paidOffday: number; paidHoliday: number; paidTotal: number;
     detectedTotal: number; reviewHours: number; pendingHours: number;
     flaggedDays: number; pendingDays: number;
+    ytdHours: number; ytdPaid: number; ytdDays: number;
+    /** Days too short to survive the rounding step — reported, not silently dropped. */
+    roundedOutDays: number; roundedOutHours: number;
   };
+  /** How the cells were rounded — stated on the page, never silent. */
+  rounding: { stepHours: number; mode: string };
+  /** The window the YTD columns cover. */
+  ytdFrom: string;
   /** Where every number came from — shown on the page, never implied. */
   provenance: string;
 }
@@ -184,6 +212,7 @@ export class OtTrackerService {
     ).catch(() => []);
 
     const byPerson = new Map<string, OtPersonRow>();
+    let roundedOutDays = 0, roundedOutMin = 0;
     for (const r of rows) {
       const key = String(r.person_no);
       let p = byPerson.get(key);
@@ -194,6 +223,7 @@ export class OtTrackerService {
           rawNormal: 0, rawOffday: 0, rawHoliday: 0, rawTotal: 0,
           paidNormal: 0, paidOffday: 0, paidHoliday: 0, paidTotal: 0,
           detectedTotal: 0, reviewHours: 0, pendingHours: 0, pendingDays: 0,
+          ytdHours: 0, ytdPaid: 0, ytdDays: 0,
           flaggedDays: 0,
         };
         byPerson.set(key, p);
@@ -207,25 +237,66 @@ export class OtTrackerService {
       const detected = r2(detectedMin / 60);
       // The ONE payable definition, shared with the OT & Exceptions report.
       const payMin = payableOtMin({ regularMin: nMin, offdayMin: oMin, holidayMin: hMin, ackReviewMin: ack });
-      const hours = r2(payMin / 60);
+      const hours = roundHours(payMin / 60);
       /* Held hours are counted BEFORE the payable skip: a day whose only overtime is
          still pending has nothing to pay, but it must not disappear from the sheet —
          that is precisely the day someone needs to look at. */
       if (pend > 0) { p.pendingHours += pend / 60; p.pendingDays++; }
-      if (hours <= 0) continue;
+      /* A day under a quarter hour rounds to zero and leaves the sheet. That is the
+         cost of readable numbers — so it is COUNTED and reported, never just dropped. */
+      if (hours <= 0) { if (payMin > 0) { roundedOutDays++; roundedOutMin += payMin; } continue; }
 
       p.cells.push({
-        day: Number(r.day), hours, type, detected,
-        reviewHours: r2(ack / 60), pendingHours: r2(pend / 60), flag: r.flag ?? null,
+        day: Number(r.day), hours, type, detected: roundHours(detected),
+        reviewHours: roundHours(ack / 60), pendingHours: roundHours(pend / 60), flag: r.flag ?? null,
       });
       if (r.flag) p.flaggedDays++;
-      const bump = ack / 60;
-      p.rawNormal += nMin / 60 + (type === 'N' ? bump : 0);
-      p.rawOffday += oMin / 60 + (type === 'O' ? bump : 0);
-      p.rawHoliday += hMin / 60 + (type === 'H' ? bump : 0);
-      // Accumulate from exact minutes, never from the rounded cell — otherwise the running
-      // total drifts above payable by a few hundredths per cell and reads like a discrepancy.
-      p.detectedTotal += detectedMin / 60; p.reviewHours += bump;
+      /* The bucket totals are summed from the ROUNDED cells, not from the raw minutes,
+         so the four total columns always reconcile with the cells a reader can see.
+         The three buckets are disjoint, so a day belongs wholly to its own type. */
+      if (type === 'N') p.rawNormal += hours;
+      else if (type === 'O') p.rawOffday += hours;
+      else p.rawHoliday += hours;
+      p.detectedTotal += detectedMin / 60; p.reviewHours += ack / 60;
+    }
+
+    /* ── YEAR TO DATE: 1 January → the end of this month, per person.
+       Same payable definition and the SAME per-day rounding as the cells above, so a
+       reader can add up twelve monthly sheets and land on this number. Computed here
+       rather than by summing the months, because a month the user has not opened must
+       still be included. */
+    const ytdRows = await this.ds.query(
+      `WITH rv AS (
+         SELECT person_no, work_date, SUM(minutes) FILTER (WHERE status = 'acknowledged') AS ack_min
+           FROM ot_review_flags
+          WHERE tenant_id = $1 AND work_date >= $2::date AND work_date < ($3::date + INTERVAL '1 month')
+          GROUP BY person_no, work_date
+       )
+       SELECT rd.person_no,
+              SUM(COALESCE(rd.ot_min,0))         AS n_min,
+              SUM(COALESCE(rd.offday_ot_min,0))  AS o_min,
+              SUM(COALESCE(rd.holiday_ot_min,0)) AS h_min,
+              MAX(COALESCE(rv.ack_min, 0))       AS ack_min
+         FROM roster_days rd
+         LEFT JOIN rv ON rv.person_no = rd.person_no AND rv.work_date = rd.work_date
+        WHERE rd.tenant_id = $1
+          AND rd.work_date >= $2::date AND rd.work_date < ($3::date + INTERVAL '1 month')
+        GROUP BY rd.person_no, rd.work_date
+       HAVING (SUM(COALESCE(rd.ot_min,0)) + SUM(COALESCE(rd.offday_ot_min,0))
+               + SUM(COALESCE(rd.holiday_ot_min,0)) + MAX(COALESCE(rv.ack_min,0))) > 0`,
+      [tenantId, `${month.slice(0, 4)}-01-01`, first],
+    ).catch(() => []);
+    const ytd = new Map<string, { hours: number; paid: number; days: number }>();
+    for (const r of ytdRows) {
+      const nM = Number(r.n_min), oM = Number(r.o_min), hM = Number(r.h_min), ack = Number(r.ack_min) || 0;
+      // round each DAY then accumulate — identical treatment to the grid, so the figures agree
+      const hrs = roundHours(payableOtMin({ regularMin: nM, offdayMin: oM, holidayMin: hM, ackReviewMin: ack }) / 60);
+      if (hrs <= 0) continue;
+      const rate = hM > 0 ? OT_RATES.holiday : oM > 0 ? OT_RATES.offday : OT_RATES.normal;
+      const key = String(r.person_no);
+      const cur = ytd.get(key) || { hours: 0, paid: 0, days: 0 };
+      cur.hours += hrs; cur.paid += hrs * rate; cur.days++;
+      ytd.set(key, cur);
     }
 
     const people = [...byPerson.values()].filter((p) => p.cells.length > 0 || p.pendingHours > 0).map((p) => {
@@ -236,6 +307,8 @@ export class OtTrackerService {
       p.paidOffday = r2(p.rawOffday * OT_RATES.offday);
       p.paidHoliday = r2(p.rawHoliday * OT_RATES.holiday);
       p.paidTotal = r2(p.paidNormal + p.paidOffday + p.paidHoliday);
+      const y = ytd.get(p.personNo);
+      p.ytdHours = r2(y?.hours || 0); p.ytdPaid = r2(y?.paid || 0); p.ytdDays = y?.days || 0;
       p.cells.sort((a, b) => a.day - b.day);
       return p;
     }).sort((a, b) => b.paidTotal - a.paidTotal || a.name.localeCompare(b.name));
@@ -258,13 +331,20 @@ export class OtTrackerService {
         pendingHours: sum((p) => p.pendingHours),
         flaggedDays: people.reduce((s, p) => s + p.flaggedDays, 0),
         pendingDays: people.reduce((s, p) => s + p.pendingDays, 0),
+        ytdHours: sum((p) => p.ytdHours), ytdPaid: sum((p) => p.ytdPaid),
+        ytdDays: people.reduce((s, p) => s + p.ytdDays, 0),
+        roundedOutDays, roundedOutHours: r2(roundedOutMin / 60),
       },
+      rounding: { stepHours: OT_ROUNDING.stepHours, mode: OT_ROUNDING.mode },
+      ytdFrom: `${month.slice(0, 4)}-01-01`,
       provenance:
         'roster_days — the reconciled per-person-per-day spine (Ameyo ∪ Sprinklr ∪ Odoo punch vs schedule). ' +
         'The three OT buckets are disjoint by rule (BR-OT-001), so nothing is double-counted. ' +
         'Hours are PAYABLE OT (`payableOtMin`, D-2026-07-11): the three buckets plus before/after-shift ' +
         'minutes that review has ACKNOWLEDGED — pending minutes are shown but never paid, and a worked ' +
         'OFF day stays non-payable until HR clarifies. ' +
+        `Each day is rounded to the nearest ${OT_ROUNDING.stepHours} h (the granularity of the Director's own ` +
+        'workbooks) and the totals are summed from those rounded days, so the sheet reconciles with its own cells. ' +
         `Money hours = payable × rate (N ${OT_RATES.normal} · O ${OT_RATES.offday} · H ${OT_RATES.holiday}), ` +
         'rates taken from the Director\'s own tracker formulas and OV CALCULATION.xlsx. Read-only.',
     };

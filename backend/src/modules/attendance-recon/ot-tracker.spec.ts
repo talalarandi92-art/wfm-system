@@ -112,11 +112,46 @@ describe('OT tracker', () => {
       expect(r.people[0].cells.map((c) => c.type)).toEqual(['H', 'O', 'N']);
     });
 
-    it('detected never drifts above payable through per-cell rounding', async () => {
-      // 7 days of 2h23m: rounding each cell then summing would overshoot the exact total.
-      const r = await build(Array.from({ length: 7 }, (_, i) => row({ day: i + 1, ot_min: 143 })));
+    /* Display rounding (Director 2026-07-24: "بدي أرقام ثابتة ما بدي 2.2 وهيك").
+       The step is his own workbooks' granularity — half an hour — and it is applied to
+       the DAY, with the totals summed from the rounded days, so the sheet visibly adds up. */
+    it('every cell is a whole or half hour', async () => {
+      const r = await build([
+        row({ day: 1, ot_min: 122 }),   // 2.03 h → 2
+        row({ day: 2, ot_min: 244 }),   // 4.07 h → 4
+        row({ day: 3, ot_min: 759 }),   // 12.65 h → 12.5
+        row({ day: 4, ot_min: 18 }),    // 0.3 h → 0.5
+      ]);
+      expect(r.people[0].cells.map((c) => c.hours)).toEqual([2, 4, 12.5, 0.5]);
+      for (const c of r.people[0].cells) expect(c.hours * 2).toBe(Math.round(c.hours * 2));
+      expect(r.rounding).toEqual({ stepHours: 0.5, mode: 'nearest' });
+    });
+
+    it('rounds to the NEAREST step — never down, which would shave minutes off people daily', async () => {
+      const r = await build([row({ day: 1, ot_min: 40 })]);          // 0.667 h
+      expect(r.people[0].cells[0].hours).toBe(0.5);                   // nearest, not floor(0)
+      const up = await build([row({ day: 1, ot_min: 50 })]);          // 0.833 h
+      expect(up.people[0].cells[0].hours).toBe(1);
+    });
+
+    it('the totals are summed from the ROUNDED cells, so the sheet reconciles with itself', async () => {
+      const r = await build(Array.from({ length: 7 }, (_, i) => row({ day: i + 1, ot_min: 143 })));  // 2.383 h → 2.5
       const p = r.people[0];
-      expect(p.detectedTotal).toBeCloseTo(p.rawTotal, 2);
+      expect(p.cells.every((c) => c.hours === 2.5)).toBe(true);
+      expect(p.rawTotal).toBe(17.5);                                  // 7 × 2.5 — what a reader adds up
+      expect(p.rawNormal).toBe(17.5);
+      expect(p.paidTotal).toBe(21.88);                                // 17.5 × 1.25
+      // the exact measurement is still carried, unrounded, for anyone who needs it
+      expect(p.detectedTotal).toBeCloseTo(16.68, 1);
+    });
+
+    it('carries a year-to-date figure alongside the month', async () => {
+      const r = await build([row({ day: 1, ot_min: 120 })]);
+      // the stub answers the YTD query with the same single row, so YTD ≥ the month
+      expect(r.people[0]).toHaveProperty('ytdHours');
+      expect(r.people[0]).toHaveProperty('ytdPaid');
+      expect(r.totals).toHaveProperty('ytdHours');
+      expect(r.ytdFrom).toBe('2026-01-01');
     });
 
     it('the engine flag on a person-day is surfaced, never dropped', async () => {
