@@ -5,6 +5,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { OtTrackerService, OT_RATES, OtTrackerReport } from './ot-tracker.service';
+import { OtYearService, OtYearReport } from './ot-year.service';
 
 /* MONTHLY OT TRACKER — the online replacement for the per-occasion overtime workbooks.
  * Read-only over roster_days; the export is shaped to be interchangeable with the
@@ -15,12 +16,21 @@ import { OtTrackerService, OT_RATES, OtTrackerReport } from './ot-tracker.servic
 @Controller('attendance-recon')
 @UseGuards(JwtAuthGuard)
 export class OtTrackerController {
-  constructor(private readonly tracker: OtTrackerService) {}
+  constructor(
+    private readonly tracker: OtTrackerService,
+    private readonly yearly: OtYearService,
+  ) {}
 
   private month(m?: string): string {
     const s = String(m || '').trim();
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(s)) throw new BadRequestException('month must be YYYY-MM');
     return s;
+  }
+
+  private parseYear(y?: string): number {
+    const n = Number(String(y || '').trim());
+    if (!Number.isInteger(n) || n < 2000 || n > 2100) throw new BadRequestException('year must be YYYY');
+    return n;
   }
 
   /** Which months actually carry overtime — drives the page's month picker (no guessing). */
@@ -36,6 +46,136 @@ export class OtTrackerController {
   @ApiOperation({ summary: 'Monthly overtime tracker — people × days, raw + paid hours' })
   async get(@Req() req: any, @Query('month') month?: string): Promise<OtTrackerReport> {
     return this.tracker.build(req.user.tenantId, this.month(month));
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+   *  YEAR-TO-DATE over the Director's OWN overtime workbooks (ot_source_rows).
+   *  A different question from the month tracker above: that one asks "what did
+   *  the engine measure?", this one asks "what do my approved sheets add up to,
+   *  per person, since January?" — with the overlap between those sheets removed.
+   *  ══════════════════════════════════════════════════════════════════════════ */
+  @Get('roster-v2/ot-year/years')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Years present in the ingested overtime workbooks' })
+  async years(@Req() req: any) {
+    return { years: await this.yearly.years(req.user.tenantId) };
+  }
+
+  @Get('roster-v2/ot-year')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Year-to-date overtime per employee from the source workbooks (months + days)' })
+  async year(@Req() req: any, @Query('year') year?: string): Promise<OtYearReport> {
+    return this.yearly.build(req.user.tenantId, this.parseYear(year));
+  }
+
+  /** → .xlsx: Year grid · every day · conflicts · sources · summary. */
+  @Get('roster-v2/ot-year/export')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Year-to-date overtime → .xlsx' })
+  async yearExport(@Req() req: any, @Res() res: Response, @Query('year') year?: string) {
+    const y = this.parseYear(year);
+    const d = await this.yearly.build(req.user.tenantId, y);
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'WFM System';
+    const bold = (ws: ExcelJS.Worksheet) => { ws.getRow(1).font = { bold: true }; ws.views = [{ state: 'frozen', ySplit: 1 }]; };
+
+    /* Sheet 1 — the year grid: one row per employee, twelve months across. */
+    const ws = wb.addWorksheet(`OT ${y}`);
+    ws.columns = [
+      { header: 'Agent Name', key: 'name', width: 26 }, { header: 'ID', key: 'id', width: 10 },
+      { header: 'Function', key: 'fn', width: 20 },
+      ...d.monthLabels.map((m, i) => ({ header: m.slice(0, 3), key: `m${i}`, width: 9 })),
+      { header: 'Undated', key: 'und', width: 10 },
+      { header: 'TOTAL HRS', key: 'tot', width: 12 },
+      { header: 'OT days', key: 'days', width: 9 },
+      { header: 'Engine hrs (compare)', key: 'eng', width: 19 },
+    ];
+    d.people.forEach((p) => {
+      const row: any = { name: p.name, id: p.personNo, fn: p.functionName || '', und: p.undatedTotal || '', tot: p.total, days: p.daysCount, eng: p.engineHours };
+      p.months.forEach((h, i) => { row[`m${i}`] = h || ''; });
+      const r = ws.addRow(row);
+      r.getCell('tot').font = { bold: true };
+      for (let i = 4; i <= 3 + 12 + 4; i++) r.getCell(i).numFmt = '0.00';
+    });
+    if (d.people.length) {
+      const t: any = { name: 'TOTAL', id: `${d.totals.people} people`, und: d.totals.undated, tot: d.totals.total, days: d.totals.daysCount, eng: d.totals.engineHours };
+      d.totals.months.forEach((h, i) => { t[`m${i}`] = h || ''; });
+      const tr = ws.addRow(t); tr.font = { bold: true };
+    }
+    bold(ws);
+    ws.views = [{ state: 'frozen', xSplit: 3, ySplit: 1 }];
+
+    /* Sheet 2 — every day behind those totals. */
+    const days = wb.addWorksheet('Days');
+    days.columns = [
+      { header: 'ID', key: 'id', width: 10 }, { header: 'Agent Name', key: 'name', width: 26 },
+      { header: 'Function', key: 'fn', width: 20 }, { header: 'Date', key: 'date', width: 12 },
+      { header: 'Month', key: 'month', width: 10 }, { header: 'Hours', key: 'hours', width: 9 },
+      { header: 'Shift', key: 'shift', width: 9 }, { header: 'Occasion', key: 'occ', width: 34 },
+      { header: 'Sheets disagreed?', key: 'cf', width: 17 },
+    ];
+    d.people.forEach((p) => p.days.forEach((c) => days.addRow({
+      id: p.personNo, name: p.name, fn: p.functionName || '', date: c.date, month: c.date.slice(0, 7),
+      hours: c.hours, shift: c.shiftCode || '', occ: c.occasion, cf: c.conflict ? 'YES — see Conflicts' : '',
+    })));
+    bold(days);
+
+    /* Sheet 3 — the days the workbooks contradict each other on. */
+    const cf = wb.addWorksheet('Conflicts');
+    cf.columns = [
+      { header: 'ID', key: 'id', width: 10 }, { header: 'Agent Name', key: 'name', width: 26 },
+      { header: 'Date', key: 'date', width: 18 }, { header: 'Shown (largest)', key: 'chosen', width: 15 },
+      { header: 'Candidate hours', key: 'h', width: 15 }, { header: 'From sheet', key: 'sheet', width: 26 },
+      { header: 'From file', key: 'file', width: 52 },
+    ];
+    d.conflicts.forEach((c) => c.candidates.forEach((k, i) => cf.addRow({
+      id: i === 0 ? c.personNo : '', name: i === 0 ? c.name : '', date: i === 0 ? c.date : '',
+      chosen: i === 0 ? c.chosen : '', h: k.hours, sheet: k.sheet, file: k.file,
+    })));
+    bold(cf);
+
+    /* Sheet 4 — which workbook contributed what. */
+    const src = wb.addWorksheet('Sources');
+    src.columns = [
+      { header: 'Occasion', key: 'occ', width: 40 }, { header: 'File', key: 'file', width: 56 },
+      { header: 'Rows', key: 'rows', width: 8 }, { header: 'People', key: 'people', width: 9 },
+      { header: 'Hours as stacked', key: 'h', width: 17 }, { header: 'Undated rows', key: 'und', width: 13 },
+      { header: 'Flagged rows', key: 'fl', width: 13 },
+    ];
+    d.sources.forEach((s) => src.addRow({ occ: s.occasion, file: s.file, rows: s.rows, people: s.people, h: s.stackedHours, und: s.undated, fl: s.flagged }));
+    bold(src);
+
+    /* Sheet 5 — the summary, including the double-count this page removes. */
+    const sum = wb.addWorksheet('Summary');
+    sum.columns = [{ header: 'Metric', key: 'm', width: 52 }, { header: 'Value', key: 'v', width: 60 }];
+    ([
+      ['Year', y], ['Employees with overtime', d.totals.people],
+      ['TOTAL hours (what each person adds up to)', d.totals.total],
+      ['  · placed on a specific day', d.totals.dated],
+      ['  · month-level only (source gave no date)', d.totals.undated],
+      ['Person-days counted', d.dedup.personDays],
+      ['— WHY THIS IS NOT JUST THE SHEETS ADDED UP —', ''],
+      ['Hours if every sheet row were stacked', d.dedup.stacked],
+      ['Hours after one value per person-day', d.dedup.deduped],
+      ['DOUBLE COUNT AVOIDED', d.dedup.avoided],
+      ['Repeated person-days where sheets AGREE', d.dedup.agreed],
+      ['Repeated person-days where sheets DISAGREE (see Conflicts)', d.dedup.disagreed],
+      ['— COMPARISON —', ''],
+      ['Engine-measured hours over the same year', d.totals.engineHours],
+      ['Note', 'The engine detects; your sheets approve. They are not expected to match.'],
+      ['— PROVENANCE —', ''],
+      ['Workbooks ingested', d.sources.length],
+      ['Last ingest', d.ingestedAt || '—'],
+      ['Source', d.provenance],
+    ] as [string, any][]).forEach(([m, v]) => sum.addRow({ m, v }));
+    bold(sum);
+    sum.getColumn(2).alignment = { wrapText: true, vertical: 'top' };
+
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="Overtime_${y}_Year_Tracker.xlsx"`,
+    });
+    res.end(Buffer.from(await wb.xlsx.writeBuffer()));
   }
 
   /** → .xlsx in the Director's own tracker layout (+ a Raw sheet and a Summary sheet). */
