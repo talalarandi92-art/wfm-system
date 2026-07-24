@@ -43,9 +43,15 @@ const add = (level, name, detail, fix) => { items.push({ level, name, detail, fi
     else {
       const up = Math.round((Date.now() - app.pm2_env.pm_uptime) / 1000);
       const r = app.pm2_env.restart_time || 0;
-      add(r > 3 ? 'warn' : 'ok', 'Supervisor',
-        `online · pid ${app.pid} · up ${up < 90 ? up + 's' : Math.round(up / 60) + 'm'} · ${r} restart(s) · ${Math.round((app.monit?.memory || 0) / 1e6)}MB`,
-        r > 3 ? 'It has restarted repeatedly — check `npx pm2 logs wfm-backend --err`' : null);
+      /* `restart_time` counts DELIBERATE restarts too — every rebuild-and-reload
+         during development bumps it, so warning on it cries wolf. `unstable_restarts`
+         is the one that means "it crashed and came back", which is the only kind
+         worth interrupting someone about before a presentation. */
+      const crashes = app.pm2_env.unstable_restarts || 0;
+      add(crashes > 0 ? 'warn' : 'ok', 'Supervisor',
+        `online · pid ${app.pid} · up ${up < 90 ? up + 's' : Math.round(up / 60) + 'm'} · ` +
+        `${crashes} crash-restart(s) (${r} total incl. deliberate) · ${Math.round((app.monit?.memory || 0) / 1e6)}MB`,
+        crashes > 0 ? 'It has CRASHED and self-healed — check `npx pm2 logs wfm-backend --err` before presenting' : null);
     }
   } catch (e) {
     add('warn', 'Supervisor', 'could not query PM2 — the backend may be running bare (no auto-restart)',

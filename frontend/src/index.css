@@ -334,7 +334,10 @@
 
   /* Sidebar section divider */
   .sidebar-divider { @apply h-px bg-white/5 mx-3 my-2; }
-  .sidebar-label   { @apply text-[10px] font-bold uppercase tracking-widest text-slate-600 px-3 mb-1; }
+  /* slate-400, not slate-600: these sit on the dark navy rail (#0d1120) in EVERY
+     theme, where slate-600 measures 2.48:1 — below AA and genuinely hard to read.
+     slate-400 gives 7.32:1 and still reads as a quiet section label. */
+  .sidebar-label   { @apply text-[10px] font-bold uppercase tracking-widest text-slate-400 px-3 mb-1; }
 
   /* Glow effects */
   .glow-indigo { filter: drop-shadow(0 0 12px rgba(99,102,241,0.5)); }
@@ -626,8 +629,8 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light .text-slate-100 { color: #1e293b !important; }
 .theme-light .text-slate-200 { color: #334155 !important; }
 .theme-light .text-slate-300 { color: #475569 !important; }
-.theme-light .text-slate-400 { color: #64748b !important; }
-.theme-light .text-slate-500 { color: #64748b !important; }
+.theme-light .text-slate-400 { color: #526074 !important; }
+.theme-light .text-slate-500 { color: #526074 !important; }
 /* …but keep white text when it sits on a solid colored chip/button (not bg-white) */
 .theme-light .text-white[class*="bg-"]:not([class*="bg-white"]) { color: #fff !important; }
 .theme-light .btn-primary, .theme-light .btn-danger { color: #fff !important; }
@@ -660,49 +663,49 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 
 /* dark-first INLINE light-slate text colors (style={{color:'#e2e8f0'}} etc.) →
    readable dark tones. These hexes are body/muted text by convention. */
-.theme-light [style*="color: rgb(241, 245, 249)"] { color: #0f172a !important; }  /* #f1f5f9 */
-.theme-light [style*="color: rgb(226, 232, 240)"] { color: #1e293b !important; }  /* #e2e8f0 */
-.theme-light [style*="color: rgb(203, 213, 225)"] { color: #334155 !important; }  /* #cbd5e1 */
-.theme-light [style*="color: rgb(148, 163, 184)"] { color: #64748b !important; }  /* #94a3b8 */
+.theme-light [style*="color: rgb(241, 245, 249)"]:not(aside *):not(.keep-dark *) { color: #0f172a !important; }  /* #f1f5f9 */
+.theme-light [style*="color: rgb(226, 232, 240)"]:not(aside *):not(.keep-dark *) { color: #1e293b !important; }  /* #e2e8f0 */
+.theme-light [style*="color: rgb(203, 213, 225)"]:not(aside *):not(.keep-dark *) { color: #334155 !important; }  /* #cbd5e1 */
+.theme-light [style*="color: rgb(148, 163, 184)"]:not(aside *):not(.keep-dark *) { color: #64748b !important; }  /* #94a3b8 */
 /* light accent text (…-300) is faint on white → same hue, darker for contrast */
-.theme-light [style*="color: rgb(165, 180, 252)"] { color: #4f46e5 !important; }  /* indigo-300 */
-.theme-light [style*="color: rgb(103, 232, 249)"] { color: #0891b2 !important; }  /* cyan-300 */
-.theme-light [style*="color: rgb(134, 239, 172)"] { color: #16a34a !important; }  /* green-300 */
-.theme-light [style*="color: rgb(252, 165, 165)"] { color: #dc2626 !important; }  /* red-300 */
-.theme-light [style*="color: rgb(253, 224, 71)"]  { color: #a16207 !important; }  /* yellow-300 */
-.theme-light [style*="color: rgb(251, 191, 36)"]  { color: #b45309 !important; }  /* amber-400 */
-.theme-light [style*="color: rgb(252, 211, 77)"]  { color: #b45309 !important; }  /* amber-300 */
-.theme-light [style*="color: rgb(74, 222, 128)"]  { color: #15803d !important; }  /* green-400 */
-.theme-light [style*="color: rgb(52, 211, 153)"]  { color: #047857 !important; }  /* emerald-400 */
-.theme-light [style*="color: rgb(96, 165, 250)"]  { color: #2563eb !important; }  /* blue-400 */
-.theme-light [style*="color: rgb(248, 113, 113)"] { color: #dc2626 !important; }  /* red-400 */
-.theme-light [style*="color: rgb(129, 140, 248)"] { color: #4f46e5 !important; }  /* indigo-400 */
-.theme-light [style*="color: rgb(34, 211, 238)"]  { color: #0891b2 !important; }  /* cyan-400 */
-.theme-light [style*="color: rgb(56, 189, 248)"]  { color: #0284c7 !important; }  /* sky-400 (morning) */
-.theme-light [style*="color: rgb(167, 139, 250)"] { color: #7c3aed !important; }  /* violet-400 (night) */
-.theme-light [style*="color: rgb(192, 132, 252)"] { color: #9333ea !important; }  /* purple-400 (leave) */
-.theme-light [style*="color: rgb(251, 146, 60)"]  { color: #ea580c !important; }  /* orange-400 (evening) */
-.theme-light [style*="color: rgb(110, 231, 183)"] { color: #047857 !important; }  /* emerald-300 */
-.theme-light [style*="color: rgb(134, 239, 172)"] { color: #15803d !important; }  /* green-300 */
-.theme-light [style*="color: rgb(125, 211, 252)"] { color: #0284c7 !important; }  /* sky-300 */
-.theme-light [style*="color: rgb(94, 234, 212)"]  { color: #0f766e !important; }  /* teal-300 */
-.theme-light [style*="color: rgb(253, 164, 175)"] { color: #e11d48 !important; }  /* rose-300 */
-.theme-light [style*="color: rgb(196, 181, 253)"] { color: #7c3aed !important; }  /* violet-300 */
-.theme-light [style*="color: rgb(199, 210, 254)"] { color: #4338ca !important; }  /* indigo-200 (active chips) */
-.theme-light [style*="color: rgb(165, 180, 252)"] { color: #4f46e5 !important; }  /* indigo-300 (accent text) */
-.theme-light [style*="color: rgb(103, 232, 249)"] { color: #0e7490 !important; }  /* cyan-300 */
-.theme-light [style*="color: rgba(251, 191, 36"] { color: #b45309 !important; }   /* amber-400 w/ alpha */
+.theme-light [style*="color: rgb(165, 180, 252)"]:not(aside *):not(.keep-dark *) { color: #4f46e5 !important; }  /* indigo-300 */
+.theme-light [style*="color: rgb(103, 232, 249)"]:not(aside *):not(.keep-dark *) { color: #0891b2 !important; }  /* cyan-300 */
+.theme-light [style*="color: rgb(134, 239, 172)"]:not(aside *):not(.keep-dark *) { color: #16a34a !important; }  /* green-300 */
+.theme-light [style*="color: rgb(252, 165, 165)"]:not(aside *):not(.keep-dark *) { color: #dc2626 !important; }  /* red-300 */
+.theme-light [style*="color: rgb(253, 224, 71)"]:not(aside *):not(.keep-dark *)  { color: #a16207 !important; }  /* yellow-300 */
+.theme-light [style*="color: rgb(251, 191, 36)"]:not(aside *):not(.keep-dark *)  { color: #92400e !important; }  /* amber-400 */
+.theme-light [style*="color: rgb(252, 211, 77)"]:not(aside *):not(.keep-dark *)  { color: #92400e !important; }  /* amber-300 */
+.theme-light [style*="color: rgb(74, 222, 128)"]:not(aside *):not(.keep-dark *)  { color: #166534 !important; }  /* green-400 */
+.theme-light [style*="color: rgb(52, 211, 153)"]:not(aside *):not(.keep-dark *)  { color: #047857 !important; }  /* emerald-400 */
+.theme-light [style*="color: rgb(96, 165, 250)"]:not(aside *):not(.keep-dark *)  { color: #2563eb !important; }  /* blue-400 */
+.theme-light [style*="color: rgb(248, 113, 113)"]:not(aside *):not(.keep-dark *) { color: #dc2626 !important; }  /* red-400 */
+.theme-light [style*="color: rgb(129, 140, 248)"]:not(aside *):not(.keep-dark *) { color: #4f46e5 !important; }  /* indigo-400 */
+.theme-light [style*="color: rgb(34, 211, 238)"]:not(aside *):not(.keep-dark *)  { color: #0891b2 !important; }  /* cyan-400 */
+.theme-light [style*="color: rgb(56, 189, 248)"]:not(aside *):not(.keep-dark *)  { color: #0284c7 !important; }  /* sky-400 (morning) */
+.theme-light [style*="color: rgb(167, 139, 250)"]:not(aside *):not(.keep-dark *) { color: #7c3aed !important; }  /* violet-400 (night) */
+.theme-light [style*="color: rgb(192, 132, 252)"]:not(aside *):not(.keep-dark *) { color: #9333ea !important; }  /* purple-400 (leave) */
+.theme-light [style*="color: rgb(251, 146, 60)"]:not(aside *):not(.keep-dark *)  { color: #ea580c !important; }  /* orange-400 (evening) */
+.theme-light [style*="color: rgb(110, 231, 183)"]:not(aside *):not(.keep-dark *) { color: #047857 !important; }  /* emerald-300 */
+.theme-light [style*="color: rgb(134, 239, 172)"]:not(aside *):not(.keep-dark *) { color: #166534 !important; }  /* green-300 */
+.theme-light [style*="color: rgb(125, 211, 252)"]:not(aside *):not(.keep-dark *) { color: #0284c7 !important; }  /* sky-300 */
+.theme-light [style*="color: rgb(94, 234, 212)"]:not(aside *):not(.keep-dark *)  { color: #0f766e !important; }  /* teal-300 */
+.theme-light [style*="color: rgb(253, 164, 175)"]:not(aside *):not(.keep-dark *) { color: #e11d48 !important; }  /* rose-300 */
+.theme-light [style*="color: rgb(196, 181, 253)"]:not(aside *):not(.keep-dark *) { color: #7c3aed !important; }  /* violet-300 */
+.theme-light [style*="color: rgb(199, 210, 254)"]:not(aside *):not(.keep-dark *) { color: #4338ca !important; }  /* indigo-200 (active chips) */
+.theme-light [style*="color: rgb(165, 180, 252)"]:not(aside *):not(.keep-dark *) { color: #4f46e5 !important; }  /* indigo-300 (accent text) */
+.theme-light [style*="color: rgb(103, 232, 249)"]:not(aside *):not(.keep-dark *) { color: #155e75 !important; }  /* cyan-300 */
+.theme-light [style*="color: rgba(251, 191, 36"]:not(aside *):not(.keep-dark *) { color: #92400e !important; }   /* amber-400 w/ alpha */
 
 /* light-mode: deepen pale accent TEXT *classes* (Tailwind -300/-400) so they read
    on light surfaces. Safe — in Light every surface is light; solid colored buttons
    use inline white, not these classes. (Sidebar text is re-lit separately.) */
 .theme-light .text-amber-300, .theme-light .text-amber-400,
-.theme-light [class*="text-amber-3"], .theme-light [class*="text-amber-4"] { color: #b45309 !important; }
+.theme-light [class*="text-amber-3"], .theme-light [class*="text-amber-4"] { color: #92400e !important; }
 .theme-light .text-yellow-300, .theme-light .text-yellow-400 { color: #a16207 !important; }
 .theme-light .text-emerald-300, .theme-light .text-emerald-400 { color: #047857 !important; }
-.theme-light .text-green-300, .theme-light .text-green-400 { color: #15803d !important; }
+.theme-light .text-green-300, .theme-light .text-green-400 { color: #166534 !important; }
 .theme-light .text-sky-300, .theme-light .text-sky-400 { color: #0284c7 !important; }
-.theme-light .text-cyan-300, .theme-light .text-cyan-400 { color: #0e7490 !important; }
+.theme-light .text-cyan-300, .theme-light .text-cyan-400 { color: #155e75 !important; }
 .theme-light .text-blue-300, .theme-light .text-blue-400 { color: #2563eb !important; }
 .theme-light .text-indigo-200, .theme-light .text-indigo-300, .theme-light .text-indigo-400 { color: #4338ca !important; }
 .theme-light .text-violet-300, .theme-light .text-violet-400 { color: #7c3aed !important; }
@@ -712,7 +715,7 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light .text-pink-300, .theme-light .text-pink-400 { color: #db2777 !important; }
 .theme-light .text-teal-300, .theme-light .text-teal-400 { color: #0f766e !important; }
 .theme-light .text-orange-300, .theme-light .text-orange-400 { color: #c2410c !important; }
-.theme-light [style*="color: rgb(253, 186, 116)"] { color: #c2410c !important; }  /* orange-300 inline */
+.theme-light [style*="color: rgb(253, 186, 116)"]:not(aside *):not(.keep-dark *) { color: #c2410c !important; }  /* orange-300 inline */
 /* but keep these light inside the dark sidebar rail */
 .theme-light aside [class*="text-amber-"], .theme-light aside [class*="text-emerald-"], .theme-light aside [class*="text-indigo-"] { color: inherit !important; }
 
@@ -776,3 +779,82 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light .keep-dark [style*="solid rgba(255, 255, 255, 0."] { border-color: rgba(255, 255, 255, 0.09) !important; }
 .theme-light .keep-dark [class*="bg-white/"]     { background-color: rgba(255, 255, 255, 0.05) !important; }
 .theme-light .keep-dark [class*="border-white/"] { border-color: rgba(255, 255, 255, 0.1) !important; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LIGHT-MODE SEMANTIC-COLOUR NET  (measured 2026-07-25, presentation hardening)
+   ══════════════════════════════════════════════════════════════════════════
+   This app is dark-first, so status colours were picked from the 300–500 band of
+   the palette — correct on a near-black canvas, unreadable on a light one. A
+   composited contrast audit over the live pages in Light mode found 104 failing
+   text nodes, all of them these seven inline colours:
+
+     indigo-300 rgba(165,180,252,.8) ×37  worst 1.46:1   (usernames)
+     green-500  rgb(34,197,94)       ×24  worst 1.61:1   (percentages)
+     amber-500  rgb(245,158,11)       ×7  worst 1.72:1
+     cyan-500   rgb(6,182,212)        ×4  worst 1.79:1
+     orange-500 rgb(249,115,22)       ×1  worst 2.59:1
+     rose-500   rgb(244,63,94)        ×1  worst 3.39:1
+     violet-500 rgb(139,92,246)       ×1  worst 3.39:1
+
+   WCAG AA needs 4.5:1 for body text. Each is remapped to its 700-band sibling,
+   which keeps the SAME hue — a green number stays green, so nothing the reader
+   has learned to recognise changes — while clearing 4.5:1 on --surface.
+
+   Two traps this block is written around:
+   · `background-color: rgb(...)` CONTAINS the substring `color: rgb(...)`, so a
+     naive [style*="color: rgb(…)"] would repaint backgrounds too. Every rule is
+     therefore anchored to the START of the attribute or to a `; ` boundary.
+   · The sidebar rail stays dark in every theme, so these overrides are reverted
+     inside `aside` and `.keep-dark`, exactly as the older net does.
+   ────────────────────────────────────────────────────────────────────────── */
+.theme-light [style^="color: rgba(165, 180, 252"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgba(165, 180, 252"]:not(aside *):not(.keep-dark *) { color: #3730a3 !important; }  /* indigo-300 → 800 */
+
+.theme-light [style^="color: rgb(34, 197, 94)"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgb(34, 197, 94)"]:not(aside *):not(.keep-dark *)   { color: #166534 !important; }  /* green-500 → 800 */
+
+.theme-light [style^="color: rgb(245, 158, 11)"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgb(245, 158, 11)"]:not(aside *):not(.keep-dark *)  { color: #92400e !important; }  /* amber-500 → 800 */
+
+.theme-light [style^="color: rgb(6, 182, 212)"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgb(6, 182, 212)"]:not(aside *):not(.keep-dark *)   { color: #155e75 !important; }  /* cyan-500 → 800 */
+
+.theme-light [style^="color: rgb(249, 115, 22)"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgb(249, 115, 22)"]:not(aside *):not(.keep-dark *)  { color: #9a3412 !important; }  /* orange-500 → 800 */
+
+.theme-light [style^="color: rgb(244, 63, 94)"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgb(244, 63, 94)"]:not(aside *):not(.keep-dark *)   { color: #9f1239 !important; }  /* rose-500 → 800 */
+
+.theme-light [style^="color: rgb(139, 92, 246)"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgb(139, 92, 246)"]:not(aside *):not(.keep-dark *)  { color: #5b21b6 !important; }  /* violet-500 → 800 */
+
+/* The rail (and anything opting into keep-dark) stays dark in EVERY theme, so the
+   remaps above must not reach inside it. A "reset" rule cannot undo them — it would
+   have to know each original colour — so the exclusion is expressed on the selectors
+   themselves via :not() with a descendant argument (Selectors L4). */
+
+/* Tailwind-class variants of the same dark-first palette. `.text-indigo-300/80` was
+   the single largest offender (37 nodes at 1.46:1 — the usernames under every agent
+   name) and carries NO inline style, so the attribute rules above cannot reach it. */
+.theme-light .text-indigo-300\/80,
+.theme-light .text-indigo-300,
+.theme-light .text-indigo-400  { color: #3730a3 !important; }
+.theme-light .text-green-400,
+.theme-light .text-green-500,
+.theme-light .text-emerald-400 { color: #166534 !important; }
+.theme-light .text-cyan-400,
+.theme-light .text-cyan-500     { color: #155e75 !important; }
+.theme-light .text-amber-400,
+.theme-light .text-amber-500    { color: #92400e !important; }
+/* the dark rail keeps its own palette */
+.theme-light aside [class*="text-indigo-"],
+.theme-light aside [class*="text-green-"],
+.theme-light aside [class*="text-cyan-"],
+.theme-light aside [class*="text-amber-"] { color: inherit !important; }
+
+/* slate-500 is the app's "muted detail" tone (shift windows, secondary times). It
+   measures 4.40:1 on --surface and 3.89:1 on --bg in Light — just under AA both
+   times, which is the most insidious kind of miss: it looks fine until someone
+   actually has to read it. #526074 keeps the same cool-grey character at 5.91/5.22. */
+.theme-light [style^="color: rgb(100, 116, 139)"]:not(aside *):not(.keep-dark *),
+.theme-light [style*="; color: rgb(100, 116, 139)"]:not(aside *):not(.keep-dark *) { color: #526074 !important; }
