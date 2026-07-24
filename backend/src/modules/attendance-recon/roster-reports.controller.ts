@@ -163,7 +163,16 @@ export class RosterReportsController {
              COUNT(*) FILTER (WHERE presence='absent')::int absent, COUNT(*) FILTER (WHERE presence='sick')::int sick,
              COUNT(*) FILTER (WHERE ${CRED_LATE})::int late_days, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int late_min,
              COUNT(*) FILTER (WHERE ${CRED_EARLY})::int early_days, COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}),0)::int early_min,
-             COALESCE(SUM(ot_before_min),0)::int ot_before, COALESCE(SUM(ot_after_min),0)::int ot_after, COALESCE(SUM(${TRUE_OT}),0)::int ot_total,
+             COALESCE(SUM(ot_before_min),0)::int ot_before, COALESCE(SUM(ot_after_min),0)::int ot_after,
+             /* PAYABLE OT — the same definition the OT & Exceptions report uses.
+                This summed ALL OT including supervisory rows flagged ot_record_only
+                (BR-ROL-002: recorded, never paid), so the dashboard read 16,440h
+                against the report's 16,388h for the identical period. Two roster
+                screens quoting two OT totals is precisely what dashboard principle
+                P-3 forbids. The record-only minutes are not hidden — they are
+                returned beside it so the difference is visible, not silent. */
+             COALESCE(SUM(${TRUE_OT}) FILTER (WHERE NOT COALESCE(ot_record_only,false)),0)::int ot_total,
+             COALESCE(SUM(${TRUE_OT}) FILTER (WHERE COALESCE(ot_record_only,false)),0)::int ot_record_only_min,
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
              ROUND(AVG(adherence_pct),1) conformance
         FROM roster_days r WHERE ${w}`, p))[0];
