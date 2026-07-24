@@ -239,7 +239,13 @@ export function Wallboard({ live, breakData, fc, coverage, ar, onClose }: { live
               ))}
               <div style={{ display: 'flex', gap: 14, marginTop: 8 }}>
                 {[
-                  { l: ar ? 'حضور / مجدول' : 'Punched / Scheduled', v: `${coverage?.attendance?.punched_in ?? 0} / ${coverage?.attendance?.total_scheduled ?? 0}`, c: '#34d399' },
+                  /* Same rule as the Command Center: an unpublished roster is not
+                     "0 scheduled". On a wallboard, on a wall, that lie is loudest. */
+                  { l: ar ? 'حضور / مجدول' : 'Punched / Scheduled',
+                    v: (coverage?.attendance?.total_scheduled ?? 0) > 0
+                      ? `${coverage?.attendance?.punched_in ?? 0} / ${coverage?.attendance?.total_scheduled}`
+                      : (ar ? 'لا روستر' : 'no roster'),
+                    c: (coverage?.attendance?.total_scheduled ?? 0) > 0 ? '#34d399' : '#64748b' },
                   { l: ar ? 'على استئذان' : 'On permission', v: coverage?.onPermission ?? 0, c: '#fbbf24' },
                   { l: ar ? 'مسجّل دخول (لايف)' : 'Logged in (live)', v: coverage?.liveSprinklr?.totalLoggedIn ?? '—', c: '#06b6d4' },
                   { l: 'AHT', v: fc.staffing?.avgAhtSec != null ? `${Math.round(fc.staffing.avgAhtSec / 60)}${ar ? 'د' : 'm'}` : '—', c: '#818cf8' },

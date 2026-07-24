@@ -8,6 +8,8 @@ import {
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile, Donut, Gauge, BarRow, Sparkline, useReducedMotion } from '@/components/dazzle';
+import { useDataSpan } from '@/hooks/useDataSpan';
+import DataSpanNote from '@/components/DataSpanNote';
 
 interface Row {
   employee_no: string; name: string; function_name: string; date: string; day_name: string;
@@ -255,8 +257,21 @@ export default function RosterPage() {
   const [q, setQ] = useState('');
   const [presence, setPresence] = useState('');
   const [shift, setShift] = useState('');
-  const [from, setFrom] = useState('2026-06-01');
-  const [to, setTo] = useState('2026-06-30');
+  /* Opening window comes from the data, never from a literal. This was hard-coded to
+     June 2026 — correct on the day it was written and wrong every month after. The
+     span endpoint answers with the newest COMPLETE month that actually has rows. */
+  const { span: dataSpan } = useDataSpan();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [rangeReady, setRangeReady] = useState(false);
+  useEffect(() => {
+    if (rangeReady || !dataSpan?.defaultFrom || !dataSpan?.defaultTo) return;
+    setFrom(dataSpan.defaultFrom); setTo(dataSpan.defaultTo); setRangeReady(true);
+  }, [dataSpan, rangeReady]);
+  const jumpLatest = () => {
+    if (!dataSpan?.latestMonthFrom || !dataSpan?.latestDay) return;
+    setFrom(dataSpan.latestMonthFrom); setTo(dataSpan.latestDay); setPage(0);
+  };
   const [sort, setSort] = useState('date_desc');
   const [page, setPage] = useState(0);
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -267,6 +282,7 @@ export default function RosterPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
+    if (!from || !to) return;                 // wait for the span — never query a blank range
     setLoading(true); setOpenKey(null);
     const p = new URLSearchParams({ from, to, sort, limit: String(PER), offset: String(page*PER) });
     if (q) p.set('q', q); if (presence) p.set('presence', presence); if (shift) p.set('shift', shift);
@@ -398,6 +414,7 @@ export default function RosterPage() {
 
   return (
     <div className="space-y-4 page-enter">
+      <DataSpanNote span={dataSpan} onJumpLatest={jumpLatest} />
       {/* header + actions — gradient hero band, theme-safe */}
       <div className="rounded-3xl p-4 relative overflow-hidden flex items-center justify-between flex-wrap gap-3" style={{ background:'linear-gradient(135deg, rgba(99,102,241,0.13), rgba(139,92,246,0.06) 55%, transparent)', border:'1px solid var(--border)' }}>
         <div className="absolute -top-10 -inline-end-8 w-44 h-44 rounded-full" style={{ background:'#6366f1', opacity:0.12, filter:'blur(48px)', pointerEvents:'none' }} />

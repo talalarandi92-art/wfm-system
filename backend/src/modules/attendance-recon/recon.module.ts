@@ -13,6 +13,7 @@ import { RosterIngestionService } from './roster-ingestion.service';
 import { RosterSharedService } from './roster-shared.service';
 import { OtTrackerService } from './ot-tracker.service';
 import { OtYearService } from './ot-year.service';
+import { DataSpanService } from './data-span.service';
 
-@Module({ controllers: [ReconController, RosterFairnessController, RosterHourlyController, RosterGenerateController, RosterAnalyticsController, WfhReportController, ScheduleOpsController, RosterReportsController, OtTrackerController], providers: [ReconService, RosterIngestionService, RosterSharedService, OtTrackerService, OtYearService] })
+@Module({ controllers: [ReconController, RosterFairnessController, RosterHourlyController, RosterGenerateController, RosterAnalyticsController, WfhReportController, ScheduleOpsController, RosterReportsController, OtTrackerController], providers: [ReconService, RosterIngestionService, RosterSharedService, OtTrackerService, OtYearService, DataSpanService] })
 export class ReconModule {}

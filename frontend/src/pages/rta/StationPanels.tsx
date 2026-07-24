@@ -563,6 +563,14 @@ export function CoveragePanel({ coverage, live, ar }: { coverage: Coverage | nul
           <p className="text-xs font-semibold mb-3 flex items-center gap-2" style={{ color: tsColor(dark) }}>
             <BarChart3 size={12} />{ar ? 'الجدول مقابل الفعلي' : 'Schedule vs Actual'}
           </p>
+          {/* Nothing scheduled means no roster for this date — say so, so a zero is
+              never mistaken for "the whole team failed to show up". */}
+          {+(coverage.attendance.total_scheduled ?? 0) === 0 && (
+            <p className="text-[10px] mb-2" style={{ color: T.faint }}>
+              {ar ? 'الروستر غير منشور لهذا التاريخ — الأرقام تحت ليست قياساً للحضور'
+                  : 'No roster published for this date — the figures below are not an attendance measurement'}
+            </p>
+          )}
           <div className="grid grid-cols-3 gap-3">
             {[
               { l: ar ? 'مجدول' : 'Scheduled',  v: +(coverage.attendance.total_scheduled ?? 0), c: '#818cf8' },

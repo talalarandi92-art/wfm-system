@@ -337,14 +337,21 @@ export default function CommandCenter({
                         : (ar ? 'بانتظار المنحنى' : 'awaiting curve'),
                     },
                     {
+                      /* "0 / 0" would read as "nobody came to work" — alarming, and false.
+                         Nothing scheduled means the roster has not been published for this
+                         date, which is a fact about the SYSTEM, not about the floor. Say
+                         that instead; never let an absent input look like a measurement. */
                       k: 'punch', l: ar ? 'حضور / مجدول' : 'Punched / scheduled',
-                      v: coverage?.attendance
-                        ? `${nfmt(coverage.attendance.punched_in)} / ${nfmt(coverage.attendance.total_scheduled)}`
-                        : '—',
-                      c: QPAL.brand,
+                      v: !coverage?.attendance ? '—'
+                        : coverage.attendance.total_scheduled > 0
+                          ? `${nfmt(coverage.attendance.punched_in)} / ${nfmt(coverage.attendance.total_scheduled)}`
+                          : (ar ? 'لا يوجد روستر' : 'no roster'),
+                      c: coverage?.attendance && coverage.attendance.total_scheduled === 0 ? QPAL.degraded : QPAL.brand,
                       bar: coverage?.attendance && coverage.attendance.total_scheduled > 0
                         ? (coverage.attendance.punched_in / coverage.attendance.total_scheduled) * 100 : null,
-                      note: ar ? 'من الروستر اليوم' : "from today's roster",
+                      note: coverage?.attendance && coverage.attendance.total_scheduled === 0
+                        ? (ar ? 'الروستر غير منشور لهذا اليوم' : 'roster not published for this date')
+                        : (ar ? 'من الروستر اليوم' : "from today's roster"),
                     },
                     {
                       k: 'perm', l: ar ? 'على استئذان' : 'On permission',

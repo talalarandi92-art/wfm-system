@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { StatTile, Gauge } from '@/components/dazzle';
+import { fmtLocalDate } from '@/utils/format';
 import { tp } from '@/components/ds';
 import {
   Phone, MessageSquare, Mail, Zap, Users, TrendingUp, TrendingDown,
@@ -432,7 +433,14 @@ export default function CapacityPage() {
   const [functions, setFunctions] = useState<Func[]>([]);
   const [overview, setOverview] = useState<HcOverviewRow[]>([]);
   const [selectedFunc, setSelectedFunc] = useState<Func | null>(null);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  /* TODAY is the right default here and only here: capacity planning looks FORWARD —
+     the engine forecasts demand for a day that has not happened yet (basisKind
+     'engine-forecast'), so pinning this page to the last day the roster covers would
+     defeat its purpose. What WAS wrong is how "today" was computed:
+     `new Date().toISOString()` is UTC, and in Kuwait (+03:00) that names YESTERDAY
+     for the first three hours of every day — the exact trap BR-TIM-001 bans.
+     `fmtLocalDate` is the local-safe helper the rest of the app uses. */
+  const [date, setDate] = useState(() => fmtLocalDate(new Date()));
 
   // Per-channel inputs
   const [targetSL, setTargetSL] = useState(80);

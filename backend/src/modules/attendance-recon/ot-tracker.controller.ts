@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { OtTrackerService, OT_RATES, OtTrackerReport } from './ot-tracker.service';
 import { OtYearService, OtYearReport } from './ot-year.service';
+import { DataSpanService, DataSpanReport } from './data-span.service';
 
 /* MONTHLY OT TRACKER — the online replacement for the per-occasion overtime workbooks.
  * Read-only over roster_days; the export is shaped to be interchangeable with the
@@ -19,7 +20,16 @@ export class OtTrackerController {
   constructor(
     private readonly tracker: OtTrackerService,
     private readonly yearly: OtYearService,
+    private readonly span: DataSpanService,
   ) {}
+
+  /** WHERE THE DATA IS — every date-driven screen opens from this, never from a guess. */
+  @Get('roster-v2/data-span')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'Authoritative data coverage: latest day / week / month + feed freshness' })
+  async dataSpan(@Req() req: any): Promise<DataSpanReport> {
+    return this.span.build(req.user.tenantId);
+  }
 
   private month(m?: string): string {
     const s = String(m || '').trim();
