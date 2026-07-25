@@ -70,6 +70,7 @@ import { ChiefModule }               from '@modules/chief/chief.module';
 import { BotsModule }                from '@modules/bots/bots.module';
 import { RetentionModule }           from '@modules/retention/retention.module';
 import { TenantMiddleware } from '@common/middleware/tenant.middleware';
+import { QueryParamsMiddleware } from '@common/query-params.pipe';
 
 @Module({
   imports: [
@@ -207,8 +208,13 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
+    /* QueryParamsMiddleware runs FIRST: a malformed date should be rejected before
+       any tenant/auth work is done on its behalf. It validates the parameter names
+       the platform uses everywhere (date/from/to/weekStart/month/year + the numeric
+       ones) and drops empty strings, which is what turned a cleared date field into
+       a 500 on 7 of 10 endpoints. See common/query-params.pipe.ts. */
     consumer
-      .apply(TenantMiddleware)
+      .apply(QueryParamsMiddleware, TenantMiddleware)
       .forRoutes('*');
   }
 }

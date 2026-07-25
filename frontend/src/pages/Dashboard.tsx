@@ -194,9 +194,17 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
   const W=480, H=220, PL=36, PB=24, PT=18, PR=10;
   const cw=W-PL-PR, ch=H-PT-PB;
 
-  const scheduled = d.map(x=>x.present+Math.round((x.absent+x.leave)*0.3+2));
-  const forecast  = d.map(x=>x.present+Math.round((x.absent+x.leave)*0.5+4));
-  const maxV = Math.max(...d.map(x=>x.present+x.absent+x.leave), ...forecast, 1);
+  /* REMOVED — two fabricated series:
+         scheduled = present + (absent+leave)*0.3 + 2
+         forecast  = present + (absent+leave)*0.5 + 4
+     Neither was a schedule or a forecast. Both were cosmetic offsets of the SAME
+     measured attendance line, drawn at identical stroke weight, legended "Forecast"
+     and "Scheduled", and read out in the tooltip as `Fcst:` / `Sched:`. A viewer
+     comparing three lines was comparing one number with itself twice.
+     The platform has a real forecaster (`/forecasting/volume`, Erlang + seasonal)
+     and a real scheduled-headcount source (`headcount_intervals`); this chart is
+     fed by neither, so it now plots only what it actually measured. */
+  const maxV = Math.max(...d.map(x=>x.present+x.absent+x.leave), 1);
 
   const T = nt(dark);
 
@@ -218,28 +226,19 @@ function LineChart({ data, dark, ar }: { data: DashData['trend']; dark: boolean;
       {[0,.5,1].map(f=>(
         <text key={f} x={PL-4} y={PT+ch*(1-f)+4} textAnchor="end" fontSize={9} fill={T.axis}>{Math.round(maxV*f)}</text>
       ))}
-      {line(forecast, '#818cf8')}
-      {line(scheduled, '#38bdf8')}
       {line(d.map(x=>x.present), '#34d399')}
       {hovered !== null && (() => {
         const x = PL+(hovered/(d.length-1||1))*cw;
         return (
           <>
             <line x1={x} x2={x} y1={PT} y2={PT+ch} stroke={T.crosshair} />
-            {[
-              { v:forecast[hovered], c:'#818cf8' },
-              { v:scheduled[hovered], c:'#38bdf8' },
-              { v:d[hovered].present, c:'#34d399' },
-            ].map(({v,c},i)=>(
-              <circle key={i} cx={x} cy={PT+ch-(v/maxV)*ch} r={3.5} fill={c} />
-            ))}
-            <rect x={Math.min(x-34, W-80)} y={PT} width={68} height={60} rx={6} fill={T.tooltipBg} stroke={T.bdInput} />
+            <circle cx={x} cy={PT+ch-(d[hovered].present/maxV)*ch} r={3.5} fill="#34d399" />
+            <rect x={Math.min(x-34, W-80)} y={PT} width={68} height={47} rx={6} fill={T.tooltipBg} stroke={T.bdInput} />
             <text x={Math.min(x-34, W-80)+34} y={PT+13} textAnchor="middle" fontSize={9} fontWeight="600" fill={T.tooltipTx}>
               {new Date(d[hovered].date).toLocaleDateString(ar?'ar':'en',{day:'numeric',month:'short'})}
             </text>
-            <text x={Math.min(x-34, W-80)+34} y={PT+26} textAnchor="middle" fontSize={9} fill="#34d399">{ar?'فعلي':'Actual'}: {d[hovered].present}</text>
-            <text x={Math.min(x-34, W-80)+34} y={PT+39} textAnchor="middle" fontSize={9} fill="#38bdf8">{ar?'مجدول':'Sched'}: {scheduled[hovered]}</text>
-            <text x={Math.min(x-34, W-80)+34} y={PT+52} textAnchor="middle" fontSize={9} fill="#818cf8">{ar?'توقع':'Fcst'}: {forecast[hovered]}</text>
+            <text x={Math.min(x-34, W-80)+34} y={PT+26} textAnchor="middle" fontSize={9} fill="#34d399">{ar?'حاضر':'Present'}: {d[hovered].present}</text>
+            <text x={Math.min(x-34, W-80)+34} y={PT+39} textAnchor="middle" fontSize={8.5} fill={T.axis}>{ar?'غياب/إجازة':'Abs/leave'}: {d[hovered].absent + d[hovered].leave}</text>
           </>
         );
       })()}
@@ -333,11 +332,22 @@ function LiveStat({ label, labelAr, value, color, dark, ar }: {
 /* ─── Function table row ─────────────────────────────────────────────────── */
 function FnRow({ fn, i, total, dark, ar }: { fn:DashData['functions'][0]; i:number; total:number; dark:boolean; ar:boolean }) {
   const [hov, setHov] = useState(false);
-  const pct = fn.scheduled>0 ? Math.round((fn.present/fn.scheduled)*100) : 0;
-  const s = pct>=85?{l:'Good',ar:'جيد',c:'#10b981'}:pct>=65?{l:'Watch',ar:'مراقبة',c:'#f59e0b'}:{l:'At Risk',ar:'خطر',c:'#ef4444'};
-  const ahtMins = 10 + Math.floor((fn.name.length * 7) % 30);
+  /* `pct` is a real ratio of measured present to scheduled — but only when something
+     WAS scheduled. With nothing scheduled it used to read 0%, coloured red, which
+     says "catastrophic attendance" when the truth is "no roster for this day". */
+  const hasSched = fn.scheduled > 0;
+  const pct = hasSched ? Math.round((fn.present/fn.scheduled)*100) : null;
+  const s = pct == null ? { l:'No roster', ar:'لا يوجد روستر', c:'#64748b' }
+    : pct>=85?{l:'Good',ar:'جيد',c:'#10b981'}:pct>=65?{l:'Watch',ar:'مراقبة',c:'#f59e0b'}:{l:'At Risk',ar:'خطر',c:'#ef4444'};
   const T = nt(dark);
-  const aht = `0${3 + Math.floor(ahtMins/20)}:${String(ahtMins % 60).padStart(2,'0')}`;
+  /* REMOVED: an "Avg Handle Time" column computed as
+         10 + Math.floor((fn.name.length * 7) % 30)
+     — average handle time derived from the NUMBER OF CHARACTERS IN THE FUNCTION'S
+     NAME, rendered beside genuinely measured columns with no distinguishing mark.
+     There is no defensible answer to "why is this function's AHT 3:24?", and the
+     platform's own principle P-1 (D-070) forbids presenting a fabricated metric as
+     measured. Real AHT lives in the Sprinklr feed (agent_daily_stats) and belongs on
+     the Live Monitoring screen that already sources it; it is not re-invented here. */
 
   return (
     <tr onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}
@@ -350,9 +360,8 @@ function FnRow({ fn, i, total, dark, ar }: { fn:DashData['functions'][0]; i:numb
         </div>
       </td>
       <td style={{ padding:'13px 20px', fontSize:13, fontWeight:700, color:T.textStrong, fontVariantNumeric:'tabular-nums' }}>{fn.present.toLocaleString()}</td>
-      <td style={{ padding:'13px 20px', fontSize:13, fontWeight:700, color: pct>=85?'#10b981':pct>=65?'#f59e0b':'#ef4444', fontVariantNumeric:'tabular-nums' }}>{pct}%</td>
-      <td style={{ padding:'13px 20px', fontSize:12, color:T.text2, fontVariantNumeric:'tabular-nums' }}>{aht}</td>
-      <td style={{ padding:'13px 20px', fontSize:13, color:T.text3, fontVariantNumeric:'tabular-nums' }}>{fn.scheduled}</td>
+      <td style={{ padding:'13px 20px', fontSize:13, fontWeight:700, color: pct == null ? T.text2 : pct>=85?'#10b981':pct>=65?'#f59e0b':'#ef4444', fontVariantNumeric:'tabular-nums' }}>{pct == null ? '—' : `${pct}%`}</td>
+      <td style={{ padding:'13px 20px', fontSize:13, color:T.text3, fontVariantNumeric:'tabular-nums' }}>{hasSched ? fn.scheduled : '—'}</td>
       <td style={{ padding:'13px 20px' }}>
         <span style={{ padding:'4px 12px', borderRadius:20, fontSize:11, fontWeight:700, background:`${s.c}15`, color:s.c, border:`1px solid ${s.c}30`, display:'inline-flex', alignItems:'center', gap:5 }}>
           {s.c==='#ef4444' && <span style={{ width:5,height:5,borderRadius:'50%',background:'#ef4444',animation:'nx-pulse 1.5s ease infinite',display:'inline-block' }} />}
@@ -484,7 +493,11 @@ export default function Dashboard() {
   const tp    = T.text;
   const ts    = T.text2;
 
-  const adherePct = data?.mtd.attendanceRate ?? 0;
+  /* The backend returns NULL deliberately when mtdPresent + mtdAbsent === 0 —
+     "nothing was measured". Collapsing that to 0 made an unmeasured month render as
+     a red 0% "Service Level" and fire a false "Low Schedule Adherence" alert. Keep
+     the null and let every consumer decide how to say "no data". */
+  const adherePct: number | null = data?.mtd.attendanceRate ?? null;
   const pendTotal = data ? data.requests.pending + data.requests.peerPending : 0;
   const alertCount = data ? data.alerts.missingPunchToday + data.alerts.lateOver30 + data.alerts.unlinkedEmployees : 0;
 
@@ -546,28 +559,44 @@ export default function Dashboard() {
           {/* ══ MAIN ══════════════════════════════════════════════════════ */}
           <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:18 }}>
 
-            {/* ── KPI row (5 cards, single row) ────────────────────────── */}
+            {/* ── KPI row — every card is a MEASURED figure ───────────────
+                Three things were removed here, all of them fabricated:
+                  · "Scheduled Hours"   = headcount × 8
+                  · "Forecasted Demand" = headcount × 8.2
+                    Neither reads a schedule or the forecaster. "Forecasted Demand"
+                    in particular collided with the real Erlang/seasonal engine.
+                  · trendPct={3.2} / {5.1} / {6.4} / {-2.7} "vs last week" — constants
+                    rendered as coloured up/down arrows. They would have read
+                    "+3.2% vs last week" every week forever, including a week when
+                    headcount fell. A trend nobody computed is worse than no trend.
+                The Adherence card no longer silently substitutes the MONTH-TO-DATE
+                attendance rate when the live feed is empty while still captioned
+                "live from Sprinklr today" — it says the feed is unavailable. */}
             <div style={{ display:'flex', gap:10 }}>
               <KpiCard icon={Users}     color="#6366f1" title="Total Headcount"     titleAr="إجمالي الموظفين"
                 numValue={data.employees.total}
-                trendPct={3.2} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
+                trendLabel="active employees" trendLabelAr="موظف نشط"
                 dark={dark} ar={ar} delay={0} />
-              <KpiCard icon={Clock}     color="#38bdf8" title="Scheduled Hours"     titleAr="ساعات مجدولة"
-                numValue={data.employees.total * 8}
-                trendPct={5.1} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
+              <KpiCard icon={Activity}  color="#34d399" title="Present Today"       titleAr="الحاضرون اليوم"
+                numValue={data.functions.reduce((s,f)=>s+f.present,0)}
+                trendLabel="measured from the roster" trendLabelAr="مقاس من الروستر"
                 dark={dark} ar={ar} delay={60} />
-              <KpiCard icon={TrendingUp} color="#818cf8" title="Forecasted Demand"  titleAr="الطلب المتوقع"
-                numValue={Math.round(data.employees.total * 8.2)}
-                trendPct={6.4} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
+              <KpiCard icon={Clock}     color="#38bdf8" title="Scheduled Today"     titleAr="المجدولون اليوم"
+                numValue={data.functions.reduce((s,f)=>s+f.scheduled,0)}
+                trendLabel="from the published schedule" trendLabelAr="من الجدول المنشور"
                 dark={dark} ar={ar} delay={120} />
-              <KpiCard icon={Activity}  color="#a78bfa" title="Schedule Adherence"  titleAr="الالتزام بالجدول"
-                value={liveOps?.avgAdherence != null ? `${liveOps.avgAdherence}%` : `${adherePct.toFixed(1)}%`}
-                donut={liveOps?.avgAdherence ?? adherePct}
-                trendLabel="live from Sprinklr today" trendLabelAr="مباشر من سبرينكلر اليوم"
+              <KpiCard icon={TrendingUp} color="#a78bfa" title="Schedule Adherence"  titleAr="الالتزام بالجدول"
+                value={liveOps?.avgAdherence != null ? `${liveOps.avgAdherence}%`
+                     : adherePct != null ? `${adherePct.toFixed(1)}%` : '—'}
+                donut={liveOps?.avgAdherence ?? adherePct ?? undefined}
+                trendLabel={liveOps?.avgAdherence != null ? 'live from Sprinklr today'
+                          : adherePct != null ? 'month to date (live feed unavailable)' : 'no data'}
+                trendLabelAr={liveOps?.avgAdherence != null ? 'مباشر من سبرينكلر اليوم'
+                          : adherePct != null ? 'من بداية الشهر (التغذية الحيّة غير متاحة)' : 'لا توجد بيانات'}
                 dark={dark} ar={ar} delay={180} onClick={()=>navigate('/rta')} />
               <KpiCard icon={FileText}  color="#f59e0b" title="Pending Requests"    titleAr="طلبات معلقة"
                 numValue={pendTotal}
-                trendPct={-2.7} trendLabel="vs last week" trendLabelAr="مقارنة بالأسبوع الماضي"
+                trendLabel="awaiting approval" trendLabelAr="بانتظار الموافقة"
                 dark={dark} ar={ar} delay={240} onClick={()=>navigate('/requests')} />
             </div>
 
@@ -623,14 +652,14 @@ export default function Dashboard() {
               <div style={{ ...card, padding:'16px 20px' }}>
                 <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12, gap:8 }}>
                   <div style={{ fontSize:13, fontWeight:600, color:tp, lineHeight:1.3 }}>
-                    {ar ? 'المتوقع مقابل المجدول مقابل الفعلي' : 'Forecast vs Scheduled vs Actual'}
+                    {ar ? 'الحضور الفعلي — آخر ٧ أيام' : 'Measured attendance — last 7 days'}
                   </div>
                   <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6, flexShrink:0 }}>
                     <select style={{ fontSize:11,background:'transparent',border:`1px solid ${T.bdInput}`,borderRadius:6,color:ts,padding:'2px 6px',cursor:'pointer' }}>
                       <option>{ar?'ساعات':'Hours'}</option>
                     </select>
                     <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-                      {[{c:'#818cf8',l:ar?'توقع':'Forecast'},{c:'#38bdf8',l:ar?'مجدول':'Scheduled'},{c:'#34d399',l:ar?'فعلي':'Actual'}].map(x=>(
+                      {[{c:'#34d399',l:ar?'حاضر (مقاس)':'Present (measured)'}].map(x=>(
                         <span key={x.l} style={{ display:'flex',alignItems:'center',gap:4,fontSize:10,color:ts }}>
                           <span style={{ width:16,height:2.5,borderRadius:2,background:x.c,display:'inline-block' }} />{x.l}
                         </span>
@@ -679,7 +708,11 @@ export default function Dashboard() {
                 {[
                   { l:'Live Contacts',    ar:'جهات اتصال مباشرة', v: data.today.present,                     c:undefined },
                   { l:'Agents Available', ar:'متاحون',            v: data.today.present - data.today.lateIn,  c:undefined },
-                  { l:'Service Level',    ar:'مستوى الخدمة',      v: `${adherePct.toFixed(0)}%`,             c: adherePct>=85?'#10b981':adherePct>=70?'#f59e0b':'#ef4444' },
+                  /* Renamed: this is the month-to-date ATTENDANCE rate. Calling it
+                     "Service Level" on a contact-centre screen asserts answered-within-
+                     threshold, a completely different KPI the platform does measure
+                     elsewhere — a buyer reading it here would be right to feel misled. */
+                  { l:'Attendance (MTD)', ar:'الحضور (من بداية الشهر)', v: adherePct == null ? '—' : `${adherePct.toFixed(0)}%`, c: adherePct == null ? ts : adherePct>=85?'#10b981':adherePct>=70?'#f59e0b':'#ef4444' },
                   { l:'Agents on Leave',  ar:'في إجازة',          v: data.today.onLeave,                      c:undefined },
                   { l:'Late Arrivals',    ar:'متأخرون',           v: data.today.lateIn,                       c: data.today.lateIn>5?'#ef4444':'#f59e0b' },
                 ].map((s,i)=>(
@@ -694,7 +727,13 @@ export default function Dashboard() {
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
                     <tr style={{ borderBottom:`1px solid ${T.rowBd}` }}>
-                      {[{ar:'الوظيفة',en:'Queue'},{ar:'الحاضرون',en:'Live Contacts'},{ar:'مستوى الخدمة',en:'SL %'},{ar:'متوسط المعالجة',en:'Avg Handle Time'},{ar:'المجدولون',en:'Agents Available'},{ar:'الحالة',en:'Status'},{ar:'إجراء',en:'Actions'}]
+                      {/* Headers name what the columns REALLY are. They previously read
+                          "Queue / Live Contacts / SL % / Avg Handle Time / Agents Available"
+                          — contact-centre telemetry language over what is actually roster
+                          attendance: function, people present, present-vs-scheduled, people
+                          scheduled. A buyer reading "SL %" expects answered-within-threshold
+                          and would be right to feel misled. The fabricated AHT column is gone. */}
+                      {[{ar:'الوظيفة',en:'Function'},{ar:'الحاضرون',en:'Present'},{ar:'حضور مقابل مجدول',en:'Present vs scheduled'},{ar:'المجدولون',en:'Scheduled'},{ar:'الحالة',en:'Status'},{ar:'إجراء',en:'Actions'}]
                         .map(h=>(
                           <th key={h.en} style={{ padding:'9px 20px', textAlign:'start', fontSize:10, fontWeight:600, letterSpacing:'0.07em', textTransform:'uppercase', color:T.axis, whiteSpace:'nowrap' }}>
                             {ar?h.ar:h.en}
@@ -730,7 +769,7 @@ export default function Dashboard() {
                 title="High Shrinkage Detected" titleAr="انكماش عالٍ مكتشف"
                 desc={`${data.alerts.lateOver30} agents late by 30+ min`} descAr={`${data.alerts.lateOver30} موظف تأخر أكثر من 30 دق`}
                 time={new Date().toLocaleTimeString(ar?'ar':'en',{hour:'2-digit',minute:'2-digit'})} dark={dark} ar={ar} />}
-              {adherePct < 85 && <AlertItem icon={AlertCircle} color="#f59e0b"
+              {adherePct != null && adherePct < 85 && <AlertItem icon={AlertCircle} color="#f59e0b"
                 title="Low Schedule Adherence" titleAr="الالتزام منخفض"
                 desc="Schedule adherence is below 85%." descAr="الالتزام بالجدول أقل من 85%"
                 time={new Date().toLocaleTimeString(ar?'ar':'en',{hour:'2-digit',minute:'2-digit'})} dark={dark} ar={ar} />}

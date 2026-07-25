@@ -17,12 +17,24 @@ export class CoachingService implements OnModuleInit, OnModuleDestroy {
   private static readonly THRESHOLD = 3;   // occurrences in window → flag
   private static readonly WINDOW    = 30;  // days
 
-  // Late / early-out only count when NOT covered by an approved permission that
-  // day (authorized permissions must not trigger coaching). `perm` is the
-  // LATERAL join added in scan().
+  /* Late / early-out only count when NOT covered by an approved permission that
+   * day (authorized permissions must not trigger coaching). `perm` is the
+   * LATERAL join added in scan().
+   *
+   * THE WINDOW IS 7..240 MINUTES, NOT "> 0". These triggers wrote real coaching
+   * flags and notified every TL and manager, and they fired on a **one-minute**
+   * lateness three times in 30 days. That contradicts the confirmed rule twice:
+   *   · tolerance is >6 minutes (BR-TRD-001, rule confirmed 2026-06-30) — a
+   *     minute late is not lateness, and treating it as such punishes traffic;
+   *   · with no upper bound, a cross-midnight shift whose punch lands on the
+   *     wrong calendar day reads as a 4-hour "lateness" — a data artifact, not
+   *     a person's behaviour. `common/wfm-metrics.ts` caps it at 240 and files
+   *     anything beyond as data quality.
+   * The same 7..240 window is what every roster report uses, so an agent's
+   * coaching history and their attendance report can no longer disagree. */
   private static readonly TRIGGERS = [
-    { type: 'repeated_late',      col: 'CASE WHEN ar.punch_late_minutes > 0 AND NOT COALESCE(perm.perm_late, FALSE) THEN 1 ELSE 0 END',      ar: 'تأخّر متكرر' },
-    { type: 'repeated_early_out', col: 'CASE WHEN ar.punch_early_out_minutes > 0 AND NOT COALESCE(perm.perm_early, FALSE) THEN 1 ELSE 0 END', ar: 'خروج مبكر متكرر' },
+    { type: 'repeated_late',      col: 'CASE WHEN ar.punch_late_minutes BETWEEN 7 AND 240 AND NOT COALESCE(perm.perm_late, FALSE) THEN 1 ELSE 0 END',      ar: 'تأخّر متكرر' },
+    { type: 'repeated_early_out', col: 'CASE WHEN ar.punch_early_out_minutes BETWEEN 7 AND 240 AND NOT COALESCE(perm.perm_early, FALSE) THEN 1 ELSE 0 END', ar: 'خروج مبكر متكرر' },
     { type: 'missing_punch',      col: 'CASE WHEN ar.is_missing_punch THEN 1 ELSE 0 END',            ar: 'بصمات ناقصة متكررة' },
   ];
 

@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType, Logger } from '@nestjs/common';
+import { PgErrorFilter } from '@common/filters/pg-error.filter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
@@ -103,6 +104,11 @@ async function bootstrap() {
     transform: true,
     transformOptions: { enableImplicitConversion: true },
   }));
+
+  /* A malformed value is a BAD REQUEST, not a server failure. Without this, a bad
+     date reached Postgres and surfaced as 500 "Internal server error" on 7 of 10
+     probed endpoints. Narrow by design — only input-shape SQLSTATEs convert. */
+  app.useGlobalFilters(new PgErrorFilter());
 
   // API prefix and versioning
   app.setGlobalPrefix('api');

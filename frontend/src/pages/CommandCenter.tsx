@@ -5,6 +5,7 @@ import {
   Activity, AlertTriangle, ArrowRight, Building2, Home, CheckCircle2,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
+import { fetchDataSpan } from '@/hooks/useDataSpan';
 import { useUiStore } from '@/store/ui.store';
 import { Gauge, Donut, BarRow } from '@/components/dazzle';
 import { Kpi, KpiRow, KpiSource } from '@/components/kpi';
@@ -20,19 +21,39 @@ export default function CommandCenter() {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+  const [rosterWindow, setRosterWindow] = useState<{ from: string; to: string } | null>(null);
   useEffect(() => {
-    Promise.allSettled([
-      apiClient.get('/dashboard/summary'),
-      apiClient.get('/attendance-recon/roster-v2/coverage-impact'),
-      apiClient.get('/attendance-recon/roster-v2/fairness'),
-      apiClient.get('/attrition'),
-      apiClient.get('/attendance-recon/roster-v2?from=2026-06-01&to=2026-06-20&limit=1'),
-      apiClient.get(`/chief/briefing?lang=${ar ? 'ar' : 'en'}`),
-    ]).then((res: any[]) => {
-      const g = (i: number) => res[i].status === 'fulfilled' ? res[i].value.data : null;
-      setD({ sum: g(0), cov: g(1), fair: g(2), attr: g(3), ros: g(4), chief: g(5) });
-      setLoading(false);
+    /* The roster slice behind the conformance gauge, the OT tile and the whole
+       presence donut was pinned to `from=2026-06-01&to=2026-06-20` — a frozen
+       20-day window, on a page whose own header says "live from the system" and
+       whose footer says "all numbers verified, no demo data". By 2026-07 it was
+       six weeks stale and getting staler, and only the OT tile's hover tooltip
+       admitted a fixed period at all. The span endpoint answers where the data
+       genuinely is, so the executive view moves with the business. */
+    let cancelled = false;
+    fetchDataSpan().then((span) => {
+      if (cancelled) return;
+      const from = span?.defaultFrom ?? span?.roster.from ?? null;
+      const to = span?.latestDay ?? span?.roster.to ?? null;
+      setRosterWindow(from && to ? { from, to } : null);
+      const rosterCall = from && to
+        ? apiClient.get(`/attendance-recon/roster-v2?from=${from}&to=${to}&limit=1`)
+        : Promise.reject(new Error('no roster coverage'));
+      Promise.allSettled([
+        apiClient.get('/dashboard/summary'),
+        apiClient.get('/attendance-recon/roster-v2/coverage-impact'),
+        apiClient.get('/attendance-recon/roster-v2/fairness'),
+        apiClient.get('/attrition'),
+        rosterCall,
+        apiClient.get(`/chief/briefing?lang=${ar ? 'ar' : 'en'}`),
+      ]).then((res: any[]) => {
+        if (cancelled) return;
+        const g = (i: number) => res[i].status === 'fulfilled' ? res[i].value.data : null;
+        setD({ sum: g(0), cov: g(1), fair: g(2), attr: g(3), ros: g(4), chief: g(5) });
+        setLoading(false);
+      });
     });
+    return () => { cancelled = true; };
   }, [ar]);
 
   const sev: Record<string, { c: string; ar: string; en: string }> = {
@@ -196,7 +217,16 @@ export default function CommandCenter() {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]" style={{ color: 'var(--text-3)' }}>
         <span className="inline-flex items-center gap-1"><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#06b6d4', display: 'inline-block' }} />{ar ? 'لايف = لحظي من النظام (حضور اليوم/الطلبات)' : 'live = real-time from the system (today’s attendance/requests)'}</span>
         <span className="inline-flex items-center gap-1"><span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />{ar ? 'مُصحّح = من التسوية المعتمدة roster_days (إذن/OT/تغطية)' : 'corrected = from the validated reconciliation roster_days (permission/OT/coverage)'}</span>
+        {/* The verification claim now carries the window it applies to. "All numbers
+            verified" over an unstated period is only half a claim — and this footer
+            used to sit under a roster slice frozen at June 1–20. */}
         <span>{ar ? '· كل الأرقام متحقّقة، لا بيانات تجريبية.' : '· all numbers verified, no demo data.'}</span>
+        {rosterWindow && (
+          <span className="inline-flex items-center gap-1" style={{ color: 'var(--text-2)' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#8b5cf6', display: 'inline-block' }} />
+            {ar ? `نافذة الروستر: ${rosterWindow.from} → ${rosterWindow.to}` : `roster window: ${rosterWindow.from} → ${rosterWindow.to}`}
+          </span>
+        )}
       </div>
     </div>
   );
