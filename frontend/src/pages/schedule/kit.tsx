@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { Hourglass } from 'lucide-react';
 import { apiClient } from '@/api/client';
+import { readableOn } from '@/utils/format';
 
 /* ── Number formatting ────────────────────────────────────────────────────── */
 /** Thin-space thousands, max one decimal: 69429 → "69 429", 6.87 → "6.9". */
@@ -72,7 +73,10 @@ export function Section({ no, icon: Icon, color, title, desc, actions, children,
             <Icon size={16} style={{ color }} strokeWidth={2.2} />
           </div>
           <span className="absolute -top-1.5 grid place-items-center rounded-full text-[8px] font-black"
-            style={{ insetInlineEnd: -5, width: 14, height: 14, background: color, color: '#fff' }}>{no}</span>
+            style={{ insetInlineEnd: -5, width: 14, height: 14, background: color,
+              /* the step number sits ON the section's accent, and that accent ranges from
+                 indigo to amber — '#fff' was 2.15:1 on amber, 2.28:1 on green. Derive it. */
+              color: readableOn(color) }}>{no}</span>
         </div>
         <div className="min-w-0 flex-1" style={{ minWidth: 180 }}>
           <div className="font-extrabold text-[13px] leading-tight" style={{ color: 'var(--text-1)' }}>{title}</div>

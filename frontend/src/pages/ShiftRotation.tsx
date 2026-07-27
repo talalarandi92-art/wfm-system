@@ -8,6 +8,7 @@ import {
 import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { ts as tsColor } from '@/components/ds';
+import { readableOn } from '@/utils/format';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface EmployeeShiftRate {
@@ -241,7 +242,7 @@ function GroupModal({
               {seq.map((s, i) => (
                 <span key={i}
                   className="px-2 py-0.5 rounded text-xs font-bold text-white"
-                  style={{ background: SHIFT_COLORS[s] ?? '#6366f1' }}
+                  style={{ background: SHIFT_COLORS[s] ?? '#6366f1', color: readableOn(SHIFT_COLORS[s] ?? '#6366f1') }}
                 >
                   {s}
                 </span>
@@ -600,8 +601,8 @@ export default function ShiftRotationPage() {
                           {grp.rotationSequence.map((s, i) => (
                             <div key={i} className="flex items-center gap-0.5">
                               <span
-                                className="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
-                                style={{ background: SHIFT_COLORS[s] ?? '#6366f1' }}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                                style={{ background: SHIFT_COLORS[s] ?? '#6366f1', color: readableOn(SHIFT_COLORS[s] ?? '#6366f1') }}
                               >{s}</span>
                               {i < grp.rotationSequence.length - 1 && (
                                 <ArrowRight size={8} className="text-slate-600" />
@@ -919,8 +920,8 @@ export default function ShiftRotationPage() {
                           <td className="py-2.5 px-3">
                             <div className="flex items-center gap-1.5">
                               <span
-                                className="px-2 py-0.5 rounded text-[10px] font-bold text-white flex-shrink-0"
-                                style={{ background: SHIFT_COLORS[emp.recommendedNextShift] ?? '#6366f1' }}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold flex-shrink-0"
+                                style={{ background: SHIFT_COLORS[emp.recommendedNextShift] ?? '#6366f1', color: readableOn(SHIFT_COLORS[emp.recommendedNextShift] ?? '#6366f1') }}
                               >
                                 {emp.recommendedNextShift}
                               </span>
@@ -932,8 +933,8 @@ export default function ShiftRotationPage() {
                           {/* Last shift */}
                           <td className="py-2.5 px-3 text-center">
                             <span
-                              className="px-2 py-0.5 rounded text-[10px] font-bold text-white"
-                              style={{ background: SHIFT_COLORS[emp.lastShiftCode] ?? '#475569' }}
+                              className="px-2 py-0.5 rounded text-[10px] font-bold"
+                              style={{ background: SHIFT_COLORS[emp.lastShiftCode] ?? '#475569', color: readableOn(SHIFT_COLORS[emp.lastShiftCode] ?? '#475569') }}
                             >
                               {emp.lastShiftCode}
                             </span>
@@ -959,7 +960,7 @@ export default function ShiftRotationPage() {
             {Object.entries(SHIFT_LABELS).filter(([k]) => k !== 'OFF').map(([code, label]) => (
               <div key={code} className="flex items-center gap-1.5">
                 <div className="w-3 h-3 rounded-sm" style={{ background: SHIFT_COLORS[code] }} />
-                <span style={{ color: SHIFT_COLORS[code] }}>{code}</span>
+                <span style={{ color: 'var(--text-2)' }}>{code}</span>
                 <span>— {ar ? label.ar : label.en}</span>
               </div>
             ))}

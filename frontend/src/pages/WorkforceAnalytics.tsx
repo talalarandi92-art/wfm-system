@@ -245,8 +245,8 @@ export default function WorkforceAnalyticsPage() {
         .theme-light .r5t .text-slate-100,.theme-light .r5t .text-slate-200{color:#1e293b}
         .theme-light .r5t .text-slate-300{color:#334155}
         .theme-light .r5t .text-slate-400{color:#475569}
-        .theme-light .r5t .text-slate-500{color:#64748b}
-        .theme-light .r5t .text-slate-600{color:#94a3b8}
+        .theme-light .r5t .text-slate-500{color:#475569}
+        .theme-light .r5t .text-slate-600{color:#334155}
         .theme-light .r5t [class*="hover:text-white"]:hover{color:var(--text-1)}
         .theme-light .r5t [class*="border-white/"]{border-color:var(--border)}
         .theme-light .r5t :not([class*="hover:"])[class*="bg-white/"]{background-color:var(--surface-2)}

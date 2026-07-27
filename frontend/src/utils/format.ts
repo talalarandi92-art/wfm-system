@@ -77,6 +77,33 @@ export function kwDateOffset(n: number): string {
 }
 
 /**
+ * The readable text colour to print ON a given background — black or white,
+ * whichever wins on contrast. Use it anywhere a background comes from a PALETTE
+ * rather than from the theme, because a palette spans light and dark hues and a
+ * hardcoded `text-white` is therefore right for only half of it.
+ *
+ * Concretely: the shift-code chips ran `text-white` over a ramp from #1e3a5f to
+ * #f59e0b, so the midnight codes read at 12:1 and the midday codes at 2.15:1 —
+ * in every theme, since the chip background is inline and theme-independent.
+ *
+ * Uses WCAG relative luminance (not a naive RGB average), which is why amber
+ * #f59e0b correctly resolves to black text while indigo #6366f1 resolves to white.
+ */
+export function readableOn(bg: string): string {
+  const h = bg.trim().replace('#', '');
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const n = parseInt(full.slice(0, 6), 16);
+  if (Number.isNaN(n)) return '#fff';
+  const chan = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+  });
+  const L = 0.2126 * chan[0] + 0.7152 * chan[1] + 0.0722 * chan[2];
+  // contrast vs white is (1.05)/(L+0.05); vs black is (L+0.05)/0.05
+  return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#fff' : '#0f172a';
+}
+
+/**
  * The Saturday that starts the workforce week (Sat→Fri) containing `d`.
  * JS getDay(): 0=Sun … 6=Sat → days to subtract = (getDay() + 1) % 7.
  */

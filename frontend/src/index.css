@@ -23,9 +23,12 @@
     --border-strong: rgba(15, 23, 42, 0.14);
     --text-1:        #0f172a;
     --text-2:        #475569;
-    /* muted label tier — WCAG-AA on --surface/--surface-2 (was #94a3b8 ≈ 2.4:1, failed AA
-       and made every <Kpi>/kit label hard to read in light mode across the whole app) */
-    --text-3:        #5b6a7d;
+    /* Muted label tier. #94a3b8 (2.4:1) was the original; #5b6a7d replaced it and was
+       verified AA against --surface (#fff) and --surface-2 — but NOT against the tinted
+       cards this app also uses, where it measures 3.94–4.22:1 and still fails. Verified
+       against the darkest light surface actually rendered (rgb(208,220,221)): #475569
+       clears at 5.26:1. Measure the worst background, not the best one. */
+    --text-3:        #475569;
     --scroll-thumb:  #cbd5e1;
     --scroll-thumb-hover: #94a3b8;
 
@@ -629,11 +632,162 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light .text-slate-100 { color: #1e293b !important; }
 .theme-light .text-slate-200 { color: #334155 !important; }
 .theme-light .text-slate-300 { color: #475569 !important; }
-.theme-light .text-slate-400 { color: #526074 !important; }
-.theme-light .text-slate-500 { color: #526074 !important; }
+/* #526074 measured 4.44:1 on the darkest light surface — just under AA, which is
+   exactly the kind of near-miss that reads as passing. #475569 clears at 5.26. */
+.theme-light .text-slate-400 { color: #475569 !important; }
+.theme-light .text-slate-500 { color: #475569 !important; }
+.theme-light .text-slate-600 { color: #334155 !important; }
 /* …but keep white text when it sits on a solid colored chip/button (not bg-white) */
 .theme-light .text-white[class*="bg-"]:not([class*="bg-white"]) { color: #fff !important; }
 .theme-light .btn-primary, .theme-light .btn-danger { color: #fff !important; }
+
+/* ── Light-mode INLINE colour net ──────────────────────────────────────────
+   The class net above cannot reach `style={{ color: '#64748b' }}`, and 512 of
+   those inline hexes exist across the UI. React serialises them to rgb(), so an
+   attribute selector matches them exactly (verified in the live DOM).
+
+   Each target is the lightest colour on the SAME hue ramp that clears WCAG AA
+   4.5:1 against the darkest light surface it actually sits on in this app —
+   solved numerically, not picked by eye. Measured effect: /rta 1089→59 fails,
+   /hourly-coverage 302→0, /skills 248→0, /ot-exceptions 318→1.
+
+   `aside` and `.keep-dark` are excluded: those regions stay dark in Light by
+   design, so darkening their text would be the same mistake in reverse. */
+.theme-light [style*="color: rgb(239, 68, 68)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #aa3030 !important; }
+.theme-light [style*="color: rgb(220, 38, 38)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #b72020 !important; }
+.theme-light [style*="color: rgb(249, 115, 22)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #98460d !important; }
+.theme-light [style*="color: rgb(234, 88, 12)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a13d08 !important; }
+.theme-light [style*="color: rgb(245, 158, 11)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #825406 !important; }
+.theme-light [style*="color: rgb(234, 179, 8)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #755a04 !important; }
+.theme-light [style*="color: rgb(16, 185, 129)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #096b4b !important; }
+.theme-light [style*="color: rgb(5, 150, 105)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #046b4b !important; }
+.theme-light [style*="color: rgb(20, 184, 166)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0b695f !important; }
+.theme-light [style*="color: rgb(45, 212, 191)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #16685e !important; }
+.theme-light [style*="color: rgb(6, 182, 212)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036677 !important; }
+.theme-light [style*="color: rgb(8, 145, 178)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #06667d !important; }
+.theme-light [style*="color: rgb(14, 165, 233)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #08638c !important; }
+.theme-light [style*="color: rgb(56, 189, 248)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1e6483 !important; }
+.theme-light [style*="color: rgb(59, 130, 246)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #295bac !important; }
+.theme-light [style*="color: rgb(99, 102, 241)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4e51be !important; }
+.theme-light [style*="color: rgb(79, 70, 229)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4d44de !important; }
+.theme-light [style*="color: rgb(139, 92, 246)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6a46bb !important; }
+.theme-light [style*="color: rgb(167, 139, 250)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #645396 !important; }
+.theme-light [style*="color: rgb(168, 85, 247)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7b3eb4 !important; }
+.theme-light [style*="color: rgb(216, 180, 254)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #68567a !important; }
+.theme-light [style*="color: rgb(236, 72, 153)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a3326a !important; }
+.theme-light [style*="color: rgb(244, 114, 182)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #90436b !important; }
+.theme-light [style*="color: rgb(249, 168, 212)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #785166 !important; }
+.theme-light [style*="color: rgb(253, 164, 175)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7c5056 !important; }
+.theme-light [style*="color: rgb(110, 231, 183)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #326852 !important; }
+.theme-light [style*="color: rgb(52, 211, 153)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1a6a4d !important; }
+.theme-light [style*="color: rgb(147, 197, 253)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475f79 !important; }
+.theme-light [style*="color: rgb(156, 163, 175)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #595d64 !important; }
+.theme-light [style*="color: rgb(34, 197, 94)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #136c34 !important; }
+.theme-light [style*="color: rgb(74, 222, 128)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #246b3d !important; }
+.theme-light [style*="color: rgb(251, 191, 36)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #765a11 !important; }
+.theme-light [style*="color: rgb(251, 146, 60)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #884f20 !important; }
+.theme-light [style*="color: rgb(248, 113, 113)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #954444 !important; }
+.theme-light [style*="color: rgb(129, 140, 248)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #51589c !important; }
+.theme-light [style*="color: rgb(34, 211, 238)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #116775 !important; }
+.theme-light [style*="color: rgb(100, 116, 139)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+.theme-light [style*="color: rgb(148, 163, 184)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+.theme-light [style*="color: rgb(203, 213, 225)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+
+/* ── …and the same colours when they carry an ALPHA ────────────────────────
+   `style={{ color: 'rgba(110,231,183,0.8)' }}` never matched the rules above,
+   which key on `color: rgb(`. Alpha only makes it worse — emerald at 80% over a
+   light card measures 1.16:1. The selector matches the rgba PREFIX, so one rule
+   covers every opacity of that hue. The replacement is fully opaque on purpose:
+   a colour already failing at full strength cannot be rescued by fading it. */
+.theme-light [style*="color: rgba(239, 68, 68"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #aa3030 !important; }
+.theme-light [style*="color: rgba(220, 38, 38"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #b72020 !important; }
+.theme-light [style*="color: rgba(249, 115, 22"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #98460d !important; }
+.theme-light [style*="color: rgba(234, 88, 12"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a13d08 !important; }
+.theme-light [style*="color: rgba(245, 158, 11"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #825406 !important; }
+.theme-light [style*="color: rgba(234, 179, 8"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #755a04 !important; }
+.theme-light [style*="color: rgba(16, 185, 129"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #096b4b !important; }
+.theme-light [style*="color: rgba(5, 150, 105"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #046b4b !important; }
+.theme-light [style*="color: rgba(20, 184, 166"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0b695f !important; }
+.theme-light [style*="color: rgba(45, 212, 191"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #16685e !important; }
+.theme-light [style*="color: rgba(6, 182, 212"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036677 !important; }
+.theme-light [style*="color: rgba(8, 145, 178"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #06667d !important; }
+.theme-light [style*="color: rgba(14, 165, 233"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #08638c !important; }
+.theme-light [style*="color: rgba(56, 189, 248"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1e6483 !important; }
+.theme-light [style*="color: rgba(59, 130, 246"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #295bac !important; }
+.theme-light [style*="color: rgba(99, 102, 241"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4e51be !important; }
+.theme-light [style*="color: rgba(139, 92, 246"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6a46bb !important; }
+.theme-light [style*="color: rgba(167, 139, 250"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #645396 !important; }
+.theme-light [style*="color: rgba(168, 85, 247"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7b3eb4 !important; }
+.theme-light [style*="color: rgba(216, 180, 254"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #68567a !important; }
+.theme-light [style*="color: rgba(236, 72, 153"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a3326a !important; }
+.theme-light [style*="color: rgba(244, 114, 182"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #90436b !important; }
+.theme-light [style*="color: rgba(249, 168, 212"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #785166 !important; }
+.theme-light [style*="color: rgba(253, 164, 175"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7c5056 !important; }
+.theme-light [style*="color: rgba(110, 231, 183"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #326852 !important; }
+.theme-light [style*="color: rgba(52, 211, 153"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1a6a4d !important; }
+.theme-light [style*="color: rgba(147, 197, 253"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475f79 !important; }
+.theme-light [style*="color: rgba(156, 163, 175"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #595d64 !important; }
+.theme-light [style*="color: rgba(34, 197, 94"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #136c34 !important; }
+.theme-light [style*="color: rgba(74, 222, 128"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #246b3d !important; }
+.theme-light [style*="color: rgba(251, 191, 36"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #765a11 !important; }
+.theme-light [style*="color: rgba(251, 146, 60"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #884f20 !important; }
+.theme-light [style*="color: rgba(248, 113, 113"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #954444 !important; }
+.theme-light [style*="color: rgba(129, 140, 248"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #51589c !important; }
+.theme-light [style*="color: rgba(34, 211, 238"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #116775 !important; }
+.theme-light [style*="color: rgba(253, 230, 138"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6d5a1f !important; }
+.theme-light [style*="color: rgba(100, 116, 139"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+.theme-light [style*="color: rgba(148, 163, 184"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+.theme-light [style*="color: rgba(203, 213, 225"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+
+/* Tailwind `gray-*` text classes. The net covered `slate-*` because the codebase
+   is overwhelmingly slate — so the handful of gray-* usages kept their dark-tuned
+   value and sat at 2.07:1. Same targets as the slate ramp. */
+.theme-light .text-gray-300, .theme-light .text-gray-400, .theme-light .text-gray-500 { color: #475569 !important; }
+.theme-light .text-gray-600 { color: #334155 !important; }
+
+/* The warm ramps (yellow/amber/orange) are still light at 600–700 — Tailwind's
+   yellow-700 #a16207 measures 3.83:1 on a light card, seen on 11 pages. The cool
+   ramps genuinely are dark by 600, so only these three are extended. */
+.theme-light [class*="text-yellow-6"], .theme-light [class*="text-yellow-7"],
+.theme-light [style*="color: rgb(161, 98, 7)"], .theme-light [style*="color: rgb(202, 138, 4)"] { color: #755a04 !important; }
+.theme-light [class*="text-amber-6"], .theme-light [class*="text-amber-7"] { color: #825406 !important; }
+.theme-light [class*="text-orange-6"] { color: #98460d !important; }
+
+/* ── Light-mode net: light TINTS of the accent families, as CLASSES ────────
+   The rules above reach inline colours. They cannot reach `text-emerald-300/80`,
+   which Tailwind emits as a CLASS (`.text-emerald-300\/80`) with no inline style
+   at all — measured at 1.16:1 over a light card on /team-360.
+
+   A substring match on the family+tint catches the plain class and every opacity
+   variant of it in one rule. Only tints 50–500 are remapped: those are the ones
+   picked to glow on a near-black card. 600+ already read on white, and darkening
+   them further would flatten the hierarchy for no contrast gain.
+
+   `aside` and `.keep-dark` stay dark by design and are excluded. */
+.theme-light [class*="text-emerald-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #096b4b !important; }
+.theme-light [class*="text-green-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #136c34 !important; }
+.theme-light [class*="text-lime-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #3d6413 !important; }
+.theme-light [class*="text-teal-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0b695f !important; }
+.theme-light [class*="text-cyan-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036677 !important; }
+.theme-light [class*="text-sky-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #08638c !important; }
+.theme-light [class*="text-blue-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #295bac !important; }
+.theme-light [class*="text-indigo-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4e51be !important; }
+.theme-light [class*="text-violet-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6a46bb !important; }
+.theme-light [class*="text-purple-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7b3eb4 !important; }
+.theme-light [class*="text-fuchsia-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #8c3499 !important; }
+.theme-light [class*="text-pink-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a3326a !important; }
+.theme-light [class*="text-rose-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a83349 !important; }
+.theme-light [class*="text-red-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #aa3030 !important; }
+.theme-light [class*="text-orange-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #98460d !important; }
+.theme-light [class*="text-amber-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #825406 !important; }
+.theme-light [class*="text-yellow-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #755a04 !important; }
+.theme-light [class*="text-slate-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-slate-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-slate-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-slate-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-slate-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+.theme-light [class*="text-gray-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-gray-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-gray-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-gray-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-gray-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+.theme-light [class*="text-zinc-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-zinc-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-zinc-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-zinc-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-zinc-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
+.theme-light [class*="text-neutral-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-neutral-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-neutral-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-neutral-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-neutral-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4a4a4a !important; }
+.theme-light [class*="text-stone-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-stone-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-stone-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-stone-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-stone-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4d4844 !important; }
+.theme-light [style*="color: rgb(226, 232, 240)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #334155 !important; }
+
 
 /* dark-first translucent surfaces → faint light surfaces with a visible hairline */
 .theme-light [style*="background: rgba(255, 255, 255, 0.0"],

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { nfmt, PAL, type StaffParams } from './kit';
+import { readableOn } from '@/utils/format';
 
 const NUM_FIELDS: { key: keyof StaffParams; ar: string; en: string; step: number; pct?: boolean }[] = [
   { key: 'acwSec',          ar: 'ACW (ث)',        en: 'ACW (s)',       step: 5 },
@@ -320,7 +321,9 @@ export default function TuningSection({ ar, no, params, edit, dirtyCount, saveDi
             <Settings2 size={16} style={{ color: 'var(--text-3)' }} strokeWidth={2.2} />
           </div>
           <span className="absolute -top-1.5 grid place-items-center rounded-full text-[8px] font-black"
-            style={{ insetInlineEnd: -5, width: 14, height: 14, background: PAL.neutral, color: '#fff' }}>{no}</span>
+            style={{ insetInlineEnd: -5, width: 14, height: 14, background: PAL.neutral,
+              /* same badge as the other kits — derive the foreground from the chip */
+              color: readableOn(PAL.neutral) }}>{no}</span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-extrabold text-[13px]" style={{ color: 'var(--text-1)' }}>
