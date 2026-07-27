@@ -12,8 +12,8 @@ import { tp, useInjectDsStyles } from '@/components/ds';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 interface DashboardData {
-  totals: { totalEmployees: number; passing: number; failing: number; overallAvg: number; highest: number; lowest: number };
-  functionAverages: { functionName: string; empCount: number; avgNetPoints: number; avgQualityPct: number; avgAhtMins: number; avgFcrPct: number; avgWdPct: number; belowZeroCount: number; passingCount: number }[];
+  totals: { totalEmployees: number; passing: number; failing: number; overallAvg: number | null; highest: number | null; lowest: number | null };
+  functionAverages: { functionName: string; empCount: number; avgNetPoints: number | null; avgQualityPct: number | null; avgAhtMins: number | null; avgFcrPct: number | null; avgWdPct: number | null; belowZeroCount: number; passingCount: number }[];
   top3PerFunction: { employeeName: string; functionName: string; netPoints: number | null; podiumRank: number; loginId: string }[];
   coachingList: { employeeName: string; employeeNo: string; loginId: string; functionName: string; teamLeader: string; netPoints: number | null; qualityScore: number | null; ahtScore: number | null; fcrScore: number | null; quizScore: number | null; mistakesScore: number | null; functionRank: number | null }[];
 }
@@ -691,9 +691,9 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
           { label: ar ? 'موظفين' : 'Employees',         value: totals.totalEmployees, color: '#818cf8' },
           { label: ar ? 'ناجحون' : 'Passing',            value: totals.passing,        color: '#22c55e' },
           { label: ar ? 'يحتاجون تدريب' : 'Coaching',   value: totals.failing,        color: '#ef4444' },
-          { label: ar ? 'متوسط' : 'Avg Pts',             value: (totals.overallAvg > 0 ? '+' : '') + (totals.overallAvg?.toFixed?.(1) ?? 0), color: scoreColor(totals.overallAvg) ?? textSec },
-          { label: ar ? 'الأعلى' : 'Highest',            value: (totals.highest > 0 ? '+' : '') + totals.highest, color: '#22c55e' },
-          { label: ar ? 'الأدنى' : 'Lowest',             value: totals.lowest,         color: '#ef4444' },
+          { label: ar ? 'متوسط' : 'Avg Pts',             value: totals.overallAvg == null ? '—' : (totals.overallAvg > 0 ? '+' : '') + totals.overallAvg.toFixed(1), color: (totals.overallAvg == null ? null : scoreColor(totals.overallAvg)) ?? textSec },
+          { label: ar ? 'الأعلى' : 'Highest',            value: totals.highest == null ? '—' : (totals.highest > 0 ? '+' : '') + totals.highest, color: totals.highest == null ? textSec : '#22c55e' },
+          { label: ar ? 'الأدنى' : 'Lowest',             value: totals.lowest ?? '—',  color: totals.lowest  == null ? textSec : '#ef4444' },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded-2xl p-4 flex flex-col gap-1"
             style={{ background: `${color}0a`, border: `1px solid ${color}20` }}>
@@ -742,10 +742,13 @@ function DashboardTab({ batchId, dark, ar }: { batchId: string; dark: boolean; a
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { label: 'Avg Pts', value: (fn.avgNetPoints > 0 ? '+' : '') + (fn.avgNetPoints ?? 0), color: scoreColor(fn.avgNetPoints) ?? textSec },
-                      { label: 'Quality', value: `${fn.avgQualityPct ?? 0}%`, color: '#818cf8' },
-                      { label: 'Avg AHT', value: `${fn.avgAhtMins ?? 0}m`,    color: '#fbbf24' },
-                      { label: 'FCR',     value: `${fn.avgFcrPct ?? 0}%`,     color: '#34d399' },
+                      /* null = not measured for this function this period. Rendering it
+                         as 0 accused a whole function of scoring zero on a KPI that
+                         was simply never evaluated. */
+                      { label: 'Avg Pts', value: fn.avgNetPoints == null ? '—' : (fn.avgNetPoints > 0 ? '+' : '') + fn.avgNetPoints, color: (fn.avgNetPoints == null ? null : scoreColor(fn.avgNetPoints)) ?? textSec },
+                      { label: 'Quality', value: fn.avgQualityPct == null ? '—' : `${fn.avgQualityPct}%`, color: fn.avgQualityPct == null ? textSec : '#818cf8' },
+                      { label: 'Avg AHT', value: fn.avgAhtMins   == null ? '—' : `${fn.avgAhtMins}m`,    color: fn.avgAhtMins   == null ? textSec : '#fbbf24' },
+                      { label: 'FCR',     value: fn.avgFcrPct    == null ? '—' : `${fn.avgFcrPct}%`,     color: fn.avgFcrPct    == null ? textSec : '#34d399' },
                     ].map(m => (
                       <div key={m.label} className="rounded-xl p-2 text-center"
                         style={{ background: T.innerBg }}>

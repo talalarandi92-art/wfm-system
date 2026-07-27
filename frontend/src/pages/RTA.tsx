@@ -22,6 +22,7 @@ import { ReportIncidentModal, UnauthorizedBreakAlert, CrossSkillAlertPanel, Skil
 import { DailyReportPanel, AdherencePanel, CompliancePanel } from './rta/ReportPanels';
 import { Wallboard } from './rta/WallboardPanels';
 import CommandCenter from './rta/CommandCenter';
+import { kwToday } from '@/utils/format';
 
 export default function RTAPage() {
   const { lang, dark } = useUiStore();
@@ -42,7 +43,7 @@ export default function RTAPage() {
   const [adherence, setAdherence]   = useState<AdherenceReport | null>(null);
   const [intraday, setIntraday]     = useState<IntradayData | null>(null);
   const [adhRefreshing, setAdhRefreshing] = useState(false);
-  const todayStr = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+  const todayStr = kwToday();
   const [daily, setDaily]           = useState<DailyReport | null>(null);
   const [fc, setFc]                 = useState<ContactForecast | null>(null);
   const [dailyFrom, setDailyFrom]   = useState(todayStr);

@@ -5,15 +5,15 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '@/store/ui.store';
-
+import { fmtLocalDate, kwDateOffset } from '@/utils/format';
 interface OdooConfig { url: string; db: string; username: string; apiKey: string }
 interface SyncLog {
   id: string; data_type: string; total_records: number; applied_records: number;
   error_count: number; created_at: string;
 }
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthAgoISO = () => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); };
+const todayISO = () => fmtLocalDate(new Date());
+const monthAgoISO = () => kwDateOffset(-30);
 const fmtDT = (d: string) => new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
 
 export default function OdooIntegrationPage() {

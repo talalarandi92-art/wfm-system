@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { CreateCalendarEventDto, UpdateCalendarEventDto } from './dto/calendar-event.dto';
+import { kwToday, kwHour } from '@common/kw-date';
 
 @ApiTags('Calendar')
 @ApiBearerAuth()
@@ -231,7 +232,7 @@ export class CalendarController {
   @ApiOperation({ summary: "Today's events for the current user" })
   async todayEvents(@CurrentUser() user: any) {
     const tid = user.tenantId;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = kwToday();
 
     const rows = await this.ds.query(
       `SELECT e.id, e.title, e.event_type, e.start_at, e.end_at, e.location, e.color, e.status
@@ -325,8 +326,12 @@ export class CalendarController {
     @Query('hour') hour?: string,
   ) {
     const tid      = user.tenantId;
-    const checkDate = date ?? new Date().toISOString().slice(0, 10);
-    const checkHour = hour ? parseInt(hour, 10) : new Date().getHours();
+    const checkDate = date ?? kwToday();
+    /* kwHour, not getHours(): the date above is Kuwait-local, and a server in any
+       other zone would have paired it with ITS OWN hour — computing a coverage gap
+       for the wrong hour of the wrong day, which is precisely when a gap alert
+       matters. Date and hour must come from one clock. */
+    const checkHour = hour ? parseInt(hour, 10) : kwHour();
 
     // Get HC by function from the schedule (attendance_records) for this date/hour.
     // Uses the scheduled time window directly (cross-midnight aware) — the same

@@ -26,20 +26,29 @@ export default function TrendsPage() {
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
   const pts = d?.points || [];
 
-  // a small bar-series chart
-  const Chart = ({ title, get, fmt, colorFn, unit }: { title:string; get:(p:any)=>number; fmt:(v:number)=>string; colorFn?:(v:number)=>string; unit?:string }) => {
-    const vals = pts.map(get); const max = Math.max(...vals, 1);
+  /* A small bar-series chart. `get` may return null — a period the metric was NOT
+     measured in (no roster rows yet, a future week). Those periods are drawn as an
+     empty slot with "—", never as a zero bar: `Number(p.conf)||0` used to paint a
+     full-height RED column reading "0% conformance" for a week nobody had worked
+     yet. An unmeasured period must look unmeasured. */
+  const Chart = ({ title, get, fmt, colorFn, unit }: { title:string; get:(p:any)=>number|null; fmt:(v:number)=>string; colorFn?:(v:number)=>string; unit?:string }) => {
+    const vals = pts.map(get).filter((v:number|null)=>v!=null) as number[];
+    const max = Math.max(...vals, 1);
+    const gaps = pts.length - vals.length;
     return (
       <div className="rounded-2xl p-3.5" style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)' }}>
-        <h3 className="text-xs font-bold text-white mb-3">{title}{unit?<span className="text-slate-500 font-normal"> ({unit})</span>:''}</h3>
+        <h3 className="text-xs font-bold text-white mb-3">{title}{unit?<span className="text-slate-500 font-normal"> ({unit})</span>:''}
+          {gaps>0 && <span className="text-slate-500 font-normal"> · {gaps} {ar?'فترة بلا قياس':gaps===1?'period not measured':'periods not measured'}</span>}</h3>
         <div className="flex items-end gap-2 h-32">
-          {pts.map((p:any,i:number)=>{ const v=get(p); const c=colorFn?colorFn(v):'#6366f1';
+          {pts.map((p:any,i:number)=>{ const v=get(p); const c=v==null?'#475569':colorFn?colorFn(v):'#6366f1';
             return (
               <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative">
-                <span className="text-[9px] mb-0.5" style={{ color:c }}>{fmt(v)}</span>
-                <div className="w-full rounded-t" style={{ height:`${Math.max(2,100*v/max)}%`, background:c, minHeight:'2px' }}/>
+                <span className="text-[9px] mb-0.5" style={{ color:c }}>{v==null?'—':fmt(v)}</span>
+                {v==null
+                  ? <div className="w-full" style={{ height:'3px', borderTop:'1px dashed #475569' }}/>
+                  : <div className="w-full rounded-t" style={{ height:`${Math.max(2,100*v/max)}%`, background:c, minHeight:'2px' }}/>}
                 <span className="text-[8px] text-slate-500 mt-1 whitespace-nowrap">{p.label}</span>
-                <div className="hidden group-hover:block absolute bottom-full mb-1 px-2 py-1 rounded text-[10px] whitespace-nowrap z-10" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)', color:'#e2e8f0' }}>{p.label}: {fmt(v)} · {p.agents} {ar?'موظف':'agents'}</div>
+                <div className="hidden group-hover:block absolute bottom-full mb-1 px-2 py-1 rounded text-[10px] whitespace-nowrap z-10" style={{ background:'#11162a', border:'1px solid rgba(255,255,255,0.15)', color:'#e2e8f0' }}>{p.label}: {v==null?(ar?'ما فيه قياس لهالفترة':'not measured'):`${fmt(v)} · ${p.agents} ${ar?'موظف':'agents'}`}</div>
               </div>
             );
           })}
@@ -89,10 +98,10 @@ export default function TrendsPage() {
 
       {!loading && pts.length>0 && (<>
         <div className="grid md:grid-cols-2 gap-3">
-          <Chart title={ar?'الكونفورمانس':'Conformance'} unit="%" get={(p)=>Number(p.conf)||0} fmt={(v)=>`${v}%`} colorFn={adhC}/>
-          <Chart title={ar?'الأوفر تايم':'Overtime'} unit={ar?'ساعة':'hrs'} get={(p)=>p.otmin} fmt={dur} colorFn={()=>'#10b981'}/>
-          <Chart title={ar?'أيام التأخير':'Late days'} get={(p)=>p.latedays} fmt={(v)=>`${v}`} colorFn={()=>'#f59e0b'}/>
-          <Chart title={ar?'الغياب':'Absence'} get={(p)=>p.absent} fmt={(v)=>`${v}`} colorFn={()=>'#f43f5e'}/>
+          <Chart title={ar?'الكونفورمانس':'Conformance'} unit="%" get={(p)=>p.conf==null?null:Number(p.conf)} fmt={(v)=>`${v}%`} colorFn={adhC}/>
+          <Chart title={ar?'الأوفر تايم':'Overtime'} unit={ar?'ساعة':'hrs'} get={(p)=>p.otmin??null} fmt={dur} colorFn={()=>'#10b981'}/>
+          <Chart title={ar?'أيام التأخير':'Late days'} get={(p)=>p.latedays??null} fmt={(v)=>`${v}`} colorFn={()=>'#f59e0b'}/>
+          <Chart title={ar?'الغياب':'Absence'} get={(p)=>p.absent??null} fmt={(v)=>`${v}`} colorFn={()=>'#f43f5e'}/>
         </div>
 
         <div className="rounded-2xl overflow-auto" style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(255,255,255,0.07)' }}>

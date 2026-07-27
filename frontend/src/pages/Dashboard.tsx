@@ -11,6 +11,7 @@ import { useUiStore }   from '@/store/ui.store';
 import { apiClient }    from '@/api/client';
 import { useNavigate }  from 'react-router-dom';
 import { tp as tpTok, ts as tsTok } from '@/components/ds';
+import { kwToday } from '@/utils/format';
 
 /* ── Theme-aware neutral tokens ──────────────────────────────────────────────
    One factory feeds every card / chart / table on the dashboard. Dark keeps
@@ -427,7 +428,7 @@ export default function Dashboard() {
 
   const loadLiveOps = useCallback(async () => {
     try {
-      const today = new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+      const today = kwToday();
       const [liveR, adhR, vioR] = await Promise.allSettled([
         apiClient.get('/integrations/sprinklr/live'),
         apiClient.get(`/integrations/sprinklr/adherence?from=${today}&to=${today}`),

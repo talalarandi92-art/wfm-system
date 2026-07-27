@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AnalystService } from '@modules/analyst/analyst.service';
 import { AgentRunner } from '@common/agent-runner';
+import { kwToday } from '@common/kw-date';
 
 /**
  * Auto Mode — the Chief acting as deputy on requests. When enabled, a background
@@ -100,7 +101,7 @@ export class AutoModeService implements OnModuleInit, OnModuleDestroy {
 
     let acted = 0;
     for (const req of pend) {
-      const date = req.pdate ?? new Date().toISOString().slice(0, 10);
+      const date = req.pdate ?? kwToday();
       const v = req.function_id ? await verdictFor(date, req.function_id) : null;
       let decision: 'approve' | 'reject' | 'hold' = 'hold';
       let reason = 'لا توجد قراءة تغطية كافية — تُرك للمراجعة البشرية.';

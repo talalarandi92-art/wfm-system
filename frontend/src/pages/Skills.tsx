@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import { useUiStore } from '../store/ui.store';
+import { kwToday } from '@/utils/format';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 interface Skill {
@@ -142,7 +143,9 @@ export default function SkillsPage() {
     const now   = new Date();
     const start = now.toTimeString().slice(0, 5);
     const end   = new Date(now.getTime() + 2 * 3600000).toTimeString().slice(0, 5);
-    const today = now.toISOString().slice(0, 10);
+    // the start/end below are LOCAL wall-clock (toTimeString); the date must come
+    // from the same clock, or a 01:30 dispatch is filed against yesterday
+    const today = kwToday();
     setDispatch({
       employeeId:   candidate.employeeId,
       employeeName: candidate.name,

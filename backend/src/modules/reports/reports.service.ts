@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import * as XLSX from 'xlsx';
+import { kwToday, fmtLocalDate } from '@common/kw-date';
 
 /**
  * Detailed, audit-grade reporting.
@@ -47,8 +48,8 @@ export class ReportsService {
     const [r] = await this.ds.query(
       `SELECT MAX(attendance_date) AS d FROM attendance_records WHERE tenant_id = $1`, [tid],
     ).catch(() => [{ d: null }]);
-    const d = r?.d ? (r.d instanceof Date ? r.d.toISOString() : String(r.d)) : new Date().toISOString();
-    return d.slice(0, 10);
+    // BR-TIM-001 — a pg `date` is LOCAL midnight; toISOString() named yesterday
+    return fmtLocalDate(r?.d) ?? kwToday();
   }
 
   async resolveRange(tid: string, from?: string, to?: string) {

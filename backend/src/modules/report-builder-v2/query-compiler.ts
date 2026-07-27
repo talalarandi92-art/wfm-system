@@ -121,6 +121,9 @@ export function compile(input: CompileInput): CompiledQuery {
 
   const params: any[] = [input.tenantId];
   const where: string[] = [`${src.tenantCol} = $1`];
+  // the source's own invariant (e.g. roster_days canonical-dedup `is_active`) — a
+  // report must never be able to opt out of it, so it goes in before any filter
+  if (src.baseWhere) where.push(src.baseWhere);
 
   // date range on the source's date column (half-open upper bound; month-overlap for month-grain sources).
   pushDateRange(src, input.dateFrom, input.dateTo, params, where);
@@ -196,6 +199,8 @@ export function compileDrill(input: DrillInput): CompiledQuery {
 
   const params: any[] = [input.tenantId];
   const where: string[] = [`${src.tenantCol} = $1`];
+  // SAME invariant as compile() — otherwise a drill would show rows the aggregate never counted
+  if (src.baseWhere) where.push(src.baseWhere);
 
   // date range — identical half-open (+ month-overlap for month-grain) bound as compile()
   pushDateRange(src, input.dateFrom, input.dateTo, params, where);

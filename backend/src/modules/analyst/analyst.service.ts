@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { HealthGuardService } from '@modules/health-guard/health-guard.service';
+import { kwToday } from '@common/kw-date';
 
 /**
  * WFM / RTA Analyst guard.
@@ -67,7 +68,7 @@ export class AnalystService {
       // the furthest scheduled date, so the Chief's briefing date stays sensible.
       `SELECT MAX(attendance_date)::text d FROM attendance_records WHERE tenant_id = $1 AND attendance_date <= CURRENT_DATE`, [tid],
     ).catch(() => [{ d: null }]);
-    const date = dateQ ?? ld?.d ?? new Date().toISOString().slice(0, 10);
+    const date = dateQ ?? ld?.d ?? kwToday();
     const surplusSafe = await this.getThreshold(tid, 'surplus_safe', 2);
     const slaTarget = await this.getThreshold(tid, 'queue_sla_target', 80);
     const backlogMax = await this.getThreshold(tid, 'queue_backlog_max', 20);

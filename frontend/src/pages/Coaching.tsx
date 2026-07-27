@@ -7,6 +7,7 @@ import { useFilterStore } from '@/store/filter.store';
 import { FunctionFilter } from '@/components/FunctionFilter';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
+import { kwDateOffset } from '@/utils/format';
 
 interface Flag {
   id: string; triggerType: string; occurrences: number; detail: string;
@@ -59,7 +60,7 @@ export default function CoachingPage() {
   const address = async (id: string) => { try { await apiClient.post(`/coaching/flags/${id}/address`); await load(); } catch {} };
   const dismiss = async (id: string) => { try { await apiClient.post(`/coaching/flags/${id}/dismiss`); await load(); } catch {} };
   const schedule = async (id: string) => {
-    const def = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.toISOString().slice(0, 10)} 10:00`; })();
+    const def = `${kwDateOffset(1)} 10:00`;   // tomorrow in Kuwait, not in UTC
     const when = window.prompt(ar ? 'موعد الجلسة (YYYY-MM-DD HH:MM)' : 'Session time (YYYY-MM-DD HH:MM)', def);
     if (!when) return;
     try { await apiClient.post(`/coaching/flags/${id}/schedule-session`, { scheduledAt: when.replace(' ', 'T') }); await load(); } catch {}

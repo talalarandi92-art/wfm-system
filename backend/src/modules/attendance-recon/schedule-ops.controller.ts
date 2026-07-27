@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, Res, UseGuards, NotFoundException,
+} from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -328,7 +330,7 @@ export class ScheduleOpsController {
   private async resolveOtReview(req: any, id: string, status: 'acknowledged' | 'ignored', note?: string) {
     const t = req.user.tenantId;
     const [flag] = await this.ds.query(`SELECT * FROM ot_review_flags WHERE tenant_id=$1 AND id=$2`, [t, id]);
-    if (!flag) throw new BadRequestException('OT review flag not found');
+    if (!flag) throw new NotFoundException('OT review flag not found');
     const actor = req.user.email || req.user.id || req.user.sub || 'unknown';
     await this.ds.query(
       `UPDATE ot_review_flags SET status=$3, note=$4, reviewed_by=$5, reviewed_at=NOW(), updated_at=NOW() WHERE tenant_id=$1 AND id=$2`,
@@ -720,7 +722,7 @@ export class ScheduleOpsController {
   async scheduleRevert(@Req() req: any, @Query('id') idQ?: string) {
     const t = req.user.tenantId; const id = idQ || (req.params && req.params.id);
     const [log] = await this.ds.query(`SELECT * FROM schedule_change_log WHERE tenant_id=$1 AND id=$2`, [t, id]);
-    if (!log) throw new BadRequestException('Change not found');
+    if (!log) throw new NotFoundException('Change not found');
     if (log.reverted) return { ok: true, alreadyReverted: true };
     const rt = async (code: string) => this.resolveShiftTimes(t, code);
     if (log.change_type === 'swap') {

@@ -8,6 +8,7 @@ import BreakCard from '@/components/breaks/BreakCard';
 import BreakCommandCenter from '@/components/breaks/CommandCenter';
 import BreakReports from '@/components/breaks/BreakReports';
 import BreakSimulation from '@/components/breaks/BreakSimulation';
+import { fmtLocalDate } from '@/utils/format';
 import {
   Coffee, Clock, AlertTriangle, CheckCircle, XCircle,
   Calendar, Users, BarChart3, RefreshCw, Plus, Loader2, TrendingDown, Zap,
@@ -138,7 +139,7 @@ function riskColor(level: string) {
   return '#22c55e';
 }
 
-function today() { return new Date().toISOString().slice(0, 10); }
+function today() { return fmtLocalDate(new Date()); }
 
 // ── Main Component ────────────────────────────────────────────────────────────
 

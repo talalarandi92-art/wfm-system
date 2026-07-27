@@ -7,6 +7,7 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { hoursCoveredHH } from '../attendance-recon/coverage-core';
 import { CoverageRebuildService } from './coverage-rebuild.service';
+import { kwToday } from '@common/kw-date';
 
 /**
  * Per-function hourly coverage for a date.
@@ -42,7 +43,7 @@ export class CoverageController {
     const [ld] = await this.ds.query(
       `SELECT MAX(attendance_date)::text AS d FROM attendance_records WHERE tenant_id = $1`, [tid],
     ).catch(() => [{ d: null }]);
-    const date = dateQ ?? ld?.d ?? new Date().toISOString().slice(0, 10);
+    const date = dateQ ?? ld?.d ?? kwToday();
 
     // Intern functions fold into their parent team's headcount (canon_fn strips the
     // "Internship " prefix). functionId is a function UUID (from the picker) — resolve it to
@@ -179,9 +180,14 @@ export class CoverageController {
     }
 
     const functions = [...fns.values()].map(a => {
+      /* With NO same-weekday history in the lookback there is nothing to model a
+         requirement from. `Math.max(size, 1)` divided by 1 and produced required=0,
+         so `gap = available - 0` reported a comfortable SURPLUS — "we could not
+         model this" rendered as "zero staff needed". `modelled` says which it is. */
+      const modelled = a.histDates.size > 0;
       const nHist = Math.max(a.histDates.size, 1);
       const hours = Array.from({ length: 24 }, (_, h) => {
-        const required  = Math.round(a.reqSum[h] / nHist);
+        const required  = modelled ? Math.round(a.reqSum[h] / nHist) : null;
         const scheduled = a.scheduled[h];
         const available = Math.max(0,
           scheduled - a.sick[h] - a.absent[h] - a.permission[h] - a.late[h] - a.earlyOut[h] + a.ot[h]);
@@ -191,22 +197,27 @@ export class CoverageController {
           onSick: a.sick[h], onAbsent: a.absent[h], onPermission: a.permission[h],
           atRisk: a.pendingPerm[h],   // pending permissions — would erode `available` if approved
           late: a.late[h], earlyOut: a.earlyOut[h], ot: a.ot[h],
-          gap: available - required,
+          modelled,
+          gap: required == null ? null : available - required,
         };
-      }).filter(x => x.scheduled > 0 || x.required > 0); // only operating hours
+      }).filter(x => x.scheduled > 0 || (x.required ?? 0) > 0); // only operating hours
       return {
         functionId: a.functionId, functionName: a.functionName,
         hours,
         summary: {
           late: a.lateCount, overtime: a.otCount, earlyOut: a.earlyCount, sick: a.sickCount,
           absent: a.absentCount, permissions: a.permCount, pendingPermissions: a.pendingPermCount,
-          worstGap: hours.length ? Math.min(...hours.map(x => x.gap)) : 0,
+          /* worstGap over MODELLED hours only. An unmodelled hour has no gap; folding
+             it in as 0 hid a real shortfall behind a comfortable-looking minimum. */
+          worstGap: (() => { const g = hours.map(x => x.gap).filter((v): v is number => v != null);
+                             return g.length ? Math.min(...g) : null; })(),
+          modelled,
         },
       };
     }).filter(f => f.hours.length > 0)
       .sort((a, b) => a.functionName.localeCompare(b.functionName));
 
-    return { date, basis: 'required = avg of same-weekday history (last 6); available = scheduled − sick − absent − APPROVED permission; pending permissions reported separately as atRisk', functions };
+    return { date, basis: 'required = avg of same-weekday history (last 6); available = scheduled − sick − absent − APPROVED permission; pending permissions reported separately as atRisk. required/gap are NULL where no same-weekday history exists (modelled=false) — not zero.', functions };
   }
 
   /**

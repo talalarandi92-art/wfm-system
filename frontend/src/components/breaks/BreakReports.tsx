@@ -3,6 +3,7 @@ import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { card as cardStyle, tp, ts } from '@/components/ds';
 import { AlertTriangle, BarChart3, Clock, Coffee, Download, Loader2, Scale, Timer, Zap } from 'lucide-react';
+import { kwDateOffset } from '@/utils/format';
 
 /**
  * B5 §25 — consolidated break reports tab: entitlement vs used, delay stats,
@@ -28,8 +29,7 @@ interface Report {
 }
 
 function isoDaysAgo(n: number) {
-  const d = new Date(Date.now() - n * 86_400_000);
-  return d.toISOString().slice(0, 10);
+  return kwDateOffset(-n);
 }
 
 export default function BreakReports() {

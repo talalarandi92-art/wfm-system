@@ -40,27 +40,45 @@ export class ScorecardGuardService implements OnModuleInit, OnModuleDestroy {
   }
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 
-  private async latestWeek(tid: string, functionId?: string): Promise<string | null> {
+  /* THE PERIOD IS THE BATCH, NOT THE WEEK LABEL.
+     `week_label` is unique only WITHIN one upload — every month has its own
+     W1..W4 and its own `Final`. Grouping by week_label across the whole table and
+     then filtering `WHERE week_label = $2` merges every uploaded month into one
+     cohort the moment a second month exists. This guard writes real coaching_flags
+     and manager notifications off that cohort, so the blend would put people on an
+     HR list for being below a two-month average that no scorecard ever stated. */
+  private async latestBatch(tid: string): Promise<string | null> {
     const [r] = await this.ds.query(
-      `SELECT week_label FROM scorecard_entries WHERE tenant_id = $1
-        GROUP BY week_label ORDER BY (week_label = 'Final') DESC, MAX(created_at) DESC LIMIT 1`, [tid]).catch(() => []);
+      `SELECT id FROM scorecard_batches WHERE tenant_id = $1 AND status <> 'archived'
+        ORDER BY period_year DESC NULLS LAST, period_month DESC NULLS LAST, uploaded_at DESC LIMIT 1`, [tid]).catch(() => []);
+    return r?.id ?? null;
+  }
+
+  private async latestWeek(tid: string, batchId: string): Promise<string | null> {
+    const [r] = await this.ds.query(
+      `SELECT week_label FROM scorecard_entries WHERE tenant_id = $1 AND batch_id = $2
+        GROUP BY week_label ORDER BY (week_label = 'Final') DESC, MAX(created_at) DESC LIMIT 1`, [tid, batchId]).catch(() => []);
     return r?.week_label ?? null;
   }
 
   async weeks(tid: string) {
+    const bid = await this.latestBatch(tid);
+    if (!bid) return [];
     return this.ds.query(
-      `SELECT week_label, COUNT(*)::int n FROM scorecard_entries WHERE tenant_id = $1 GROUP BY week_label ORDER BY week_label`, [tid]).catch(() => []);
+      `SELECT week_label, COUNT(*)::int n FROM scorecard_entries WHERE tenant_id = $1 AND batch_id = $2 GROUP BY week_label ORDER BY week_label`, [tid, bid]).catch(() => []);
   }
 
   async review(tid: string, week?: string, functionName?: string) {
-    const wk = week || await this.latestWeek(tid);
+    const bid = await this.latestBatch(tid);
+    if (!bid) return { week: null, empty: true };
+    const wk = week || await this.latestWeek(tid, bid);
     if (!wk) return { week: null, empty: true };
-    const fnFilter = functionName ? 'AND function_name = $3' : '';
-    const params: any[] = functionName ? [tid, wk, functionName] : [tid, wk];
+    const fnFilter = functionName ? 'AND function_name = $4' : '';
+    const params: any[] = functionName ? [tid, wk, bid, functionName] : [tid, wk, bid];
     const rows: any[] = await this.ds.query(
       `SELECT employee_no, employee_name, function_name, team_leader, net_points, function_rank,
               ${SCORE_FIELDS.map(s => s.f).join(', ')}
-         FROM scorecard_entries WHERE tenant_id = $1 AND week_label = $2 ${fnFilter}`, params).catch(() => []);
+         FROM scorecard_entries WHERE tenant_id = $1 AND week_label = $2 AND batch_id = $3 ${fnFilter}`, params).catch(() => []);
     if (!rows.length) return { week: wk, empty: true };
 
     /* ── NOT SCORED ≠ SCORED ZERO ──────────────────────────────────────────
@@ -119,11 +137,16 @@ export class ScorecardGuardService implements OnModuleInit, OnModuleDestroy {
       .map(r => ({ name: r.employee_name, employeeNo: r.employee_no, fn: r.function_name, tl: r.team_leader, points: pts(r), funcAvg: +((fnAvg.get(r.function_name)! / fnCount.get(r.function_name)!)).toFixed(1), weakest: weakest(r) }))
       .sort((a, b) => a.points - b.points);
 
-    // Weekly trend (avg net_points per week, same function filter).
+    /* Weekly trend, same function filter — and the same batch. Without the batch
+       scope, W1 of this month and W1 of every previous month averaged into one
+       point, so a trend line would flatten out instead of showing movement. The
+       `Final` row is excluded: it is the month result, not a fifth week. */
+    const tParams: any[] = functionName ? [tid, functionName, bid] : [tid, bid];
     const trend: any[] = await this.ds.query(
       `SELECT week_label, AVG(net_points)::numeric(10,1) avg FROM scorecard_entries
-        WHERE tenant_id = $1 ${functionName ? 'AND function_name = $2' : ''}
-        GROUP BY week_label ORDER BY week_label`, functionName ? [tid, functionName] : [tid]).catch(() => []);
+        WHERE tenant_id = $1 AND batch_id = $${tParams.length} AND week_label <> 'Final'
+              ${functionName ? 'AND function_name = $2' : ''}
+        GROUP BY week_label ORDER BY week_label`, tParams).catch(() => []);
 
     return { week: wk, empty: false, unscored, overall, byFunction, byTeamLeader, top, bottom, belowTarget, coachingCandidates: belowTarget.length, trend };
   }

@@ -3,7 +3,7 @@ import {
   Shield, X, AlertTriangle, Loader2, Shuffle, ArrowLeftRight, CheckCircle2,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
-import { fmtDuration } from '@/utils/format';
+import { fmtDuration, kwToday } from '@/utils/format';
 import { useUiStore } from '@/store/ui.store';
 import { tp, ts as tsColor } from '@/components/ds';
 import {
@@ -364,7 +364,8 @@ export function CrossSkillAlertPanel({
     const now = new Date();
     const start = now.toTimeString().slice(0, 5);
     const end = new Date(now.getTime() + 2 * 3600000).toTimeString().slice(0, 5);
-    const today = now.toISOString().slice(0, 10);
+    // same clock as the local start/end times below — see Skills.tsx
+    const today = kwToday();
     onDispatch({
       employeeId: c.employeeId, employeeName: c.name,
       fromFunction: c.function, toFunction: q.queueName,

@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import { shiftCategoryFromCode } from '../../common/shift-category';
 import { normalizeShiftCode } from '../../common/shift-normalize';
 import { functionAllowsFemaleLate } from '../schedule-generator/generator.types';
+import { kwToday } from '@common/kw-date';
 
 // ── Shift code → marker + times lookup ──────────────────────────────────────
 // Used by editCell to resolve a typed shift code to DB values
@@ -961,7 +962,7 @@ export class ScheduleService {
     offset?: number;
   }) {
     const from = filters.dateFrom ?? new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-    const to   = filters.dateTo   ?? new Date().toISOString().slice(0, 10);
+    const to   = filters.dateTo   ?? kwToday();
 
     const conditions: string[] = [
       `ar.tenant_id = $1`,

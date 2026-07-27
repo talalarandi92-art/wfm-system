@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Post, Query, Req, Res, StreamableFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Get, Post, Query, Req, Res, StreamableFile, UseGuards, UseInterceptors, NotFoundException,
+} from '@nestjs/common';
 import * as ExcelJS from 'exceljs';
 import type { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -9,6 +11,7 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { MATERNITY_7H, TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
 import { RosterTtlCacheInterceptor } from '@common/ttl-cache.interceptor';
 import { covHourSql, covMinSql, covAbsSql, covHhSql, coversHourJs, STD_SHIFT_START_SQL, STD_SHIFT_END_SQL } from './coverage-core';
+import { kwToday } from '@common/kw-date';
 
 /* Hourly analytics + live-week forecast + gap-remedy/cross-skill/OT-request
  * endpoints, split VERBATIM out of the monolithic ReconController (2026-07-07,
@@ -348,7 +351,7 @@ export class RosterHourlyController {
     // actual frontier = last reconciled day; default the week to the Saturday on/before it (the seam).
     const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
     const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
-    const ws = snapSat(weekStart || frontier || new Date().toISOString().slice(0, 10));
+    const ws = snapSat(weekStart || frontier || kwToday());
     const dates: string[] = []; { const d = new Date(ws + 'T00:00:00Z'); for (let i = 0; i < 7; i++) { dates.push(d.toISOString().slice(0, 10)); d.setUTCDate(d.getUTCDate() + 1); } }
     const weekEnd = dates[6];
     const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -539,7 +542,7 @@ export class RosterHourlyController {
     const t = req.user.tenantId;
     const [{ frontier }] = await this.ds.query(`SELECT MAX(work_date)::text frontier FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]);
     const snapSat = (iso: string) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 1) % 7)); return d.toISOString().slice(0, 10); };
-    const ws = snapSat(weekStart || frontier || new Date().toISOString().slice(0, 10));
+    const ws = snapSat(weekStart || frontier || kwToday());
     const we = new Date(ws + 'T00:00:00Z'); we.setUTCDate(we.getUTCDate() + 6); const weekEnd = we.toISOString().slice(0, 10);
     const covHh = covHhSql;   // wrap-corrected hour-of-day coverage — coverage-core (R2.1)
     const SEC = '(CASE WHEN sc.end_time<=sc.start_time THEN EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time)+1440 ELSE EXTRACT(HOUR FROM sc.end_time)*60+EXTRACT(MINUTE FROM sc.end_time) END)';
@@ -687,7 +690,7 @@ export class RosterHourlyController {
     if (!b?.toFunction || !b?.date || b?.startHour == null || b?.endHour == null || !b?.personNo)
       throw new BadRequestException('personNo, toFunction, date, startHour, endHour are required');
     const [emp] = await this.ds.query(`SELECT id, employee_no, TRIM(CONCAT(first_name_en,' ',COALESCE(last_name_en,''))) name FROM employees WHERE tenant_id=$1 AND employee_no=$2`, [t, b.personNo]);
-    if (!emp) throw new BadRequestException(`Employee ${b.personNo} not found`);
+    if (!emp) throw new NotFoundException(`Employee ${b.personNo} not found`);
     const [usr] = await this.ds.query(`SELECT id FROM users WHERE tenant_id=$1 AND employee_id=$2 AND status='active' LIMIT 1`, [t, emp.id]).catch(() => [null]);
     const pad = (n: number) => String(n).padStart(2, '0');
     const startAt = `${b.date}T${pad(b.startHour)}:00:00+03:00`, endAt = `${b.date}T${pad(b.endHour)}:00:00+03:00`;
@@ -728,7 +731,7 @@ export class RosterHourlyController {
     const t = req.user.tenantId; const managerId = req.user.id || req.user.sub;
     if (!b?.personNo || !b?.date || b?.startHour == null || b?.endHour == null) throw new BadRequestException('personNo, date, startHour, endHour required');
     const [emp] = await this.ds.query(`SELECT id, employee_no, TRIM(CONCAT(first_name_en,' ',COALESCE(last_name_en,''))) name FROM employees WHERE tenant_id=$1 AND employee_no=$2`, [t, b.personNo]);
-    if (!emp) throw new BadRequestException(`Employee ${b.personNo} not found`);
+    if (!emp) throw new NotFoundException(`Employee ${b.personNo} not found`);
     const [usr] = await this.ds.query(`SELECT id FROM users WHERE tenant_id=$1 AND employee_id=$2 AND status='active' LIMIT 1`, [t, emp.id]).catch(() => [null]);
     const [rt] = await this.ds.query(`SELECT id FROM request_types WHERE tenant_id=$1 AND code='overtime' LIMIT 1`, [t]);
     const [fnRow] = b.toFunction ? await this.ds.query(`SELECT id FROM functions WHERE tenant_id=$1 AND name=$2 LIMIT 1`, [t, b.toFunction]).catch(() => [null]) : [null];
@@ -770,7 +773,7 @@ export class RosterHourlyController {
               EXTRACT(HOUR FROM ro.end_time)*60+EXTRACT(MINUTE FROM ro.end_time) oe, ro.duration_minutes dur
          FROM requests r JOIN request_overtimes ro ON ro.request_id=r.id JOIN employees e ON e.id=r.employee_id
         WHERE r.tenant_id=$1 AND r.id=$2`, [t, b.requestId]);
-    if (!row) throw new BadRequestException('OT request not found');
+    if (!row) throw new NotFoundException('OT request not found');
     if (!b.accept) {
       // agent declined — store the reason and tell the manager WHY, so they can pick another remedy.
       await this.ds.query(`UPDATE requests SET status='rejected', rejected_at=NOW(), rejection_reason=$2, updated_at=NOW() WHERE id=$1`, [b.requestId, b.reason ?? null]);

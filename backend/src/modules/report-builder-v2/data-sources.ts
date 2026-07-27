@@ -58,6 +58,11 @@ export interface DataSourceDef {
   description_en?: string;       // one sentence: what this source reports on
   description_ar?: string;
   from: string;                  // FROM clause (may include a FIXED join)
+  /** An invariant of the source itself, ANDed into every query and every drill —
+   *  not a user filter and not overridable. Used for roster_days' canonical-dedup
+   *  `is_active` (BR-ATT-008): without it a builder report double-counts anyone who
+   *  has a folded second employee number. */
+  baseWhere?: string;
   tenantCol: string;             // tenant scoping column
   dateCol: string;               // date column the dashboard date-range filters on
   dateGrain?: 'day' | 'month';   // 'month' → dateCol is a month BUCKET (first-of-month); the range
@@ -125,7 +130,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     key: 'overtime', label_en: 'Overtime', label_ar: 'العمل الإضافي', group: 'Overtime', category: 'Workforce',
     description_en: 'Overtime minutes and days per agent from the canonical roster, split into regular, off-day and holiday buckets.',
     description_ar: 'دقائق وأيام العمل الإضافي لكل موظف من الجدول المعتمد، مقسّمة إلى إضافي عادي وإضافي إجازة وإضافي عطلة.',
-    from: 'roster_days', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
+    from: 'roster_days', baseWhere: 'is_active', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
     permission: 'attendance.view_team',
     dimensions: RD_DIMS,
     metrics: [
@@ -157,7 +162,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     key: 'login_logout', label_en: 'Login / Logout', label_ar: 'الدخول والخروج', group: 'Attendance', category: 'Workforce',
     description_en: 'System login and logout behaviour per agent: worked time, average login/logout and credible late/early minutes.',
     description_ar: 'سلوك دخول وخروج النظام لكل موظف: وقت العمل ومتوسط الدخول/الخروج ودقائق التأخير/الخروج المبكر الموثوقة.',
-    from: 'roster_days', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
+    from: 'roster_days', baseWhere: 'is_active', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
     permission: 'attendance.view_team',
     dimensions: [...RD_DIMS, { key: 'loginSrc', col: 'login_src', label_en: 'Login Source', label_ar: 'مصدر الدخول', type: 'string', category: 'Data Quality',
       description_en: 'Which system supplied the login time (e.g. Sprinklr or punch).', description_ar: 'النظام الذي زوّد وقت الدخول (مثل سبرنكلر أو البصمة).' }],
@@ -190,7 +195,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     key: 'attendance', label_en: 'Attendance', label_ar: 'الحضور والانصراف', group: 'Attendance', category: 'Workforce',
     description_en: 'Day-type attendance counts per agent: worked, office, WFH, off, leave, sick, absent, late and permissions.',
     description_ar: 'عدّادات الحضور اليومية لكل موظف: عمل، مكتب، منزل، راحة، إجازة، مرض، غياب، تأخير واستئذانات.',
-    from: 'roster_days', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
+    from: 'roster_days', baseWhere: 'is_active', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
     permission: 'attendance.view_team',
     dimensions: [...RD_DIMS, { key: 'hrCode', col: 'hr_code', label_en: 'HR Code', label_ar: 'رمز HR', type: 'string', category: 'Schedule',
       description_en: 'The HR attendance code assigned to the day by the reconciliation matrix.', description_ar: 'رمز الحضور الذي عيّنته مصفوفة المطابقة لليوم.' }],
@@ -229,7 +234,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     key: 'adherence_conformance', label_en: 'Adherence & Conformance', label_ar: 'الالتزام والمطابقة', group: 'Attendance', category: 'Workforce',
     description_en: 'Schedule adherence and conformance per agent: average adherence, conforming-day rate, credible tardiness bands and missing-log counts.',
     description_ar: 'التزام ومطابقة الجدول لكل موظف: متوسط الالتزام ونسبة الأيام المطابقة وفئات التأخير الموثوقة وعدّادات السجلات الناقصة.',
-    from: 'roster_days', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
+    from: 'roster_days', baseWhere: 'is_active', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
     permission: 'attendance.view_team',
     dimensions: RD_DIMS,
     metrics: [
@@ -524,7 +529,7 @@ export const DATA_SOURCES: DataSourceDef[] = [
     key: 'shrinkage_leave', label_en: 'Shrinkage & Leave', label_ar: 'الفاقد والإجازات', group: 'Attendance', category: 'Workforce',
     description_en: 'Lost-time view of the roster: leave, sick, absence, WFH and OFF days plus the shrinkage percentage of scheduled time.',
     description_ar: 'عرض الوقت المفقود من الجدول: أيام الإجازة والمرض والغياب والمنزل والراحة ونسبة الفاقد من الوقت المجدول.',
-    from: 'roster_days', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
+    from: 'roster_days', baseWhere: 'is_active', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
     permission: 'attendance.view_team',
     dimensions: RD_DIMS,
     metrics: [

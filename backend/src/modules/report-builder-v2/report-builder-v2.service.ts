@@ -1,4 +1,6 @@
-import { Injectable, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable, ForbiddenException, BadRequestException, NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { compile, compileDrill, getSource, listCatalog, CompileInput, DrillInput, EnforcedFilter, BuilderValidationError } from './query-compiler';
@@ -166,7 +168,7 @@ export class ReportBuilderV2Service {
     const [r] = await this.ds.query(
       `SELECT name, description, source_key, config, viz FROM rb_saved_reports
         WHERE tenant_id=$1 AND id=$2 AND (owner_user=$3 OR shared)`, [user.tenantId, id, user.id]);
-    if (!r) throw new BadRequestException('Report not found');
+    if (!r) throw new NotFoundException('Report not found');
     const [n] = await this.ds.query(
       `INSERT INTO rb_saved_reports (tenant_id, owner_user, name, description, source_key, config, viz, shared)
        VALUES ($1,$2,$3,$4,$5,$6,$7,false) RETURNING id`,
@@ -178,7 +180,7 @@ export class ReportBuilderV2Service {
   async getReport(tid: string, userId: string, id: string) {
     const [r] = await this.ds.query(
       `SELECT * FROM rb_saved_reports WHERE tenant_id=$1 AND id=$2 AND (owner_user=$3 OR shared)`, [tid, id, userId]);
-    if (!r) throw new BadRequestException('Report not found');
+    if (!r) throw new NotFoundException('Report not found');
     return r;
   }
   async saveReport(user: any, b: any) {
@@ -193,7 +195,7 @@ export class ReportBuilderV2Service {
   }
   async updateReport(user: any, id: string, b: any) {
     const [own] = await this.ds.query(`SELECT owner_user FROM rb_saved_reports WHERE tenant_id=$1 AND id=$2`, [user.tenantId, id]);
-    if (!own) throw new BadRequestException('Report not found');
+    if (!own) throw new NotFoundException('Report not found');
     if (own.owner_user !== user.id) throw new ForbiddenException('Only the owner can edit this report');
     await this.ds.query(
       `UPDATE rb_saved_reports SET name=COALESCE($3,name), description=COALESCE($4,description),
@@ -205,7 +207,7 @@ export class ReportBuilderV2Service {
   }
   async deleteReport(user: any, id: string) {
     const [own] = await this.ds.query(`SELECT owner_user FROM rb_saved_reports WHERE tenant_id=$1 AND id=$2`, [user.tenantId, id]);
-    if (!own) throw new BadRequestException('Report not found');
+    if (!own) throw new NotFoundException('Report not found');
     if (own.owner_user !== user.id) throw new ForbiddenException('Only the owner can delete this report');
     await this.ds.query(`DELETE FROM rb_saved_reports WHERE tenant_id=$1 AND id=$2`, [user.tenantId, id]);
     await this.audit(user, 'report_builder.report.deleted', 'rb_saved_reports', id, {});
@@ -232,7 +234,7 @@ export class ReportBuilderV2Service {
     const [d] = await this.ds.query(
       `SELECT name, description, sections, date_range, filters FROM rb_saved_dashboards
         WHERE tenant_id=$1 AND id=$2 AND (owner_user=$3 OR shared)`, [user.tenantId, id, user.id]);
-    if (!d) throw new BadRequestException('Dashboard not found');
+    if (!d) throw new NotFoundException('Dashboard not found');
     const [n] = await this.ds.query(
       `INSERT INTO rb_saved_dashboards (tenant_id, owner_user, name, description, sections, date_range, filters, shared)
        VALUES ($1,$2,$3,$4,$5,$6,$7,false) RETURNING id`,
@@ -244,7 +246,7 @@ export class ReportBuilderV2Service {
   async getDashboard(tid: string, userId: string, id: string) {
     const [d] = await this.ds.query(
       `SELECT * FROM rb_saved_dashboards WHERE tenant_id=$1 AND id=$2 AND (owner_user=$3 OR shared)`, [tid, id, userId]);
-    if (!d) throw new BadRequestException('Dashboard not found');
+    if (!d) throw new NotFoundException('Dashboard not found');
     return d;
   }
   async saveDashboard(user: any, b: any) {
@@ -259,7 +261,7 @@ export class ReportBuilderV2Service {
   }
   async updateDashboard(user: any, id: string, b: any) {
     const [own] = await this.ds.query(`SELECT owner_user FROM rb_saved_dashboards WHERE tenant_id=$1 AND id=$2`, [user.tenantId, id]);
-    if (!own) throw new BadRequestException('Dashboard not found');
+    if (!own) throw new NotFoundException('Dashboard not found');
     if (own.owner_user !== user.id) throw new ForbiddenException('Only the owner can edit this dashboard');
     await this.ds.query(
       `UPDATE rb_saved_dashboards SET name=COALESCE($3,name), description=COALESCE($4,description),
@@ -273,7 +275,7 @@ export class ReportBuilderV2Service {
   }
   async deleteDashboard(user: any, id: string) {
     const [own] = await this.ds.query(`SELECT owner_user FROM rb_saved_dashboards WHERE tenant_id=$1 AND id=$2`, [user.tenantId, id]);
-    if (!own) throw new BadRequestException('Dashboard not found');
+    if (!own) throw new NotFoundException('Dashboard not found');
     if (own.owner_user !== user.id) throw new ForbiddenException('Only the owner can delete this dashboard');
     await this.ds.query(`DELETE FROM rb_saved_dashboards WHERE tenant_id=$1 AND id=$2`, [user.tenantId, id]);
     await this.audit(user, 'report_builder.dashboard.deleted', 'rb_saved_dashboards', id, {});

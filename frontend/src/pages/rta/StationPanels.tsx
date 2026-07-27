@@ -3,7 +3,7 @@ import {
   Radio, WifiOff, ArrowRight, AlertTriangle, Coffee, Shield,
   UserCheck, Clock, CheckCircle2, Activity, BarChart3, Timer,
 } from 'lucide-react';
-import { fmtDurationSec } from '@/utils/format';
+import { fmtDurationSec, kwToday } from '@/utils/format';
 import { useUiStore } from '@/store/ui.store';
 import { tp, ts as tsColor } from '@/components/ds';
 import {
@@ -522,7 +522,7 @@ export function CoveragePanel({ coverage, live, ar }: { coverage: Coverage | nul
      showed each function's numbers as if they were the whole floor. Fold to a
      floor total through the shared helper (same one the Command Center uses). */
   const cov = useMemo(() => foldCoverage(coverage?.intervals), [coverage]);
-  const covToday = !!cov?.date && cov.date === new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+  const covToday = !!cov?.date && cov.date === kwToday();
 
   const lsp = coverage?.liveSprinklr ?? (live ? {
     available:    (live.agents).filter(a => a.status === 'available').length,

@@ -52,6 +52,31 @@ export function fmtLocalDate(d: Date): string {
 }
 
 /**
+ * TODAY in Kuwait as "YYYY-MM-DD" — the browser-side twin of the server's
+ * `@common/kw-date.kwToday()`.
+ *
+ * Two wrong ways this replaces, both of which were live in this codebase:
+ *   · `new Date().toISOString().slice(0,10)` — a UTC date. Kuwait is UTC+03:00, so
+ *     between 00:00 and 02:59 local it names YESTERDAY. That opened the calendar on
+ *     the wrong cell and, worse, stamped cross-skill dispatch windows with
+ *     yesterday's date while using today's local wall-clock start time.
+ *   · `new Date(Date.now() + 3*3600e3).toISOString().slice(0,10)` — correct, but
+ *     open-coded in four files. One shared definition, so it cannot drift.
+ *
+ * Note this is deliberately KUWAIT, not the viewer's machine: the roster, the
+ * schedule and every shift boundary are Kuwait wall-clock, so a laptop set to
+ * another timezone must still see the operation's day.
+ */
+export function kwToday(): string {
+  return new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** Kuwait's calendar date `n` days from today (negative = in the past). */
+export function kwDateOffset(n: number): string {
+  return new Date(Date.now() + 3 * 3600_000 + n * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
  * The Saturday that starts the workforce week (Sat→Fri) containing `d`.
  * JS getDay(): 0=Sun … 6=Sat → days to subtract = (getDay() + 1) % 7.
  */

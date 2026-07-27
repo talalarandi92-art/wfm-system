@@ -23,6 +23,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { kwToday } from '@common/kw-date';
 
 export interface DataSpanFeed {
   key: string;
@@ -93,7 +94,7 @@ export class DataSpanService {
       [tenantId],
     ).catch(() => [null]);
 
-    const today = span?.today ?? new Date().toISOString().slice(0, 10);
+    const today = span?.today ?? kwToday();
     if (!span?.b) {
       return {
         today, roster: { from: null, to: null, days: 0, rows: 0, people: 0 },

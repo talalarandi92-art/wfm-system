@@ -34,13 +34,14 @@ import {
   type RtaAlert,
 } from './kit';
 import { AgentDonut, AgentBoard, AgentStateBreakdown } from './LivePanels';
+import { kwToday } from '@/utils/format';
 
 const SP_LIVE_EP = 'GET /api/v1/integrations/sprinklr/live';
 const COV_EP = 'GET /api/v1/integrations/sprinklr/coverage';
 const ADH_EP = 'GET /api/v1/integrations/sprinklr/adherence';
 
 /* Kuwait "today" — the same anchor the rest of the RTA page uses. */
-const kwToday = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+
 
 export default function CommandCenter({
   live, breakData, coverage, violations, adherence, ar, onSelectQueue, onSelectAgent, pulse,

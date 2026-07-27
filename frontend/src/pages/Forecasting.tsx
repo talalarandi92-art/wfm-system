@@ -4,6 +4,7 @@ import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { useInjectDsStyles } from '@/components/ds';
 import EmptyState from '@/components/EmptyState';
+import { fmtLocalDate } from '@/utils/format';
 
 interface Interval { date: string; hour: number; channel: string; forecast: number; basis: number; requiredHc: number | null; occupancy: number | null; isOverride?: boolean; overrideReason?: string | null }
 interface SavedRow { id: string; name: string | null; rangeFrom: string; rangeTo: string; channel: string | null; dataPoints: number; overrides: number; createdAt: string }
@@ -22,7 +23,7 @@ interface AccResp {
   mape: number | null; wape: number | null; bias: number | null; matched: number; totalActual: number;
 }
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+const todayStr = () => fmtLocalDate(new Date());
 const addDays = (s: string, n: number) => new Date(new Date(`${s}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
 const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
 

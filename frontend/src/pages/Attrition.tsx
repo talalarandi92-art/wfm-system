@@ -51,7 +51,10 @@ export default function AttritionPage() {
   }, [from, to]);
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
-  const rateColor = (r: number) => r >= 35 ? '#ef4444' : r >= 20 ? '#f59e0b' : '#22c55e';
+  /* null = the rate could not be computed (no headcount in the window). It must NOT
+     take the green "under 20%" tint — a period with no data was reading as perfect
+     retention. Grey it and say so. */
+  const rateColor = (r: number | null) => r == null ? '#64748b' : r >= 35 ? '#ef4444' : r >= 20 ? '#f59e0b' : '#22c55e';
   const maxFn = Math.max(1, ...(data?.byFunction?.map(f => f.total) ?? []));
   const maxMonth = Math.max(1, ...(data?.byMonth?.map(m => m.total) ?? []));
   // monthly trends (chronological) to draw inside the count tiles
@@ -92,8 +95,11 @@ export default function AttritionPage() {
           <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))' }}>
             <div className="rounded-2xl p-4" style={{ background: `${rateColor(data.summary.attritionRateAnnualized)}12`, border: `1px solid ${rateColor(data.summary.attritionRateAnnualized)}33` }}>
               <div className="flex items-center gap-1.5 text-[11px] mb-1" style={{ color: '#94a3b8' }}><TrendingDown size={12} /> {ar ? 'التسرّب السنوي' : 'Annualized attrition'}</div>
-              <div className="text-3xl font-bold tabular-nums" style={{ color: rateColor(data.summary.attritionRateAnnualized) }}>{data.summary.attritionRateAnnualized}%</div>
-              <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>{data.summary.attritionRatePeriod}% {ar ? 'خلال الفترة' : 'in period'}</div>
+              <div className="text-3xl font-bold tabular-nums" style={{ color: rateColor(data.summary.attritionRateAnnualized) }}>{data.summary.attritionRateAnnualized == null ? '—' : `${data.summary.attritionRateAnnualized}%`}</div>
+              <div className="text-[10px] mt-0.5" style={{ color: '#64748b' }}>
+                {data.summary.attritionRatePeriod == null
+                  ? (ar ? 'ما فيه هيدكاونت بالفترة — النسبة ما بتنحسب' : 'no headcount in this period — rate not computable')
+                  : `${data.summary.attritionRatePeriod}% ${ar ? 'خلال الفترة' : 'in period'}`}</div>
             </div>
             {([
               [ar ? 'إجمالي المغادرين' : 'Separations', data.summary.separations, '#cbd5e1', UserMinus],

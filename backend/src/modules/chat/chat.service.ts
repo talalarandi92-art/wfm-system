@@ -63,7 +63,12 @@ export class ChatService {
 
   async getMessages(channelId: string, userId: string, limit = 80, before?: string) {
     const isMember = await this.memberRepo.findOne({ where: { channelId, userId } });
-    if (!isMember) throw new Error('Not a member');
+    /* ForbiddenException, not a bare Error. A bare Error is not an HttpException,
+       so Nest mapped this membership check to a 500 "Internal server error" — the
+       IDOR guard worked, but reported itself as a crash. That is wrong for the
+       caller (a 500 invites a retry; a 403 does not) and it buried real 500s in
+       the log behind a steady stream of fake ones. */
+    if (!isMember) throw new ForbiddenException('You are not a member of this channel');
 
     let query = `
       SELECT
@@ -266,7 +271,12 @@ export class ChatService {
 
   async exportChannelMessages(channelId: string, userId: string) {
     const isMember = await this.memberRepo.findOne({ where: { channelId, userId } });
-    if (!isMember) throw new Error('Not a member');
+    /* ForbiddenException, not a bare Error. A bare Error is not an HttpException,
+       so Nest mapped this membership check to a 500 "Internal server error" — the
+       IDOR guard worked, but reported itself as a crash. That is wrong for the
+       caller (a 500 invites a retry; a 403 does not) and it buried real 500s in
+       the log behind a steady stream of fake ones. */
+    if (!isMember) throw new ForbiddenException('You are not a member of this channel');
 
     const [channel] = await this.dataSource.query(
       `SELECT name, name_ar FROM chat_channels WHERE id = $1`, [channelId]

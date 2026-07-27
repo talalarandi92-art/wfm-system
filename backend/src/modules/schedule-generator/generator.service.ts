@@ -1,4 +1,6 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable, BadRequestException, NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import {
@@ -1267,7 +1269,7 @@ export class GeneratorService {
        FROM schedule_versions WHERE id = $1 AND tenant_id = $2`,
       [versionId, tenantId],
     );
-    if (!version) throw new BadRequestException('Schedule version not found.');
+    if (!version) throw new NotFoundException('Schedule version not found.');
 
     // PUBLISH-OVERWRITE GUARD (business rule 6.7): a published/locked schedule
     // must never be silently overwritten by publishing another version over the

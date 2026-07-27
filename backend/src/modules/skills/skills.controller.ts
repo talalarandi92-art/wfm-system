@@ -8,6 +8,7 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { kwToday } from '@common/kw-date';
 
 @ApiTags('Skills')
 @ApiBearerAuth()
@@ -250,7 +251,7 @@ export class SkillsController {
     const skillFilter  = skillCode  ? `AND s.code = $${params.push(skillCode) && params.length}`  : '';
     const fnFilter     = targetFn   ? `AND f.name != $${params.push(targetFn) && params.length}`  : '';
 
-    const theDate = date ?? new Date().toISOString().slice(0, 10);
+    const theDate = date ?? kwToday();
     const dateParam = params.push(theDate) && params.length;
     // Gap window hours (for "is the agent's shift covering this period?")
     const fH = fromHour ? parseInt(fromHour, 10) : null;

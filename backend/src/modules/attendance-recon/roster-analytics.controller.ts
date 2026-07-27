@@ -385,19 +385,49 @@ export class RosterAnalyticsController {
 
   /** Scorecard Board — official scorecard, board VIEW over scorecard_entries at
    *  agent × week grain (same source as the scorecard module; a VIEW, not an
-   *  independent score). By-agent = avg across the agent's weeks for every KPI;
-   *  pass ?person= for the W1–W5 weekly drill. Alias-aware via employee_identity. */
+   *  independent score). By-agent = avg across the agent's WEEKS for every KPI;
+   *  pass ?person= for the W1–W5 weekly drill. Alias-aware via employee_identity.
+   *
+   *  TWO CORRECTNESS RULES THIS ENDPOINT NOW HOLDS — both were being violated:
+   *
+   *  1. ONE PERIOD AT A TIME. It read every scorecard_entries row the tenant has
+   *     ever had, so a second uploaded month would silently average two months
+   *     into one board while the page caption named a single month. Now scoped to
+   *     a batch (`?period=`, default = the newest), and the period is RETURNED so
+   *     the caption states the period actually being shown.
+   *
+   *  2. `Final` IS NOT A WEEK. Each agent has W1..W4 plus a `Final` summary row
+   *     carrying the official month result. AVG over all five folded the official
+   *     answer into its own average of weeks — for person 12648 that turned an
+   *     official Net of 125 into 113. The weekly average now covers weeks only,
+   *     and the official Final is returned ALONGSIDE it as `final_net`/`rank`,
+   *     so both numbers are visible and neither is silently blended. */
   @Get('roster-v2/scorecard')
   @RequirePermissions('attendance.view_team')
-  @ApiOperation({ summary: 'Official scorecard board — per-agent (avg of weeks) + weekly W1–W5 drill, all KPIs' })
-  async scorecardBoard(@Req() req: any, @Query('function') fn?: string, @Query('teamLeader') tl?: string, @Query('person') person?: string) {
+  @ApiOperation({ summary: 'Official scorecard board — per-agent (avg of weeks) + official Final + weekly drill, one period' })
+  async scorecardBoard(@Req() req: any, @Query('function') fn?: string, @Query('teamLeader') tl?: string, @Query('person') person?: string, @Query('period') period?: string) {
     const t = req.user.tenantId;
-    // KPI metadata + max points (cap = top observed score per KPI)
+
+    /* Period scoping. Batches are the upload unit and carry the real period name. */
+    const batches = await this.ds.query(
+      `SELECT id, period_name, period_year, period_month FROM scorecard_batches
+        WHERE tenant_id=$1 AND status <> 'archived'
+        ORDER BY period_year DESC NULLS LAST, period_month DESC NULLS LAST, uploaded_at DESC`, [t]);
+    const batch = (period ? batches.find((b: any) => b.period_name === period || b.id === period) : null) ?? batches[0] ?? null;
+    if (!batch) {
+      return { period: null, periodOptions: [], kpiMeta: [], agents: [], avgNet: null, count: 0,
+               filterOptions: { functions: [], teamLeaders: [] },
+               note: 'No scorecard batch has been uploaded yet.' };
+    }
+    const bid = batch.id;
+    const WEEKS_ONLY = `se.week_label IS DISTINCT FROM 'Final'`;   // `Final` is the month result, not a week
+
+    // KPI metadata + max points (cap = top observed score per KPI, within THIS period)
     const [mx] = await this.ds.query(
       `SELECT MAX(quality_score) quality, MAX(aht_score) aht, MAX(fcr_score) fcr, MAX(productivity_score) productivity,
               MAX(ctr_score) ctr, MAX(quiz_score) quiz, MAX(prr_points) prr, MAX(response_time_score) resptime,
               MAX(mistakes_score) mistakes, MAX(incidents_score) incidents, MAX(attendance_score) attendance
-         FROM scorecard_entries WHERE tenant_id=$1`, [t]);
+         FROM scorecard_entries WHERE tenant_id=$1 AND batch_id=$2`, [t, bid]);
     const kpiMeta = [
       ['quality', 'Quality', 'pct'], ['fcr', 'FCR', 'pct'], ['productivity', 'Productivity', 'pct'], ['mistakes', 'Mistakes', 'count'], ['resptime', 'Response Time', 'min'],
       ['ctr', 'CTR', 'pct'], ['quiz', 'Quiz', 'pct'], ['aht', 'AHT', 'min'], ['prr', 'PRR', 'pct'], ['incidents', 'Incidents', 'count'], ['attendance', 'Attendance', 'pct'],
@@ -420,31 +450,52 @@ export class RosterAnalyticsController {
                 ROUND(productivity_actual::numeric*100,1) productivity_act, ROUND(ctr_actual::numeric*100,1) ctr_act, ROUND(quiz_actual::numeric*100,1) quiz_act,
                 ROUND(prr_rate::numeric*100,1) prr_act, ROUND(response_time_actual::numeric*1440,1) resptime_act, ROUND(mistakes_actual::numeric,1) mistakes_act,
                 ROUND(response_rate::numeric*100,1) res, ROUND(working_days_pct::numeric*100,1) wd
-           FROM scorecard_entries WHERE tenant_id=$1 AND employee_no = ANY($2) ORDER BY week_label`, [t, ids.length ? ids : [person]]);
-      return { person, kpiMeta, weeks };
+           FROM scorecard_entries WHERE tenant_id=$1 AND batch_id=$3 AND employee_no = ANY($2) ORDER BY week_label`, [t, ids.length ? ids : [person], bid]);
+      return { person, period: batch.period_name, kpiMeta, weeks };
     }
 
-    const p: any[] = [t]; let w = `se.tenant_id=$1`;
+    const p: any[] = [t, bid]; let w = `se.tenant_id=$1 AND se.batch_id=$2`;
     if (fn) { p.push(fn); w += ` AND se.function_name=$${p.length}`; }
     if (tl) { p.push(tl); w += ` AND se.team_leader=$${p.length}`; }
+    /* Averages over WEEKS only; the official `Final` row is joined back separately
+       so the board shows the month result next to the weekly trend. */
     const agents = await this.ds.query(
-      `SELECT i.person_no, mode() WITHIN GROUP (ORDER BY i.clean_name) name, mode() WITHIN GROUP (ORDER BY se.function_name) fn,
-              mode() WITHIN GROUP (ORDER BY se.team_leader) tl, COUNT(*)::int weeks,
-              ROUND(AVG(se.net_points),1) net, ROUND(AVG(se.function_rank),1) rank,
-              ROUND(AVG(se.quality_score),1) quality, ROUND(AVG(se.aht_score),1) aht, ROUND(AVG(se.fcr_score),1) fcr,
-              ROUND(AVG(se.productivity_score),1) productivity, ROUND(AVG(se.ctr_score),1) ctr, ROUND(AVG(se.quiz_score),1) quiz,
-              ROUND(AVG(se.prr_points),1) prr, ROUND(AVG(se.response_time_score),1) resptime, ROUND(AVG(se.mistakes_score),1) mistakes,
-              ROUND(AVG(se.incidents_score),1) incidents, ROUND(AVG(se.attendance_score),1) attendance, ROUND(AVG(se.response_rate::numeric)*100,1) res, ${ACT}
-         FROM scorecard_entries se JOIN employee_identity i ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
-        WHERE ${w} GROUP BY i.person_no ORDER BY net DESC NULLS LAST`, p);
+      `WITH wk AS (
+         SELECT i.person_no, mode() WITHIN GROUP (ORDER BY i.clean_name) name, mode() WITHIN GROUP (ORDER BY se.function_name) fn,
+                mode() WITHIN GROUP (ORDER BY se.team_leader) tl, COUNT(*)::int weeks,
+                ROUND(AVG(se.net_points),1) net,
+                ROUND(AVG(se.quality_score),1) quality, ROUND(AVG(se.aht_score),1) aht, ROUND(AVG(se.fcr_score),1) fcr,
+                ROUND(AVG(se.productivity_score),1) productivity, ROUND(AVG(se.ctr_score),1) ctr, ROUND(AVG(se.quiz_score),1) quiz,
+                ROUND(AVG(se.prr_points),1) prr, ROUND(AVG(se.response_time_score),1) resptime, ROUND(AVG(se.mistakes_score),1) mistakes,
+                ROUND(AVG(se.incidents_score),1) incidents, ROUND(AVG(se.attendance_score),1) attendance,
+                ROUND(AVG(se.response_rate::numeric)*100,1) res, ${ACT}
+           FROM scorecard_entries se JOIN employee_identity i ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
+          WHERE ${w} AND ${WEEKS_ONLY} GROUP BY i.person_no
+       ), fin AS (
+         SELECT i.person_no, MAX(se.net_points) final_net, MAX(se.function_rank) rank
+           FROM scorecard_entries se JOIN employee_identity i ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
+          WHERE ${w} AND se.week_label = 'Final' GROUP BY i.person_no
+       )
+       SELECT wk.*, fin.final_net, fin.rank FROM wk LEFT JOIN fin USING (person_no)
+        ORDER BY COALESCE(fin.final_net, wk.net) DESC NULLS LAST`, p);
     // "where short" — the KPI losing the most points vs its max (biggest gap)
     for (const a of agents) { let worst: any = null;
       for (const k of kpiMeta) { const v = a[k.key] == null ? null : Number(a[k.key]); if (v == null || !k.max) continue; const gap = Math.round((k.max - v) * 10) / 10; if (gap > 0 && (!worst || gap > worst.gap)) worst = { key: k.key, label: k.label, gap, score: v, max: k.max }; }
       a.weakest = worst; }
-    const fnOpts = await this.ds.query(`SELECT DISTINCT function_name v FROM scorecard_entries WHERE tenant_id=$1 AND function_name IS NOT NULL ORDER BY 1`, [t]);
-    const tlOpts = await this.ds.query(`SELECT DISTINCT team_leader v FROM scorecard_entries WHERE tenant_id=$1 AND team_leader IS NOT NULL ORDER BY 1`, [t]);
-    const avgNet = agents.length ? Math.round(agents.reduce((a: number, r: any) => a + Number(r.net || 0), 0) / agents.length * 10) / 10 : 0;
-    return { kpiMeta, agents, avgNet, count: agents.length, filterOptions: { functions: fnOpts.map((r: any) => r.v), teamLeaders: tlOpts.map((r: any) => r.v) } };
+    const fnOpts = await this.ds.query(`SELECT DISTINCT function_name v FROM scorecard_entries WHERE tenant_id=$1 AND batch_id=$2 AND function_name IS NOT NULL ORDER BY 1`, [t, bid]);
+    const tlOpts = await this.ds.query(`SELECT DISTINCT team_leader v FROM scorecard_entries WHERE tenant_id=$1 AND batch_id=$2 AND team_leader IS NOT NULL ORDER BY 1`, [t, bid]);
+    /* Average over agents who HAVE a score. `Number(r.net || 0)` counted an agent
+       with no score as a zero and dragged the centre average down. */
+    const nets = agents.map((r: any) => (r.net == null ? null : Number(r.net))).filter((v: number | null): v is number => v != null);
+    const avgNet = nets.length ? Math.round((nets.reduce((a: number, b: number) => a + b, 0) / nets.length) * 10) / 10 : null;
+    return {
+      period: batch.period_name,
+      periodOptions: batches.map((b: any) => b.period_name),
+      kpiMeta, agents, avgNet, count: agents.length,
+      unscored: agents.length - nets.length,
+      basis: 'Per-agent KPI columns = average of that agent\'s WEEKLY rows in this period; final_net/rank = the official Final row. Weeks and Final are never blended.',
+      filterOptions: { functions: fnOpts.map((r: any) => r.v), teamLeaders: tlOpts.map((r: any) => r.v) },
+    };
   }
 
   /** Agent Progress — month-over-month self-comparison: did this agent improve or

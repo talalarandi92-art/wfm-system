@@ -15,6 +15,7 @@ import { tp, ts, NxBtn } from '@/components/ds';
 import { FieldPicker, PickerField } from '@/components/report-builder/FieldPicker';
 import { DateRangePicker, DateRangeValue } from '@/components/report-builder/DateRangePicker';
 import { useSources, useSourceDetail } from './sourceCatalog';
+import { fmtLocalDate } from '@/utils/format';
 import {
   WidgetConfig, Viz, Gran, FilterOp, OPS_BY_TYPE, OP_LABEL, VALUELESS, newWidget, SavedReportLite,
 } from './types';
@@ -250,7 +251,7 @@ export function WidgetEditor({ initial, savedReports, dark, ar, onSave, onCancel
                   {L('Wide (full row)', 'عريض (صف كامل)')}
                 </label>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 11.5, color: tp(dark), fontWeight: 600 }}>
-                  <input type="checkbox" checked={!!w.pinnedDates} onChange={e => patch({ pinnedDates: e.target.checked ? { dateFrom: pinVal.dateFrom || new Date().toISOString().slice(0, 10), dateTo: pinVal.dateTo || new Date().toISOString().slice(0, 10) } : null })} style={{ accentColor: '#f59e0b' }} />
+                  <input type="checkbox" checked={!!w.pinnedDates} onChange={e => patch({ pinnedDates: e.target.checked ? { dateFrom: pinVal.dateFrom || fmtLocalDate(new Date()), dateTo: pinVal.dateTo || fmtLocalDate(new Date()) } : null })} style={{ accentColor: '#f59e0b' }} />
                   {L('Pin own dates (ignore dashboard date)', 'تثبيت تاريخ خاص (تجاهل تاريخ اللوحة)')}
                 </label>
                 {w.pinnedDates && (

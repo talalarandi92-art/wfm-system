@@ -33,6 +33,7 @@ import ScenarioSection, { normalizeScenarios } from './capacity/ScenarioSection'
 import InsightsSection, { normalizeInsights } from './capacity/InsightsSection';
 import TuningSection from './capacity/TuningSection';
 import HiringBody from './capacity/HiringSection';
+import { kwDateOffset } from '@/utils/format';
 
 const AR_DIGITS = ['١', '٢', '٣', '٤', '٥', '٦', '٧'];
 const DOWS_AR = ['أحد', 'اثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'];
@@ -45,8 +46,8 @@ export default function StaffingEnginePage() {
   /* ── Core data ─────────────────────────────────────────────────────────── */
   const [params, setParams] = useState<StaffParams[]>([]);
   const [req, setReq] = useState<ReqResp | null>(null);
-  const [from, setFrom] = useState(() => new Date(Date.now() + 86400000).toISOString().slice(0, 10));
-  const [to, setTo] = useState(() => new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10));
+  const [from, setFrom] = useState(() => kwDateOffset(1));
+  const [to, setTo] = useState(() => kwDateOffset(7));
   const [viewDate, setViewDate] = useState<string | null>(null);
   const [ordersScale, setOrdersScale] = useState(1);
   const [loading, setLoading] = useState(true);

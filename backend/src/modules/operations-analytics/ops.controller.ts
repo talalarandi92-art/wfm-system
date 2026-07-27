@@ -16,6 +16,7 @@ import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { OpsUploadService } from './ops-upload.service';
 import { PeopleInsightsService } from './people-insights.service';
+import { fmtLocalDate } from '@common/kw-date';
 
 @ApiTags('Operations Analytics')
 @ApiBearerAuth()
@@ -434,7 +435,7 @@ export class OpsController {
     );
     return {
       cells: rows.map((r: any) => ({
-        date: r.contact_date instanceof Date ? r.contact_date.toISOString().slice(0,10) : r.contact_date,
+        date: fmtLocalDate(r.contact_date),   // BR-TIM-001
         hour: r.contact_hour,
         count: parseInt(r.cnt, 10),
       })),
@@ -537,7 +538,7 @@ export class OpsController {
       const cur = n(r.contacts);
       return {
         week: r.week,
-        weekStart: r.week_start instanceof Date ? r.week_start.toISOString().slice(0,10) : r.week_start,
+        weekStart: fmtLocalDate(r.week_start),   // BR-TIM-001
         contacts: cur,
         positive: n(r.positive),
         negative: n(r.negative),

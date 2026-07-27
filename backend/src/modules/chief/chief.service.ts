@@ -9,6 +9,7 @@ import { ReporterService } from '@modules/reporter/reporter.service';
 import { AdvisorService } from '@modules/advisor/advisor.service';
 import { AutoModeService } from '@modules/automode/automode.service';
 import { ScorecardGuardService } from '@modules/scorecard-guard/scorecard-guard.service';
+import { kwToday } from '@common/kw-date';
 
 /**
  * The Chief — sits above the whole team. It reads every guard (health, analyst,
@@ -114,7 +115,7 @@ export class ChiefService {
     ]);
 
     const base = {
-      date: assess?.date ?? date ?? new Date().toISOString().slice(0, 10),
+      date: assess?.date ?? date ?? kwToday(),
       posture, directive, domains, priorities: top,
       learning: { learnedSamples, decisionsLogged: decided },
       autoMode, selfTest, scorecard,

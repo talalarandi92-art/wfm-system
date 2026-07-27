@@ -20,32 +20,39 @@ export default function ScorecardBoardPage() {
   const { lang } = useUiStore(); const ar = lang === 'ar';
   const nav = useNavigate();
   const [fn, setFn] = useState(''); const [tl, setTl] = useState(''); const [search, setSearch] = useState('');
+  const [period, setPeriod] = useState('');   // '' = the newest uploaded period; the API tells us which
   const [sort, setSort] = useState('net');
   const [d, setD] = useState<any>(null); const [loading, setLoading] = useState(true);
   const [openRow, setOpenRow] = useState<string>(''); const [weeks, setWeeks] = useState<Record<string,any>>({});
 
   const load = useCallback(() => {
     setLoading(true);
-    const q = new URLSearchParams(); if (fn) q.set('function',fn); if (tl) q.set('teamLeader',tl);
-    apiClient.get(`/attendance-recon/roster-v2/scorecard?${q}`).then((r:any)=>setD(r.data)).catch(()=>setD(null)).finally(()=>setLoading(false));
-  }, [fn, tl]);
+    const q = new URLSearchParams(); if (fn) q.set('function',fn); if (tl) q.set('teamLeader',tl); if (period) q.set('period',period);
+    apiClient.get(`/attendance-recon/roster-v2/scorecard?${q}`)
+      .then((r:any)=>{ setD(r.data); if (!period && r.data?.period) setPeriod(r.data.period); })
+      .catch(()=>setD(null)).finally(()=>setLoading(false));
+  }, [fn, tl, period]);
   useEffect(() => { const t=setTimeout(load,200); return ()=>clearTimeout(t); }, [load]);
 
   const toggle = (pn:string) => {
     if (openRow===pn) { setOpenRow(''); return; } setOpenRow(pn);
-    if (!weeks[pn]) apiClient.get(`/attendance-recon/roster-v2/scorecard?person=${pn}`).then((r:any)=>setWeeks(w=>({ ...w, [pn]:r.data.weeks||[] }))).catch(()=>{});
+    if (!weeks[pn]) apiClient.get(`/attendance-recon/roster-v2/scorecard?person=${pn}${period?`&period=${encodeURIComponent(period)}`:''}`).then((r:any)=>setWeeks(w=>({ ...w, [pn]:r.data.weeks||[] }))).catch(()=>{});
   };
 
   const inputCls = 'px-2.5 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 outline-none focus:border-indigo-400';
   const kpis = d?.kpiMeta || [];
+  /* The agent's headline score = the OFFICIAL Final row when the period has one;
+     the average of their weeks otherwise. The two are never added together — a
+     `Final` folded into an average of weeks turned an official 125 into 113. */
+  const official = (a:any) => Number(a?.final_net ?? a?.net ?? -Infinity);
   const agents = (d?.agents||[]).filter((a:any)=>{ const s=search.toLowerCase().trim(); return !s || a.name?.toLowerCase().includes(s) || String(a.person_no).includes(s); })
-    .sort((a:any,b:any)=> sort==='net' ? (Number(b.net||0)-Number(a.net||0)) : sort==='name' ? (a.name||'').localeCompare(b.name||'') : (Number(b[sort]||0)-Number(a[sort]||0)));
-  const topAgent = [...agents].sort((a:any,b:any)=>Number(b.net||0)-Number(a.net||0))[0];
+    .sort((a:any,b:any)=> sort==='net' ? (official(b)-official(a)) : sort==='name' ? (a.name||'').localeCompare(b.name||'') : (Number(b[sort]||0)-Number(a[sort]||0)));
+  const topAgent = [...agents].sort((a:any,b:any)=>official(b)-official(a))[0];
   const netBands = [
-    { label: ar?'ممتاز ≥100':'Excellent ≥100', value: agents.filter((a:any)=>Number(a.net)>=100).length, color:'#22c55e' },
-    { label: ar?'جيد 80–99':'Good 80–99',       value: agents.filter((a:any)=>{const n=Number(a.net);return n>=80&&n<100;}).length, color:'#06b6d4' },
-    { label: ar?'مراقبة 60–79':'Watch 60–79',   value: agents.filter((a:any)=>{const n=Number(a.net);return n>=60&&n<80;}).length, color:'#f59e0b' },
-    { label: ar?'خطر <60':'At risk <60',         value: agents.filter((a:any)=>Number(a.net)<60).length, color:'#f43f5e' },
+    { label: ar?'ممتاز ≥100':'Excellent ≥100', value: agents.filter((a:any)=>official(a)>=100).length, color:'#22c55e' },
+    { label: ar?'جيد 80–99':'Good 80–99',       value: agents.filter((a:any)=>{const n=official(a);return n>=80&&n<100;}).length, color:'#06b6d4' },
+    { label: ar?'مراقبة 60–79':'Watch 60–79',   value: agents.filter((a:any)=>{const n=official(a);return n>=60&&n<80;}).length, color:'#f59e0b' },
+    { label: ar?'خطر <60':'At risk <60',         value: agents.filter((a:any)=>Number.isFinite(official(a)) && official(a)<60).length, color:'#f43f5e' },
   ];
 
   return (
@@ -54,10 +61,16 @@ export default function ScorecardBoardPage() {
         <button onClick={()=>nav('/wfm-overview')} className="p-2 rounded-xl" style={{ background:'rgba(255,255,255,0.06)' }}><ArrowLeft size={16} className="text-white"/></button>
         <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#f59e0b,#8b5cf6)' }}><ClipboardList size={20} className="text-white"/></div>
         <div className="flex-1 min-w-[180px]"><h1 className="text-lg font-bold text-white">{ar?'لوحة السكور كارد':'Scorecard Board'}</h1>
-          <p className="text-xs text-slate-500">{ar?'السكوركارد الرسمي — عرض اللوحة (وكيل × أسبوع)':'Official scorecard — board view (agent × week)'}</p></div>
+          <p className="text-xs text-slate-500">{ar?'السكوركارد الرسمي — عرض اللوحة (وكيل × أسبوع)':'Official scorecard — board view (agent × week)'}
+            {d?.period ? <span className="text-slate-400"> · {d.period}</span> : null}</p></div>
         <div className="flex items-center gap-1.5"><Search size={14} className="text-slate-400"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={ar?'بحث':'Search'} className={inputCls}/></div>
         <select value={fn} onChange={e=>setFn(e.target.value)} className={inputCls}><option value="">{ar?'كل الفنكشن':'All functions'}</option>{(d?.filterOptions?.functions||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
         <select value={tl} onChange={e=>setTl(e.target.value)} className={inputCls}><option value="">{ar?'كل التيم ليدرز':'All TLs'}</option>{(d?.filterOptions?.teamLeaders||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}</select>
+        {/* The period is a REAL selector fed by the uploaded batches — the caption
+            used to be the hardcoded string "May 2026" regardless of what loaded. */}
+        <select value={period} onChange={e=>setPeriod(e.target.value)} className={inputCls} title={ar?'فترة السكوركارد':'Scorecard period'}>
+          {(d?.periodOptions||[]).map((x:string)=><option key={x} value={x}>{x}</option>)}
+        </select>
       </div>
 
       {loading && <p className="text-sm text-slate-500 py-8 text-center">{ar?'جارٍ التحميل…':'Loading…'}</p>}
@@ -91,7 +104,9 @@ export default function ScorecardBoardPage() {
                 <th className="px-2 py-2 text-start font-semibold">#</th><th className="px-2 py-2 text-start font-semibold">{ar?'الموظف':'Agent'}</th>
                 <th className="px-2 py-2 text-start font-semibold">{ar?'الفنكشن':'Function'}</th>
                 {kpis.map((k:any)=><th key={k.key} className="px-2 py-2 text-center font-semibold whitespace-nowrap" title={k.max!=null?`max ${k.max}`:''}>{k.label}{k.max!=null?<span className="text-slate-600"> /{k.max}</span>:''}</th>)}
-                <th className="px-2 py-2 text-center font-semibold">Net</th><th className="px-2 py-2 text-center font-semibold">{ar?'ترتيب':'Rank'}</th>
+                <th className="px-2 py-2 text-center font-semibold" title={ar?'متوسط أسابيع الموظف':"average of the agent's weeks"}>{ar?'Net (أسابيع)':'Net (weeks)'}</th>
+                <th className="px-2 py-2 text-center font-semibold" title={ar?'صف Final الرسمي':'the official Final row'}>{ar?'Net الرسمي':'Net (final)'}</th>
+                <th className="px-2 py-2 text-center font-semibold">{ar?'ترتيب':'Rank'}</th>
                 <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{ar?'وين النقص':'Weakest'}</th>
               </tr>
             </thead>
@@ -104,12 +119,13 @@ export default function ScorecardBoardPage() {
                     <td className="px-2 py-1.5 text-slate-400 whitespace-nowrap">{a.fn}</td>
                     {kpis.map((k:any)=>{ const v=a[k.key]==null?null:Number(a[k.key]); const act=a[k.key+'_act'];
                       return <td key={k.key} className="px-2 py-1.5 text-center"><div className="font-semibold" style={{ color:sc(v,k.max) }}>{v==null?'—':v}</div><div className="text-[8px] text-slate-500 leading-none">{fmtAct(k.unit,act)}</div></td>; })}
-                    <td className="px-2 py-1.5 text-center font-bold" style={{ color:netC(Number(a.net)) }}>{a.net}</td>
+                    <td className="px-2 py-1.5 text-center" style={{ color:a.net==null?'#64748b':netC(Number(a.net)) }}>{a.net ?? '—'}</td>
+                    <td className="px-2 py-1.5 text-center font-bold" style={{ color:a.final_net==null?'#64748b':netC(Number(a.final_net)) }}>{a.final_net ?? '—'}</td>
                     <td className="px-2 py-1.5 text-center text-slate-300">{a.rank!=null?`#${a.rank}`:'—'}</td>
                     <td className="px-2 py-1.5 text-start whitespace-nowrap">{a.weakest?<span style={{ color:'#f87171' }}>{a.weakest.label} <span className="text-slate-500">(−{a.weakest.gap})</span></span>:<span className="text-emerald-400">✓</span>}</td>
                   </tr>
                   {openRow===a.person_no && (
-                    <tr><td colSpan={kpis.length+6} className="px-3 py-2" style={{ background:'rgba(99,102,241,0.05)' }}>
+                    <tr><td colSpan={kpis.length+7} className="px-3 py-2" style={{ background:'rgba(99,102,241,0.05)' }}>
                       <p className="text-[10px] text-slate-400 mb-1">{ar?'التفصيل الأسبوعي':'Weekly breakdown'}</p>
                       {!weeks[a.person_no] ? <p className="text-[10px] text-slate-500">…</p> : (
                         <table className="w-full text-[10px]"><thead><tr className="text-slate-500"><th className="text-start">{ar?'الأسبوع':'Week'}</th>{kpis.map((k:any)=><th key={k.key} className="text-center">{k.label}</th>)}<th className="text-center">Net</th></tr></thead>
@@ -130,7 +146,10 @@ export default function ScorecardBoardPage() {
             </tbody>
           </table>
         </div>
-        <p className="text-[10px] text-slate-500">{ar?'الألوان حسب النقطة/السقف (أخضر≥90%). اضغط أي موظف للتفصيل الأسبوعي. مايو 2026.':'colours = score/max (green≥90%). Click an agent for the weekly breakdown. May 2026.'}</p>
+        <p className="text-[10px] text-slate-500">
+          {ar?'الألوان حسب النقطة/السقف (أخضر≥90%). اضغط أي موظف للتفصيل الأسبوعي.':'colours = score/max (green≥90%). Click an agent for the weekly breakdown.'}
+          {d?.period ? ` ${d.period}.` : ''} {d?.basis}
+        </p>
       </>)}
     </div>
   );

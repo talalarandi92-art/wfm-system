@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Activity, Upload, Download, Loader2, Users, Gauge, Phone, Clock } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
+import { fmtLocalDate } from '@/utils/format';
 
 interface AgentRow {
   userId: string; name: string; campaign: string; intervals: number;
@@ -42,7 +43,7 @@ export default function ProductivityPage() {
     const rows = res.agents.map(a => [a.userId, a.name, a.campaign, a.intervals, a.staffed, a.ready, a.productivityPct, a.occupancyPct, a.break, a.breakPct, a.idle, a.idlePct, a.voiceOff, a.talk, a.acw, a.wrappedCalls, a.aht]);
     const csv = '﻿' + [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = `agent_productivity_${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `agent_productivity_${fmtLocalDate(new Date())}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   const Metric = ({ icon: Icon, label, value, color }: any) => (

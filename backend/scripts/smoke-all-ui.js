@@ -90,6 +90,26 @@ function discover() {
      GROUP BY 1 ORDER BY SUM(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0)) DESC LIMIT 1`, [T]);
   const emp     = await one(`SELECT id::text FROM employees WHERE tenant_id=$1 LIMIT 1`, [T]);
   const usr     = await one(`SELECT id::text FROM users WHERE tenant_id=$1 LIMIT 1`, [T]);
+
+  /* A bare `${id}` means a DIFFERENT table on every route. Feeding an employee
+     uuid to an outage lookup proves nothing except that the row is missing, so
+     each route family gets a real id of its own kind where the table has one. */
+  const ID_OF = {};
+  for (const [re, sql] of [
+    ['/outages',            `SELECT id::text FROM outages WHERE tenant_id=$1 LIMIT 1`],
+    ['/technical-issues',   `SELECT id::text FROM technical_issues WHERE tenant_id=$1 LIMIT 1`],
+    ['/knowledge-base',     `SELECT id::text FROM kb_articles WHERE tenant_id=$1 LIMIT 1`],
+    ['/chat/channels',      `SELECT c.id::text FROM chat_channels c JOIN chat_channel_members m ON m.channel_id=c.id WHERE m.user_id=$2 LIMIT 1`],
+    ['/report-builder-v2/saved-reports',    `SELECT id::text FROM saved_reports WHERE tenant_id=$1 LIMIT 1`],
+    ['/report-builder-v2/saved-dashboards', `SELECT id::text FROM saved_dashboards WHERE tenant_id=$1 LIMIT 1`],
+    ['/forecasting/saved',  `SELECT id::text FROM forecast_scenarios WHERE tenant_id=$1 LIMIT 1`],
+    ['/imports',            `SELECT id::text FROM import_batches WHERE tenant_id=$1 LIMIT 1`],
+    ['/requests',           `SELECT id::text FROM requests WHERE tenant_id=$1 LIMIT 1`],
+    ['/reporter/runs',      `SELECT id::text FROM reporter_runs WHERE tenant_id=$1 LIMIT 1`],
+  ]) {
+    const r = await one(sql.includes('$2') ? sql : sql, sql.includes('$2') ? [T, u.id] : [T]);
+    if (r && r.id) ID_OF[re] = r.id;
+  }
   await c.end();
 
   const DATE = busiest.d || span.b, FROM = span.a, TO = span.b;
@@ -98,7 +118,7 @@ function discover() {
 
   /* Substitute `${expr}` by what the variable NAME means, not by its code. */
   const byName = [
-    [/weekstart|week_start|^week$|wk/i,        sat],
+    [/week(start|_start)?$|^wk/i,              sat],   // weekStart, selectedWeek, wk — but NOT plural 'weeks' (a count)
     [/from|start(date)?|since/i,               FROM],
     [/to\b|end(date)?|until/i,                 TO],
     [/month/i,                                 otMonth.m || DATE.slice(0, 7)],
@@ -112,10 +132,55 @@ function discover() {
     [/limit|count|top|months|weeks|days/i,     '6'],
     [/id$/i,                                   emp.id || '1'],
   ];
-  const fill = (raw) => raw.replace(/\$\{([^}]*)\}/g, (_, expr) => {
-    const hit = byName.find(([re]) => re.test(expr));
-    return encodeURIComponent(hit ? hit[1] : '');
-  });
+  /* A page that writes `?${qp}` is interpolating a whole URLSearchParams bag, not
+     one value. Substituting '' sent a query with NO parameters and every handler
+     with a required param answered 400 — the harness grading its own empty URL as
+     a product bug. Build the bag the page would have built instead. */
+  const BAG = /^(qp|pq|qs|q|params|sp|usp|query|args)\d*$/i;
+  const bagFor = (route) => {
+    const p = new URLSearchParams();
+    if (/person|agent-|\/me\//.test(route)) p.set('person', String(person.p));
+    if (/aFrom|period-compare/.test(route)) { p.set('aFrom', FROM); p.set('aTo', TO); p.set('bFrom', FROM); p.set('bTo', TO); }
+    p.set('from', FROM); p.set('to', TO);
+    if (/month/i.test(route)) p.set('month', otMonth.m || DATE.slice(0, 7));
+    if (/week/i.test(route)) p.set('weekStart', sat);
+    if (/date=/i.test(route)) p.set('date', DATE);
+    return p.toString();
+  };
+
+  /** true when a `${…}` could not be resolved to anything real. */
+  let unresolved = false;
+  const fill = (raw) => {
+    unresolved = false;
+    return raw.replace(/\$\{([^}]*)\}/g, (_, expr) => {
+      const e = expr.trim();
+      if (BAG.test(e)) {
+        // Some pages keep the leading '?' INSIDE the variable (const q = `?from=…`),
+        // others outside it (`…?${qp}`). Emit one iff the path has none already —
+        // without this the query was glued onto the route name and every such call
+        // 404'd on a path that does not exist.
+        const bag = bagFor(raw);
+        return raw.slice(0, raw.indexOf('${' + expr)).includes('?') ? bag : '?' + bag;
+      }
+      if (/^[a-z_]*id\d*$/i.test(e) || /id$/i.test(e)) {          // a row id → pick the right table
+        const hit = Object.keys(ID_OF).find((k) => raw.startsWith(k));
+        if (hit) return encodeURIComponent(ID_OF[hit]);
+        if (/employeeid|empid/i.test(e) && emp.id) return encodeURIComponent(emp.id);
+        if (/userid/i.test(e) && usr.id) return encodeURIComponent(usr.id);
+        unresolved = true;                                       // no row of this kind exists
+        return '00000000-0000-0000-0000-000000000000';
+      }
+      const hit = byName.find(([re]) => re.test(e));
+      if (!hit) { unresolved = true; return ''; }
+      return encodeURIComponent(hit[1]);
+    });
+  };
+
+  /* Documented, UI-handled precondition failures. Declared, not silenced — they
+     are printed in their own bucket so the claim stays checkable. */
+  const EXPECTED_400 = [
+    [/\/breaks\/my-break-status/, 'admin has no linked employee — BreakCard renders the "not linked" state off this exact 400'],
+  ];
 
   const token = jwt.sign({ sub: u.id, tenantId: T }, process.env.JWT_ACCESS_SECRET, { expiresIn: '45m' });
   const discovered = discover();
@@ -123,19 +188,26 @@ function discover() {
   console.log(`WHOLE-UI SMOKE as [${ROLE}] · ${discovered.size} endpoints discovered by reading ${FE.replace(/\\/g, '/')}`);
   console.log(`  anchors — day ${DATE} · week ${sat} · span ${FROM}→${TO} · fn "${fn.f}" · person ${person.p} (${person.n}) · month ${otMonth.m}\n`);
 
-  const skipped = [], fails = [], slow = [], authz = [];
+  const skipped = [], fails = [], slow = [], authz = [], unbuildable = [], expected = [];
   let ok = 0;
 
   for (const [raw, files] of [...discovered.entries()].sort()) {
     const ex = EXCLUDE.find(([re]) => re.test(raw));
     if (ex) { skipped.push({ raw, why: ex[1] }); continue; }
-    const url = `${BASE}/api/v1${fill(raw)}`;
+    const filled = fill(raw);
+    const couldNotBuild = unresolved;
+    const url = `${BASE}/api/v1${filled}`;
     const t0 = Date.now();
     try {
       const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       const ms = Date.now() - t0;
+      // a 500 is ALWAYS a product failure, however the URL was built
       if (r.status >= 500) { fails.push({ raw, status: r.status, files: [...files], ms }); continue; }
       if (r.status === 401 || r.status === 403) { authz.push({ raw, status: r.status }); continue; }
+      const exp = EXPECTED_400.find(([re]) => re.test(raw));
+      if (r.status === 400 && exp) { expected.push({ raw, why: exp[1] }); continue; }
+      // 404 on an id this harness had to invent says nothing about the product
+      if (couldNotBuild && (r.status === 404 || r.status === 400)) { unbuildable.push({ raw, status: r.status }); continue; }
       if (r.status >= 400) { fails.push({ raw, status: r.status, files: [...files], ms }); continue; }
       ok++;
       if (ms > 1500) slow.push({ raw, ms });
@@ -146,7 +218,8 @@ function discover() {
   }
 
   console.log(`${'═'.repeat(74)}`);
-  console.log(`  OK ${ok}   FAIL ${fails.length}   authz-blocked ${authz.length}   skipped ${skipped.length}`);
+  console.log(`  OK ${ok}   FAIL ${fails.length}   authz-blocked ${authz.length}   ` +
+              `expected-400 ${expected.length}   no-test-row ${unbuildable.length}   skipped ${skipped.length}`);
   if (fails.length) {
     console.log('\n  FAILURES — a page in the product calls each of these:');
     for (const f of fails) console.log(`   ✗ ${f.status}  ${f.raw}\n        called from: ${f.files.slice(0, 3).join(', ')}`);
@@ -154,6 +227,16 @@ function discover() {
   if (slow.length && SLOW) {
     console.log('\n  SLOW (>1.5s) — works, but would feel sluggish live:');
     for (const s of slow.sort((a, b) => b.ms - a.ms)) console.log(`   ! ${String(s.ms).padStart(6)}ms  ${s.raw}`);
+  }
+  if (expected.length) {
+    console.log('\n  EXPECTED 400 — the UI reads this exact response as a state, not an error:');
+    for (const e of expected) console.log(`   · ${e.raw}\n        ${e.why}`);
+  }
+  if (unbuildable.length) {
+    console.log('\n  NO TEST ROW — the route needs an id of a kind this database has none of,');
+    console.log('  so the harness could not build a real URL. NOT a product failure; listed so');
+    console.log('  the coverage number is not quietly inflated:');
+    for (const u2 of unbuildable) console.log(`   · ${u2.status}  ${u2.raw}`);
   }
   if (skipped.length) {
     console.log('\n  Deliberately not smoked (stated so the coverage claim stays honest):');

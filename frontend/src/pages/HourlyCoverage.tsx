@@ -8,13 +8,17 @@ import { FunctionFilter } from '@/components/FunctionFilter';
 import { apiClient } from '@/api/client';
 import { tp, ts as tsColor, useInjectDsStyles, gapColor } from '@/components/ds';
 
+/* `required` and `gap` are NULL when the function has no same-weekday history to
+   model a requirement from. They must never be coerced to 0: "we could not model
+   this" would render as "zero staff needed", i.e. a comfortable surplus. */
 interface HourRow {
-  hour: number; required: number; scheduled: number; available: number;
-  onSick: number; onAbsent: number; onPermission: number; late: number; earlyOut: number; ot: number; gap: number;
+  hour: number; required: number | null; scheduled: number; available: number;
+  onSick: number; onAbsent: number; onPermission: number; late: number; earlyOut: number; ot: number;
+  gap: number | null; modelled: boolean;
 }
 interface FnCoverage {
   functionId: string; functionName: string; hours: HourRow[];
-  summary: { late: number; overtime: number; earlyOut: number; sick: number; absent: number; permissions: number; worstGap: number };
+  summary: { late: number; overtime: number; earlyOut: number; sick: number; absent: number; permissions: number; worstGap: number | null; modelled: boolean };
 }
 interface Resp { date: string; basis: string; functions: FnCoverage[] }
 
@@ -81,14 +85,19 @@ export default function HourlyCoveragePage() {
         <div className="space-y-4">
           <p className="text-[10px]" style={{ color: 'var(--text-3)' }}>{data.basis}</p>
           {data.functions.map(fn => {
-            const maxVal = Math.max(...fn.hours.flatMap(h => [h.required, h.scheduled]), 1);
+            const maxVal = Math.max(...fn.hours.flatMap(h => [h.required ?? 0, h.scheduled]), 1);
             return (
               <div key={fn.functionId} className="rounded-2xl overflow-hidden" style={panel}>
                 {/* Function header + summary chips */}
                 <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap" style={{ borderBottom: '1px solid var(--border)', background: 'rgba(99,102,241,0.05)' }}>
                   <span className="text-sm font-bold" style={{ color: tp(dark) }}>{fn.functionName}</span>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    {fn.summary.worstGap < 0 && (
+                    {!fn.summary.modelled && (
+                      <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg font-bold" style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}>
+                        {ar ? 'ما فيه تاريخ لنفس اليوم — الاحتياج ما اتحسب' : 'no same-weekday history — requirement not modelled'}
+                      </span>
+                    )}
+                    {fn.summary.worstGap != null && fn.summary.worstGap < 0 && (
                       <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg font-bold" style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
                         <AlertTriangle size={10} /> {ar ? 'أسوأ فجوة' : 'worst gap'} {fn.summary.worstGap}
                       </span>
@@ -121,7 +130,9 @@ export default function HourlyCoveragePage() {
                       {fn.hours.map(h => (
                         <tr key={h.hour} style={{ borderBottom: '1px solid var(--border)' }}>
                           <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: 'var(--text-2)' }}>{hh(h.hour)}</td>
-                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: '#818cf8' }}>{h.required}</td>
+                          <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.required == null ? 'var(--text-3)' : '#818cf8' }}
+                              title={h.required == null ? (ar ? 'ما فيه تاريخ كافي لحساب الاحتياج' : 'not enough history to model a requirement') : undefined}>
+                            {h.required ?? '—'}</td>
                           <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: 'var(--text-1)' }}>{h.scheduled}</td>
                           <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.onPermission ? '#a78bfa' : 'var(--text-3)' }}>{h.onPermission || '·'}</td>
                           <td className="px-3 py-1.5 text-xs tabular-nums" style={{ color: h.late ? '#fb923c' : 'var(--text-3)' }}>{h.late || '·'}</td>
@@ -135,13 +146,16 @@ export default function HourlyCoveragePage() {
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-1.5 text-xs font-bold tabular-nums" style={{ color: gapColor(h.gap, -1) }}>{h.gap >= 0 ? `+${h.gap}` : h.gap}</td>
+                          <td className="px-3 py-1.5 text-xs font-bold tabular-nums" style={{ color: h.gap == null ? 'var(--text-3)' : gapColor(h.gap, -1) }}>
+                            {h.gap == null ? '—' : h.gap >= 0 ? `+${h.gap}` : h.gap}</td>
                           <td className="px-3 py-1.5" style={{ minWidth: 160 }}>
                             <div className="relative h-3 rounded" style={{ background: 'var(--surface-2)' }}>
-                              {/* required marker */}
-                              <div className="absolute top-0 bottom-0" style={{ left: `${(h.required / maxVal) * 100}%`, width: 2, background: '#818cf8' }} />
+                              {/* required marker — omitted entirely when unmodelled, rather than pinned at 0 */}
+                              {h.required != null && (
+                                <div className="absolute top-0 bottom-0" style={{ left: `${(h.required / maxVal) * 100}%`, width: 2, background: '#818cf8' }} />
+                              )}
                               {/* available bar */}
-                              <div className="h-full rounded" style={{ width: `${(h.available / maxVal) * 100}%`, background: gapColor(h.gap, -1), opacity: 0.7 }} />
+                              <div className="h-full rounded" style={{ width: `${(h.available / maxVal) * 100}%`, background: h.gap == null ? 'var(--text-3)' : gapColor(h.gap, -1), opacity: 0.7 }} />
                             </div>
                           </td>
                         </tr>

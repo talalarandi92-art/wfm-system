@@ -10,6 +10,7 @@ import { StaffingService } from './staffing.service';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
+import { kwToday } from '@common/kw-date';
 
 @Controller('capacity')
 @UseGuards(JwtAuthGuard)
@@ -33,7 +34,7 @@ export class CapacityController {
 
   @Get('hc-overview')
   getHcOverview(@CurrentUser() user: any, @Query('date') date: string) {
-    const d = date || new Date().toISOString().slice(0, 10);
+    const d = date || kwToday();
     return this.svc.getCurrentHcOverview(this.tid(user), d);
   }
 
@@ -43,7 +44,7 @@ export class CapacityController {
     @Query('functionId') functionId: string,
     @Query('date') date: string,
   ) {
-    const d = date || new Date().toISOString().slice(0, 10);
+    const d = date || kwToday();
     return this.svc.getHcByInterval(this.tid(user), functionId, d);
   }
 

@@ -15,6 +15,7 @@ import { rosterCacheInvalidate } from '@common/ttl-cache.interceptor';
 import { ReconService } from './recon.service';
 import { RosterIngestionService } from './roster-ingestion.service';
 import { RosterSharedService } from './roster-shared.service';
+import { kwToday } from '@common/kw-date';
 
 // Source files live server-side (Ameyo export alone is ~72MB). EVERY path is
 // env-driven so nothing Windows-specific is baked in for a server deploy; the
@@ -280,7 +281,7 @@ export class ReconController {
   @RequirePermissions('attendance.view_team')
   @ApiOperation({ summary: 'HR attendance matrix .xlsx — Update (past week actual) + Advance (next week planned) sheets' })
   async hrMatrix(@Req() req: any, @Res() res: Response, @Query('ref') ref?: string) {
-    const r = ref || new Date().toISOString().slice(0, 10);
+    const r = ref || kwToday();
     const buf = await this.ingestion.hrMatrix(req.user.tenantId, r);
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

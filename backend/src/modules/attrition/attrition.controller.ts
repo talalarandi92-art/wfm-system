@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
+import { kwToday } from '@common/kw-date';
 
 /**
  * Attrition from the schedule's separation markers, over the canonical roster
@@ -41,8 +42,8 @@ export class AttritionController {
       `SELECT MIN(work_date)::text mn, MAX(work_date)::text mx
          FROM roster_days r
         WHERE r.tenant_id = $1 AND ${MARK} IN ('RES','TER','TRANSFER')`, [tid]).catch(() => [{}]);
-    const fromD = from ?? span?.mn ?? new Date().toISOString().slice(0, 10);
-    const toD   = to   ?? span?.mx ?? new Date().toISOString().slice(0, 10);
+    const fromD = from ?? span?.mn ?? kwToday();
+    const toD   = to   ?? span?.mx ?? kwToday();
 
     // Separations: one per canonical person (is_active dedupes old↔new intern ids).
     // function = the person's last real function before they left (per-month aware).
@@ -99,8 +100,12 @@ export class AttritionController {
     const involuntary = separations.filter((s: any) => s.code === 'TER').length;
     const avgHc = hc?.avg_hc ?? 0;
     const months = Math.max(hc?.months ?? 1, 1);
-    const ratePeriod = avgHc > 0 ? +((total / avgHc) * 100).toFixed(1) : 0;
-    const rateAnnualized = +(ratePeriod * (12 / months)).toFixed(1);
+    /* NULL, not 0, when there is no headcount to divide by. Zero was rendered as a
+       large green "0%" — the frontend's rateColor tints anything under 20 green — so
+       a window with NO ROSTER DATA read as perfect retention. An attrition rate that
+       could not be computed must say so. */
+    const ratePeriod = avgHc > 0 ? +((total / avgHc) * 100).toFixed(1) : null;
+    const rateAnnualized = ratePeriod == null ? null : +(ratePeriod * (12 / months)).toFixed(1);
 
     const byFunction = this.group(separations, (s: any) => s.function_name);
     const byMonth = this.group(separations, (s: any) => s.separation_date.slice(0, 7));

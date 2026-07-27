@@ -21,6 +21,7 @@ import { DateRangePicker, DateRangeValue, presetById } from '@/components/report
 import { WidgetCard } from '@/components/report-builder/dashboard/WidgetCard';
 import { WidgetEditor } from '@/components/report-builder/dashboard/WidgetEditor';
 import { loadSources } from '@/components/report-builder/dashboard/sourceCatalog';
+import { fmtLocalDate } from '@/utils/format';
 import {
   SectionConfig, WidgetConfig, SavedDashboard, SavedReportLite, DashFilter,
   newSection, newWidget, defaultRange, uid,
@@ -70,7 +71,7 @@ export default function DashboardBuilderPage() {
     refreshSaved();
     apiClient.get('/report-builder-v2/saved-reports').then((r: any) => setSavedReports(r.data ?? [])).catch(() => {});
     // function list for the cascade chip (attendance carries every function)
-    apiClient.post('/report-builder-v2/run', { sourceKey: 'attendance', dimensions: ['function'], metrics: ['workedDays'], dateFrom: '2020-01-01', dateTo: new Date().toISOString().slice(0, 10), granularity: 'none', limit: 200 })
+    apiClient.post('/report-builder-v2/run', { sourceKey: 'attendance', dimensions: ['function'], metrics: ['workedDays'], dateFrom: '2020-01-01', dateTo: fmtLocalDate(new Date()), granularity: 'none', limit: 200 })
       .then((r: any) => setFunctions((r.data?.rows ?? []).map((x: any) => x.function).filter(Boolean).sort()))
       .catch(() => {});
   }, []); // eslint-disable-line

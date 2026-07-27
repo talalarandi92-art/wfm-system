@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { UpsertCampaignDto } from './dto/upsert-campaign.dto';
+import { kwToday } from '@common/kw-date';
 
 /**
  * Campaign / Blackout Calendar.
@@ -24,7 +25,7 @@ export class CampaignsController {
   constructor(@InjectDataSource() private readonly ds: DataSource) {}
 
   private shape(r: any) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = kwToday();
     const start = String(r.start_date).slice(0, 10);
     const end   = String(r.end_date).slice(0, 10);
     const status = today < start ? 'upcoming' : today > end ? 'past' : 'active';
@@ -78,7 +79,7 @@ export class CampaignsController {
   @Get('active')
   @ApiOperation({ summary: 'Campaigns covering a date' })
   async activeOn(@CurrentUser() user: any, @Query('date') date?: string) {
-    const d = date ?? new Date().toISOString().slice(0, 10);
+    const d = date ?? kwToday();
     const rows = await this.ds.query(
       `SELECT c.*, NULL AS created_by_name FROM campaigns c
        WHERE c.tenant_id = $1 AND c.is_active = TRUE AND $2::date BETWEEN c.start_date AND c.end_date
@@ -96,7 +97,7 @@ export class CampaignsController {
     @Query('date') date: string,
     @Query('type') type?: string,
   ) {
-    const d = date ?? new Date().toISOString().slice(0, 10);
+    const d = date ?? kwToday();
     const rows = await this.ds.query(
       `SELECT * FROM campaigns
        WHERE tenant_id = $1 AND is_active = TRUE AND restrict_requests = TRUE

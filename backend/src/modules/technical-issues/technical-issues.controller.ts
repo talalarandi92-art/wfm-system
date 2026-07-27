@@ -1,7 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Delete,
-  Param, Query, Body, UseGuards, UseInterceptors, UploadedFile,
-  BadRequestException, UnauthorizedException, ForbiddenException, Res,
+  Controller, Get, Post, Patch, Delete, Param, Query, Body, UseGuards, UseInterceptors, UploadedFile, BadRequestException, UnauthorizedException, ForbiddenException, Res, NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -170,7 +168,7 @@ export class TechnicalIssuesController {
     const [issue] = await this.ds.query(
       `SELECT * FROM agent_tech_reports WHERE id = $1 AND tenant_id = $2`, [id, tid],
     );
-    if (!issue) throw new BadRequestException('Issue not found');
+    if (!issue) throw new NotFoundException('Issue not found');
     // Non-viewers (agents) may only open their own report.
     const perms = user?.permissionCodes ?? user?.permissions ?? [];
     if (!perms.includes('tech_issues.view') && issue.reporter_id !== (user?.userId ?? user?.sub)) {
@@ -211,7 +209,7 @@ export class TechnicalIssuesController {
     const [issue] = await this.ds.query(
       `SELECT id FROM agent_tech_reports WHERE id = $1 AND tenant_id = $2`, [id, tid],
     );
-    if (!issue) throw new BadRequestException('Issue not found');
+    if (!issue) throw new NotFoundException('Issue not found');
 
     await this.ds.query(`
       INSERT INTO agent_tech_report_attachments
@@ -236,7 +234,7 @@ export class TechnicalIssuesController {
       `SELECT stored_name FROM agent_tech_report_attachments WHERE id = $1 AND report_id = $2 AND tenant_id = $3`,
       [aid, id, tid],
     );
-    if (!row) throw new BadRequestException('Attachment not found');
+    if (!row) throw new NotFoundException('Attachment not found');
 
     const filePath = join(UPLOAD_DIR, row.stored_name);
     if (existsSync(filePath)) unlinkSync(filePath);
@@ -258,7 +256,7 @@ export class TechnicalIssuesController {
     const [issue] = await this.ds.query(
       `SELECT * FROM agent_tech_reports WHERE id = $1 AND tenant_id = $2`, [id, tid],
     );
-    if (!issue) throw new BadRequestException('Issue not found');
+    if (!issue) throw new NotFoundException('Issue not found');
     if (issue.status !== 'pending_rta') throw new BadRequestException('Issue is not pending RTA validation');
 
     if (body.convertToOutage) {
@@ -353,7 +351,7 @@ export class TechnicalIssuesController {
     const [issue] = await this.ds.query(
       `SELECT * FROM agent_tech_reports WHERE id = $1 AND tenant_id = $2`, [id, tid],
     );
-    if (!issue) throw new BadRequestException('Issue not found');
+    if (!issue) throw new NotFoundException('Issue not found');
     const perms = user?.permissionCodes ?? user?.permissions ?? [];
     if (!perms.includes('tech_issues.view') && issue.reporter_id !== (user?.userId ?? user?.sub)) {
       throw new ForbiddenException('Not allowed to view this report');

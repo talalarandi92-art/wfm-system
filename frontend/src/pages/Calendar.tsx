@@ -7,6 +7,7 @@ import {
 import { apiClient } from '../api/client';
 import { useUiStore } from '../store/ui.store';
 import { ts as tsTok } from '@/components/ds';
+import { kwToday } from '@/utils/format';
 
 /* ── Theme-aware neutral tokens ──────────────────────────────────────────────
    Centralizes the calendar's surface / border / text / overlay neutrals. Dark
@@ -397,7 +398,7 @@ export default function CalendarPage() {
   ];
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = kwToday();   // BR-TIM-001: toISOString() highlighted the wrong cell before 03:00
 
   return (
     <div className="p-6 min-h-full" dir={ar ? 'rtl' : 'ltr'}>

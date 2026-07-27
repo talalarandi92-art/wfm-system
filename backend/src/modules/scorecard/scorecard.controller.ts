@@ -17,6 +17,8 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { ScorecardUploadService } from './scorecard-upload.service';
 import { ScorecardScoringService } from './scorecard-scoring.service';
 import { AutoScoringReadinessService } from './auto-scoring-readiness.service';
+import { kwToday, fmtLocalDate } from '@common/kw-date';
+import { PUNCH_LATE } from '@common/wfm-metrics';
 
 /* ─── incentive tiers per function (KD) ─────────────────────────────────── */
 const INCENTIVE_TIERS = [
@@ -88,8 +90,8 @@ export class ScorecardController {
     const [dateRow] = await this.ds.query(
       `SELECT MAX(attendance_date) AS latest FROM attendance_records WHERE tenant_id = $1`, [tid],
     );
-    const latestRaw = dateRow.latest instanceof Date ? dateRow.latest.toISOString() : (dateRow.latest ?? new Date().toISOString());
-    const latest = latestRaw.slice(0, 10);
+    // BR-TIM-001: a pg `date` arrives as LOCAL midnight — toISOString() would name yesterday
+    const latest = fmtLocalDate(dateRow.latest) ?? kwToday();
     const fromDate = from ?? latest.slice(0, 7) + '-01';
     const toDate   = to   ?? latest;
 
@@ -185,8 +187,8 @@ export class ScorecardController {
     const [dateRow] = await this.ds.query(
       `SELECT MAX(attendance_date) AS latest FROM attendance_records WHERE tenant_id = $1`, [tid],
     );
-    const latestRaw2 = dateRow.latest instanceof Date ? dateRow.latest.toISOString() : (dateRow.latest ?? new Date().toISOString());
-    const latest = latestRaw2.slice(0, 10);
+    // BR-TIM-001 — same as above; this is the second call site of the identical bug
+    const latest = fmtLocalDate(dateRow.latest) ?? kwToday();
     const fromDate = from ?? latest.slice(0, 7) + '-01';
     const toDate   = to   ?? latest;
 
@@ -194,13 +196,18 @@ export class ScorecardController {
     const scope = await this.resolveScope(user);
     let fScope = '';
     if (!scope.all) { fParams.push(scope.empIds); fScope = `AND e.id = ANY($${fParams.length}::uuid[])`; }
+    /* NOTE — `ot_minutes` below is the THIN single-column legacy source on
+       attendance_records. It structurally cannot reach TRUE_OT (ot + offday +
+       holiday, BR-OT-001) and runs ~28% short of every other OT surface. This
+       endpoint currently has no UI consumer; retargeting it to roster_days is
+       tracked separately rather than changed silently here. */
     const rows = await this.ds.query(
       `SELECT f.name AS function_name,
          COUNT(DISTINCT e.id) AS headcount,
          COUNT(ar.id) FILTER (WHERE ar.attendance_marker = 'present') AS present_total,
          COUNT(ar.id) FILTER (WHERE ar.attendance_marker IN ('absent','sick')) AS absent_total,
-         COUNT(ar.id) FILTER (WHERE ar.punch_late_minutes > 0 AND ar.attendance_marker='present') AS late_total,
-         COALESCE(SUM(ar.punch_late_minutes) FILTER (WHERE ar.punch_late_minutes > 0),0) AS late_minutes_total,
+         COUNT(ar.id) FILTER (WHERE ${PUNCH_LATE} AND ar.attendance_marker='present') AS late_total,
+         COALESCE(SUM(ar.punch_late_minutes) FILTER (WHERE ${PUNCH_LATE}),0) AS late_minutes_total,
          COUNT(ar.id) FILTER (WHERE ar.is_missing_punch AND ar.attendance_marker='present') AS missing_punch_total,
          COALESCE(SUM(ar.ot_minutes) FILTER (WHERE ar.ot_minutes > 0),0) AS ot_minutes_total,
          ROUND(100.0 * COUNT(ar.id) FILTER (WHERE ar.attendance_marker='present') /
@@ -478,14 +485,18 @@ export class ScorecardController {
     const toN = (v: any) => v === null || v === undefined ? null : parseInt(v, 10);
     const toF = (v: any) => v === null || v === undefined ? null : parseFloat(v);
 
+    /* COUNTs are genuinely zero when nothing matched — "no employees passed" is a
+       measurement. AVG/MIN/MAX over an empty set are NOT: `?? 0` reported an
+       average score of 0 for a period with no scored rows, which reads as the
+       whole centre failing. Those stay null and render as "—". */
     return {
       totals: {
         totalEmployees: toN(totals?.total_employees) ?? 0,
         passing:        toN(totals?.passing) ?? 0,
         failing:        toN(totals?.failing) ?? 0,
-        overallAvg:     toF(totals?.overall_avg) ?? 0,
-        highest:        toN(totals?.highest) ?? 0,
-        lowest:         toN(totals?.lowest) ?? 0,
+        overallAvg:     toF(totals?.overall_avg),
+        highest:        toN(totals?.highest),
+        lowest:         toN(totals?.lowest),
       },
       functionAverages: fnAvgs.map((r: any) => ({
         functionName:    r.function_name,

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { kwToday, fmtLocalDate, addDays } from '@common/kw-date';
 
 /**
  * Deep workforce analytics over attendance_records.
@@ -22,7 +23,7 @@ export class AnalyticsService {
     const [r] = await this.ds.query(
       `SELECT MAX(attendance_date) AS latest FROM attendance_records WHERE tenant_id=$1`, [tenantId],
     );
-    const latest = (r.latest instanceof Date ? r.latest.toISOString() : (r.latest ?? new Date().toISOString())).slice(0, 10);
+    const latest = fmtLocalDate(r.latest) ?? kwToday();   // BR-TIM-001
     return { from: from ?? latest.slice(0, 7) + '-01', to: to ?? latest };
   }
 
@@ -220,7 +221,7 @@ export class AnalyticsService {
       const planned = parseInt(r.planned, 10), unplanned = parseInt(r.unplanned, 10);
       return {
         bucket: r.bucket,
-        firstDay: r.first_day instanceof Date ? r.first_day.toISOString().slice(0, 10) : r.first_day,
+        firstDay: fmtLocalDate(r.first_day),
         scheduled: parseInt(r.scheduled, 10),
         plannedPct: Math.round(1000 * planned / sched) / 10,
         unplannedPct: Math.round(1000 * unplanned / sched) / 10,
@@ -336,16 +337,18 @@ export class AnalyticsService {
     const dayNamesEn = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const forecast: any[] = [];
     for (let d = 0; d < horizonDays; d++) {
-      const date = new Date();
-      date.setDate(date.getDate() + d + 1);              // start tomorrow
-      const dow = date.getDay();
+      /* One clock for both fields. This used to take `dow` from a LOCAL Date and
+         the printed date from toISOString() — before 03:00 Kuwait those disagreed,
+         so a forecast row carried Monday's profile under Sunday's date. */
+      const iso = addDays(kwToday(), d + 1);             // start tomorrow
+      const dow = new Date(iso + 'T00:00:00Z').getUTCDay();
       const hours: { hour: number; forecastHc: number }[] = [];
       for (let h = 0; h < 24; h++) {
         const v = avg[`${dow}-${h}`] ?? 0;
         hours.push({ hour: h, forecastHc: Math.round(v * 10) / 10 });
       }
       forecast.push({
-        date: date.toISOString().slice(0, 10),
+        date: iso,
         dow, dayName: dayNamesEn[dow], dayNameAr: dayNamesAr[dow],
         peakHc: Math.max(0, ...hours.map(x => x.forecastHc)),
         hours,

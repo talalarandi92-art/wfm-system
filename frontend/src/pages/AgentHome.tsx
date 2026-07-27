@@ -11,6 +11,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { conformanceGrade } from '@/utils/format';
 import { tp, ts as tsColor } from '@/components/ds';
 import BreakCard from '@/components/breaks/BreakCard';
+import { fmtLocalDate } from '@/utils/format';
 
 // Theme-aware neutral tokens (semantic status colors stay hardcoded — same meaning in every theme)
 const neutralT = (dark: boolean) => ({
@@ -69,7 +70,7 @@ const LEAVE_AR: Record<string, string> = {
   death: 'إجازة وفاة', comp_off: 'يوم تعويضي', annual_leave: 'إجازة سنوية', sick_leave: 'إجازة مرضية',
 };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+const todayISO = () => fmtLocalDate(new Date());
 const fmtD = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 const fmtDT = (d: string) => new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
 

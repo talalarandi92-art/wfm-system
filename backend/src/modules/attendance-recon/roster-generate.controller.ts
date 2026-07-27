@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, Req, UseGuards, NotFoundException,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -7,6 +9,7 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { shiftCategoryFromCode, shiftCategoryCaseSql } from '@common/shift-category';
 import { RosterSharedService } from './roster-shared.service';
 import { scoreScheduleQuality, QualityRow } from '../schedule-generator/verdict.engine';
+import { kwToday } from '@common/kw-date';
 
 /* Schedule generators (ladder / demand mix / weekly assignment), drafts and
  * publish/unpublish, split VERBATIM out of the monolithic ReconController
@@ -40,7 +43,7 @@ export class RosterGenerateController {
     // function key is CANONICAL (interns fold into their parent team for headcount — Director rule)
     let fn = functionName ? functionName.replace(/^\s*[Ii]nternship\s+/, '') : functionName;
     if (!fn) { const [top] = await this.ds.query(`SELECT canon_fn(COALESCE(role_function,function_name)) fn FROM roster_days WHERE tenant_id=$1 AND is_active AND shift_start_min IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 1`, [t]); fn = top?.fn; }
-    const ws = snapSat(weekStart || (frontier ? (() => { const d = new Date(frontier + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })() : new Date().toISOString().slice(0, 10)));
+    const ws = snapSat(weekStart || (frontier ? (() => { const d = new Date(frontier + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })() : kwToday()));
     const weeks = Math.max(1, Math.min(4, parseInt(weeksQ || '2', 10)));
     const nDays = weeks * 7;
     const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -487,7 +490,7 @@ export class RosterGenerateController {
   async getDraft(@Req() req: any, @Query('id') id: string) {
     if (!id) throw new BadRequestException('id required');
     const [row] = await this.ds.query(`SELECT id, function, week_start::text "weekStart", label, payload, created_at FROM schedule_drafts WHERE tenant_id=$1 AND id=$2`, [req.user.tenantId, id]);
-    if (!row) throw new BadRequestException('draft not found');
+    if (!row) throw new NotFoundException('draft not found');
     return { id: row.id, ...row.payload, label: row.label, createdAt: row.created_at };
   }
 
@@ -504,7 +507,7 @@ export class RosterGenerateController {
     let weekStart = body?.weekStart;
     if (!weekStart) {
       const [{ mx }] = await this.ds.query(`SELECT MAX(attendance_date)::text mx FROM attendance_records WHERE tenant_id=$1`, [t]);
-      const dt = new Date(`${mx || new Date().toISOString().slice(0, 10)}T00:00:00Z`); let add = (6 - dt.getUTCDay() + 7) % 7; if (add === 0) add = 7;
+      const dt = new Date(`${mx || kwToday()}T00:00:00Z`); let add = (6 - dt.getUTCDay() + 7) % 7; if (add === 0) add = 7;
       dt.setUTCDate(dt.getUTCDate() + add); weekStart = dt.toISOString().slice(0, 10);
     }
     // resolve canonical person_no → employees.id, and shift code → shift_codes (id/start/end)

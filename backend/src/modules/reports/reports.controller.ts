@@ -8,7 +8,7 @@ import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { ReportsService } from './reports.service';
-
+import { kwToday, fmtLocalDate } from '@common/kw-date';
 // Build a CSV string from an array of objects using its keys as headers.
 function rowsToCsv(rows: any[]): string {
   if (!rows.length) return '';
@@ -208,7 +208,7 @@ export class ReportsController {
     const [dateRow] = await this.ds.query(
       `SELECT MAX(attendance_date) AS latest FROM attendance_records WHERE tenant_id = $1`, [tid],
     );
-    const latest = (dateRow.latest instanceof Date ? dateRow.latest.toISOString() : (dateRow.latest ?? new Date().toISOString())).slice(0, 10);
+    const latest = fmtLocalDate(dateRow.latest) ?? kwToday();   // BR-TIM-001
     const fromDate = from ?? latest.slice(0, 7) + '-01';
     const toDate   = to   ?? latest;
 
@@ -306,7 +306,7 @@ export class ReportsController {
     const [dateRow] = await this.ds.query(
       `SELECT MAX(attendance_date) AS latest FROM attendance_records WHERE tenant_id = $1`, [tid],
     );
-    const latest = (dateRow.latest instanceof Date ? dateRow.latest.toISOString() : (dateRow.latest ?? new Date().toISOString())).slice(0, 10);
+    const latest = fmtLocalDate(dateRow.latest) ?? kwToday();   // BR-TIM-001
     const fromDate = from ?? latest.slice(0, 7) + '-01';
     const toDate   = to   ?? latest;
 
@@ -375,7 +375,7 @@ export class ReportsController {
     const [dateRow] = await this.ds.query(
       `SELECT MAX(attendance_date) AS latest FROM attendance_records WHERE tenant_id = $1`, [tid],
     );
-    const latest = (dateRow.latest instanceof Date ? dateRow.latest.toISOString() : (dateRow.latest ?? new Date().toISOString())).slice(0, 10);
+    const latest = fmtLocalDate(dateRow.latest) ?? kwToday();   // BR-TIM-001
     const fromDate = from ?? latest.slice(0, 7) + '-01';
     const toDate   = to   ?? latest;
 
@@ -447,7 +447,7 @@ export class ReportsController {
     const tid    = user.tenantId;
     const limit  = format === 'csv' ? 5000 : parseInt(limitQ ?? '100', 10);
     const offset = parseInt(offsetQ ?? '0', 10);
-    const toDate   = to   ?? new Date().toISOString().slice(0, 10);
+    const toDate   = to   ?? kwToday();
     const fromDate = from ?? toDate.slice(0, 7) + '-01';
 
     const params: any[] = [tid, fromDate, toDate];
@@ -528,7 +528,7 @@ export class ReportsController {
     @Res({ passthrough: true }) res?: Response,
   ) {
     const tid = user.tenantId;
-    const toDate   = to   ?? new Date().toISOString().slice(0, 10);
+    const toDate   = to   ?? kwToday();
     const fromDate = from ?? toDate.slice(0, 7) + '-01';
 
     const rows = await this.ds.query(

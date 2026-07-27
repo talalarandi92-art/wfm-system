@@ -1,6 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Query,
-  Request, Res, StreamableFile, UseGuards, HttpCode, HttpStatus, BadRequestException,
+  Controller, Get, Post, Patch, Body, Param, Query, Request, Res, StreamableFile, UseGuards, HttpCode, HttpStatus, BadRequestException, NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
@@ -183,7 +182,7 @@ export class BreaksController {
     @Body() body: Record<string, unknown>,
   ) {
     const res = await this.policyService.updatePolicy(req.user.tenantId, id, body);
-    if (!res) throw new BadRequestException('Policy not found');
+    if (!res) throw new NotFoundException('Policy not found');
     await this.policyService.audit(
       req.user.tenantId, { id: req.user.id, email: req.user.email },
       'breaks.policy.updated', 'break_policies_v2', id,
