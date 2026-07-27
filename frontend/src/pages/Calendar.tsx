@@ -7,7 +7,7 @@ import {
 import { apiClient } from '../api/client';
 import { useUiStore } from '../store/ui.store';
 import { ts as tsTok } from '@/components/ds';
-import { kwToday } from '@/utils/format';
+import { kwToday, readableOn } from '@/utils/format';
 
 /* ── Theme-aware neutral tokens ──────────────────────────────────────────────
    Centralizes the calendar's surface / border / text / overlay neutrals. Dark
@@ -553,7 +553,10 @@ export default function CalendarPage() {
                     <span className="text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full"
                       style={{
                         background: isToday ? '#818cf8' : 'transparent',
-                        color: isToday ? '#fff' : isWeekend ? textSec : textPri,
+                        /* white on indigo-400 is 2.98:1 — derive it instead (5.98:1).
+                           Same class of bug as the shift chips: a fixed foreground
+                           over a background the theme does not control. */
+                        color: isToday ? readableOn('#818cf8') : isWeekend ? textSec : textPri,
                       }}>
                       {day}
                     </span>

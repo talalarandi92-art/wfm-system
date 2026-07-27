@@ -153,7 +153,10 @@ export class ScorecardGuardService implements OnModuleInit, OnModuleDestroy {
 
   async summary(tid: string) {
     const r: any = await this.review(tid).catch(() => null);
-    if (!r || r.empty) return { week: null, avg: 0, belowTarget: 0, worstFunction: null };
+    /* NULL, not 0. `avg: 0` for a tenant with no scorecard uploaded rendered on the
+       Chief briefing as an average score of zero — the whole centre failing — when
+       the truth is that nothing has been scored yet. */
+    if (!r || r.empty) return { week: null, avg: null, belowTarget: null, worstFunction: null };
     const worst = r.byFunction[r.byFunction.length - 1];
     return { week: r.week, avg: r.overall.avg, belowTarget: r.coachingCandidates, topPerformer: r.top[0]?.name ?? null, worstFunction: worst ? `${worst.functionName} (${worst.avg})` : null };
   }

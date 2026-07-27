@@ -188,7 +188,7 @@ function discover() {
   console.log(`WHOLE-UI SMOKE as [${ROLE}] · ${discovered.size} endpoints discovered by reading ${FE.replace(/\\/g, '/')}`);
   console.log(`  anchors — day ${DATE} · week ${sat} · span ${FROM}→${TO} · fn "${fn.f}" · person ${person.p} (${person.n}) · month ${otMonth.m}\n`);
 
-  const skipped = [], fails = [], slow = [], authz = [], unbuildable = [], expected = [];
+  const skipped = [], fails = [], slow = [], authz = [], unbuildable = [], expected = [], throttled = [];
   let ok = 0;
 
   for (const [raw, files] of [...discovered.entries()].sort()) {
@@ -199,7 +199,16 @@ function discover() {
     const url = `${BASE}/api/v1${filled}`;
     const t0 = Date.now();
     try {
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      let r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      /* 429 is the API defending itself, not a broken endpoint. Running this straight
+         after pre-flight (which runs its own 46-endpoint sweep) tripped the throttle
+         and reported 160 "failures" from a completely healthy system — the harness
+         grading its own impatience. Back off once, then count it separately. */
+      if (r.status === 429) {
+        await new Promise((res) => setTimeout(res, 1200));
+        r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (r.status === 429) { throttled.push({ raw }); continue; }
+      }
       const ms = Date.now() - t0;
       // a 500 is ALWAYS a product failure, however the URL was built
       if (r.status >= 500) { fails.push({ raw, status: r.status, files: [...files], ms }); continue; }
@@ -219,7 +228,8 @@ function discover() {
 
   console.log(`${'═'.repeat(74)}`);
   console.log(`  OK ${ok}   FAIL ${fails.length}   authz-blocked ${authz.length}   ` +
-              `expected-400 ${expected.length}   no-test-row ${unbuildable.length}   skipped ${skipped.length}`);
+              `expected-400 ${expected.length}   no-test-row ${unbuildable.length}   ` +
+              `rate-limited ${throttled.length}   skipped ${skipped.length}`);
   if (fails.length) {
     console.log('\n  FAILURES — a page in the product calls each of these:');
     for (const f of fails) console.log(`   ✗ ${f.status}  ${f.raw}\n        called from: ${f.files.slice(0, 3).join(', ')}`);
@@ -227,6 +237,13 @@ function discover() {
   if (slow.length && SLOW) {
     console.log('\n  SLOW (>1.5s) — works, but would feel sluggish live:');
     for (const s of slow.sort((a, b) => b.ms - a.ms)) console.log(`   ! ${String(s.ms).padStart(6)}ms  ${s.raw}`);
+  }
+  if (throttled.length) {
+    console.log(`
+  RATE-LIMITED — the throttle held (it is meant to). Re-run on its own,`);
+    console.log('  or wait a minute after pre-flight; these were never exercised:');
+    for (const t2 of throttled.slice(0, 8)) console.log(`   · ${t2.raw}`);
+    if (throttled.length > 8) console.log(`   · …and ${throttled.length - 8} more`);
   }
   if (expected.length) {
     console.log('\n  EXPECTED 400 — the UI reads this exact response as a state, not an error:');
