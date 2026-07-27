@@ -381,15 +381,35 @@ describe('query-compiler PARITY (live wfm_db)', () => {
      ignored). 60s is generous for correctness work and still catches a hang. */
   jest.setTimeout(60_000);
 
-  it('overtime TRUE_OT (min) matches a direct canonical query', async () => {
+  /* PAYABLE, not raw. This assertion used to compare the compiler against an
+     UNFILTERED sum of roster_days — which is not the canonical definition of OT
+     anywhere in this platform, and therefore pinned the builder to DISAGREE with
+     the OT report, the roster dashboard and the executive tile. Payable OT is
+     `is_active` (drops non-canonical duplicate identities, BR-ATT-008) AND NOT
+     `ot_record_only` (drops supervisory OT that is recorded but never paid,
+     BR-ROL-002). Measured on this window: of 3,505 rows, 0 are non-active and 85
+     are record-only carrying 2,808 minutes — the entire gap the old assertion
+     was enshrining. */
+  it('overtime TRUE_OT (min) matches the canonical PAYABLE query', async () => {
     if (!up) { console.warn('DB down — parity skipped'); return; }
     const c = compile({ sourceKey: 'overtime', tenantId: TID, metrics: ['trueOtMin'], dateFrom: FROM, dateTo: TO });
     const [built] = await q(c.sql, c.params);
+    const TRUE_OT_SUM = 'SUM(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))';
     const [direct] = await q(
-      `SELECT SUM(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0)) trueotmin
-         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [TID, FROM, TO]);
+      `SELECT ${TRUE_OT_SUM} trueotmin
+         FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3
+          AND is_active AND NOT COALESCE(ot_record_only,false)`, [TID, FROM, TO]);
     expect(Number(built.trueOtMin)).toBe(Number(direct.trueotmin));
     expect(Number(built.trueOtMin)).toBeGreaterThan(0);
+
+    /* And the exclusion must be doing real work. Without this, dropping the filter
+       would make both sides equal again and the test would pass on a regression. */
+    const [excluded] = await q(
+      `SELECT ${TRUE_OT_SUM} m FROM roster_days
+        WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3
+          AND (NOT is_active OR COALESCE(ot_record_only,false))`, [TID, FROM, TO]);
+    expect(Number(excluded.m)).toBeGreaterThan(0);
+    expect(Number(built.trueOtMin)).toBeLessThan(Number(built.trueOtMin) + Number(excluded.m));
   });
 
   it('login_logout worked (min) + credible-late days match direct queries', async () => {

@@ -128,9 +128,16 @@ export const DATA_SOURCES: DataSourceDef[] = [
   // ── OVERTIME ──────────────────────────────────────────────────────────────
   {
     key: 'overtime', label_en: 'Overtime', label_ar: 'العمل الإضافي', group: 'Overtime', category: 'Workforce',
-    description_en: 'Overtime minutes and days per agent from the canonical roster, split into regular, off-day and holiday buckets.',
-    description_ar: 'دقائق وأيام العمل الإضافي لكل موظف من الجدول المعتمد، مقسّمة إلى إضافي عادي وإضافي إجازة وإضافي عطلة.',
-    from: 'roster_days', baseWhere: 'is_active', tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
+    description_en: 'PAYABLE overtime per agent from the canonical roster, split into regular, off-day and holiday buckets. Excludes supervisory record-only OT, which is recorded but never paid — the OT & Exceptions report states that bucket separately.',
+    description_ar: 'الإضافي المستحق للدفع لكل موظف من الجدول المعتمد، مقسّماً إلى عادي وإجازة وعطلة. لا يشمل الإضافي المسجّل للإشرافيين (مسجّل ولا يُدفع) — تقرير الإضافي والاستثناءات يعرضه لوحده.',
+    /* PAYABLE, exactly like the OT report and the executive tile — `is_active`
+       drops non-canonical duplicate identities (BR-ATT-008) and `ot_record_only`
+       drops supervisory OT that is recorded but never paid (BR-ROL-002). Without
+       the second filter this source answered 16,440.20h where every other OT
+       surface answered 16,388.38h. Scoped to THIS source: supervisors' attendance
+       is tracked normally, so the attendance/login sources must not inherit it. */
+    from: 'roster_days', baseWhere: 'is_active AND NOT COALESCE(ot_record_only,false)',
+    tenantCol: 'tenant_id', dateCol: 'work_date', personCol: 'COALESCE(person_no,employee_no)',
     permission: 'attendance.view_team',
     dimensions: RD_DIMS,
     metrics: [

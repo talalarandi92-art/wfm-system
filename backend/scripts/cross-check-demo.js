@@ -237,6 +237,176 @@ const BASE = process.argv[2] || 'http://localhost:3000';
       return { a: y.totals.people, b: (y.people || []).length, labelA: 'stated people', labelB: 'rows returned', unit: '' };
     });
 
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     WHOLE-SYSTEM — the modules outside the demo path also have to agree.
+     Added after the Report Builder was found answering a different "True OT"
+     than the OT report for the identical window: nothing was watching it.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  // ── 8. Report Builder is not a private universe ────────────────────────
+  const build = async (body) => {
+    const r = await fetch(`${BASE}/api/v1/report-builder-v2/run`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status} on report-builder run`);
+    return (await r.json()).rows?.[0] ?? {};
+  };
+
+  await check('Builder: True OT equals the OT report for the same window',
+    'A user can build their own OT report. If the builder applies different rules than the official ' +
+    'report, the buyer gets two numbers for one concept from one product — measured gap was 51.82h ' +
+    '(supervisory record-only) on top of 541.12h (duplicate identities).',
+    async () => {
+      const row = await build({ sourceKey: 'overtime', metrics: ['trueOtMin'], dateFrom: FROM, dateTo: TO });
+      const [q] = await sql(
+        `SELECT SUM(COALESCE(ot_min,0)+COALESCE(offday_ot_min,0)+COALESCE(holiday_ot_min,0))::int m
+           FROM roster_days
+          WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3
+            AND is_active AND NOT COALESCE(ot_record_only,false)`, [T, FROM, TO]);
+      return { a: Number(row.trueOtMin) / 60, b: q.m / 60, labelA: 'builder True OT', labelB: 'payable OT in SQL', unit: 'h' };
+    }, 0);
+
+  await check('Builder: agent population excludes duplicate identities',
+    'roster_days keeps non-canonical rows for people with a folded second employee number. A builder ' +
+    'report that counts them reports more staff than exist.',
+    async () => {
+      const row = await build({ sourceKey: 'overtime', metrics: ['agents'], dateFrom: FROM, dateTo: TO });
+      const [q] = await sql(
+        `SELECT COUNT(DISTINCT COALESCE(person_no,employee_no))::int n FROM roster_days
+          WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3
+            AND is_active AND NOT COALESCE(ot_record_only,false)`, [T, FROM, TO]);
+      return { a: row.agents, b: q.n, labelA: 'builder agents', labelB: 'canonical people in SQL', unit: '' };
+    }, 0);
+
+  await check('Builder: late days use the platform tardiness window, not > 0',
+    'A one-minute lateness is not a lateness (BR-TRD-001, 7..240). A builder report that counts it ' +
+    'would put people on a list the official reports never put them on.',
+    async () => {
+      const row = await build({ sourceKey: 'attendance', metrics: ['lateDays'], dateFrom: FROM, dateTo: TO });
+      const [q] = await sql(
+        `SELECT COUNT(*)::int n FROM roster_days
+          WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active
+            AND sys_late_min BETWEEN 7 AND 240`, [T, FROM, TO]);
+      return { a: row.lateDays, b: q.n, labelA: 'builder late days', labelB: 'SQL 7..240', unit: 'days' };
+    }, 0);
+
+  // ── 9. Scorecard: one period, and Final never blended into the weeks ────
+  await check('Scorecard board: reports a real uploaded period, not a blend',
+    'The board read every scorecard row the tenant has ever had while the caption named one month. ' +
+    'With a second month uploaded that silently averages two months into one league table.',
+    async () => {
+      const b = await api('/attendance-recon/roster-v2/scorecard');
+      const [q] = await sql(
+        `SELECT COUNT(DISTINCT batch_id)::int n FROM scorecard_entries se
+          WHERE se.tenant_id=$1 AND se.batch_id = (
+            SELECT id FROM scorecard_batches WHERE tenant_id=$1 AND status <> 'archived'
+             ORDER BY period_year DESC NULLS LAST, period_month DESC NULLS LAST, uploaded_at DESC LIMIT 1)`, [T]);
+      return { a: b.period ? q.n : 0, b: 1, labelA: `board period "${b.period}" → batches`, labelB: 'exactly one', unit: '' };
+    }, 0);
+
+  await check('Scorecard board: agent count matches the period it claims',
+    'A board listing more agents than the period contains means rows leaked in from another upload.',
+    async () => {
+      const b = await api('/attendance-recon/roster-v2/scorecard');
+      const [q] = await sql(
+        `SELECT COUNT(DISTINCT i.person_no)::int n
+           FROM scorecard_entries se JOIN employee_identity i
+             ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
+          WHERE se.tenant_id=$1 AND se.week_label <> 'Final'
+            AND se.batch_id = (SELECT id FROM scorecard_batches WHERE tenant_id=$1 AND status <> 'archived'
+              ORDER BY period_year DESC NULLS LAST, period_month DESC NULLS LAST, uploaded_at DESC LIMIT 1)`, [T]);
+      return { a: b.count, b: q.n, labelA: 'board agents', labelB: 'people with weekly rows', unit: '' };
+    }, 0);
+
+  await check('Scorecard board: the official Final is never folded into the weekly average',
+    'Averaging W1..W4 together with the Final summary row turned one agent\u2019s official Net of 125 ' +
+    'into 113. The two must be reported side by side, never added.',
+    async () => {
+      const b = await api('/attendance-recon/roster-v2/scorecard');
+      const withFinal = (b.agents || []).filter((a) => a.final_net != null);
+      if (!withFinal.length) return { a: 1, b: 1, labelA: 'no Final rows in this period', labelB: 'n/a', unit: '' };
+      const [q] = await sql(
+        `SELECT MAX(se.net_points)::numeric v
+           FROM scorecard_entries se JOIN employee_identity i
+             ON i.tenant_id=se.tenant_id AND i.employee_no=se.employee_no
+          WHERE se.tenant_id=$1 AND se.week_label='Final' AND i.person_no=$2
+            AND se.batch_id = (SELECT id FROM scorecard_batches WHERE tenant_id=$1 AND status <> 'archived'
+              ORDER BY period_year DESC NULLS LAST, period_month DESC NULLS LAST, uploaded_at DESC LIMIT 1)`,
+        [T, withFinal[0].person_no]);
+      return { a: Number(withFinal[0].final_net), b: Number(q.v),
+               labelA: `board final_net (${withFinal[0].name})`, labelB: 'the Final row in SQL', unit: 'pts' };
+    }, 0);
+
+  // ── 10. Attrition: the headline rate and the list beneath it ───────────
+  await check('Attrition: the separations list matches the stated count',
+    'The classic dashboard lie is a headline larger than the table under it.',
+    async () => {
+      const a = await api('/attrition?months=6');
+      return { a: a.summary.separations, b: (a.separations || []).length,
+               labelA: 'stated separations', labelB: 'rows listed', unit: '' };
+    }, 0);
+
+  await check('Attrition: voluntary + involuntary account for every separation',
+    'A separation that is neither RES nor TER would vanish from both splits while still inflating the total.',
+    async () => {
+      const a = await api('/attrition?months=6');
+      return { a: a.summary.separations, b: a.summary.voluntary + a.summary.involuntary,
+               labelA: 'total separations', labelB: 'voluntary + involuntary', unit: '' };
+    }, 0);
+
+  await check('Attrition: a rate is stated only when it can be computed',
+    'With no headcount to divide by, a 0 rate was rendered as a large GREEN 0% — a window with no ' +
+    'data reading as perfect retention. Null is the only honest answer.',
+    async () => {
+      const a = await api('/attrition?months=6');
+      const consistent = (a.summary.avgHeadcount > 0) === (a.summary.attritionRatePeriod != null);
+      return { a: consistent ? 1 : 0, b: 1,
+               labelA: `avgHC ${a.summary.avgHeadcount} / rate ${a.summary.attritionRatePeriod}`,
+               labelB: 'rate present iff headcount > 0', unit: '' };
+    }, 0);
+
+  // ── 11. Coverage: an unmodelled requirement is not a surplus ───────────
+  await check('Coverage: every hour states whether its requirement was modelled',
+    'No same-weekday history produced required=0, so gap = available - 0 reported a comfortable ' +
+    'SURPLUS. "We could not model this" must never render as "zero staff needed".',
+    async () => {
+      /* Stated as CONSISTENT == TOTAL, not BAD == 0. The harness rejects 0-vs-0 on
+         purpose — two zeros prove nothing, because a check that never read anything
+         also produces them. Counting the hours that pass makes the assertion real. */
+      const cv = await api(`/coverage/hourly?date=${TO}`);
+      let good = 0, total = 0;
+      for (const f of cv.functions || []) for (const h of f.hours || []) {
+        total++;
+        // `required` and `gap` must be null together, and `modelled` must agree with both
+        const paired = (h.required == null) === (h.gap == null);
+        const honest = (h.required != null) === (h.modelled === true);
+        if (paired && honest) good++;
+      }
+      return { a: good, b: total, labelA: 'hours stating their own basis', labelB: 'hours returned', unit: '' };
+    }, 0);
+
+  // ── 12. Shrinkage: the parts and the whole ─────────────────────────────
+  await check('Shrinkage: planned + unplanned + late equals the stated total',
+    'Shrinkage drives every capacity number. If the components do not sum to the headline, the ' +
+    'headline is not made of the components.',
+    async () => {
+      const sh = await api(`/analytics/shrinkage?from=${FROM}&to=${TO}`);
+      const o = sh.overall;
+      return { a: o.totalPct, b: o.plannedPct + o.unplannedPct + o.latePct,
+               labelA: 'stated total shrinkage', labelB: 'planned + unplanned + late', unit: '%' };
+    }, 0.011);   // each part is rounded to 1dp, so three parts can drift by up to 0.05
+
+  await check('Shrinkage: weekday and weekend partition the same scheduled days',
+    'The split views must cover the whole period exactly once — no day counted twice, none dropped.',
+    async () => {
+      const sh = await api(`/analytics/shrinkage?from=${FROM}&to=${TO}`);
+      return { a: sh.overall.scheduledDays, b: sh.weekday.scheduledDays + sh.weekend.scheduledDays,
+               labelA: 'overall scheduled days', labelB: 'weekday + weekend', unit: 'days' };
+    }, 0);
+
   await c.end();
   const bad = results.filter((r) => !r.ok);
   console.log(`\n${'═'.repeat(72)}`);

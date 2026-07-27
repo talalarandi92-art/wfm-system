@@ -7,7 +7,7 @@
  *   • share/unshare — owner-only toggle (shared-only body)
  * plus the RBAC guards (a teammate cannot rename/share/delete a shared item).
  */
-import { ForbiddenException, BadRequestException } from '@nestjs/common';
+import { ForbiddenException, BadRequestException, NotFoundException } from '@nestjs/common';
 import { ReportBuilderV2Service } from './report-builder-v2.service';
 
 const TID = 'a0000000-0000-0000-0000-000000000001';
@@ -52,10 +52,13 @@ describe('ReportBuilderV2Service — saved library (BLD-5)', () => {
     expect(query.mock.calls[0][1]).toEqual([TID, 'rep-shared', OTHER.id]);
   });
 
-  it('duplicateReport throws when the report is not visible', async () => {
+  /* 404, not 400. "You cannot see this report" and "no such report" must be the
+     SAME answer — a 400 that differs from the not-found path would confirm to a
+     caller that a report they are not allowed to see exists. */
+  it('duplicateReport throws NOT FOUND when the report is not visible', async () => {
     const { svc, query } = makeSvc();
     query.mockResolvedValueOnce([]); // SELECT finds nothing
-    await expect(svc.duplicateReport(OTHER, 'nope')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.duplicateReport(OTHER, 'nope')).rejects.toBeInstanceOf(NotFoundException);
     expect(query).toHaveBeenCalledTimes(1); // never reached INSERT
   });
 
@@ -75,10 +78,10 @@ describe('ReportBuilderV2Service — saved library (BLD-5)', () => {
     expect(insert[1][1]).toBe(OWNER.id);
   });
 
-  it('duplicateDashboard throws when the dashboard is not visible', async () => {
+  it('duplicateDashboard throws NOT FOUND when the dashboard is not visible', async () => {
     const { svc, query } = makeSvc();
     query.mockResolvedValueOnce([]);
-    await expect(svc.duplicateDashboard(OTHER, 'nope')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(svc.duplicateDashboard(OTHER, 'nope')).rejects.toBeInstanceOf(NotFoundException);
   });
 
   /* ── RENAME (owner-only, via updateReport name-only body) ─────────── */
