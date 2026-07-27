@@ -9,6 +9,7 @@ import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { ts as tsColor } from '@/components/ds';
 import { readableOn } from '@/utils/format';
+import { SHIFT_COLORS } from '@/utils/shift-colors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface EmployeeShiftRate {
@@ -63,11 +64,9 @@ interface Summary {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const SHIFT_COLORS: Record<string, string> = {
-  M:   '#0ea5e9', B:  '#38bdf8', C: '#f59e0b',
-  E:   '#f97316', N:  '#8b5cf6', N2: '#6d28d9',
-  MD:  '#1e3a5f', MN: '#1e1b4b', OFF: '#475569',
-};
+/* The palette now lives in utils/shift-colors so every screen agrees — see the
+   note there on why both night codes moved together. */
+
 const SHIFT_LABELS: Record<string, { ar: string; en: string }> = {
   M:   { ar: 'صباحي',       en: 'Morning'   },
   B:   { ar: 'ضحى',         en: 'Mid-Morn'  },

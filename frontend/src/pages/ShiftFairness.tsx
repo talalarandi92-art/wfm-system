@@ -3,6 +3,7 @@ import { Scale, CalendarDays, Moon, Users, TrendingDown, TrendingUp, CalendarOff
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile, BarRow } from '@/components/dazzle';
+import { SHIFT_COLORS } from '@/utils/shift-colors';
 
 /** Shift Fairness — night/midnight load + weekend-OFF fairness over the uploaded roster
  *  (roster_days, deduped). Optional dedicated NIGHT TEAM carve-out (the user's choice) and
@@ -101,7 +102,7 @@ export default function ShiftFairnessPage() {
           <div className="rounded-2xl p-4" style={panel}>
             <p className="text-[11px] mb-1" style={{ color: 'var(--text-2)' }}>{ar ? 'خريطة خلطة الشفتات لكل موظف (صباحي/مسائي/نايت/ميدنايت كنسبة من أيام عمله). 🌙 = فريق ليلي (اضغط للتثبيت/الإلغاء) · 🔒 = عالق ≥80% على شفت واحد (ما بيتدوّر).' : 'shift-mix heatmap per agent (morning/evening/night/midnight as % of working days). 🌙 = night team (click to toggle) · 🔒 = stuck ≥80% on one shift (never rotates).'}</p>
             <div className="flex items-center gap-3 mb-3 text-[10px]" style={{ color: 'var(--text-3)' }}>
-              {[[ar ? 'صباحي' : 'Morning', '#38bdf8'], [ar ? 'مسائي' : 'Evening', '#fb923c'], [ar ? 'نايت' : 'Night', '#a78bfa'], [ar ? 'ميدنايت' : 'Midnight', '#ef4444']].map(([l, c]: any) => (
+              {[[ar ? 'صباحي' : 'Morning', '#38bdf8'], [ar ? 'مسائي' : 'Evening', '#fb923c'], [ar ? 'نايت' : 'Night', SHIFT_COLORS.N], [ar ? 'ميدنايت' : 'Midnight', '#ef4444']].map(([l, c]: any) => (
                 <span key={l} className="flex items-center gap-1.5"><span className="w-3 h-3 rounded" style={{ background: c }} />{l}</span>
               ))}
             </div>

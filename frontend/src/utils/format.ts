@@ -99,8 +99,12 @@ export function readableOn(bg: string): string {
     return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
   });
   const L = 0.2126 * chan[0] + 0.7152 * chan[1] + 0.0722 * chan[2];
-  // contrast vs white is (1.05)/(L+0.05); vs black is (L+0.05)/0.05
-  return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#fff' : '#0f172a';
+  /* TRUE black, not slate-900. With #0f172a as the dark option there is a band of
+     mid-tone backgrounds where NEITHER choice reaches AA — violet #8b5cf6 landed
+     there at 4.22:1. Against pure black/white the worst possible background still
+     yields 4.58:1, so this function can always return a passing answer.
+     contrast vs white = 1.05/(L+0.05); vs black = (L+0.05)/0.05 */
+  return (1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05) ? '#fff' : '#000';
 }
 
 /**

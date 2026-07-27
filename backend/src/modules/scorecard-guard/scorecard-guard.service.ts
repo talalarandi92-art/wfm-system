@@ -132,9 +132,36 @@ export class ScorecardGuardService implements OnModuleInit, OnModuleDestroy {
     const top = ranked.slice(0, 5).map(r => ({ name: r.employee_name, fn: r.function_name, points: pts(r) }));
     const bottom = ranked.slice(-5).reverse().map(r => ({ name: r.employee_name, fn: r.function_name, points: pts(r), weakest: weakest(r) }));
 
-    // Below the function average → coaching candidates.
-    const belowTarget = scored.filter(r => pts(r) < (fnAvg.get(r.function_name)! / fnCount.get(r.function_name)!))
-      .map(r => ({ name: r.employee_name, employeeNo: r.employee_no, fn: r.function_name, tl: r.team_leader, points: pts(r), funcAvg: +((fnAvg.get(r.function_name)! / fnCount.get(r.function_name)!)).toFixed(1), weakest: weakest(r) }))
+    /* ── COACHING CANDIDATES = the bottom QUARTILE of each function ──────────
+       Was "below the function average", which is an arithmetic identity rather
+       than a threshold: ~half of any group is below its own mean, forever, no
+       matter how well the group performs. Measured on February 2026 it selected
+       31 of 73 scored agents (42.5%) — while the scorecard's OWN pass mark
+       (Net < 0) failed nobody at all. A quartile is a share you can state out
+       loud: "the lowest 25% of your team".  (Director's decision, 2026-07-27.) */
+    const MIN_POOL = 4;   // below this a "quartile" is one person or none — not a finding
+    const byFn = new Map<string, number[]>();
+    for (const r of scored) {
+      const a = byFn.get(r.function_name) ?? [];
+      a.push(pts(r)); byFn.set(r.function_name, a);
+    }
+    /** 25th percentile, linear interpolation — the same definition as SQL's PERCENTILE_CONT. */
+    const p25 = new Map<string, number>();
+    for (const [f, arr] of byFn) {
+      const v = [...arr].sort((a, b) => a - b);
+      const idx = 0.25 * (v.length - 1);
+      const lo = Math.floor(idx), hi = Math.ceil(idx);
+      p25.set(f, lo === hi ? v[lo] : v[lo] + (v[hi] - v[lo]) * (idx - lo));
+    }
+    const belowTarget = scored
+      .filter(r => (byFn.get(r.function_name)?.length ?? 0) >= MIN_POOL && pts(r) < p25.get(r.function_name)!)
+      .map(r => ({
+        name: r.employee_name, employeeNo: r.employee_no, fn: r.function_name, tl: r.team_leader,
+        points: pts(r),
+        funcAvg: +((fnAvg.get(r.function_name)! / fnCount.get(r.function_name)!)).toFixed(1),
+        funcP25: +p25.get(r.function_name)!.toFixed(1),
+        weakest: weakest(r),
+      }))
       .sort((a, b) => a.points - b.points);
 
     /* Weekly trend, same function filter — and the same batch. Without the batch
@@ -179,7 +206,7 @@ export class ScorecardGuardService implements OnModuleInit, OnModuleDestroy {
          VALUES ($1,$2,'low_scorecard',30,1,$3,'medium','open',NOW(),NOW())
          ON CONFLICT (tenant_id, employee_id, trigger_type) WHERE (status = 'open')
          DO UPDATE SET detail = $3, updated_at = NOW()`,
-        [tid, emp.id, `سكور ${cand.points} تحت متوسط ${cand.fn} (${cand.funcAvg}) — الأضعف: ${cand.weakest}`]).catch(() => {});
+        [tid, emp.id, `سكور ${cand.points} — ضمن أدنى 25% في ${cand.fn} (حد الربع ${cand.funcP25} · متوسط القسم ${cand.funcAvg}) — الأضعف: ${cand.weakest}`]).catch(() => {});
       flagged++;
     }
     if (flagged) this.log.log(`tenant ${tid}: ${flagged} low-scorecard coaching flag(s)`);

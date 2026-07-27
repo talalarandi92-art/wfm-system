@@ -30,6 +30,7 @@ import { useUiStore } from '@/store/ui.store';
 import { fmtLocalDate, weekStartSat } from '@/utils/format';
 import { Section, Awaiting, SPAL, normalizeVerdict, DAY_AR7, DAY_EN7 } from './kit';
 import VerdictHero from './VerdictHero';
+import { SHIFT_COLORS } from '@/utils/shift-colors';
 
 // ─── Types (identical contract to the generator endpoints) ───────────────────
 interface ShiftDef { code: string; label: string; color: string; category: string; }
@@ -1262,7 +1263,7 @@ export default function GeneratorPanel() {
                         // Canonical categories (backend/src/common/shift-category.ts): M/B/C = Morning/Day family, N = Night, MD/MN = Midnight
                         { code: 'M',  color: '#0ea5e9', labelAr: 'صباحي',                 labelEn: 'Morning' },
                         { code: 'C',  color: '#f59e0b', labelAr: 'نهاري — تنتهي 20:00',   labelEn: 'Day (ends 20:00)' },
-                        { code: 'N',  color: '#8b5cf6', labelAr: 'ليلي',                  labelEn: 'Night' },
+                        { code: 'N',  color: SHIFT_COLORS.N, labelAr: 'ليلي',            labelEn: 'Night' },
                         { code: 'MD', color: '#6366f1', labelAr: 'منتصف الليل',           labelEn: 'Midnight' },
                       ].map(s => (
                         <span key={s.code} className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg font-semibold"

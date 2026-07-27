@@ -3,6 +3,7 @@ import { Wand2, CalendarDays, Users, Layers, CheckCircle2, AlertTriangle, Clock,
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
 import { StatTile } from '@/components/dazzle';
+import { shiftColor } from '@/utils/shift-colors';
 
 /** Demand-driven shift-mix generator: measures the hourly need per function (from the approved
  *  roster_days) and greedy set-covers the function's real shift windows to cover every hour,
@@ -53,7 +54,10 @@ export default function ScheduleDemandPage() {
     const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = `roster_${saved.function}_${saved.weekStart}.csv`; a.click(); URL.revokeObjectURL(u);
   };
   const catColor = (c: string) => c === 'midnight' ? '#ef4444' : c === 'night' ? '#a78bfa' : c === 'day' ? '#0ea5e9' : 'var(--text-3)';
-  const cellColor = (code: string) => code === 'OFF' ? 'var(--text-3)' : /^(MD|MN)/.test(code) ? '#ef4444' : /^N/.test(code) ? '#a78bfa' : '#0ea5e9';
+  /* `N` was #a78bfa here and #8b5cf6 in the rotation grid — the same shift code in
+     two violets. shiftColor() is the one source. Midnight stays red on THIS screen
+     deliberately: here it marks a demand risk, not the shift's identity colour. */
+  const cellColor = (code: string) => code === 'OFF' ? 'var(--text-3)' : /^(MD|MN)/.test(code) ? '#ef4444' : shiftColor(code, '#0ea5e9');
 
   const inputStyle = { background: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-1)' } as React.CSSProperties;
   const panel = { background: 'var(--surface)', border: '1px solid var(--border)' } as React.CSSProperties;
