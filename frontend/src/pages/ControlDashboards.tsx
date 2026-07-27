@@ -12,11 +12,11 @@ import { Kpi, KpiRow, KpiSource } from '@/components/kpi';
 
 interface Bundle {
   period: { from: string; to: string; attendanceDate: string };
-  requests: { total: number; approved: number; rejected: number; pending: number; escalated: number; overdue: number; urgent: number; avgDecisionHours: number | null };
+  requests: { total: number | null; approved: number; rejected: number; pending: number; escalated: number; overdue: number; urgent: number; avgDecisionHours: number | null };
   attendance: { present: number; absent: number; late: number; earlyOut: number; missingPunch: number };
   coaching: { high: number; medium: number; low: number };
-  campaignsActive: number;
-  otHours: number;
+  campaignsActive: number | null;
+  otHours: number | null;
   byType: { name: string; count: number }[];
   byFunction: { name: string; late: number; absent: number; present: number }[];
 }
@@ -127,7 +127,7 @@ export default function ControlDashboardsPage() {
                 <Kpi label={ar ? 'متأخرة عن SLA' : 'SLA overdue'} value={d.requests.overdue} accent="#fb923c" icon={<AlertTriangle size={15} />} drill="/requests" sub={d.requests.escalated ? `${d.requests.escalated} ${ar ? 'مُصعّد' : 'escalated'}` : undefined}
                   source={src('requests', 'Still-pending requests (pending / peer_pending) whose sla_due_at is already past', 'طلبات ما زالت معلّقة وتجاوز موعد sla_due_at الخاص بها', reqPeriod)} />
                 <Kpi label={ar ? 'إضافي (ساعات)' : 'Overtime (h)'} value={d.otHours} accent="#22d3ee" icon={<Zap size={15} />} drill="/roster?tab=ot"
-                  source={src('attendance_records', 'SUM(ot_minutes)/60 over the period — attendance-spine OT only (NOT the canonical TRUE_OT = ot + offday_ot + holiday_ot from roster_days; drill for the 3-bucket split)', 'مجموع ot_minutes÷60 خلال الفترة — من سجل الحضور فقط (ليس TRUE_OT الكامل بثلاث فئات من roster_days؛ افتح التفصيل للتقسيم)', reqPeriod)} />
+                  source={src('roster_days', 'TRUE_OT (ot + offday_ot + holiday_ot) / 60 over roster_days for the period — payable only (is_active, excludes supervisory record-only). Same definition as every other OT surface.', 'TRUE_OT (عادي + أوف + عطلة) ÷ 60 من roster_days خلال الفترة — المستحق فقط (is_active، بدون أوفرتايم المشرفين المسجَّل غير المدفوع). نفس تعريف كل شاشات الأوفرتايم.', reqPeriod)} />
                 <Kpi label={ar ? 'حملات نشطة' : 'Active campaigns'} value={d.campaignsActive} accent="#f59e0b" icon={<Megaphone size={15} />} drill="/schedule?tab=campaigns"
                   source={src('campaigns', 'COUNT of campaigns with is_active = TRUE and today between start_date and end_date', 'عدد الحملات المفعّلة التي يقع اليوم ضمن مدتها', ar ? 'اليوم' : 'today')} />
                 <Kpi label={ar ? 'كوتشينج (عالية)' : 'Coaching (high)'} value={d.coaching.high} accent="#a855f7" icon={<GraduationCap size={15} />} drill="/scorecard?tab=coaching" sub={`${d.coaching.medium + d.coaching.low} ${ar ? 'أخرى' : 'others'}`}
@@ -136,12 +136,27 @@ export default function ControlDashboardsPage() {
               <div className="mt-4 grid lg:grid-cols-3 gap-3">
                 {/* approval-rate gauge */}
                 {(() => {
-                  const rate = d.requests.total > 0 ? Math.round((d.requests.approved / d.requests.total) * 100) : 0;
-                  const gc = rate >= 90 ? '#22c55e' : rate >= 75 ? '#06b6d4' : rate >= 50 ? '#f59e0b' : '#ef4444';
+                  /* No requests in the period is NOT a 0% approval rate. This
+                     rendered a red 0% dial captioned "0 / 0 approved" on the
+                     executive tab — an absence presented as a catastrophic
+                     measurement. */
+                  const total = d.requests.total;
+                  const rate = total != null && total > 0 ? Math.round((d.requests.approved / total) * 100) : null;
+                  const gc = rate == null ? '#64748b' : rate >= 90 ? '#22c55e' : rate >= 75 ? '#06b6d4' : rate >= 50 ? '#f59e0b' : '#ef4444';
                   return (
                     <div className="rounded-2xl p-4 flex flex-col items-center justify-center" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
                       <div className="text-xs font-bold mb-2 self-start" style={{ color: tp(dark) }}>{ar ? 'معدّل الموافقة' : 'Approval rate'}</div>
-                      <Gauge value={rate} label={`${d.requests.approved}/${d.requests.total} ${ar ? 'موافقة' : 'approved'}`} color={gc} size={150} />
+                      {rate == null ? (
+                        <div className="flex flex-col items-center justify-center" style={{ height: 150 }}>
+                          <div className="text-2xl font-bold" style={{ color: '#64748b' }}>—</div>
+                          <div className="text-[11px] mt-1" style={{ color: tsColor(dark) }}>
+                            {total === 0 ? (ar ? 'لا توجد طلبات في الفترة' : 'no requests in period')
+                                         : (ar ? 'البيانات غير متاحة' : 'data unavailable')}
+                          </div>
+                        </div>
+                      ) : (
+                        <Gauge value={rate} label={`${d.requests.approved}/${total} ${ar ? 'موافقة' : 'approved'}`} color={gc} size={150} />
+                      )}
                     </div>
                   );
                 })()}
@@ -154,9 +169,10 @@ export default function ControlDashboardsPage() {
                       { label: ar ? 'مرفوضة' : 'Rejected', value: d.requests.rejected, color: '#f87171' },
                       { label: ar ? 'قيد الموافقة' : 'Pending', value: d.requests.pending, color: '#fbbf24' },
                     ];
-                    const other = Math.max(0, d.requests.total - segs.reduce((a, c) => a + c.value, 0));
+                    const reqTotal = d.requests.total ?? 0;
+                    const other = Math.max(0, reqTotal - segs.reduce((a, c) => a + c.value, 0));
                     if (other > 0) segs.push({ label: ar ? 'أخرى' : 'Other', value: other, color: '#64748b' });
-                    return <Donut segments={segs} centerNum={d.requests.total} centerLabel={ar ? 'طلب' : 'requests'} />;
+                    return <Donut segments={segs} centerNum={reqTotal} centerLabel={ar ? 'طلب' : 'requests'} />;
                   })()}
                 </div>
                 {/* requests by type — animated bars */}
@@ -196,7 +212,7 @@ export default function ControlDashboardsPage() {
                 <Kpi label={ar ? 'بصمات ناقصة' : 'Missing punch'} value={d.attendance.missingPunch} accent="#a855f7" icon={<AlertTriangle size={15} />} drill="/attendance?tab=dashboard"
                   source={src('attendance_records', 'Records on the latest attendance date flagged is_missing_punch = TRUE', 'سجلات آخر يوم حضور الموسومة is_missing_punch', attPeriod)} />
                 <Kpi label={ar ? 'إضافي (ساعات)' : 'OT (h)'} value={d.otHours} accent="#22d3ee" icon={<Zap size={15} />} drill="/roster?tab=ot"
-                  source={src('attendance_records', 'SUM(ot_minutes)/60 over the period — attendance-spine OT only (NOT the canonical TRUE_OT = ot + offday_ot + holiday_ot from roster_days; drill for the 3-bucket split)', 'مجموع ot_minutes÷60 خلال الفترة — من سجل الحضور فقط (ليس TRUE_OT الكامل بثلاث فئات من roster_days؛ افتح التفصيل للتقسيم)', reqPeriod)} />
+                  source={src('roster_days', 'TRUE_OT (ot + offday_ot + holiday_ot) / 60 over roster_days for the period — payable only (is_active, excludes supervisory record-only). Same definition as every other OT surface.', 'TRUE_OT (عادي + أوف + عطلة) ÷ 60 من roster_days خلال الفترة — المستحق فقط (is_active، بدون أوفرتايم المشرفين المسجَّل غير المدفوع). نفس تعريف كل شاشات الأوفرتايم.', reqPeriod)} />
               </KpiRow>
               <FnTable />
             </>

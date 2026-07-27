@@ -2,6 +2,8 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { TRUE_OT } from '@common/wfm-metrics';
+import { kwToday } from '@common/kw-date';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
@@ -27,7 +29,11 @@ export class ControlDashboardController {
     @Query('to')   to?: string,
   ) {
     const tid = user.tenantId;
-    const toDate   = to   ?? new Date().toISOString().slice(0, 10);
+    /* Kuwait-local today. `toISOString()` is UTC, so during the first three hours
+       of the 1st of a month it still named the LAST day of the previous month —
+       and `fromDate` below derives from it, so the executive "month to date" bundle
+       silently reported the whole prior month. */
+    const toDate   = to   ?? kwToday();
     const fromDate = from ?? toDate.slice(0, 7) + '-01';
 
     // Latest attendance date (data may be historical)
@@ -50,7 +56,7 @@ export class ControlDashboardController {
        FROM requests
        WHERE tenant_id = $1 AND submitted_at::date BETWEEN $2 AND $3`,
       [tid, fromDate, toDate],
-    ).catch(() => [{}]);
+    ).catch(() => [null]);
 
     const [attRow] = await this.ds.query(
       `SELECT
@@ -61,7 +67,7 @@ export class ControlDashboardController {
          COUNT(*) FILTER (WHERE is_missing_punch)              AS missing_punch
        FROM attendance_records WHERE tenant_id = $1 AND attendance_date = $2::date`,
       [tid, latest],
-    ).catch(() => [{}]);
+    ).catch(() => [null]);
 
     const coachRows = await this.ds.query(
       `SELECT severity, COUNT(*) AS n FROM coaching_flags
@@ -73,12 +79,21 @@ export class ControlDashboardController {
     const [campRow] = await this.ds.query(
       `SELECT COUNT(*) AS active FROM campaigns
        WHERE tenant_id = $1 AND is_active = TRUE AND CURRENT_DATE BETWEEN start_date AND end_date`, [tid],
-    ).catch(() => [{ active: 0 }]);
+    ).catch(() => [{ active: null }]);
 
+    /* The Exec/WFM "Overtime (h)" tile. It summed attendance_records.ot_minutes —
+       a table with ONE OT column — so it was structurally incapable of matching
+       TRUE_OT and undercounted by ~28%, while CommandCenter showed the real figure
+       under the same name. The drift was disclosed only inside a hover tooltip; the
+       number an executive actually reads was still wrong. Payable OT over the
+       canonical spine, same definition as every other OT surface.
+       A FAILED query returns null, not 0 — see `num()`: a zero that means "the
+       query broke" is indistinguishable from a quiet day, on an executive screen. */
     const [otRow] = await this.ds.query(
-      `SELECT COALESCE(SUM(ot_minutes), 0) AS ot_min FROM attendance_records
-       WHERE tenant_id = $1 AND attendance_date BETWEEN $2 AND $3`, [tid, fromDate, toDate],
-    ).catch(() => [{ ot_min: 0 }]);
+      `SELECT COALESCE(SUM(${TRUE_OT}), 0) AS ot_min FROM roster_days
+       WHERE tenant_id = $1 AND work_date BETWEEN $2 AND $3
+         AND is_active AND NOT COALESCE(ot_record_only, false)`, [tid, fromDate, toDate],
+    ).catch(() => [{ ot_min: null }]);
 
     const byType = await this.ds.query(
       `SELECT rt.name, COUNT(*) AS n FROM requests r
@@ -99,7 +114,12 @@ export class ControlDashboardController {
        GROUP BY canon_fn(COALESCE(f.name,'—')) ORDER BY late DESC, absent DESC LIMIT 10`, [tid, latest],
     ).catch(() => []);
 
-    const num = (v: any) => parseInt(v ?? 0, 10) || 0;
+    /* `parseInt(v ?? 0) || 0` turned a BROKEN query into a measured zero. Each
+       block's .catch now yields null, and this keeps the null all the way to the
+       client so the UI can render "—" plus an "unavailable" chip. An executive
+       could not previously tell a quiet day from a query that failed. */
+    const num = (v: any) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+    const otMin = num(otRow?.ot_min);
     return {
       period: { from: fromDate, to: toDate, attendanceDate: latest },
       requests: {
@@ -113,7 +133,7 @@ export class ControlDashboardController {
       },
       coaching,
       campaignsActive: num(campRow?.active),
-      otHours: +(num(otRow?.ot_min) / 60).toFixed(1),
+      otHours: otMin == null ? null : +(otMin / 60).toFixed(1),
       byType: byType.map((r: any) => ({ name: r.name, count: num(r.n) })),
       byFunction: byFunction.map((r: any) => ({
         name: r.name, late: num(r.late), absent: num(r.absent), present: num(r.present),

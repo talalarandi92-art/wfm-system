@@ -26,3 +26,27 @@ export const CRED_LATE = '(sys_late_min BETWEEN 7 AND 240)';
 
 export const CRED_EARLY =
   `(sys_early_min BETWEEN 7 AND 240 AND COALESCE(person_no,employee_no) NOT IN ${MATERNITY_7H})`;
+
+/**
+ * PUNCH-BASED tardiness, for the surfaces still reading `attendance_records`
+ * (People 360, the Reports exports, coaching, the scorecard attendance block).
+ * Same 7..240 window as CRED_LATE/CRED_EARLY — those name the SYSTEM-login
+ * columns on roster_days; these name the PUNCH columns on attendance_records.
+ *
+ * They exist because five places were each carrying their own `> 0` test, so a
+ * one-minute lateness counted against a person on one screen and not on another,
+ * and a cross-midnight punch landing on the wrong calendar day read as a
+ * four-hour lateness with no upper bound. Audited 2026-07-25: applying the window
+ * moves the population from 1,710 late-days / 100 people to 1,149 / 89 — 551 of
+ * the removed days were between 1 and 6 minutes, across 88 different people.
+ */
+export const PUNCH_LATE = '(punch_late_minutes BETWEEN 7 AND 240)';
+export const PUNCH_EARLY = '(punch_early_out_minutes BETWEEN 7 AND 240)';
+
+/**
+ * The canonical-identity filter. `is_active` is the CANONICAL-DEDUP flag
+ * (BR-ATT-008) — it marks the surviving row when one human has two ids (the
+ * intern 6xxxx / full-time 1xxxx pair). It is NOT employment status.
+ * Omitting it double-counts people; every roster read must carry it.
+ */
+export const ACTIVE_ROW = 'is_active';

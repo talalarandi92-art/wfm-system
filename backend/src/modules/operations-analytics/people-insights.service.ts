@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { PUNCH_LATE, PUNCH_EARLY } from '@common/wfm-metrics';
 import * as ExcelJS from 'exceljs';
 
 /**
@@ -20,9 +21,13 @@ export class PeopleInsightsService {
     const r = await this.ds.query(
       `SELECT MIN(attendance_date)::text a, MAX(attendance_date)::text b
          FROM attendance_records WHERE tenant_id=$1`, [tenantId]);
-    const max = to || r[0]?.b || '2026-06-30';
-    // default = the month of the latest data
-    const def = from || (max ? `${max.slice(0, 7)}-01` : '2026-06-01');
+    /* No literal fallback. These used to be '2026-06-30' / '2026-06-01', so a
+       tenant whose attendance table is empty — a fresh install, a failed import —
+       was answered with a fabricated June-2026 window and a page full of zeroes
+       that looked measured. An empty table must say "no data", not invent one. */
+    const max = to || r[0]?.b || null;
+    if (!max) return { from: null, to: null };
+    const def = from || `${max.slice(0, 7)}-01`;
     return { from: def, to: max };
   }
 
@@ -39,17 +44,24 @@ export class PeopleInsightsService {
                COUNT(*) FILTER (WHERE ar.attendance_marker='absent')                           AS absence_days,
                COUNT(*) FILTER (WHERE ar.attendance_marker='off')                              AS off_days,
                COUNT(*) FILTER (WHERE ar.attendance_marker='comp')                             AS comp_days,
-               COUNT(*) FILTER (WHERE ar.punch_late_minutes > 0)                               AS late_count,
+               COUNT(*) FILTER (WHERE ${PUNCH_LATE})                                           AS late_count,
                COALESCE(SUM(ar.punch_late_minutes),0)                                          AS late_minutes,
-               COUNT(*) FILTER (WHERE ar.punch_early_out_minutes > 0)                          AS early_count,
+               COUNT(*) FILTER (WHERE ${PUNCH_EARLY})                                          AS early_count,
                COALESCE(SUM(ar.punch_early_out_minutes),0)                                     AS early_minutes,
                COUNT(*) FILTER (WHERE ar.is_missing_punch AND ar.attendance_marker='present')  AS missing_punch,
                COUNT(*) FILTER (WHERE ar.is_missing_system AND ar.attendance_marker='present') AS missing_system,
                ROUND(COALESCE(SUM(ar.ot_minutes),0)/60.0, 1)                                   AS ot_hours,
-               -- conformance: present days with no unauthorised late/early/missing
+               /* CLEAN-PUNCH days, deliberately NOT called "conformance".
+                  Conformance elsewhere (WfmOverview, Trends) is AVG(adherence_pct)
+                  from roster_days, which folds APPROVED PERMISSIONS and applies the
+                  7..240 credible window. This counts days with a spotless punch. A
+                  person with an approved 10-minute permission is 100% conformant on
+                  the Overview and was non-conformant on their own 360 page — same
+                  word, two answers. The column is renamed rather than redefined so
+                  nothing silently changes meaning. */
                COUNT(*) FILTER (WHERE ar.attendance_marker='present'
-                 AND COALESCE(ar.punch_late_minutes,0)=0 AND COALESCE(ar.punch_early_out_minutes,0)=0
-                 AND NOT ar.is_missing_punch)                                                  AS conforming_days
+                 AND NOT ${PUNCH_LATE} AND NOT ${PUNCH_EARLY}
+                 AND NOT ar.is_missing_punch)                                                  AS clean_punch_days
           FROM attendance_records ar
          WHERE ar.tenant_id=$1 AND ar.attendance_date BETWEEN $2 AND $3
          GROUP BY ar.employee_id
@@ -89,7 +101,12 @@ export class PeopleInsightsService {
     const params: any[] = [tenantId, from, to];
     // reference $2/$3 (from/to) harmlessly so the count query — which reuses this
     // WHERE but not the CTEs — supplies the same param count PG expects.
-    let where = `e.tenant_id=$1 AND $2::date IS NOT NULL AND $3::date IS NOT NULL`;
+    /* `e.status='active'` — every sibling query filters it (users, skills,
+       workforce-analytics, scorecard); this one did not, so resigned and
+       terminated staff were counted as headcount and listed as rows. A People 360
+       population that disagrees with the Executive Overview on the same day is
+       the exact inconsistency dashboard principle P-3 forbids. */
+    let where = `e.tenant_id=$1 AND e.status='active' AND $2::date IS NOT NULL AND $3::date IS NOT NULL`;
     // Fold interns into the parent team: picking a parent includes its interns (canon_fn on names).
     if (opts.functionId) { params.push(opts.functionId); where += ` AND e.function_id IN (SELECT id FROM functions WHERE canon_fn(name)=canon_fn((SELECT name FROM functions WHERE id=$${params.length})))`; }
     if (opts.search) {
@@ -99,7 +116,7 @@ export class PeopleInsightsService {
     const sortMap: Record<string, string> = {
       name: `name ASC`, late: `late_count DESC NULLS LAST`, sick: `sick_days DESC NULLS LAST`,
       ot: `ot_hours DESC NULLS LAST`, calls: `calls DESC NULLS LAST`, aht: `aht_sec ASC NULLS LAST`,
-      conformance: `conformance_pct DESC NULLS LAST`, score: `avg_net DESC NULLS LAST`,
+      conformance: `clean_punch_pct DESC NULLS LAST`, score: `avg_net DESC NULLS LAST`,
       absence: `absence_days DESC NULLS LAST`,
     };
     const order = sortMap[opts.sort || ''] || `working_days DESC NULLS LAST`;
@@ -126,7 +143,7 @@ export class PeopleInsightsService {
              COALESCE(att.missing_punch,0)::int  AS missing_punch,
              COALESCE(att.missing_system,0)::int AS missing_system,
              COALESCE(att.ot_hours,0)::float   AS ot_hours,
-             CASE WHEN att.working_days>0 THEN ROUND(100.0*att.conforming_days/att.working_days,1) ELSE NULL END AS conformance_pct,
+             CASE WHEN att.working_days>0 THEN ROUND(100.0*att.clean_punch_days/att.working_days,1) ELSE NULL END AS clean_punch_pct,
              COALESCE(prod.calls,0)::int       AS calls,
              CASE WHEN prod.calls>0 THEN ROUND((prod.talk+prod.acw)/prod.calls) ELSE NULL END AS aht_sec,
              CASE WHEN prod.staffed>0 THEN ROUND(100.0*(prod.talk+prod.acw)/prod.staffed,1) ELSE NULL END AS occupancy,
@@ -155,6 +172,7 @@ export class PeopleInsightsService {
   /** Per-function 360 rollup. */
   async functions360(tenantId: string, from?: string, to?: string) {
     const w = await this.window(tenantId, from, to);
+    if (!w.from || !w.to) return { from: null, to: null, empty: true, functions: [], rows: [], total: 0 };
     const rows = await this.ds.query(`
       WITH ${this.cteBlock()}
       SELECT canon_fn(COALESCE(f.name,'(none)')) AS function_name,
@@ -168,7 +186,7 @@ export class PeopleInsightsService {
              SUM(COALESCE(prod.calls,0))::int       AS calls,
              CASE WHEN SUM(prod.calls)>0 THEN ROUND(SUM(prod.talk+prod.acw)/SUM(prod.calls)) ELSE NULL END AS aht_sec,
              CASE WHEN SUM(prod.staffed)>0 THEN ROUND(100.0*SUM(prod.talk+prod.acw)/SUM(prod.staffed),1) ELSE NULL END AS occupancy,
-             CASE WHEN SUM(att.working_days)>0 THEN ROUND(100.0*SUM(att.conforming_days)/SUM(att.working_days),1) ELSE NULL END AS conformance_pct,
+             CASE WHEN SUM(att.working_days)>0 THEN ROUND(100.0*SUM(att.clean_punch_days)/SUM(att.working_days),1) ELSE NULL END AS clean_punch_pct,
              ROUND(AVG(sc.avg_net),1) AS avg_net,
              CASE WHEN SUM(fcr.fcr_total)>0 THEN ROUND(AVG(fcr.fcr_pct),1) ELSE NULL END AS fcr_pct
         FROM employees e
@@ -177,7 +195,7 @@ export class PeopleInsightsService {
         LEFT JOIN prod ON prod.employee_no=e.employee_no
         LEFT JOIN sc   ON sc.employee_no=e.employee_no
         LEFT JOIN fcr  ON fcr.employee_id=e.id
-       WHERE e.tenant_id=$1
+       WHERE e.tenant_id=$1 AND e.status='active'
        GROUP BY canon_fn(COALESCE(f.name,'(none)'))
        ORDER BY employees DESC
     `, [tenantId, w.from, w.to]);
@@ -198,7 +216,7 @@ export class PeopleInsightsService {
       ['WFH', 'wfh_days', 8], ['Sick', 'sick_days', 8], ['Leave', 'leave_days', 8], ['Absence', 'absence_days', 9],
       ['Off', 'off_days', 7], ['Late', 'late_count', 8], ['Late Min', 'late_minutes', 9], ['Early Out', 'early_count', 9],
       ['Miss Punch', 'missing_punch', 10], ['Miss System', 'missing_system', 11], ['OT Hours', 'ot_hours', 9],
-      ['Conformance %', 'conformance_pct', 13], ['Calls', 'calls', 9], ['AHT (s)', 'aht_sec', 9],
+      ['Clean punch %', 'clean_punch_pct', 13], ['Calls', 'calls', 9], ['AHT (s)', 'aht_sec', 9],
       ['Occupancy %', 'occupancy', 11], ['Break %', 'break_pct', 9], ['FCR %', 'fcr_pct', 9], ['Score', 'avg_net', 8],
     ] as [string, string, number][];
     ws.columns = cols.map(([h, k, w]) => ({ header: h, key: k, width: w }));
@@ -216,7 +234,7 @@ export class PeopleInsightsService {
       { header: 'Leave', key: 'leave_days', width: 8 }, { header: 'Absence', key: 'absence_days', width: 9 },
       { header: 'Late', key: 'late_count', width: 8 }, { header: 'OT Hours', key: 'ot_hours', width: 10 },
       { header: 'Calls', key: 'calls', width: 9 }, { header: 'AHT (s)', key: 'aht_sec', width: 9 },
-      { header: 'Occupancy %', key: 'occupancy', width: 12 }, { header: 'Conformance %', key: 'conformance_pct', width: 13 },
+      { header: 'Occupancy %', key: 'occupancy', width: 12 }, { header: 'Clean punch %', key: 'clean_punch_pct', width: 13 },
       { header: 'FCR %', key: 'fcr_pct', width: 9 }, { header: 'Score', key: 'avg_net', width: 8 },
     ];
     fs2.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -245,7 +263,7 @@ export class PeopleInsightsService {
        WHERE e.tenant_id=$1 AND e.id=$2`, [tenantId, employeeId]))[0];
     if (!head) return { error: 'not found' };
 
-    const summary = (await this.people(tenantId, { from: w.from, to: w.to, search: head.employee_no, limit: 1 })).rows[0] || {};
+    const summary = (await this.people(tenantId, { from: w.from ?? undefined, to: w.to ?? undefined, search: head.employee_no, limit: 1 })).rows[0] || {};
     const daily = await this.ds.query(`
       SELECT attendance_date::text date, attendance_marker AS marker, is_wfh,
              punch_in::text, punch_out::text, punch_late_minutes AS late, punch_early_out_minutes AS early,

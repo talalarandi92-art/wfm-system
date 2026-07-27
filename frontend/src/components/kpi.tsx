@@ -152,8 +152,14 @@ export function Kpi({ label, value, source, drill, accent = '#6366f1', sub, icon
         )}
         <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-3)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
       </div>
-      <div style={{ fontSize: 25, fontWeight: 800, letterSpacing: '-.035em', lineHeight: 1, color: 'var(--text-1)', fontVariantNumeric: 'tabular-nums' }}>
-        {value}
+      {/* A null/undefined value means the figure was NOT measured — a failed query,
+          an empty feed, a period with nothing in it. React renders null as nothing,
+          leaving a blank space that reads as a rendering glitch; and any caller who
+          defended with `?? 0` turned an absence into a confident zero. Say "—" and
+          dim it, so an unmeasured number can never be mistaken for a measured one. */}
+      <div style={{ fontSize: 25, fontWeight: 800, letterSpacing: '-.035em', lineHeight: 1,
+        color: value == null ? 'var(--text-3)' : 'var(--text-1)', fontVariantNumeric: 'tabular-nums' }}>
+        {value == null ? '—' : value}
       </div>
       {sub != null && <div style={{ fontSize: 10.5, color: 'var(--text-3)', marginTop: 5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>}
       {spark && spark.length >= 2 && (

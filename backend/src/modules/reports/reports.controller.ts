@@ -2,6 +2,7 @@ import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { TRUE_OT, PUNCH_LATE } from '@common/wfm-metrics';
 import { Response } from 'express';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
@@ -322,7 +323,13 @@ export class ReportsController {
        LEFT JOIN functions f ON f.id = e.function_id
        WHERE ar.tenant_id = $1
          AND ar.attendance_date BETWEEN $2 AND $3
-         AND ar.punch_late_minutes > 0
+         /* 7..240, not >0. The exported "Late Ranking" named people whose
+            lateness was a single minute — and, with no upper bound, counted a
+            cross-midnight punch landing on the wrong calendar day as a four-hour
+            lateness. The Report Builder in this same station already uses the
+            canonical window, so the CSV and the builder named different worst
+            offenders for the same period. */
+         AND ${PUNCH_LATE}
          AND ar.attendance_marker = 'present'
        GROUP BY e.id, e.employee_no, e.first_name_en, e.last_name_en, e.gender, f.name
        ORDER BY late_count DESC, total_late_minutes DESC
@@ -373,19 +380,27 @@ export class ReportsController {
     const toDate   = to   ?? latest;
 
     const rows = await this.ds.query(
-      `SELECT e.employee_no,
-         e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS employee_name,
-         f.name AS function_name, e.gender,
+      `SELECT COALESCE(e.employee_no, ar.person_no) AS employee_no,
+         COALESCE(NULLIF(TRIM(e.first_name_en || ' ' || COALESCE(e.last_name_en,'')), ''), MAX(ar.clean_name)) AS employee_name,
+         COALESCE(f.name, MAX(ar.role_function)) AS function_name, e.gender,
+         /* TRUE_OT over roster_days — NOT SUM(attendance_records.ot_minutes).
+            That table has a single OT column, so this report was structurally
+            incapable of seeing off-day and public-holiday overtime and undercounted
+            by ~28% against every roster screen and against the OT tracker the
+            Director exports. Payable only: duplicate-identity rows (is_active) and
+            supervisory record-only rows are excluded, exactly as the OT report does. */
          COUNT(*) AS ot_days,
-         SUM(ar.ot_minutes) AS total_ot_minutes,
-         ROUND(AVG(ar.ot_minutes)) AS avg_ot_minutes
-       FROM attendance_records ar
-       JOIN employees e ON e.id = ar.employee_id
+         SUM(${TRUE_OT}) AS total_ot_minutes,
+         ROUND(AVG(${TRUE_OT})) AS avg_ot_minutes
+       FROM roster_days ar
+       LEFT JOIN employees e ON e.employee_no = ar.person_no
        LEFT JOIN functions f ON f.id = e.function_id
        WHERE ar.tenant_id = $1
-         AND ar.attendance_date BETWEEN $2 AND $3
-         AND ar.ot_minutes > 0
-       GROUP BY e.id, e.employee_no, e.first_name_en, e.last_name_en, e.gender, f.name
+         AND ar.work_date BETWEEN $2 AND $3
+         AND ar.is_active
+         AND NOT COALESCE(ar.ot_record_only, false)
+         AND ${TRUE_OT} > 0
+       GROUP BY ar.person_no, e.employee_no, e.first_name_en, e.last_name_en, e.gender, f.name
        ORDER BY total_ot_minutes DESC
        LIMIT 200`,
       [tid, fromDate, toDate],

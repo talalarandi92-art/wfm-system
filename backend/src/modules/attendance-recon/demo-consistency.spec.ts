@@ -60,6 +60,52 @@ describe('demo consistency guards', () => {
     });
   });
 
+  describe('OT is the same definition on EVERY surface, not just the roster', () => {
+    /* Audited live: ot-exceptions, roster-dashboard, control-dashboard and
+       reports/overtime all answered 16,388.4h for the same period only after
+       these four were repointed. Three of them read attendance_records, whose
+       single ot_minutes column structurally cannot reach TRUE_OT (~28% short). */
+    const otSurfaces: [string, string][] = [
+      ['../reports/reports.controller.ts', 'the exported OT ranking'],
+      ['../control-dashboard/control-dashboard.controller.ts', 'the executive OT tile'],
+    ];
+    it.each(otSurfaces)('%s uses TRUE_OT over roster_days', (rel) => {
+      const src = fs.readFileSync(path.join(__dirname, rel), 'utf8');
+      expect(src).toContain('TRUE_OT');
+      expect(src).toContain('roster_days');
+      // and must not fall back to the thin single-column source for OT
+      expect(src).not.toMatch(/SUM\(\s*(ar\.)?ot_minutes\s*\)/);
+    });
+  });
+
+  describe('tardiness is 7..240 minutes everywhere it can punish someone', () => {
+    /* `> 0` meant a ONE-MINUTE lateness counted, and with no upper bound a
+       cross-midnight punch read as a four-hour lateness. Measured: 1,710 → 1,149
+       late-days, 100 → 89 people. Coaching writes real HR flags off this. */
+    const surfaces: [string, string][] = [
+      ['../coaching/coaching.service.ts', 'coaching flags + manager notifications'],
+      ['../operations-analytics/people-insights.service.ts', 'People 360'],
+      ['../reports/reports.controller.ts', 'the exported Late ranking'],
+    ];
+    it.each(surfaces)('%s never counts a sub-7-minute lateness', (rel) => {
+      const src = fs.readFileSync(path.join(__dirname, rel), 'utf8');
+      expect(src).not.toMatch(/punch_late_minutes\s*>\s*0/);
+      expect(src).not.toMatch(/punch_early_out_minutes\s*>\s*0/);
+    });
+  });
+
+  describe('nobody is judged on a score that was never given', () => {
+    it('the scorecard guard excludes unscored rows from every aggregate', () => {
+      const src = fs.readFileSync(path.join(__dirname, '../scorecard-guard/scorecard-guard.service.ts'), 'utf8');
+      // NULL net_points must not become 0 — that put unscored agents in `bottom`
+      // and wrote them a real coaching_flags row.
+      expect(src).not.toContain('Number(r.net_points ?? 0)');
+      expect(src).toContain('rows.filter(r => r.net_points != null)');
+      // an unevaluated KPI cannot be someone's "weakest"
+      expect(src).toContain('if (r[s.f] == null) continue;');
+    });
+  });
+
   describe('an absent input never renders as a measurement', () => {
     /* Found live: Live Monitoring showed "Punched / scheduled: 0 / 0" on a date with
        no published roster — which reads as "the entire team failed to show up". */

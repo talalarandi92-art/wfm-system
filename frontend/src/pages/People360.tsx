@@ -4,6 +4,7 @@ import {
   CalendarDays, Activity, Award, Coffee, Clock, Phone, ShieldCheck, ChevronLeft,
 } from 'lucide-react';
 import { apiClient } from '../api/client';
+import { fmtLocalDate } from '@/utils/format';
 import { useUiStore } from '@/store/ui.store';
 import { Kpi360Card, agent360Url, confColor as cf, Open360Link } from '@/components/agent360/shared';
 
@@ -13,7 +14,12 @@ const n0 = (v: any) => v == null ? '—' : Number(v).toLocaleString();
 const pct = (v: any) => v == null ? '—' : `${v}%`;
 const sc = (v: number | null) => v == null ? '#64748b' : v>=90?'#22c55e':v>=75?'#06b6d4':v>=60?'#f59e0b':'#f43f5e';
 const fc = (v: number | null) => v == null ? '#64748b' : v>=70?'#22c55e':v>=60?'#f59e0b':'#f43f5e';
-const todayISO = '2026-06-30', firstOfMonth = '2026-06-01';
+/* These were the literals '2026-06-30' and '2026-06-01', wired straight into the
+   page's opening state, every request it makes, and the export filename — so the
+   page always opened on June 2026 no matter what the date actually was. Computed
+   locally (never toISOString, which names the wrong day in Kuwait +03:00). */
+const monthStart = () => { const d = new Date(); return fmtLocalDate(new Date(d.getFullYear(), d.getMonth(), 1)); };
+const todayLocal = () => fmtLocalDate(new Date());
 const PER = 20;
 
 interface Row {
@@ -21,7 +27,7 @@ interface Row {
   working_days: number; office_days: number; wfh_days: number; sick_days: number; leave_days: number;
   absence_days: number; off_days: number; comp_days: number; late_count: number; late_minutes: number;
   early_count: number; missing_punch: number; missing_system: number; ot_hours: number;
-  conformance_pct: number | null; calls: number; aht_sec: number | null; occupancy: number | null;
+  clean_punch_pct: number | null; calls: number; aht_sec: number | null; occupancy: number | null;
   break_pct: number | null; staffed_h: number | null; avg_net: number | null; sc_months: number | null;
   fcr_pct: number | null; fcr_total: number | null;
 }
@@ -36,8 +42,8 @@ export default function People360Page() {
   const { lang } = useUiStore();
   const ar = lang === 'ar';
   const [view, setView] = useState<'people' | 'functions'>('people');
-  const [from, setFrom] = useState(firstOfMonth);
-  const [to, setTo] = useState(todayISO);
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(todayLocal);
   const [functionId, setFunctionId] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('working_days');
@@ -80,7 +86,7 @@ export default function People360Page() {
     const avg = (k: keyof Row) => { const v = rows.filter(r => r[k] != null); return v.length ? Math.round(v.reduce((s, r) => s + Number(r[k]), 0) / v.length) : null; };
     const avg1 = (k: keyof Row) => { const v = rows.filter(r => r[k] != null); return v.length ? Math.round(v.reduce((s, r) => s + Number(r[k]), 0) / v.length * 10) / 10 : null; };
     return { count: data.total, sick: sum('sick_days'), absence: sum('absence_days'), late: sum('late_count'),
-      ot: Math.round(sum('ot_hours')), conf: avg1('conformance_pct'), aht: avg('aht_sec'), score: avg1('avg_net') };
+      ot: Math.round(sum('ot_hours')), conf: avg1('clean_punch_pct'), aht: avg('aht_sec'), score: avg1('avg_net') };
   }, [data]);
 
   const pageRows: Row[] = useMemo(() => (data?.rows || []).slice(page*PER, page*PER+PER), [data, page]);
@@ -151,7 +157,7 @@ export default function People360Page() {
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2">
             {[
               { ic: Users,      l: ar?'موظفين':'Employees', v: summary.count, c:'#6366f1' },
-              { ic: ShieldCheck,l: ar?'كونفورمانس':'Conformance', v: summary.conf!=null?summary.conf+'%':'—', c: cf(summary.conf) },
+              { ic: ShieldCheck,l: ar?'بصمة نظيفة':'Clean punch', v: summary.conf!=null?summary.conf+'%':'—', c: cf(summary.conf) },
               { ic: Award,      l: ar?'سكور':'Score', v: summary.score ?? '—', c: sc(summary.score) },
               { ic: Activity,   l: 'AHT', v: hms(summary.aht), c:'#06b6d4' },
               { ic: Coffee,     l: ar?'سيك':'Sick', v: summary.sick, c:'#f59e0b' },
@@ -194,7 +200,7 @@ export default function People360Page() {
                     <td className="px-2 py-2.5 text-center"><Pill v={r.late_count||null} color="#f59e0b" /></td>
                     <td className="px-2 py-2.5 text-center text-slate-300">{r.ot_hours?Number(r.ot_hours).toFixed(1):'—'}</td>
                     <td className="px-2 py-2.5 text-center text-slate-300">{hms(r.aht_sec)}</td>
-                    <td className="px-2 py-2.5 text-center"><Pill v={r.conformance_pct} color={cf(r.conformance_pct)} suffix="%" /></td>
+                    <td className="px-2 py-2.5 text-center"><Pill v={r.clean_punch_pct} color={cf(r.clean_punch_pct)} suffix="%" /></td>
                     <td className="px-2 py-2.5 text-center"><Pill v={r.avg_net} color={sc(r.avg_net)} /></td>
                   </tr>
                   {openId === r.id && (
@@ -245,7 +251,7 @@ export default function People360Page() {
                   <td className="px-2.5 py-2.5 text-center text-slate-300">{n0(f.calls)}</td>
                   <td className="px-2.5 py-2.5 text-center text-slate-300">{hms(f.aht_sec)}</td>
                   <td className="px-2.5 py-2.5 text-center text-slate-300">{pct(f.occupancy)}</td>
-                  <td className="px-2.5 py-2.5 text-center"><Pill v={f.conformance_pct} color={cf(f.conformance_pct)} suffix="%" /></td>
+                  <td className="px-2.5 py-2.5 text-center"><Pill v={f.clean_punch_pct} color={cf(f.clean_punch_pct)} suffix="%" /></td>
                   <td className="px-2.5 py-2.5 text-center"><Pill v={f.avg_net} color={sc(f.avg_net)} /></td>
                 </tr>
               ))}
@@ -282,7 +288,7 @@ function DetailPanel({ d, r, ar }: { d: any; r: Row; ar: boolean }) {
         {grp(ar?'الحضور':'Attendance', [
           [ar?'أيام عمل':'Work days', r.working_days, 'var(--text-1)'], [ar?'مكتب':'Office', r.office_days], [ar?'WFH':'WFH', r.wfh_days],
           [ar?'سيك':'Sick', r.sick_days, r.sick_days?'#f59e0b':''], [ar?'إجازة':'Leave', r.leave_days], [ar?'غياب':'Absence', r.absence_days, r.absence_days?'#f43f5e':''],
-          [ar?'أوف':'Off', r.off_days], [ar?'تعويضي':'Comp', r.comp_days], [ar?'كونفورمانس':'Conformance', pct(r.conformance_pct), cf(r.conformance_pct)],
+          [ar?'أوف':'Off', r.off_days], [ar?'تعويضي':'Comp', r.comp_days], [ar?'بصمة نظيفة':'Clean punch', pct(r.clean_punch_pct), cf(r.clean_punch_pct)],
         ])}
         {grp(ar?'الالتزام':'Punctuality', [
           [ar?'تأخير':'Late', r.late_count, r.late_count?'#f59e0b':''], [ar?'دقائق تأخير':'Late min', r.late_minutes],
