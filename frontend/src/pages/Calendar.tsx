@@ -426,7 +426,7 @@ export default function CalendarPage() {
               <Bell size={16} style={{ color: textSec }} />
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center"
-                  style={{ background: '#ef4444', color: '#fff' }}>
+                  style={{ background: '#ef4444', color: readableOn('#ef4444') }}>
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}

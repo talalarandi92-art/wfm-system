@@ -8,12 +8,31 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, X, Zap, Info } from 'lucide-react';
 import { nfmt, PAL, Awaiting, type HourReq, type ReqDay } from './kit';
+import { readableOnWash } from '@/utils/format';
 
 /* indigo→red heat ramp, zero = faint surface */
+const heatRgb = (t: number): [number, number, number] =>
+  [Math.round(99 + t * 140), Math.round(102 - t * 40), Math.round(241 - t * 130)];
+const heatT = (v: number, max: number) => Math.min(v / Math.max(max, 1), 1);
 const heat = (v: number, max: number): string => {
   if (v <= 0) return 'var(--surface-2)';
-  const t = Math.min(v / Math.max(max, 1), 1);
-  return `rgba(${Math.round(99 + t * 140)}, ${Math.round(102 - t * 40)}, ${Math.round(241 - t * 130)}, ${0.25 + t * 0.65})`;
+  const t = heatT(v, max);
+  const [r, g, b] = heatRgb(t);
+  return `rgba(${r}, ${g}, ${b}, ${0.25 + t * 0.65})`;
+};
+/* The cell is a TRANSLUCENT wash, so what the text actually sits on depends on the
+   theme's surface underneath it — white was 2.49:1 on a pale cell and 3.36:1 on a
+   hot one. While the wash is faint the surface dominates, so the theme's own text
+   colour is correct in both themes; once it is opaque enough the hue dominates and
+   the foreground can be derived from the hue itself. */
+const heatText = (v: number, max: number): string => {
+  if (v <= 0) return 'var(--text-2)';
+  const t = heatT(v, max);
+  const alpha = 0.25 + t * 0.65;
+  if (alpha < 0.62) return 'var(--text-1)';
+  const [r, g, b] = heatRgb(t);
+  /* the wash, not the hue — the composite differs by theme (see readableOnWash) */
+  return readableOnWash('#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join(''), alpha);
 };
 
 function MathModal({ ar, fn, h, onClose }: { ar: boolean; fn: string; h: HourReq; onClose: () => void }) {
@@ -144,7 +163,11 @@ export default function RequirementSection({ ar, day, loading }: {
                     title={`${String(h.hour).padStart(2, '0')}:00 — ${ar ? 'فوليوم' : 'vol'} ${nfmt(h.volume)} · ${h.requiredScheduledHc} HC${h.learned ? (ar ? ' · ⚡ أرضية متعلمة' : ' · ⚡ learned floor') : ''} — ${ar ? 'اضغط للتفاصيل' : 'click for the math'}`}
                     style={{
                       background: heat(h.requiredScheduledHc, maxCell),
-                      color: h.requiredScheduledHc > maxCell * 0.55 ? '#fff' : 'var(--text-1)', height: 26,
+                      /* was: `> maxCell * 0.55 ? '#fff' : var(--text-1)` — the right idea,
+                         but the switch to white happened at alpha 0.61, where the wash is
+                         still translucent enough that the light surface dominates (white
+                         measured 2.49:1 there). heatText() switches on the alpha instead. */
+                      color: heatText(h.requiredScheduledHc, maxCell), height: 26,
                       boxShadow: h.learned ? `inset 0 0 0 1.5px ${PAL.learn}` : undefined,
                       transition: 'transform .1s',
                     }}>

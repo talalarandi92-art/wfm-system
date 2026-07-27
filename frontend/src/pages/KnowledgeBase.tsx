@@ -435,7 +435,7 @@ export default function KnowledgeBasePage() {
         <div className="space-y-1">
           <button onClick={() => setActiveCat(null)}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-all text-start
-              ${!activeCat ? 'bg-indigo-500/15 text-white' : 'text-slate-400 hover:bg-white/5'}`}>
+              ${!activeCat ? 'bg-indigo-500/15 text-1 font-semibold' : 'text-slate-400 hover:bg-white/5'}`}>
             <span className="flex items-center gap-2"><Folder size={14} /> {ar ? 'كل المقالات' : 'All Articles'}</span>
             <span className="text-[10px] text-slate-500">{totalArticles}</span>
           </button>

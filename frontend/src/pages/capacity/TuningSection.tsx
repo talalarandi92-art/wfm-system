@@ -53,7 +53,7 @@ function ParamsEditor({ ar, params, edit, dirtyCount, saveDirty, saving }: {
         right={dirtyCount > 0 && (
           <button onClick={saveDirty} disabled={saving}
             className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-lg"
-            style={{ background: '#6366f1', color: '#fff' }}>
+            style={{ background: '#6366f1', color: readableOn('#6366f1') }}>
             {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
             {ar ? `حفظ (${dirtyCount})` : `Save (${dirtyCount})`}
           </button>
@@ -160,7 +160,7 @@ function EventForecastPanel({ ar }: { ar: boolean }) {
         </button>
         <button onClick={() => fileRef.current?.click()} disabled={busy}
           className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg"
-          style={{ background: '#6366f1', color: '#fff' }}>
+          style={{ background: '#6366f1', color: readableOn('#6366f1') }}>
           {busy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
           {ar ? 'رفع الملف المعبّى' : 'Upload filled file'}
         </button>

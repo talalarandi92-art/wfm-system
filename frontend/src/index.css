@@ -620,6 +620,64 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 /* scrollbar in teal */
 .theme-glass { --scroll-thumb: #134e4a; --scroll-thumb-hover: #0f766e; }
 
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DARK-MODE INLINE COLOUR NET — the mirror of the light one, and it exists for
+   the same reason: hardcoded inline hexes ignore the theme entirely.
+
+   The dark TOKENS are correct (--text-2 #94a3b8, --text-3 #7c8ba1). The failures
+   are `style={{ color: "#475569" }}` — slate-600, a colour picked for a white
+   card — sitting on the app background at 2.17:1. Measured across 12 pages in the
+   DEFAULT theme: 3,866 AA failures from 9 distinct colours, of which slate-600
+   and slate-500 alone are 93%.
+
+   This was never caught before because the contrast work had only ever audited
+   Light. Dark is the demo theme.
+
+   Values are the LIGHTEST point on each hue that clears 4.5:1 against the
+   lightest surface the colour actually lands on — solved, not chosen, so the
+   muted tier stays visibly muted instead of jumping to white.
+   `.dark` covers Glass too: Glass is a dark-based atmosphere.
+
+   SOLVED AGAINST THE LIGHTEST PANEL, not the darkest. The first pass took the app
+   background as the worst case, which left these failing at 3.57-3.91 on the raised
+   panels (rgb(37,42,74), rgb(30,41,59)). In dark the worst case is the LIGHTEST
+   surface — the mirror of the light-mode rule, and the mirror of the same mistake. */
+/* The same colours arrive as CLASSES too — `text-slate-600` IS #475569, so the
+   inline rules below cannot reach them. 932 + 619 of the remaining failures were
+   class-driven. Tints 600+ are the problem in dark; 400 and lighter already read. */
+.dark .text-slate-600:not(.keep-light *) { color: #8b94a1 !important; }
+.dark .text-slate-700:not(.keep-light *) { color: #8b949f !important; }
+.dark .text-slate-500:not(.keep-light *) { color: #8895a6 !important; }
+.dark .text-gray-600:not(.keep-light *), .dark .text-gray-700:not(.keep-light *) { color: #8b94a1 !important; }
+.dark .text-zinc-600:not(.keep-light *), .dark .text-zinc-700:not(.keep-light *) { color: #8b94a1 !important; }
+
+/* slate-600 — 2,375 hits, 2.17:1 on the app background */
+.dark [style*="color: rgb(71, 85, 105)"]:not(.keep-light *) { color: #8b94a1 !important; }
+.dark [style*="color: rgba(71, 85, 105"]:not(.keep-light *) { color: #8b94a1 !important; }
+/* slate-500 — 1,233 hits, 3.43:1 */
+.dark [style*="color: rgb(100, 116, 139)"]:not(.keep-light *) { color: #8895a6 !important; }
+.dark [style*="color: rgba(100, 116, 139"]:not(.keep-light *) { color: #8895a6 !important; }
+/* slate-400 — 3.77:1 on the lighter cards */
+.dark [style*="color: rgb(148, 163, 184)"]:not(.keep-light *) { color: #a6b3c4 !important; }
+.dark [style*="color: rgba(148, 163, 184"]:not(.keep-light *) { color: #a6b3c4 !important; }
+/* slate-700 — darker still; same family, same problem */
+.dark [style*="color: rgb(51, 65, 85)"]:not(.keep-light *) { color: #8b949f !important; }
+.dark [style*="color: rgba(51, 65, 85"]:not(.keep-light *) { color: #8b949f !important; }
+/* violet-500 as TEXT — 3.84:1. #976cf7 landed exactly ON 4.50, which rounds either
+   way; nudged so it clears with margin. */
+.dark [style*="color: rgb(139, 92, 246)"]:not(.keep-light *) { color: #9d75f8 !important; }
+.dark [style*="color: rgba(139, 92, 246"]:not(.keep-light *) { color: #9d75f8 !important; }
+/* indigo-500 as TEXT — 3.78:1 */
+.dark [style*="color: rgb(99, 102, 241)"]:not(.keep-light *) { color: #7477f3 !important; }
+.dark [style*="color: rgba(99, 102, 241"]:not(.keep-light *) { color: #7477f3 !important; }
+/* purple-500 as TEXT — 4.22:1 */
+.dark [style*="color: rgb(168, 85, 247)"]:not(.keep-light *) { color: #ac5ef7 !important; }
+.dark [style*="color: rgba(168, 85, 247"]:not(.keep-light *) { color: #ac5ef7 !important; }
+/* red-500 as TEXT — 4.12:1 */
+.dark [style*="color: rgb(239, 68, 68)"]:not(.keep-light *) { color: #f05555 !important; }
+.dark [style*="color: rgba(239, 68, 68"]:not(.keep-light *) { color: #f05555 !important; }
+
 /* ════════════════════════════════════════════════════════════════════════════
    LIGHT MODE COMFORT — the app is dark-first (hardcoded text-white + white-alpha
    inline surfaces), so plain Light washes those out. These overrides make Light
@@ -639,6 +697,12 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light .text-slate-600 { color: #334155 !important; }
 /* …but keep white text when it sits on a solid colored chip/button (not bg-white) */
 .theme-light .text-white[class*="bg-"]:not([class*="bg-white"]) { color: #fff !important; }
+/* …but `bg-indigo-500/15` is NOT a solid coloured chip — it is a 15% wash over a
+   light card, and white on it measured 1.45:1. The rule above was written for
+   solid `bg-<hue>` buttons; an opacity modifier means the surface still shows
+   through, so the dark text is the correct one. */
+.theme-light .text-white[class*="/1"], .theme-light .text-white[class*="/2"],
+.theme-light .text-white[class*="/3"] { color: #0f172a !important; }
 .theme-light .btn-primary, .theme-light .btn-danger { color: #fff !important; }
 
 /* ── Light-mode INLINE colour net ──────────────────────────────────────────
@@ -653,7 +717,7 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 
    `aside` and `.keep-dark` are excluded: those regions stay dark in Light by
    design, so darkening their text would be the same mistake in reverse. */
-.theme-light [style*="color: rgb(239, 68, 68)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #aa3030 !important; }
+.theme-light [style*="color: rgb(239, 68, 68)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a32e2e !important; }
 .theme-light [style*="color: rgb(220, 38, 38)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #b72020 !important; }
 .theme-light [style*="color: rgb(249, 115, 22)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #98460d !important; }
 .theme-light [style*="color: rgb(234, 88, 12)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a13d08 !important; }
@@ -663,31 +727,31 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light [style*="color: rgb(5, 150, 105)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #046b4b !important; }
 .theme-light [style*="color: rgb(20, 184, 166)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0b695f !important; }
 .theme-light [style*="color: rgb(45, 212, 191)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #16685e !important; }
-.theme-light [style*="color: rgb(6, 182, 212)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036677 !important; }
+.theme-light [style*="color: rgb(6, 182, 212)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036373 !important; }
 .theme-light [style*="color: rgb(8, 145, 178)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #06667d !important; }
 .theme-light [style*="color: rgb(14, 165, 233)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #08638c !important; }
 .theme-light [style*="color: rgb(56, 189, 248)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1e6483 !important; }
 .theme-light [style*="color: rgb(59, 130, 246)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #295bac !important; }
-.theme-light [style*="color: rgb(99, 102, 241)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4e51be !important; }
+.theme-light [style*="color: rgb(99, 102, 241)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #494cb3 !important; }
 .theme-light [style*="color: rgb(79, 70, 229)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4d44de !important; }
 .theme-light [style*="color: rgb(139, 92, 246)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6a46bb !important; }
 .theme-light [style*="color: rgb(167, 139, 250)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #645396 !important; }
-.theme-light [style*="color: rgb(168, 85, 247)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7b3eb4 !important; }
+.theme-light [style*="color: rgb(168, 85, 247)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #793db0 !important; }
 .theme-light [style*="color: rgb(216, 180, 254)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #68567a !important; }
 .theme-light [style*="color: rgb(236, 72, 153)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a3326a !important; }
 .theme-light [style*="color: rgb(244, 114, 182)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #90436b !important; }
 .theme-light [style*="color: rgb(249, 168, 212)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #785166 !important; }
 .theme-light [style*="color: rgb(253, 164, 175)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7c5056 !important; }
 .theme-light [style*="color: rgb(110, 231, 183)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #326852 !important; }
-.theme-light [style*="color: rgb(52, 211, 153)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1a6a4d !important; }
-.theme-light [style*="color: rgb(147, 197, 253)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475f79 !important; }
+.theme-light [style*="color: rgb(52, 211, 153)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1a694c !important; }
+.theme-light [style*="color: rgb(147, 197, 253)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #465d77 !important; }
 .theme-light [style*="color: rgb(156, 163, 175)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #595d64 !important; }
-.theme-light [style*="color: rgb(34, 197, 94)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #136c34 !important; }
-.theme-light [style*="color: rgb(74, 222, 128)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #246b3d !important; }
+.theme-light [style*="color: rgb(34, 197, 94)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #126832 !important; }
+.theme-light [style*="color: rgb(74, 222, 128)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #246a3c !important; }
 .theme-light [style*="color: rgb(251, 191, 36)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #765a11 !important; }
 .theme-light [style*="color: rgb(251, 146, 60)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #884f20 !important; }
-.theme-light [style*="color: rgb(248, 113, 113)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #954444 !important; }
-.theme-light [style*="color: rgb(129, 140, 248)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #51589c !important; }
+.theme-light [style*="color: rgb(248, 113, 113)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #803a3a !important; }
+.theme-light [style*="color: rgb(129, 140, 248)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #464d88 !important; }
 .theme-light [style*="color: rgb(34, 211, 238)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #116775 !important; }
 .theme-light [style*="color: rgb(100, 116, 139)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
 .theme-light [style*="color: rgb(148, 163, 184)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
@@ -699,7 +763,7 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
    light card measures 1.16:1. The selector matches the rgba PREFIX, so one rule
    covers every opacity of that hue. The replacement is fully opaque on purpose:
    a colour already failing at full strength cannot be rescued by fading it. */
-.theme-light [style*="color: rgba(239, 68, 68"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #aa3030 !important; }
+.theme-light [style*="color: rgba(239, 68, 68"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a32e2e !important; }
 .theme-light [style*="color: rgba(220, 38, 38"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #b72020 !important; }
 .theme-light [style*="color: rgba(249, 115, 22"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #98460d !important; }
 .theme-light [style*="color: rgba(234, 88, 12"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a13d08 !important; }
@@ -709,30 +773,30 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light [style*="color: rgba(5, 150, 105"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #046b4b !important; }
 .theme-light [style*="color: rgba(20, 184, 166"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0b695f !important; }
 .theme-light [style*="color: rgba(45, 212, 191"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #16685e !important; }
-.theme-light [style*="color: rgba(6, 182, 212"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036677 !important; }
+.theme-light [style*="color: rgba(6, 182, 212"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036373 !important; }
 .theme-light [style*="color: rgba(8, 145, 178"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #06667d !important; }
 .theme-light [style*="color: rgba(14, 165, 233"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #08638c !important; }
 .theme-light [style*="color: rgba(56, 189, 248"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1e6483 !important; }
 .theme-light [style*="color: rgba(59, 130, 246"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #295bac !important; }
-.theme-light [style*="color: rgba(99, 102, 241"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4e51be !important; }
+.theme-light [style*="color: rgba(99, 102, 241"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #494cb3 !important; }
 .theme-light [style*="color: rgba(139, 92, 246"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6a46bb !important; }
 .theme-light [style*="color: rgba(167, 139, 250"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #645396 !important; }
-.theme-light [style*="color: rgba(168, 85, 247"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7b3eb4 !important; }
+.theme-light [style*="color: rgba(168, 85, 247"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #793db0 !important; }
 .theme-light [style*="color: rgba(216, 180, 254"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #68567a !important; }
 .theme-light [style*="color: rgba(236, 72, 153"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a3326a !important; }
 .theme-light [style*="color: rgba(244, 114, 182"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #90436b !important; }
 .theme-light [style*="color: rgba(249, 168, 212"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #785166 !important; }
 .theme-light [style*="color: rgba(253, 164, 175"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7c5056 !important; }
 .theme-light [style*="color: rgba(110, 231, 183"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #326852 !important; }
-.theme-light [style*="color: rgba(52, 211, 153"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1a6a4d !important; }
-.theme-light [style*="color: rgba(147, 197, 253"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475f79 !important; }
+.theme-light [style*="color: rgba(52, 211, 153"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #1a694c !important; }
+.theme-light [style*="color: rgba(147, 197, 253"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #465d77 !important; }
 .theme-light [style*="color: rgba(156, 163, 175"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #595d64 !important; }
-.theme-light [style*="color: rgba(34, 197, 94"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #136c34 !important; }
-.theme-light [style*="color: rgba(74, 222, 128"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #246b3d !important; }
+.theme-light [style*="color: rgba(34, 197, 94"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #126832 !important; }
+.theme-light [style*="color: rgba(74, 222, 128"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #246a3c !important; }
 .theme-light [style*="color: rgba(251, 191, 36"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #765a11 !important; }
 .theme-light [style*="color: rgba(251, 146, 60"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #884f20 !important; }
-.theme-light [style*="color: rgba(248, 113, 113"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #954444 !important; }
-.theme-light [style*="color: rgba(129, 140, 248"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #51589c !important; }
+.theme-light [style*="color: rgba(248, 113, 113"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #803a3a !important; }
+.theme-light [style*="color: rgba(129, 140, 248"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #464d88 !important; }
 .theme-light [style*="color: rgba(34, 211, 238"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #116775 !important; }
 .theme-light [style*="color: rgba(253, 230, 138"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6d5a1f !important; }
 .theme-light [style*="color: rgba(100, 116, 139"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #475569 !important; }
@@ -753,6 +817,87 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light [class*="text-amber-6"], .theme-light [class*="text-amber-7"] { color: #825406 !important; }
 .theme-light [class*="text-orange-6"] { color: #98460d !important; }
 
+/* ── Targets re-solved for TINTED chips (pass 4) ───────────────────────────────
+   The values above were first solved against the NEUTRAL light surfaces. The
+   commonest chip in this UI is `background: rgba(<hue>,0.13); color: <same hue>`,
+   whose background is a wash of the SAME hue and lands near rgb(190,215,210) —
+   text solved for a neutral card measures 3.8-4.49 on it, just under AA. Each
+   target above was re-solved against the darkest background that colour is
+   actually painted on anywhere in the product.
+
+   NOTE FOR THE NEXT PERSON: these had to be edited IN PLACE, not added as a later
+   override block. An attribute selector matches the style ATTRIBUTE, which still
+   holds the ORIGINAL colour — a rule keyed on the value an earlier rule computed
+   can never match anything. */
+
+
+/* PRIMARY INDIGO CHIPS — darken the CHIP, not the text.
+   `#6366f1` with white is 4.47:1 and `#818cf8` is 2.98:1. Deriving the foreground
+   would put BLACK text on a primary button, which is wrong for the component even
+   though it passes. The standard light-mode treatment is the opposite: take the
+   brand colour one step darker, where white reads properly.
+     #6366f1 → #4338ca   white 4.47 → 7.90
+     #818cf8 → #4f46e5   white 2.98 → 6.29
+   Scoped to light; dark and glass keep the brighter brand tone they were designed
+   around. Applies to the background only — no text colour is touched. */
+/* IMPORTANT — these set the FOREGROUND as well, and that is not redundant.
+   Several of these chips derive their text colour in JS with readableOn(), which
+   reads the ORIGINAL indigo and correctly answers "black". Once this rule darkens
+   the chip, that answer is stale: black on #4338ca is 2.66:1. CSS moved the
+   background, so CSS must own the matching foreground — otherwise the two
+   decisions are made in two places from two different values, which is exactly
+   the bug this rule was written to fix. */
+[style*="background: rgb(99, 102, 241)"]:not(aside *):not(.keep-dark *) { background-color: #4338ca !important; color: #fff !important; }
+[style*="background: rgb(129, 140, 248)"]:not(aside *):not(.keep-dark *) { background-color: #4f46e5 !important; color: #fff !important; }
+[style*="background-color: rgb(99, 102, 241)"]:not(aside *):not(.keep-dark *) { background-color: #4338ca !important; color: #fff !important; }
+[style*="background-color: rgb(129, 140, 248)"]:not(aside *):not(.keep-dark *) { background-color: #4f46e5 !important; color: #fff !important; }
+.theme-light .bg-indigo-500:not(aside *):not(.keep-dark *) { background-color: #4338ca !important; }
+.theme-light .bg-indigo-400:not(aside *):not(.keep-dark *) { background-color: #4f46e5 !important; }
+
+/* red-300 #fca5a5 — mapped to #dc2626 by an older rule, which measures 3.10:1 on a
+   15% red wash of its own hue (outages / security-guard / the RTA queue chips). */
+.theme-light [style*="color: rgb(252, 165, 165)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a01b1b !important; }
+.theme-light [style*="color: rgba(252, 165, 165"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a01b1b !important; }
+
+/* The white-preserving hatch keys on the element that CARRIES the classes, but the
+   text usually lives in a child <span> that inherits the colour and has no classes
+   of its own. Cover the descendants too. */
+.theme-light [class*="bg-"][class*="/1"] *, .theme-light [class*="bg-"][class*="/2"] *,
+.theme-light [class*="bg-"][class*="/3"] * { color: inherit; }
+.theme-light .text-white[class*="/1"] *, .theme-light .text-white[class*="/2"],
+.theme-light .text-white[class*="/3"] * { color: #0f172a !important; }
+
+/* Three 600/700 tints used DIRECTLY with no light-mode rule of their own —
+   dark enough for a white card, not for a wash of their own hue. */
+/* amber-700  — 3.60:1 on its own tinted chip */
+.theme-light [style*="color: rgb(180, 83, 9)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #9b4708 !important; }
+.theme-light [style*="color: rgba(180, 83, 9"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #9b4708 !important; }
+/* green-700  — 4.38:1, a hair under */
+.theme-light [style*="color: rgb(21, 128, 61)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #157d3c !important; }
+.theme-light [style*="color: rgba(21, 128, 61"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #157d3c !important; }
+/* cyan-700   — 4.22:1 */
+.theme-light [style*="color: rgb(14, 116, 144)"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0d6f8a !important; }
+.theme-light [style*="color: rgba(14, 116, 144"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0d6f8a !important; }
+
+/* The 600/700 tints. Pass 3 stopped at 500 because 600+ "already reads on
+   white" — true on a white card, false on a tinted chip. indigo-600 measured
+   3.63:1 and sky-600 2.70:1 on their own chips. */
+.theme-light [class*="text-red-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #ac1e1e !important; }
+.theme-light [class*="text-orange-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a03509 !important; }
+.theme-light [class*="text-amber-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #9b4708 !important; }
+.theme-light [class*="text-yellow-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #8f5706 !important; }
+.theme-light [class*="text-green-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #147739 !important; }
+.theme-light [class*="text-emerald-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #046a4d !important; }
+.theme-light [class*="text-teal-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0e6a63 !important; }
+.theme-light [class*="text-cyan-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0d6f8a !important; }
+.theme-light [class*="text-sky-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #015f8f !important; }
+.theme-light [class*="text-blue-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #025886 !important; }
+.theme-light [class*="text-indigo-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #433cc3 !important; }
+.theme-light [class*="text-violet-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6e34d3 !important; }
+.theme-light [class*="text-purple-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #842ed3 !important; }
+.theme-light [class*="text-pink-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #9e0f32 !important; }
+.theme-light [class*="text-rose-6"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-7"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #9e0f32 !important; }
+
 /* ── Light-mode net: light TINTS of the accent families, as CLASSES ────────
    The rules above reach inline colours. They cannot reach `text-emerald-300/80`,
    which Tailwind emits as a CLASS (`.text-emerald-300\/80`) with no inline style
@@ -765,19 +910,19 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 
    `aside` and `.keep-dark` stay dark by design and are excluded. */
 .theme-light [class*="text-emerald-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-emerald-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #096b4b !important; }
-.theme-light [class*="text-green-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #136c34 !important; }
+.theme-light [class*="text-green-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-green-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #126832 !important; }
 .theme-light [class*="text-lime-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-lime-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #3d6413 !important; }
 .theme-light [class*="text-teal-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-teal-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #0b695f !important; }
-.theme-light [class*="text-cyan-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036677 !important; }
+.theme-light [class*="text-cyan-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-cyan-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #036373 !important; }
 .theme-light [class*="text-sky-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-sky-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #08638c !important; }
 .theme-light [class*="text-blue-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-blue-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #295bac !important; }
-.theme-light [class*="text-indigo-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #4e51be !important; }
+.theme-light [class*="text-indigo-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-indigo-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #494cb3 !important; }
 .theme-light [class*="text-violet-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-violet-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #6a46bb !important; }
-.theme-light [class*="text-purple-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #7b3eb4 !important; }
+.theme-light [class*="text-purple-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-purple-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #793db0 !important; }
 .theme-light [class*="text-fuchsia-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-fuchsia-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #8c3499 !important; }
 .theme-light [class*="text-pink-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-pink-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a3326a !important; }
 .theme-light [class*="text-rose-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-rose-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a83349 !important; }
-.theme-light [class*="text-red-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #aa3030 !important; }
+.theme-light [class*="text-red-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-red-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #a32e2e !important; }
 .theme-light [class*="text-orange-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-orange-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #98460d !important; }
 .theme-light [class*="text-amber-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-amber-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #825406 !important; }
 .theme-light [class*="text-yellow-1"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-2"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-3"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-4"]:not(aside *):not(.keep-dark *):not(.keep-dark), .theme-light [class*="text-yellow-5"]:not(aside *):not(.keep-dark *):not(.keep-dark) { color: #755a04 !important; }
@@ -822,31 +967,31 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
 .theme-light [style*="color: rgb(203, 213, 225)"]:not(aside *):not(.keep-dark *) { color: #334155 !important; }  /* #cbd5e1 */
 .theme-light [style*="color: rgb(148, 163, 184)"]:not(aside *):not(.keep-dark *) { color: #64748b !important; }  /* #94a3b8 */
 /* light accent text (…-300) is faint on white → same hue, darker for contrast */
-.theme-light [style*="color: rgb(165, 180, 252)"]:not(aside *):not(.keep-dark *) { color: #4f46e5 !important; }  /* indigo-300 */
+.theme-light [style*="color: rgb(165, 180, 252)"]:not(aside *):not(.keep-dark *) { color: #433cc3 !important; }  /* indigo-300 */
 .theme-light [style*="color: rgb(103, 232, 249)"]:not(aside *):not(.keep-dark *) { color: #0891b2 !important; }  /* cyan-300 */
 .theme-light [style*="color: rgb(134, 239, 172)"]:not(aside *):not(.keep-dark *) { color: #16a34a !important; }  /* green-300 */
 .theme-light [style*="color: rgb(252, 165, 165)"]:not(aside *):not(.keep-dark *) { color: #dc2626 !important; }  /* red-300 */
-.theme-light [style*="color: rgb(253, 224, 71)"]:not(aside *):not(.keep-dark *)  { color: #a16207 !important; }  /* yellow-300 */
+.theme-light [style*="color: rgb(253, 224, 71)"]:not(aside *):not(.keep-dark *)  { color: #8f5706 !important; }  /* yellow-300 */
 .theme-light [style*="color: rgb(251, 191, 36)"]:not(aside *):not(.keep-dark *)  { color: #92400e !important; }  /* amber-400 */
 .theme-light [style*="color: rgb(252, 211, 77)"]:not(aside *):not(.keep-dark *)  { color: #92400e !important; }  /* amber-300 */
 .theme-light [style*="color: rgb(74, 222, 128)"]:not(aside *):not(.keep-dark *)  { color: #166534 !important; }  /* green-400 */
 .theme-light [style*="color: rgb(52, 211, 153)"]:not(aside *):not(.keep-dark *)  { color: #047857 !important; }  /* emerald-400 */
 .theme-light [style*="color: rgb(96, 165, 250)"]:not(aside *):not(.keep-dark *)  { color: #2563eb !important; }  /* blue-400 */
-.theme-light [style*="color: rgb(248, 113, 113)"]:not(aside *):not(.keep-dark *) { color: #dc2626 !important; }  /* red-400 */
+.theme-light [style*="color: rgb(248, 113, 113)"]:not(aside *):not(.keep-dark *) { color: #ac1e1e !important; }  /* red-400 */
 .theme-light [style*="color: rgb(129, 140, 248)"]:not(aside *):not(.keep-dark *) { color: #4f46e5 !important; }  /* indigo-400 */
 .theme-light [style*="color: rgb(34, 211, 238)"]:not(aside *):not(.keep-dark *)  { color: #0891b2 !important; }  /* cyan-400 */
 .theme-light [style*="color: rgb(56, 189, 248)"]:not(aside *):not(.keep-dark *)  { color: #0284c7 !important; }  /* sky-400 (morning) */
 .theme-light [style*="color: rgb(167, 139, 250)"]:not(aside *):not(.keep-dark *) { color: #7c3aed !important; }  /* violet-400 (night) */
-.theme-light [style*="color: rgb(192, 132, 252)"]:not(aside *):not(.keep-dark *) { color: #9333ea !important; }  /* purple-400 (leave) */
+.theme-light [style*="color: rgb(192, 132, 252)"]:not(aside *):not(.keep-dark *) { color: #842ed3 !important; }  /* purple-400 (leave) */
 .theme-light [style*="color: rgb(251, 146, 60)"]:not(aside *):not(.keep-dark *)  { color: #ea580c !important; }  /* orange-400 (evening) */
 .theme-light [style*="color: rgb(110, 231, 183)"]:not(aside *):not(.keep-dark *) { color: #047857 !important; }  /* emerald-300 */
 .theme-light [style*="color: rgb(134, 239, 172)"]:not(aside *):not(.keep-dark *) { color: #166534 !important; }  /* green-300 */
-.theme-light [style*="color: rgb(125, 211, 252)"]:not(aside *):not(.keep-dark *) { color: #0284c7 !important; }  /* sky-300 */
-.theme-light [style*="color: rgb(94, 234, 212)"]:not(aside *):not(.keep-dark *)  { color: #0f766e !important; }  /* teal-300 */
+.theme-light [style*="color: rgb(125, 211, 252)"]:not(aside *):not(.keep-dark *) { color: #015f8f !important; }  /* sky-300 */
+.theme-light [style*="color: rgb(94, 234, 212)"]:not(aside *):not(.keep-dark *)  { color: #0e6a63 !important; }  /* teal-300 */
 .theme-light [style*="color: rgb(253, 164, 175)"]:not(aside *):not(.keep-dark *) { color: #e11d48 !important; }  /* rose-300 */
-.theme-light [style*="color: rgb(196, 181, 253)"]:not(aside *):not(.keep-dark *) { color: #7c3aed !important; }  /* violet-300 */
+.theme-light [style*="color: rgb(196, 181, 253)"]:not(aside *):not(.keep-dark *) { color: #6e34d3 !important; }  /* violet-300 */
 .theme-light [style*="color: rgb(199, 210, 254)"]:not(aside *):not(.keep-dark *) { color: #4338ca !important; }  /* indigo-200 (active chips) */
-.theme-light [style*="color: rgb(165, 180, 252)"]:not(aside *):not(.keep-dark *) { color: #4f46e5 !important; }  /* indigo-300 (accent text) */
+.theme-light [style*="color: rgb(165, 180, 252)"]:not(aside *):not(.keep-dark *) { color: #433cc3 !important; }  /* indigo-300 (accent text) */
 .theme-light [style*="color: rgb(103, 232, 249)"]:not(aside *):not(.keep-dark *) { color: #155e75 !important; }  /* cyan-300 */
 .theme-light [style*="color: rgba(251, 191, 36"]:not(aside *):not(.keep-dark *) { color: #92400e !important; }   /* amber-400 w/ alpha */
 

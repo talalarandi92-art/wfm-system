@@ -108,6 +108,51 @@ export function readableOn(bg: string): string {
 }
 
 /**
+ * Like readableOn(), but for a background that is a TRANSLUCENT wash of `hex` at
+ * `alpha` over the current theme surface — a heat cell, a tinted chip.
+ *
+ * Why this is separate: readableOn(hue) answers for the PURE colour, and a wash is
+ * not the pure colour. The same wash composites LIGHTER than the hue in light mode
+ * and DARKER in dark mode, so one answer cannot serve both — the capacity heat grid
+ * had black text at 4.30:1 in dark because the decision was made from the hue while
+ * the eye saw the composite. Reads --surface at call time, so it follows the theme.
+ */
+export function readableOnWash(hex: string, alpha: number): string {
+  const h = hex.trim().replace('#', '');
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const n = parseInt(full.slice(0, 6), 16);
+  if (Number.isNaN(n)) return '#fff';
+  const fg = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  /* A wash can sit on --surface, --surface-2 or the page --bg depending on the
+     component, and guessing wrong is how a heat label ended up at 3.99:1. Composite
+     over ALL of them and pick the foreground that is best in the WORST case, so the
+     answer holds wherever the component is actually placed. */
+  const cs = getComputedStyle(document.documentElement);
+  const surfaces = ['--surface', '--surface-2', '--bg']
+    .map((v) => cs.getPropertyValue(v).trim())
+    .filter(Boolean)
+    .map((h) => {
+      const x = h.replace('#', '');
+      const n2 = parseInt(x.length === 3 ? x.split('').map((c) => c + c).join('') : x.slice(0, 6), 16);
+      return Number.isNaN(n2) ? [255, 255, 255] : [(n2 >> 16) & 255, (n2 >> 8) & 255, n2 & 255];
+    });
+  if (!surfaces.length) surfaces.push([255, 255, 255]);
+  const a = Math.max(0, Math.min(1, alpha));
+  const lumOf = (c: number[]) => {
+    const ch = c.map((v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+    return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+  };
+  const ratio = (l1: number, l2: number) => (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  let worstWhite = Infinity, worstBlack = Infinity;
+  for (const bg of surfaces) {
+    const L = lumOf(fg.map((v, i) => v * a + bg[i] * (1 - a)));
+    worstWhite = Math.min(worstWhite, ratio(1, L));
+    worstBlack = Math.min(worstBlack, ratio(L, 0));
+  }
+  return worstWhite >= worstBlack ? '#fff' : '#000';
+}
+
+/**
  * The Saturday that starts the workforce week (Sat→Fri) containing `d`.
  * JS getDay(): 0=Sun … 6=Sat → days to subtract = (getDay() + 1) % 7.
  */

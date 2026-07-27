@@ -32,7 +32,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Hourglass, AlertTriangle } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
-import { scalarLabel, readableOn } from '@/utils/format';
+import { scalarLabel, readableOn, readableOnWash } from '@/utils/format';
 
 /* ── Number & time formatting ─────────────────────────────────────────────── */
 /** Thin-space thousands, max one decimal: 69429 → "69 429", 6.87 → "6.9". */
@@ -292,6 +292,19 @@ export function HeatCell({ label, color, intensity, title, sub, dim }: {
   title?: string; sub?: string; dim?: boolean;
 }) {
   const a = Math.max(0.1, Math.min(1, intensity));
+  /* The cell background is an ALPHA WASH of a semantic hue, so what the text sits
+     on changes with intensity: faint at the low end (the theme surface shows
+     through, and the theme's own tokens are right) and saturated at the high end
+     (the hue dominates, and --text-2 measured 2.27:1 on a hot red cell). Switch on
+     the alpha, exactly like the capacity heat grid. */
+  /* 0.55 was still too generous — at alpha 0.45 over a light card the wash is
+     already saturated enough that --text-2 measures 3.70:1. Measured switch. */
+  /* No threshold: readableOnWash COMPOSITES the wash over the theme surface, so it
+     is already correct at both ends of the ramp. The earlier `a >= 0.55`, then
+     `>= 0.4`, were attempts to guess where the hue starts to dominate — a guess the
+     compositing makes unnecessary, and both guesses left mid-intensity cells wrong
+     (--text-2 measured 3.77:1 on a moderately hot green cell). */
+  const fg = dim ? 'var(--text-3)' : readableOnWash(color, a);
   return (
     <div title={title} className="rounded-lg flex flex-col items-center justify-center flex-1"
       style={{
@@ -300,10 +313,8 @@ export function HeatCell({ label, color, intensity, title, sub, dim }: {
         border: `1px solid ${dim ? 'var(--border)' : `${color}55`}`,
         opacity: dim ? 0.55 : 1,
       }}>
-      <span className="text-[9.5px] font-bold tabular-nums leading-none"
-        style={{ color: dim ? 'var(--text-3)' : 'var(--text-1)' }}>{label}</span>
-      {sub && <span className="text-[8.5px] tabular-nums mt-0.5 leading-none"
-        style={{ color: dim ? 'var(--text-3)' : 'var(--text-2)' }}>{sub}</span>}
+      <span className="text-[9.5px] font-bold tabular-nums leading-none" style={{ color: fg }}>{label}</span>
+      {sub && <span className="text-[8.5px] tabular-nums mt-0.5 leading-none" style={{ color: fg, opacity: 0.85 }}>{sub}</span>}
     </div>
   );
 }

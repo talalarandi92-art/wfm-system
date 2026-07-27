@@ -10,6 +10,7 @@ import { useUiStore } from '@/store/ui.store';
 import { apiClient } from '@/api/client';
 import { card as cardStyle, tp, ts as tsColor, useInjectDsStyles } from '@/components/ds';
 import { fmtDateTime, fmtDuration } from '@/utils/format';
+import { readableOn } from '@/utils/format';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface OutageType { id: string; name: string; name_ar: string; code: string }
@@ -373,7 +374,7 @@ export default function OutagesPage() {
               {ar ? t.ar : t.en}
               {t.key === 'active' && activeBadge > 0 && (
                 <span className="absolute -top-1 -end-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center"
-                  style={{ background: '#ef4444', color: 'white' }}>{activeBadge}</span>
+                  style={{ background: '#ef4444', color: readableOn('#ef4444') }}>{activeBadge}</span>
               )}
             </button>
           );
