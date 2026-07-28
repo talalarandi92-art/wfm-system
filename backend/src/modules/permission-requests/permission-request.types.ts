@@ -16,7 +16,9 @@ import {
  * Business rules (enforced in service):
  *  - Minimum duration: 30 minutes
  *  - Maximum duration per request: 3 hours (180 min)
- *  - Maximum 3 permissions per week (Mon–Sun, or Sat–Fri per WFM week rule)
+ *  - Maximum 3 permissions AND 6 hours per CUT-OFF CYCLE (BR-PRM-003 + BR-TIM-002:
+ *    full-time 15→14, interns 1→end of month). This said "per week" and the code
+ *    enforced a week, which granted roughly 4x the agreed balance.
  *  - COMP requests are NOT subject to the 3h cap (handled separately)
  */
 export type PermissionType = 'late_in' | 'early_out' | 'temp_out' | 'return_during_shift';
@@ -31,8 +33,10 @@ export const PERMISSION_TYPE_LABELS: Record<PermissionType, { ar: string; en: st
 export const PERMISSION_RULES = {
   MIN_DURATION_MINUTES: 30,
   MAX_DURATION_MINUTES: 180,    // 3 hours per request
-  MAX_PER_WEEK: 3,
-  MAX_MINUTES_PER_WEEK: 360,    // 6 hours total per cycle/week
+  /* Named _PER_CYCLE, not _PER_WEEK, on purpose: the old names were the reason the
+     window drifted. The balance renews per CUT-OFF CYCLE (see cutoff-cycle.ts). */
+  MAX_PER_CYCLE: 3,
+  MAX_MINUTES_PER_CYCLE: 360,   // 6 hours per cut-off cycle
 } as const;
 
 export class CreatePermissionRequestDto {

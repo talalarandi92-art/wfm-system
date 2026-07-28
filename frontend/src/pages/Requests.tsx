@@ -929,7 +929,13 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loadingCandidates, setLoadingCandidates] = useState(false);
-  const [weeklyUsage, setWeeklyUsage] = useState<{ used: number; remaining: number; max: number; weekStart: string; weekEnd: string } | null>(null);
+  /* The balance is per CUT-OFF CYCLE, not per week (BR-PRM-003 + BR-TIM-002). The
+     API used to enforce a week and this chip said "this week" to match; both are
+     now the cycle. `remainingMinutes` is new: the 6-hour cap was always enforced
+     but never shown, so an agent could see "2 of 3 left" and still be rejected. */
+  const [weeklyUsage, setWeeklyUsage] = useState<{ used: number; remaining: number; max: number;
+    usedMinutes: number; remainingMinutes: number; maxMinutes: number;
+    weekStart: string; weekEnd: string; cycleKind: string } | null>(null);
   const [hcImpact, setHcImpact] = useState<any>(null);
   const [hcLoading, setHcLoading] = useState(false);
   const [leaveBal, setLeaveBal] = useState<any>(null);
@@ -1426,8 +1432,9 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                     <Shield size={14} style={{ color: weeklyUsage.remaining === 0 ? '#ef4444' : weeklyUsage.remaining === 1 ? '#f59e0b' : '#10b981' }} />
                     <span className="text-xs font-medium" style={{ color: weeklyUsage.remaining === 0 ? '#fca5a5' : weeklyUsage.remaining === 1 ? '#fcd34d' : '#6ee7b7' }}>
                       {weeklyUsage.remaining === 0
-                        ? (ar ? 'تجاوزت الحد الأقصى للأسبوع' : 'Weekly limit reached')
-                        : (ar ? `متبقي ${weeklyUsage.remaining} استئذان هذا الأسبوع` : `${weeklyUsage.remaining} permission(s) remaining this week`)}
+                        ? (ar ? 'تجاوزت الحد الأقصى لهذه الدورة' : 'Cycle limit reached')
+                        : (ar ? `متبقي ${weeklyUsage.remaining} استئذان و${Math.floor(weeklyUsage.remainingMinutes / 60)}س ${weeklyUsage.remainingMinutes % 60}د في هذه الدورة`
+                              : `${weeklyUsage.remaining} permission(s) and ${Math.floor(weeklyUsage.remainingMinutes / 60)}h ${weeklyUsage.remainingMinutes % 60}m left this cycle`)}
                     </span>
                   </div>
                   <div className="flex items-center gap-1">
@@ -1441,7 +1448,8 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                         {i < weeklyUsage.used ? '✓' : '○'}
                       </div>
                     ))}
-                    <span className="text-[10px] text-slate-500 ms-1">{weeklyUsage.weekStart} – {weeklyUsage.weekEnd}</span>
+                    <span className="text-[10px] text-slate-500 ms-1"
+                      title={ar ? 'دورة القطع' : 'cut-off cycle'}>{weeklyUsage.weekStart} – {weeklyUsage.weekEnd}</span>
                   </div>
                 </div>
               )}

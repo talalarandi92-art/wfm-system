@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { cutoffCycleFor, cycleKindFor } from '@common/cutoff-cycle';
 import {
   CreatePermissionRequestDto,
   ApproveRequestDto,
@@ -255,18 +256,23 @@ export class PermissionRequestService implements OnModuleInit {
       );
     }
 
-    // ── Weekly quota check (max 3 permissions per WFM week: Sat–Fri) ──────
-    // ALL-UTC date math (EXECUTION_BRIEF bug #14): the old mix of UTC parse +
-    // local getDay/setDate shifted the Saturday week boundary by a day on a
-    // +03 host. Pinning every step to UTC is deterministic on any server.
-    const permDate = new Date(String(dto.permissionDate).slice(0, 10) + 'T00:00:00Z');
-    const dayOfWeek = permDate.getUTCDay(); // 0=Sun, 6=Sat
-    // Days since last Saturday (Sat=0 in WFM week)
-    const daysSinceSat = (dayOfWeek + 1) % 7; // Sat→0, Sun→1, … Fri→6
-    const weekSat = new Date(permDate.getTime() - daysSinceSat * 86400000);
-    const weekFri = new Date(weekSat.getTime() + 6 * 86400000);
-    const weekSatStr = weekSat.toISOString().slice(0, 10);
-    const weekFriStr = weekFri.toISOString().slice(0, 10);
+    /* ── Quota check, over the CUT-OFF CYCLE ────────────────────────────────
+       BR-PRM-003: the balance is 3 permissions and 6 hours, renewing per CYCLE
+       (BR-TIM-002: full-time 15→14, interns 1→end of month). This counted over a
+       Sat–Fri WEEK, which is roughly a quarter of a cycle — so the enforced
+       allowance was about 4× the agreed one, and the data shows it was used:
+       384 of 2,298 employee-cycles exceeded 3 permissions, 442 exceeded 6 hours,
+       with one cycle reaching 11 permissions / 1,383 minutes.
+
+       The week arithmetic was fine (all-UTC, EXECUTION_BRIEF bug #14). The WINDOW
+       was the bug. cutoffCycleFor() keeps the same all-UTC discipline. */
+    const [empRow] = await this.ds.query(
+      `SELECT employment_type FROM employees WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [dto.employeeId, tenantId],
+    );
+    const cycle = cutoffCycleFor(String(dto.permissionDate).slice(0, 10), cycleKindFor(empRow?.employment_type));
+    const weekSatStr = cycle.from;
+    const weekFriStr = cycle.to;
 
     const weekCountRows = await this.ds.query(
       `SELECT COUNT(*) AS cnt
@@ -281,14 +287,14 @@ export class PermissionRequestService implements OnModuleInit {
       [tenantId, dto.employeeId, weekSatStr, weekFriStr],
     );
     const weekCount = parseInt(weekCountRows[0]?.cnt ?? '0', 10);
-    if (weekCount >= PERMISSION_RULES.MAX_PER_WEEK) {
+    if (weekCount >= PERMISSION_RULES.MAX_PER_CYCLE) {
       throw new BadRequestException(
-        `تجاوز الحد الأقصى للأذونات هذا الأسبوع (${PERMISSION_RULES.MAX_PER_WEEK} أذونات). ` +
+        `تجاوز الحد الأقصى للأذونات في هذه الدورة (${PERMISSION_RULES.MAX_PER_CYCLE} أذونات). ` +
         `المستخدم لديه بالفعل ${weekCount} أذونات من ${weekSatStr} حتى ${weekFriStr}.`,
       );
     }
 
-    // Cumulative duration cap: 6 hours of permission per week/cycle.
+    // Cumulative duration cap: 6 hours of permission per CYCLE (BR-PRM-003).
     const weekMinsRows = await this.ds.query(
       `SELECT COALESCE(SUM(rp.duration_minutes),0) AS mins
        FROM requests r
@@ -300,9 +306,10 @@ export class PermissionRequestService implements OnModuleInit {
       [tenantId, dto.employeeId, weekSatStr, weekFriStr],
     );
     const usedMins = parseInt(weekMinsRows[0]?.mins ?? '0', 10);
-    if (usedMins + durationMinutes > PERMISSION_RULES.MAX_MINUTES_PER_WEEK) {
+    if (usedMins + durationMinutes > PERMISSION_RULES.MAX_MINUTES_PER_CYCLE) {
       throw new BadRequestException(
-        `تجاوز رصيد الاستئذان الأسبوعي (${PERMISSION_RULES.MAX_MINUTES_PER_WEEK / 60} ساعات). ` +
+        `تجاوز رصيد الاستئذان لهذه الدورة (${PERMISSION_RULES.MAX_MINUTES_PER_CYCLE / 60} ساعات) ` +
+        `(${weekSatStr} → ${weekFriStr}). ` +
         `المستخدم استخدم ${usedMins} دقيقة، وهذا الطلب ${durationMinutes} دقيقة.`,
       );
     }
@@ -794,24 +801,29 @@ export class PermissionRequestService implements OnModuleInit {
     });
   }
 
-  // ── Weekly usage summary (quota check) ────────────────────────────────────
+  // ── Cycle usage summary (the balance a TL sees before approving) ──────────
 
   async getWeeklyUsage(tenantId: string, employeeId: string, date: string): Promise<{
     weekStart: string;
     weekEnd: string;
+    cycleKind: string;
+    usedMinutes: number;
+    remainingMinutes: number;
+    maxMinutes: number;
     used: number;
     remaining: number;
     max: number;
     requests: { id: string; permissionDate: string; startTime: string; endTime: string; durationMinutes: number; permissionType: string | null; status: string }[];
   }> {
-    // ALL-UTC week math (bug #14) — same fix as the quota check above.
-    const permDate = new Date(String(date).slice(0, 10) + 'T00:00:00Z');
-    const dayOfWeek = permDate.getUTCDay();
-    const daysSinceSat = (dayOfWeek + 1) % 7;
-    const weekSat = new Date(permDate.getTime() - daysSinceSat * 86400000);
-    const weekFri = new Date(weekSat.getTime() + 6 * 86400000);
-    const weekSatStr = weekSat.toISOString().slice(0, 10);
-    const weekFriStr = weekFri.toISOString().slice(0, 10);
+    /* The SAME window the quota check enforces. When these two disagreed, a TL
+       could read "1 of 3 used" and still have the approval rejected. */
+    const [empRow] = await this.ds.query(
+      `SELECT employment_type FROM employees WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [employeeId, tenantId],
+    );
+    const cycle = cutoffCycleFor(String(date).slice(0, 10), cycleKindFor(empRow?.employment_type));
+    const weekSatStr = cycle.from;
+    const weekFriStr = cycle.to;
 
     const rows = await this.ds.query(
       `SELECT r.id, rp.permission_date::text, rp.start_time::text, rp.end_time::text,
@@ -829,12 +841,19 @@ export class PermissionRequestService implements OnModuleInit {
     );
 
     const used = rows.length;
+    /* The 6-hour cap is enforced but was never REPORTED — a TL could see "2 of 3
+       permissions used" and approve a request that the minute cap then rejected. */
+    const usedMinutes = rows.reduce((a: number, r: any) => a + Number(r.duration_minutes || 0), 0);
     return {
       weekStart: weekSatStr,
       weekEnd: weekFriStr,
+      cycleKind: cycle.kind,
+      usedMinutes,
+      remainingMinutes: Math.max(0, PERMISSION_RULES.MAX_MINUTES_PER_CYCLE - usedMinutes),
+      maxMinutes: PERMISSION_RULES.MAX_MINUTES_PER_CYCLE,
       used,
-      remaining: Math.max(0, PERMISSION_RULES.MAX_PER_WEEK - used),
-      max: PERMISSION_RULES.MAX_PER_WEEK,
+      remaining: Math.max(0, PERMISSION_RULES.MAX_PER_CYCLE - used),
+      max: PERMISSION_RULES.MAX_PER_CYCLE,
       requests: rows.map((r: any) => ({
         id: r.id,
         permissionDate: r.permission_date,

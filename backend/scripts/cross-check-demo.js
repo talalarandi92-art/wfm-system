@@ -407,6 +407,47 @@ const BASE = process.argv[2] || 'http://localhost:3000';
                labelA: 'overall scheduled days', labelB: 'weekday + weekend', unit: 'days' };
     }, 0);
 
+
+  // ── 13. The permission balance is counted over the CYCLE, not a week ────
+  await check('Permission balance: enforced over the cut-off cycle',
+    'BR-PRM-003 is 3 permissions + 6 hours per CYCLE (BR-TIM-002). The code counted a ' +
+    'Sat-Fri week, which is ~1/4 of a cycle and therefore granted ~4x the agreed balance. ' +
+    'If this ever reverts, 384 of 2,298 employee-cycles go back to being over the limit.',
+    async () => {
+      const [emp] = await sql(
+        `SELECT r.employee_id, rp.permission_date::text d
+           FROM requests r JOIN request_permissions rp ON rp.request_id=r.id
+           JOIN request_types rt ON rt.id=r.request_type_id
+          WHERE rt.code='permission' AND r.status NOT IN ('rejected','cancelled')
+          ORDER BY rp.permission_date DESC LIMIT 1`);
+      if (!emp) return { a: 1, b: 1, labelA: 'no permissions on file', labelB: 'n/a', unit: '' };
+      const u = await api(`/permission-requests/weekly-usage?employeeId=${emp.employee_id}&date=${emp.d}`);
+      // a cycle spans ~28-31 days; a week would be exactly 7
+      const days = Math.round(
+        (new Date(u.weekEnd + 'T00:00:00Z') - new Date(u.weekStart + 'T00:00:00Z')) / 86400000) + 1;
+      return { a: days >= 27 ? 1 : 0, b: 1,
+               labelA: `window ${u.weekStart}→${u.weekEnd} = ${days} days`,
+               labelB: 'a cycle (>=27 days), not a week', unit: '' };
+    }, 0);
+
+  await check('Permission balance: the hour cap is reported, not just enforced',
+    'The 6-hour cap was always enforced but never returned, so a TL could read ' +
+    '"2 of 3 permissions left", approve, and have the minute cap reject it.',
+    async () => {
+      const [emp] = await sql(
+        `SELECT r.employee_id, rp.permission_date::text d
+           FROM requests r JOIN request_permissions rp ON rp.request_id=r.id
+           JOIN request_types rt ON rt.id=r.request_type_id
+          WHERE rt.code='permission' AND r.status NOT IN ('rejected','cancelled')
+          ORDER BY rp.permission_date DESC LIMIT 1`);
+      if (!emp) return { a: 1, b: 1, labelA: 'no permissions on file', labelB: 'n/a', unit: '' };
+      const u = await api(`/permission-requests/weekly-usage?employeeId=${emp.employee_id}&date=${emp.d}`);
+      const ok = Number.isFinite(u.usedMinutes) && Number.isFinite(u.remainingMinutes) && u.maxMinutes === 360;
+      return { a: ok ? 1 : 0, b: 1,
+               labelA: `used ${u.usedMinutes}m / max ${u.maxMinutes}m`,
+               labelB: 'minutes reported, cap = 360', unit: '' };
+    }, 0);
+
   await c.end();
   const bad = results.filter((r) => !r.ok);
   console.log(`\n${'═'.repeat(72)}`);
