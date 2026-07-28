@@ -38,6 +38,11 @@ const FOLDERS = ['Score Card 2025', 'Score Card 2026'];
 const APPLY = process.argv.includes('--apply');
 const onlyIx = process.argv.indexOf('--only');
 const ONLY = onlyIx > 0 ? process.argv[onlyIx + 1] : null;
+/* --year narrows which FILES get previewed, not just which get committed. The preview
+   endpoint is throttled to 20/hour; previewing all 13 workbooks on every run to load
+   three of them burns the budget and the later files come back 429. */
+const yearIx = process.argv.indexOf('--year');
+const YEAR = yearIx > 0 ? Number(process.argv[yearIx + 1]) : null;
 
 (async () => {
   const c = new Client({ host: process.env.POSTGRES_HOST, port: +process.env.POSTGRES_PORT, database: process.env.POSTGRES_DB, user: process.env.POSTGRES_USER, password: process.env.POSTGRES_PASSWORD });
@@ -60,6 +65,7 @@ const ONLY = onlyIx > 0 ? process.argv[onlyIx + 1] : null;
     const dir = path.join(ROOT, folder);
     if (!fs.existsSync(dir)) continue;
     const year = Number((folder.match(/20\d{2}/) || [])[0]) || null;
+    if (YEAR && year !== YEAR) continue;
     for (const f of fs.readdirSync(dir).filter(f => /\.xlsx$/i.test(f) && /^\d/.test(f))) {
       const mo = Number((f.match(/^(\d{1,2})\s*[.\-]/) || [])[1]) || null;
       // `month` is YYYY-MM, the platform's shape for the param everywhere else

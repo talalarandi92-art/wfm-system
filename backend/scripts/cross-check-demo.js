@@ -371,19 +371,29 @@ const BASE = process.argv[2] || 'http://localhost:3000';
       /* Fingerprint each month as its sorted employee:nets list, then look for two
          months sharing one. Comparing per-agent and counting would have to re-assert
          that neither month has extra agents; a whole-month fingerprint says it once. */
+      /* Count MONTHS against DISTINCT fingerprints rather than counting duplicates
+         against zero — the harness rightly refuses "0 vs 0" as proof of anything, and
+         it would be right to: an empty table would pass that form. */
+      const [q] = await sql(
+        `WITH m AS (
+           SELECT year, month, string_agg(employee_no || ':' || array_to_string(weekly_nets, ','), '|'
+                                          ORDER BY employee_no) AS fp
+             FROM scorecard_monthly WHERE tenant_id=$1 GROUP BY year, month)
+         SELECT COUNT(*)::int months, COUNT(DISTINCT fp)::int distinct_fp FROM m`, [T]);
       const dup = await sql(
         `WITH m AS (
            SELECT year, month, MIN(source_file) AS src, COUNT(*)::int AS n,
                   string_agg(employee_no || ':' || array_to_string(weekly_nets, ','), '|'
                              ORDER BY employee_no) AS fp
              FROM scorecard_monthly WHERE tenant_id=$1 GROUP BY year, month)
-         SELECT a.year ay, a.month am, b.year by_, b.month bm, a.n, a.src asrc, b.src bsrc
+         SELECT a.year ay, a.month am, b.year by_, b.month bm, a.n, b.src bsrc
            FROM m a JOIN m b ON (b.year, b.month) > (a.year, a.month) AND b.fp = a.fp`, [T]);
-      return { a: dup.length, b: 0,
-               labelA: dup.length
-                 ? `identical: ${dup.map((d) => `${d.ay}-${String(d.am).padStart(2, '0')} = ${d.by_}-${String(d.bm).padStart(2, '0')} (${d.n} agents, "${d.bsrc}")`).join('; ')}`
-                 : 'no duplicated months',
-               labelB: 'none', unit: '' };
+      return { a: q.months, b: q.distinct_fp,
+               labelA: `${q.months} scorecard months`,
+               labelB: dup.length
+                 ? `distinct: ${q.distinct_fp} — ${dup.map((d) => `${d.ay}-${String(d.am).padStart(2, '0')} = ${d.by_}-${String(d.bm).padStart(2, '0')} (${d.n} agents, "${d.bsrc}")`).join('; ')}`
+                 : `${q.distinct_fp} distinct — none repeats`,
+               unit: '' };
     }, 0);
 
   // ── 10. Attrition: the headline rate and the list beneath it ───────────
