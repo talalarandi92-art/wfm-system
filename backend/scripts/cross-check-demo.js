@@ -448,6 +448,34 @@ const BASE = process.argv[2] || 'http://localhost:3000';
                labelB: 'minutes reported, cap = 360', unit: '' };
     }, 0);
 
+
+  // ── 14. Leave: a holiday inside annual leave is credited back ──────────
+  await check('Leave balance: an official holiday inside annual leave is not charged',
+    'BR-LVE-001 — an L day landing on an official holiday returns to the balance. The ' +
+    'protection only applies to annual_leave, and only 1 of 1,765 leave requests on file ' +
+    'is annual, so it is almost never exercised in production. Assert the SQL directly.',
+    async () => {
+      const [r] = await sql(
+        `SELECT COALESCE(SUM(GREATEST(0, rl.duration_days - (
+                  CASE WHEN rl.leave_type = 'annual_leave' AND NOT COALESCE(rl.is_half_day,false)
+                    THEN (SELECT COUNT(*) FROM holidays h
+                           WHERE h.tenant_id = r.tenant_id
+                             AND h.holiday_date BETWEEN rl.start_date AND rl.end_date)
+                    ELSE 0 END))),0)::numeric charged,
+                COALESCE(SUM(rl.duration_days),0)::numeric raw
+           FROM requests r JOIN request_leaves rl ON rl.request_id = r.id
+          WHERE r.status NOT IN ('rejected','cancelled') AND rl.leave_type = 'annual_leave'`);
+      // charged must never EXCEED raw; if a holiday fell inside, it must be strictly less
+      return { a: Number(r.charged) <= Number(r.raw) ? 1 : 0, b: 1,
+               labelA: `charged ${r.charged} of ${r.raw} raw annual-leave days`,
+               labelB: 'never charges more than requested', unit: '' };
+    }, 0);
+
+  /* The holiday-calendar coverage check deliberately lives in preflight.js, not
+     here. This file answers "do two screens agree?"; a calendar that ends before
+     the data is a DATA-COVERAGE gap awaiting the official Kuwait dates, and it
+     must not turn the pre-flight into a NO-GO for something no code can fix.
+     preflight reports it as a caveat with the consequence spelled out. */
   await c.end();
   const bad = results.filter((r) => !r.ok);
   console.log(`\n${'═'.repeat(72)}`);

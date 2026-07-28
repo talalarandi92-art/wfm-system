@@ -113,6 +113,34 @@ const add = (level, name, detail, fix) => { items.push({ level, name, detail, fi
     if (s.b) add(s.behind <= 1 ? 'ok' : 'warn', 'Live feed (Sprinklr)',
       `through ${s.b} · ${s.behind} day(s) behind`,
       s.behind > 1 ? 'Live Monitoring will look stale — open the bridge extension to refresh' : null);
+    /* ── The holiday calendar must reach at least as far as the data ──────────
+       A missing holiday does not raise an error anywhere — it silently means "an
+       ordinary day", and that is wrong in two directions AT THE SAME TIME:
+         · someone who worked it loses holiday OT (paid at x2.0, BR-OT-003)
+         · someone on annual leave that day is CHARGED a leave day the rule says
+           should be returned (BR-LVE-001)
+       Both harm the employee, and neither shows up as a failure — the numbers
+       just come out lower. So the calendar's end date is checked against the data
+       the way the roster's freshness is. */
+    const [h] = (await c.query(
+      `SELECT COUNT(*)::int n, MAX(holiday_date)::text last,
+              (SELECT MAX(work_date)::text FROM roster_days) roster_end,
+              (MAX(holiday_date)::date - CURRENT_DATE)::int days_ahead
+         FROM holidays`)).rows;
+    if (!h || !h.n) {
+      add('bad', 'Holiday calendar', 'no holidays configured at all',
+          'Holiday OT and leave-on-holiday credit both silently stop working');
+    } else {
+      const shortOfRoster = h.roster_end && h.last < h.roster_end;
+      add(h.days_ahead < 0 || shortOfRoster ? 'warn' : 'ok', 'Holiday calendar',
+        `${h.n} day(s) configured, through ${h.last}` +
+        (h.days_ahead < 0 ? ` — ${-h.days_ahead} day(s) BEHIND today` : ` — ${h.days_ahead} day(s) ahead`),
+        h.days_ahead < 0 || shortOfRoster
+          ? 'Add the rest of the official calendar to backend/scripts/recon-config.json. ' +
+            'Until then any holiday past that date is treated as an ordinary day: no x2.0 OT, ' +
+            'and annual leave on it is charged instead of returned.'
+          : null);
+    }
     await c.end();
   } catch (e) {
     add('bad', 'Database', `cannot connect — ${e.message}`, 'Check PostgreSQL is running and backend/.env is correct');
