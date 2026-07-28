@@ -18,7 +18,8 @@
  * number equals the dedicated report's number (TRUE_OT, credible late/early, etc.).
  * Columns were verified against information_schema on the live wfm_db (2026-07-11).
  */
-import { TRUE_OT, CRED_LATE, CRED_EARLY, MATERNITY_7H } from '@common/wfm-metrics';
+import { TRUE_OT, CRED_LATE, CRED_EARLY, MATERNITY_7H,
+         SC_MONTH_NET, SC_WEEKS_BEST, SC_WEEKS_WORST, SC_WEEKS_COUNT } from '@common/wfm-metrics';
 
 export type ColType = 'string' | 'number' | 'time' | 'date' | 'bool';
 export type MetricFormat = 'int' | 'minutes' | 'hours' | 'pct' | 'decimal' | 'count';
@@ -347,13 +348,13 @@ export const DATA_SOURCES: DataSourceDef[] = [
         description_en: 'The scorecard month in YYYY-MM form.', description_ar: 'شهر بطاقة الأداء بصيغة سنة-شهر.' },
     ],
     metrics: [
-      { key: 'avgNetPoints', expr: 'ROUND(AVG(avg_net_points),2)',              label_en: 'Net Points',    label_ar: 'صافي النقاط', format: 'decimal', category: 'Score', badge: 'calculated_metric',
+      { key: 'avgNetPoints', expr: `ROUND(AVG(${SC_MONTH_NET}),2)`,             label_en: 'Net Points',    label_ar: 'صافي النقاط', format: 'decimal', category: 'Score', badge: 'calculated_metric',
         description_en: 'Average official Net Points score across the selected months.', description_ar: 'متوسط صافي النقاط الرسمي عبر الأشهر المحددة.' },
-      { key: 'bestNet',      expr: 'ROUND(MAX(best_net),1)',                    label_en: 'Best net',      label_ar: 'أفضل نقاط',   format: 'decimal', category: 'Score', badge: 'calculated_metric',
+      { key: 'bestNet',      expr: `ROUND(MAX(${SC_WEEKS_BEST}),1)`,            label_en: 'Best net',      label_ar: 'أفضل نقاط',   format: 'decimal', category: 'Score', badge: 'calculated_metric',
         description_en: 'The best weekly Net Points achieved in the range.', description_ar: 'أفضل صافي نقاط أسبوعي محقق في النطاق.' },
-      { key: 'worstNet',     expr: 'ROUND(MIN(worst_net),1)',                   label_en: 'Worst net',     label_ar: 'أدنى نقاط',   format: 'decimal', category: 'Score', badge: 'calculated_metric',
+      { key: 'worstNet',     expr: `ROUND(MIN(${SC_WEEKS_WORST}),1)`,           label_en: 'Worst net',     label_ar: 'أدنى نقاط',   format: 'decimal', category: 'Score', badge: 'calculated_metric',
         description_en: 'The worst weekly Net Points recorded in the range.', description_ar: 'أدنى صافي نقاط أسبوعي مسجّل في النطاق.' },
-      { key: 'weeksScored',  expr: 'SUM(weeks_scored)',                         label_en: 'Weeks scored',  label_ar: 'أسابيع مقيّمة',format: 'count', category: 'Score',
+      { key: 'weeksScored',  expr: `SUM(${SC_WEEKS_COUNT})`,                    label_en: 'Weeks scored',  label_ar: 'أسابيع مقيّمة',format: 'count', category: 'Score',
         description_en: 'How many scorecard weeks were evaluated.', description_ar: 'عدد أسابيع بطاقة الأداء التي جرى تقييمها.' },
       { key: 'agents',       expr: 'COUNT(DISTINCT employee_no)',               label_en: 'Agents',        label_ar: 'الموظفون',    format: 'count', category: 'Headcount',
         description_en: 'Distinct agents scored in the selection.', description_ar: 'عدد الموظفين المقيَّمين في النطاق.' },

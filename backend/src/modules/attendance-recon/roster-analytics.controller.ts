@@ -6,7 +6,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { RequirePermissions } from '@common/decorators/permissions.decorator';
-import { TRUE_OT, CRED_LATE, CRED_EARLY } from '@common/wfm-metrics';
+import { TRUE_OT, CRED_LATE, CRED_EARLY, SC_MONTH_NET, scMonthNet } from '@common/wfm-metrics';
 import { SHIFT_CAT } from './roster-shared.service';
 
 /** Pure per-function-per-month KPI point (Stage-3A trends). Percentages are derived
@@ -104,7 +104,7 @@ export class RosterAnalyticsController {
         FROM roster_days WHERE tenant_id=$1 AND team_manager=$2 AND work_date BETWEEN $3 AND $4 AND is_active
         GROUP BY 1,2 ORDER BY 1,2`, [t, tlName, dFrom, dTo]);
     const netM = await this.ds.query(`
-      SELECT year yr, month mo, ROUND(AVG(avg_net_points::numeric),1) net FROM scorecard_monthly
+      SELECT year yr, month mo, ROUND(AVG(${SC_MONTH_NET}::numeric),1) net FROM scorecard_monthly
         WHERE tenant_id=$1 AND team_manager=$2 AND make_date(year,month,1) BETWEEN date_trunc('month',$3::date) AND $4::date
         GROUP BY year,month`, [t, tlName, dFrom, dTo]);
     const netMap = new Map<string, number>(netM.map((r: any) => [`${r.yr}-${r.mo}`, Number(r.net)]));
@@ -248,7 +248,7 @@ export class RosterAnalyticsController {
     }).sort((a: any, b: any) => b.score - a.score).map((r: any, i: number) => ({ rank: i + 1, ...r }));
     // attach each person's latest official Net Points (scorecard), alias-aware
     const netRows = await this.ds.query(
-      `SELECT DISTINCT ON (i.person_no) i.person_no, sm.avg_net_points::numeric net, sm.year, sm.month
+      `SELECT DISTINCT ON (i.person_no) i.person_no, ${scMonthNet('sm')}::numeric net, sm.year, sm.month
          FROM scorecard_monthly sm JOIN employee_identity i ON i.tenant_id=sm.tenant_id AND i.employee_no=sm.employee_no
         WHERE sm.tenant_id=$1 ORDER BY i.person_no, sm.year DESC, sm.month DESC`, [t]);
     const netMap = new Map<string, { net: number; period: string }>(netRows.map((r: any) => [r.person_no, { net: Number(r.net), period: `${r.year}-${String(r.month).padStart(2, '0')}` }] as [string, { net: number; period: string }]));
@@ -524,7 +524,7 @@ export class RosterAnalyticsController {
         FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4
         GROUP BY 1,2 ORDER BY 1,2`, [t, person, dFrom, dTo]);
     const netM = await this.ds.query(`
-      SELECT year yr, month mo, ROUND(AVG(avg_net_points::numeric),1) net
+      SELECT year yr, month mo, ROUND(AVG(${SC_MONTH_NET}::numeric),1) net
         FROM scorecard_monthly WHERE tenant_id=$1 AND employee_no = ANY($2)
           AND make_date(year,month,1) BETWEEN date_trunc('month',$3::date) AND $4::date
         GROUP BY year,month`, [t, idList, dFrom, dTo]);
@@ -566,7 +566,7 @@ export class RosterAnalyticsController {
     const idList = ids.length ? ids : [person];
     // official scorecard — monthly Net Points
     const scorecard = await this.ds.query(
-      `SELECT year, month, ROUND(AVG(avg_net_points::numeric),1) net, ROUND(AVG(best_net::numeric),0) best, ROUND(AVG(worst_net::numeric),0) worst, SUM(weeks_scored)::int weeks
+      `SELECT year, month, ROUND(AVG(${SC_MONTH_NET}::numeric),1) net, ROUND(AVG(best_net::numeric),0) best, ROUND(AVG(worst_net::numeric),0) worst, SUM(weeks_scored)::int weeks
          FROM scorecard_monthly WHERE tenant_id=$1 AND employee_no = ANY($2) GROUP BY year, month ORDER BY year, month`, [t, idList]);
     // Ameyo productivity → AHT / occupancy / calls
     const [prod] = await this.ds.query(
@@ -660,7 +660,7 @@ export class RosterAnalyticsController {
                ROUND(AVG(adherence_pct),1) conformance
           FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4`, [t, pn, f, to]);
       const [net] = await this.ds.query(`
-        SELECT ROUND(AVG(avg_net_points::numeric),1) net, COUNT(*)::int months
+        SELECT ROUND(AVG(${SC_MONTH_NET}::numeric),1) net, COUNT(*)::int months
           FROM scorecard_monthly WHERE tenant_id=$1 AND employee_no = ANY($2)
             AND make_date(year,month,1) BETWEEN date_trunc('month',$3::date) AND $4::date`, [t, idList, f, to]);
       const [prod] = await this.ds.query(`

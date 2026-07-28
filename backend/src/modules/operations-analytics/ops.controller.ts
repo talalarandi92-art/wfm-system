@@ -17,6 +17,7 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { OpsUploadService } from './ops-upload.service';
 import { PeopleInsightsService } from './people-insights.service';
 import { fmtLocalDate } from '@common/kw-date';
+import { SC_MONTH_NET } from '@common/wfm-metrics';
 
 @ApiTags('Operations Analytics')
 @ApiBearerAuth()
@@ -338,7 +339,7 @@ export class OpsController {
   async scorecards(@CurrentUser() user: any, @Query('year') year?: string, @Query('month') month?: string) {
     const t = user.tenantId;
     const trend = await this.ds.query(
-      `SELECT year, month, COUNT(*)::int agents, ROUND(AVG(avg_net_points),1)::float avg_net
+      `SELECT year, month, COUNT(*)::int agents, ROUND(AVG(${SC_MONTH_NET}),1)::float avg_net
          FROM scorecard_monthly WHERE tenant_id=$1 GROUP BY year, month ORDER BY year, month`, [t]);
     // default to the latest month present
     const latest = trend[trend.length - 1];
@@ -346,12 +347,12 @@ export class OpsController {
     const m = month ? Number(month) : latest?.month;
     const p = [t, y, m];
     const periodAgents = await this.ds.query(
-      `SELECT employee_no, name, function_name, team_manager, avg_net_points::float avg_net,
+      `SELECT employee_no, name, function_name, team_manager, ${SC_MONTH_NET}::float avg_net,
               best_net::float best_net, worst_net::float worst_net, weeks_scored
          FROM scorecard_monthly WHERE tenant_id=$1 AND year=$2 AND month=$3
-        ORDER BY avg_net_points DESC`, p);
+        ORDER BY ${SC_MONTH_NET} DESC`, p);
     const byFunction = await this.ds.query(
-      `SELECT function_name, COUNT(*)::int agents, ROUND(AVG(avg_net_points),1)::float avg_net
+      `SELECT function_name, COUNT(*)::int agents, ROUND(AVG(${SC_MONTH_NET}),1)::float avg_net
          FROM scorecard_monthly WHERE tenant_id=$1 AND year=$2 AND month=$3 AND function_name IS NOT NULL
         GROUP BY function_name ORDER BY avg_net DESC`, p);
     return {

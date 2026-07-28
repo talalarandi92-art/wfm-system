@@ -65,6 +65,34 @@ const monthFromName = f => { const m = f.match(/^(\d{1,2})\s*[.\-]/); return m ?
         if (net != null) a.nets.push(Math.round(net * 10) / 10);
       }
 
+      /* STALE-TAB GUARD. A monthly workbook is usually started by copying the previous
+         one, and the aggregation tab gets renamed before it gets rebuilt. That is
+         exactly what happened to May 2026: the tab is called "May 26" but holds
+         January's 411 rows, so all 82 agents were stored twice — once as January and
+         once as May — and the "trend" between them was a flat line by construction.
+         A name check cannot catch it (the tab IS named for the right month), so
+         compare the content against what is already stored. */
+      /* Fingerprint only what would actually be stored, and compare in JS — numeric[]
+         round-trips through several text renderings and a formatting mismatch would
+         silently disable the guard. */
+      const fp = rows => [...rows].map(([id, nets]) => `${id}:${nets.join(',')}`).sort().join('|');
+      const mine = fp([...perAgent].filter(([, a]) => a.nets.length).map(([id, a]) => [id, a.nets]));
+      const prior = new Map();
+      for (const r of (await c.query(
+        `SELECT year, month, source_file, employee_no, weekly_nets FROM scorecard_monthly
+          WHERE tenant_id=$1 AND NOT (year=$2 AND month=$3)`, [tenantId, year, month])).rows) {
+        const k = `${r.year}-${r.month}`;
+        if (!prior.has(k)) prior.set(k, { file: r.source_file, rows: [] });
+        prior.get(k).rows.push([r.employee_no, r.weekly_nets.map(Number)]);
+      }
+      const clash = [...prior].find(([, v]) => fp(v.rows) === mine);
+      if (clash) {
+        console.log(`  !! ${file}: sheet "${ws.name}" is identical to ${clash[0]} (${clash[1].file}) — ${perAgent.size} agents, same nets.`);
+        console.log(`     The tab was copied and never rebuilt. SKIPPED, so ${year}-${String(month).padStart(2, '0')} is absent rather than wrong.`);
+        summary.push({ file, year, month, agents: 0, note: `duplicate of ${clash[0]}` });
+        continue;
+      }
+
       let n = 0;
       for (const [id, a] of perAgent) {
         const scored = a.nets.filter(v => v != null);

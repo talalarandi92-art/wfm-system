@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { PUNCH_LATE, PUNCH_EARLY } from '@common/wfm-metrics';
+import { PUNCH_LATE, PUNCH_EARLY, SC_MONTH_NET } from '@common/wfm-metrics';
 import * as ExcelJS from 'exceljs';
 
 /**
@@ -78,7 +78,7 @@ export class PeopleInsightsService {
          GROUP BY employee_no
       ),
       sc AS (
-        SELECT employee_no, ROUND(AVG(avg_net_points),1) AS avg_net, COUNT(*)::int AS sc_months
+        SELECT employee_no, ROUND(AVG(${SC_MONTH_NET}),1) AS avg_net, COUNT(*)::int AS sc_months
           FROM scorecard_monthly
          WHERE tenant_id=$1 AND make_date(year, month, 1) BETWEEN date_trunc('month',$2::date) AND $3
          GROUP BY employee_no
@@ -271,7 +271,7 @@ export class PeopleInsightsService {
         FROM attendance_records WHERE tenant_id=$1 AND employee_id=$2 AND attendance_date BETWEEN $3 AND $4
        ORDER BY attendance_date`, [tenantId, employeeId, w.from, w.to]);
     const scoreTrend = await this.ds.query(`
-      SELECT year, month, avg_net_points::float avg_net, best_net::float best_net, worst_net::float worst_net, weeks_scored, function_name
+      SELECT year, month, ${SC_MONTH_NET}::float avg_net, best_net::float best_net, worst_net::float worst_net, weeks_scored, function_name
         FROM scorecard_monthly WHERE tenant_id=$1 AND employee_no=$2 ORDER BY year, month`,
       [tenantId, head.employee_no]);
     const prodTrend = await this.ds.query(`

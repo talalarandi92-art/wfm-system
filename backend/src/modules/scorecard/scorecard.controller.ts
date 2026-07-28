@@ -18,7 +18,7 @@ import { ScorecardUploadService } from './scorecard-upload.service';
 import { ScorecardScoringService } from './scorecard-scoring.service';
 import { AutoScoringReadinessService } from './auto-scoring-readiness.service';
 import { kwToday, fmtLocalDate } from '@common/kw-date';
-import { PUNCH_LATE } from '@common/wfm-metrics';
+import { PUNCH_LATE, scMonthNet } from '@common/wfm-metrics';
 
 /* ─── incentive tiers per function (KD) ─────────────────────────────────── */
 const INCENTIVE_TIERS = [
@@ -647,7 +647,7 @@ export class ScorecardController {
     const rows = await this.ds.query(
       `SELECT sm.year, sm.month, sm.employee_no, COALESCE(i.person_no, sm.employee_no) AS person_no,
               sm.name AS employee_name, sm.function_name, sm.team_manager AS team_leader,
-              sm.avg_net_points
+              ${scMonthNet('sm')} AS month_net
        FROM scorecard_monthly sm
        LEFT JOIN employee_identity i ON i.tenant_id = sm.tenant_id AND i.employee_no = sm.employee_no
        WHERE sm.tenant_id=$1 ${aFn} ${aScope}
@@ -701,7 +701,7 @@ export class ScorecardController {
       e.empNo = r.employee_no; e.name = r.employee_name || e.name;
       e.func = r.function_name || e.func; e.tl = r.team_leader || e.tl;
       const idx = order[`${r.year}-${r.month}`];
-      const net = r.avg_net_points == null ? null : Number(r.avg_net_points);
+      const net = r.month_net == null ? null : Number(r.month_net);
       if (net != null) { const arr = e.byMonth.get(idx) || []; arr.push(net); e.byMonth.set(idx, arr); }
     }
 

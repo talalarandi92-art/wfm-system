@@ -340,6 +340,52 @@ const BASE = process.argv[2] || 'http://localhost:3000';
                labelA: `board final_net (${withFinal[0].name})`, labelB: 'the Final row in SQL', unit: 'pts' };
     }, 0);
 
+  await check('Scorecard monthly: the month result is read, not the whole-array average',
+    'scorecard_monthly.weekly_nets is [W1..Wn, VERDICT] — the last element is the workbook’s ' +
+    'own month verdict row (its Weeks column reads "Final"/"TMS"/"Leave", never a number). ' +
+    'avg_net_points averages that verdict in as if it were another week, and matched the ' +
+    'workbook Results sheet 1-9 times out of 60-90 in EVERY month. Ten read sites used it as ' +
+    'the agent’s score. Assert the API now reports the verdict.',
+    async () => {
+      const a = await api('/scorecard/analyze');
+      const emp = (a.employees || []).find((e) => (e.months || []).length >= 3);
+      if (!emp) return { a: 0, b: 1, labelA: 'no agent with a month series', labelB: 'at least one', unit: '' };
+      const [q] = await sql(
+        `SELECT ROUND(AVG(sm.weekly_nets[array_upper(sm.weekly_nets,1)])::numeric,1) v
+           FROM scorecard_monthly sm LEFT JOIN employee_identity i
+             ON i.tenant_id=sm.tenant_id AND i.employee_no=sm.employee_no
+          WHERE sm.tenant_id=$1 AND COALESCE(i.person_no, sm.employee_no) = (
+                SELECT COALESCE(MAX(i2.person_no), $2) FROM employee_identity i2
+                 WHERE i2.tenant_id=$1 AND i2.employee_no=$2)`, [T, String(emp.empNo)]);
+      const apiAvg = Math.round((emp.months.reduce((s, v) => s + v, 0) / emp.months.length) * 10) / 10;
+      return { a: apiAvg, b: Number(q.v), labelA: `analyze mean net (${emp.name}, ${emp.months.length} months)`,
+               labelB: 'mean of the verdict rows', unit: 'pts' };
+    }, 0.15);
+
+  await check('Scorecard monthly: no month is a copy of another month',
+    'Monthly workbooks are started by copying the previous one. May 2026’s aggregation tab was ' +
+    'renamed but never rebuilt, so it still holds January’s 411 rows — all 82 agents were stored ' +
+    'twice and the Jan-to-May trend was a flat line by construction. The ingest now refuses a ' +
+    'duplicate; this catches any already sitting in the table.',
+    async () => {
+      /* Fingerprint each month as its sorted employee:nets list, then look for two
+         months sharing one. Comparing per-agent and counting would have to re-assert
+         that neither month has extra agents; a whole-month fingerprint says it once. */
+      const dup = await sql(
+        `WITH m AS (
+           SELECT year, month, MIN(source_file) AS src, COUNT(*)::int AS n,
+                  string_agg(employee_no || ':' || array_to_string(weekly_nets, ','), '|'
+                             ORDER BY employee_no) AS fp
+             FROM scorecard_monthly WHERE tenant_id=$1 GROUP BY year, month)
+         SELECT a.year ay, a.month am, b.year by_, b.month bm, a.n, a.src asrc, b.src bsrc
+           FROM m a JOIN m b ON (b.year, b.month) > (a.year, a.month) AND b.fp = a.fp`, [T]);
+      return { a: dup.length, b: 0,
+               labelA: dup.length
+                 ? `identical: ${dup.map((d) => `${d.ay}-${String(d.am).padStart(2, '0')} = ${d.by_}-${String(d.bm).padStart(2, '0')} (${d.n} agents, "${d.bsrc}")`).join('; ')}`
+                 : 'no duplicated months',
+               labelB: 'none', unit: '' };
+    }, 0);
+
   // ── 10. Attrition: the headline rate and the list beneath it ───────────
   await check('Attrition: the separations list matches the stated count',
     'The classic dashboard lie is a headline larger than the table under it.',

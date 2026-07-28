@@ -423,14 +423,21 @@ describe('query-compiler PARITY (live wfm_db)', () => {
     expect(Number(built.credLateDays)).toBe(Number(direct.late));
   });
 
-  it('scorecard avgNetPoints matches a direct query', async () => {
+  /* The month result is the LAST element of weekly_nets (the workbook's verdict row),
+     not `avg_net_points` — which averages that verdict in as if it were a fifth week.
+     The direct query here reads the array, so it fails if the builder ever drifts back. */
+  it('scorecard avgNetPoints is the month result, not the whole-array average', async () => {
     if (!up) return;
     const c = compile({ sourceKey: 'scorecard', tenantId: TID, metrics: ['avgNetPoints', 'agents'] });
     const [built] = await q(c.sql, c.params);
     const [direct] = await q(
-      `SELECT ROUND(AVG(avg_net_points),2) avg, COUNT(DISTINCT employee_no) agents FROM scorecard_monthly WHERE tenant_id=$1`, [TID]);
+      `SELECT ROUND(AVG(weekly_nets[array_upper(weekly_nets,1)]),2) avg, COUNT(DISTINCT employee_no) agents
+         FROM scorecard_monthly WHERE tenant_id=$1`, [TID]);
     expect(Number(built.avgNetPoints)).toBeCloseTo(Number(direct.avg), 2);
     expect(Number(built.agents)).toBe(Number(direct.agents));
+
+    const [stored] = await q(`SELECT ROUND(AVG(avg_net_points),2) avg FROM scorecard_monthly WHERE tenant_id=$1`, [TID]);
+    expect(Number(built.avgNetPoints)).not.toBeCloseTo(Number(stored.avg), 1);
   });
 
   it('grouping by function preserves the overtime total (sum of parts == whole)', async () => {
