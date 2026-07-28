@@ -71,6 +71,19 @@ export interface ScorecardPreview {
   periodName: string;
   periodYear: number;
   periodMonth: number;
+  /** Where the year came from. 'assumed' means nothing named it — confirm before committing. */
+  yearSource: 'filename' | 'short' | 'assumed';
+  monthSource: 'filename' | 'assumed';
+  /** The sheet the detector chose. A workbook can carry several plausible ones. */
+  sheetName: string;
+  /** Distinct values in the Weeks column — real weeks plus the month's verdict label. */
+  weekLabels: string[];
+  /** True when Weeks parses as percentages: the column map does not fit this layout. */
+  columnsLookMisaligned: boolean;
+  /** Share of rows carrying at least one NON-ZERO KPI input. Near zero = the month was
+   *  never filled in and its scores are penalties for zeros, not performance. Counting
+   *  merely non-null cells does not work: an empty template reads 99%. */
+  kpiSignalRate: number;
   totalEmployees: number;
   totalEntries: number;
   functions: string[];
@@ -94,17 +107,50 @@ export class ScorecardUploadService {
     const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
     // Detect period from filename or sheet name
-    const { name: periodName, year, month } = this.detectPeriod(filename, sheetName);
+    const { name: periodName, year, month, yearSource, monthSource } = this.detectPeriod(filename, sheetName);
 
     const entries = this.parseRows(rows, headerRow, colMap);
 
     const employees = new Set(entries.map(e => e.employeeNo || e.loginId || e.employeeName));
     const functions = [...new Set(entries.map(e => e.functionName).filter(Boolean))];
 
+    /* The Weeks column is what tells a real week from the month's verdict row. When it
+       comes back as percentages the columns are misaligned for this workbook's layout,
+       and every KPI beside it is being read from the wrong column too. Surface that in
+       the preview rather than letting it commit and look like data. */
+    const weekLabels = [...new Set(entries.map(e => e.weekLabel).filter(Boolean))];
+    const numericWeeks = weekLabels.filter(w => /^\d*\.\d+$/.test(String(w)));
+
+    /* An UNFINISHED sheet is the dangerous case, because it parses perfectly. The
+       May 2026 "May SC 26" tab carries the full layout and clean W1..W4 + Final
+       labels, and every one of its 335 rows reads Working Days % 0, Quality 0, AHT 0,
+       FCR 0, Productivity 0 — the formulas are in place and the inputs never arrived,
+       so all 67 agents scored between -60 and 0 (median -25) purely as penalties for
+       zeros. Load that and 67 people carry a catastrophic month they never worked.
+       April, for contrast, reads WD% 0.71, Quality 1, AHT 0.0077, FCR 0.998.
+
+       Note the measure: NON-ZERO, not non-null. Counting "filled" cells rates May at
+       99% — a zero is a value. Only the signal separates a finished month from a
+       template. */
+    const ACTUALS: (keyof ScorecardEntryRaw)[] = [
+      'qualityActual', 'ahtActual', 'fcrActual', 'productivityActual',
+      'ctrActual', 'quizActual', 'responseTimeActual', 'responseRate', 'workingDaysPct'];
+    const withSignal = entries.filter(e => ACTUALS.some(k => {
+      const v = e[k];
+      return typeof v === 'number' && Number.isFinite(v) && v !== 0;
+    })).length;
+    const kpiSignalRate = entries.length ? withSignal / entries.length : 0;
+
     return {
       periodName,
       periodYear: year,
       periodMonth: month,
+      yearSource,
+      monthSource,
+      sheetName,
+      weekLabels,
+      columnsLookMisaligned: numericWeeks.length > 0,
+      kpiSignalRate: Math.round(kpiSignalRate * 100) / 100,
       totalEmployees: employees.size,
       totalEntries: entries.length,
       functions,
@@ -128,9 +174,15 @@ export class ScorecardUploadService {
     const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
     const { name: detectedName, year: detectedYear, month: detectedMonth } = this.detectPeriod(filename, sheetName);
-    const periodName  = overrides?.periodName  ?? detectedName;
     const periodYear  = overrides?.periodYear  ?? detectedYear;
     const periodMonth = overrides?.periodMonth ?? detectedMonth;
+    /* Rebuild the label from the period actually being written. Taking the detected
+       name while an override moved the year would store a batch keyed 2025-10 but
+       captioned "October 2026" — every screen would then argue with its own filter. */
+    const periodName = overrides?.periodName
+      ?? (overrides?.periodYear || overrides?.periodMonth
+        ? `${['January','February','March','April','May','June','July','August','September','October','November','December'][periodMonth - 1]} ${periodYear}`
+        : detectedName);
 
     const entries = this.parseRows(rows, headerRow, colMap);
     if (!entries.length) throw new BadRequestException('No valid scorecard rows found in the file.');
@@ -225,7 +277,24 @@ export class ScorecardUploadService {
     return { sheetName: null, headerRow: 0, colMap: COL };
   }
 
-  private detectPeriod(filename: string, sheetName: string): { name: string; year: number; month: number } {
+  /**
+   * Work out which period a workbook belongs to, and SAY how sure it is.
+   *
+   * The year used to fall back to `new Date().getFullYear()` in silence. The 2025
+   * files carry no year at all — "10.OCT SC..xlsx", sheet "OCT" — so every one of
+   * them would have been filed as the CURRENT year, landing October 2025 on top of
+   * October 2026. A wrong-year batch is worse than a missing one: it looks loaded.
+   *
+   * So the year now also comes from a two-digit form ("Jan 26" → 2026), and when
+   * nothing in the filename or sheet name says the year, `yearSource` reports
+   * 'assumed' — the caller decides whether to accept the guess or pass a year.
+   * (May 2026 already proved a sheet name can lie about its own content; a name is
+   * evidence, not proof.)
+   */
+  private detectPeriod(filename: string, sheetName: string): {
+    name: string; year: number; month: number;
+    yearSource: 'filename' | 'short' | 'assumed'; monthSource: 'filename' | 'assumed';
+  } {
     const MONTHS: Record<string, number> = {
       jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
       jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
@@ -234,17 +303,22 @@ export class ScorecardUploadService {
 
     const src = (filename + ' ' + sheetName).toLowerCase();
     let month = 0;
-    let year  = new Date().getFullYear();
+    let year = new Date().getFullYear();
+    let yearSource: 'filename' | 'short' | 'assumed' = 'assumed';
 
     for (const [abbr, m] of Object.entries(MONTHS)) {
       if (src.includes(abbr)) { month = m; break; }
     }
-    const yearMatch = src.match(/20\d{2}/);
-    if (yearMatch) year = parseInt(yearMatch[0], 10);
+    const full = src.match(/20\d{2}/);
+    // a two-digit year, but only right after a month word — "Jan 26", "April 26 SC"
+    const short = src.match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{2})\b/);
+    if (full) { year = parseInt(full[0], 10); yearSource = 'filename'; }
+    else if (short) { year = 2000 + parseInt(short[2], 10); yearSource = 'short'; }
 
+    const monthSource: 'filename' | 'assumed' = month ? 'filename' : 'assumed';
     if (!month) month = new Date().getMonth() + 1;
     const name = `${MONTH_NAMES[month - 1]} ${year}`;
-    return { name, year, month };
+    return { name, year, month, yearSource, monthSource };
   }
 
   private parseRows(rows: any[][], headerRow: number, colMap: Record<string, number>): ScorecardEntryRaw[] {

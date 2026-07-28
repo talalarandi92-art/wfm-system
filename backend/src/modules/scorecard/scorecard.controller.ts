@@ -20,6 +20,9 @@ import { AutoScoringReadinessService } from './auto-scoring-readiness.service';
 import { kwToday, fmtLocalDate } from '@common/kw-date';
 import { PUNCH_LATE, scMonthNet } from '@common/wfm-metrics';
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
 /* ─── incentive tiers per function (KD) ─────────────────────────────────── */
 const INCENTIVE_TIERS = [
   { rank: 1, reward: 70 },
@@ -254,8 +257,20 @@ export class ScorecardController {
       validators: [new MaxFileSizeValidator({ maxSize: 20 * 1024 * 1024 })],
     })) file: Express.Multer.File,
     @CurrentUser() user: any,
+    @Query('month') month?: string,
   ) {
-    return this.uploadSvc.parsePreview(file.buffer, file.originalname);
+    const p = this.uploadSvc.parsePreview(file.buffer, file.originalname);
+    /* An explicit period wins over detection. The 2025 workbooks name no year at all
+       ("10.OCT SC..xlsx"), so detection fell back to the CURRENT year and would have
+       filed October 2025 as October 2026 — on top of the real one. `month` is
+       YYYY-MM, the same shape the platform uses everywhere else. */
+    if (month) {
+      const [y, m] = month.split('-').map(Number);
+      p.periodYear = y; p.periodMonth = m;
+      p.yearSource = 'filename'; p.monthSource = 'filename';
+      p.periodName = `${MONTH_NAMES[m - 1]} ${y}`;
+    }
+    return p;
   }
 
   /** Commit upload → save to DB */
@@ -271,13 +286,15 @@ export class ScorecardController {
     })) file: Express.Multer.File,
     @CurrentUser() user: any,
     @Query('notes') notes?: string,
+    @Query('month') month?: string,
   ) {
+    const [oy, om] = month ? month.split('-').map(Number) : [undefined, undefined];
     const result = await this.uploadSvc.commitUpload(
       file.buffer,
       file.originalname,
       user.tenantId,
       user.id,
-      { notes },
+      { notes, periodYear: oy, periodMonth: om },
     );
     await this.ds.query(
       `INSERT INTO audit_logs (tenant_id, actor_id, actor_email, action, module, entity_type, entity_id, notes)
@@ -622,8 +639,6 @@ export class ScorecardController {
   @ApiOperation({ summary: 'Cumulative performance analysis across all scored months (scorecard_monthly)' })
   async analyze(@CurrentUser() user: any, @Query('function') fn?: string) {
     const tid = user.tenantId;
-    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'];
     const monthsAxis = await this.ds.query(
       `SELECT year, month FROM scorecard_monthly WHERE tenant_id=$1
        GROUP BY year, month ORDER BY year, month`, [tid]);
