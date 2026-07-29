@@ -131,14 +131,30 @@ const add = (level, name, detail, fix) => { items.push({ level, name, detail, fi
       add('bad', 'Holiday calendar', 'no holidays configured at all',
           'Holiday OT and leave-on-holiday credit both silently stop working');
     } else {
-      const shortOfRoster = h.roster_end && h.last < h.roster_end;
-      add(h.days_ahead < 0 || shortOfRoster ? 'warn' : 'ok', 'Holiday calendar',
-        `${h.n} day(s) configured, through ${h.last}` +
-        (h.days_ahead < 0 ? ` — ${-h.days_ahead} day(s) BEHIND today` : ` — ${h.days_ahead} day(s) ahead`),
-        h.days_ahead < 0 || shortOfRoster
-          ? 'Add the rest of the official calendar to backend/scripts/recon-config.json. ' +
-            'Until then any holiday past that date is treated as an ordinary day: no x2.0 OT, ' +
-            'and annual leave on it is charged instead of returned.'
+      /* The LAST HOLIDAY is not the same fact as HOW FAR THE CALENDAR HAS BEEN CHECKED.
+         This warned for 43 days that the calendar was "behind", when in truth 2026-06-16
+         was simply the last official holiday and nothing had fallen since — the Director
+         confirmed it on 2026-07-29. A quiet stretch and a neglected calendar look
+         identical from the holiday table alone, so `holidaysConfirmedThrough` in
+         recon-config.json records the date someone actually checked up to, and that is
+         what gets compared against the data. Stale marker, or roster running past it →
+         still a warning, because then nobody knows. */
+      let confirmed = null;
+      try { confirmed = JSON.parse(fs.readFileSync(path.join(__dirname, 'recon-config.json'), 'utf8')).holidaysConfirmedThrough || null; } catch { /* leave null */ }
+      const today = new Date().toISOString().slice(0, 10);
+      const coverTo = confirmed && confirmed > h.last ? confirmed : h.last;
+      const behindToday = coverTo < today;
+      const shortOfRoster = h.roster_end && coverTo < h.roster_end;
+      const stale = behindToday || shortOfRoster;
+      add(stale ? 'warn' : 'ok', 'Holiday calendar',
+        `${h.n} day(s) configured, last ${h.last}` +
+        (confirmed ? ` · checked through ${confirmed}` : ' · never confirmed') +
+        (stale ? ` — ${shortOfRoster ? `roster runs to ${h.roster_end}` : `${Math.round((Date.parse(today) - Date.parse(coverTo)) / 86400000)} day(s) behind today`}` : ''),
+        stale
+          ? 'Confirm the official calendar up to the roster end and set "holidaysConfirmedThrough" in ' +
+            'backend/scripts/recon-config.json (add any holidays found). Until then a holiday in the ' +
+            'unchecked window is treated as an ordinary day: no x2.0 OT, and annual leave on it is ' +
+            'charged instead of returned.'
           : null);
     }
     await c.end();

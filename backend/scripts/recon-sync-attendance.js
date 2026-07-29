@@ -22,7 +22,9 @@
  *
  * Wired as step 4 in recon-refresh.js (env APPLY=1 there — the pipeline already ingested).
  */
+const fs = require('fs');
 const { getClient } = require('./recon-db');
+const SCRATCH = process.env.RECON_SCRATCH || require('path').join(__dirname, '..', '.recon-scratch');
 const TENANT = process.env.RECON_TENANT || 'a0000000-0000-0000-0000-000000000001';
 const APPLY = process.env.APPLY === '1' || process.argv.includes('--apply');
 
@@ -30,8 +32,18 @@ const APPLY = process.env.APPLY === '1' || process.argv.includes('--apply');
   const c = getClient();
   await c.connect();
   try {
-    // range = the last ingest (backup table convention, same as restore), else env, else abort
+    /* Range = what the ingest JUST WROTE, read from the file it now leaves behind.
+       This used to come from roster_days_recon_bak, which holds the rows as they were
+       BEFORE the replace — so after the July load its max date was 2026-07-03 while the
+       ingest had written through 07-28, and the raw spine stopped 25 days short of the
+       roster without a word. The backup remains the fallback for an older scratch dir. */
     let from = process.env.SYNC_FROM, to = process.env.SYNC_TO;
+    if (!from || !to) {
+      try {
+        const r = JSON.parse(fs.readFileSync(SCRATCH + '/last-ingest-range.json', 'utf8'));
+        from = from || r.from; to = to || r.to;
+      } catch { /* fall through to the backup table */ }
+    }
     if (!from || !to) {
       const [r] = (await c.query(
         `SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days_recon_bak WHERE tenant_id=$1`, [TENANT])).rows;
@@ -100,8 +112,29 @@ const APPLY = process.env.APPLY === '1' || process.argv.includes('--apply');
       FROM m
       WHERE ar.tenant_id = $1 AND ar.employee_id = m.employee_id AND ar.attendance_date = m.work_date
         AND COALESCE(ar.notes,'') NOT LIKE '[generated %'`, [TENANT, from, to]);
+    /* INSERT the person-days the raw spine does not have at all.
+       This was UPDATE-only to avoid fabricating attendance, and that instinct is right —
+       but a person-day that EXISTS in roster_days is not fabricated, it is the canonical
+       record, and refusing to project it is what left 1,133 July person-days missing from
+       every reader still on this table (coverage/hourly returned an empty day for the
+       whole second half of the month). Only rows backed by a canonical roster row are
+       written, they carry a provenance note, and the generated-plan guard still applies. */
+    const ins = await c.query(`
+      WITH m AS (${PROJECTION})
+      INSERT INTO attendance_records
+        (tenant_id, employee_id, attendance_date, attendance_marker, scheduled_start, scheduled_end,
+         ot_minutes, system_late_minutes, system_early_out_minutes, punch_late_minutes,
+         punch_early_out_minutes, is_wfh, is_missing_punch, is_missing_system, notes)
+      SELECT $1, m.employee_id, m.work_date, m.marker, m.sched_start, m.sched_end,
+             m.true_ot, m.sys_late, m.sys_early, m.punch_late, m.punch_early,
+             m.is_wfh, m.missing_punch, m.missing_system, '[recon] projected from roster_days'
+        FROM m
+       WHERE NOT EXISTS (
+         SELECT 1 FROM attendance_records ar
+          WHERE ar.tenant_id = $1 AND ar.employee_id = m.employee_id AND ar.attendance_date = m.work_date)
+      RETURNING 1`, [TENANT, from, to]);
     await c.query('COMMIT');
-    console.log(`[sync-attendance] SYNCED ${res.rowCount} attendance_records rows from roster_days (${from}..${to}).`);
+    console.log(`[sync-attendance] SYNCED ${res.rowCount} updated · ${ins.rowCount} inserted from roster_days (${from}..${to}).`);
   } catch (e) {
     await c.query('ROLLBACK').catch(() => {});
     console.error('[sync-attendance] FAILED (rolled back): ' + e.message);

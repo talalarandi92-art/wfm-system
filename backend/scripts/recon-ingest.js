@@ -145,6 +145,13 @@ const MAP = {
     // REPLACE only the dates this upload actually covers
     console.log(`ingest range: ${coveredDates[0]} .. ${coveredDates[coveredDates.length - 1]}  ` +
       `(${coveredDates.length} covered day(s)${thin.length ? `, ${thin.length} thin day(s) skipped` : ''}; backed up ${bakN} rows before replace)`);
+    /* Record what was JUST WRITTEN, for step 4. The resync used to read its range from
+       roster_days_recon_bak — but that table holds the rows as they were BEFORE the
+       replace, so after the July load its max date was 2026-07-03 and the resync covered
+       06-20..07-03 while the ingest had written through 07-28. The raw spine silently
+       stopped 25 days short of the roster. */
+    fs.writeFileSync(SCRATCH + '/last-ingest-range.json',
+      JSON.stringify({ from: coveredDates[0], to: coveredDates[coveredDates.length - 1], dates: coveredDates, at: new Date().toISOString() }));
     await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date::text = ANY($2)`, [TENANT, coveredDates]);
     const allCols = (hasTenant ? ['tenant_id'] : []).concat(cols);
     let inserted = 0;
