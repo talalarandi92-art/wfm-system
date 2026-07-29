@@ -321,6 +321,62 @@ module.exports = function build() {
         : isWorkingKind ? (isWFH ? 'wfh' : 'office')
         : c.kind === 'sick' ? 'sick' : c.kind === 'leave' ? 'leave' : c.kind === 'absence' ? 'absent'
         : c.kind === 'holiday' ? 'holiday' : 'off';
+      /* ── EVIDENCE ARBITRATION (Director 2026-07-29) ────────────────────────────
+         Two rules, both about refusing to score what was not measured.
+
+         (1) ODOO IS THE ARBITER WHEN THERE IS NO EVIDENCE. A scheduled working day
+         with no session and no punch used to be recorded as "worked, system missing"
+         and scored. On July that was 238 days across 88 people — and Odoo already
+         said what they were: Off Day 140, WFH 59, leave/absence/sick/unpaid 36, and
+         only 3 genuinely unknown. The engine READ that column all along and never
+         consulted it for this case. 140 rest days were sitting inside the scheduled-
+         working denominator, which quietly deflated every coverage and conformance
+         percentage that divides by it.
+         The schedule stays the authority for the SHIFT (BR-SHF-004). This decides only
+         whether the day was WORKED at all, which is the one thing the schedule cannot
+         know in advance. Where the two disagree outright — sheet says work, Odoo says
+         Off Day — neither wins: the day is flagged for review, because one of the two
+         systems is wrong and guessing hides it.
+
+         (2) A DAY IS ONLY SCORED IF ENOUGH OF IT WAS SEEN. Measured first: of the 37
+         days whose lateness exceeded 240 minutes, 16 had worked a FULL shift hours
+         away from the scheduled window — a schedule error, not a late person — and 9
+         rested on under a quarter of the shift. A blanket ">240 is not real" rule
+         would have erased those 16 real records and still missed 6 barely-seen days
+         whose lateness happened to fall under the cut. So the gate is how much of the
+         shift the evidence actually covers, not how large the number is. */
+      const schedNet = c.net != null ? c.net : null;
+      const seenShare = (isWorkingKind && schedNet > 0 && govDur != null) ? govDur / schedNet : null;
+      const displacedMin = Math.max(sysLateStore || 0, sysEarlyStore || 0);
+
+      let odooVerdict = null, evidenceClass = null;
+      if (isWorkingKind && !hasSystem && !hasPunch) {
+        const s = String(odStatus || '').trim();
+        if (/^off\s*day/i.test(s)) odooVerdict = 'off-day-conflict';
+        else if (/annual leave/i.test(s)) odooVerdict = 'leave';
+        else if (/maternity/i.test(s)) odooVerdict = 'leave';
+        else if (/unpaid/i.test(s)) odooVerdict = 'leave';
+        else if (/sick/i.test(s)) odooVerdict = 'sick';
+        else if (/absence/i.test(s)) odooVerdict = 'absent';
+        else if (/wfh|work from home/i.test(s)) odooVerdict = 'wfh-no-evidence';
+        else odooVerdict = 'unknown';
+      } else if (isWorkingKind && seenShare != null) {
+        if (seenShare < 0.25) evidenceClass = 'insufficient';
+        else if (seenShare >= 0.75 && displacedMin > 240) evidenceClass = 'displaced';
+      }
+
+      /* Presence follows Odoo only where Odoo names a LEAVE state — those are HR facts
+         and Odoo is the HR system of record. An Off-Day conflict does NOT flip presence,
+         because the schedule may be the correct one; it is surfaced instead. */
+      const presenceArbitrated =
+        odooVerdict === 'leave' ? 'leave' :
+        odooVerdict === 'sick' ? 'sick' :
+        odooVerdict === 'absent' ? 'absent' : presenceLive;
+
+      /* Never SCORE a day nobody measured, and never score one measured wrongly. The
+         day stays in the record with its reason — excluded, not deleted. */
+      const evidenceUnscoreable = !!odooVerdict || evidenceClass === 'insufficient' || evidenceClass === 'displaced';
+
       const holidayLabel = isHolidayDate ? ('Official Holiday — ' + (HOLIDAY_NAME.get(date) || (HOLIDAY_RE.test(odStatus) ? String(odStatus).replace(/[-–—].*$/, '').replace(/\d{4}/, '').trim() : 'Holiday'))) : null;
       const mismatchLive = (isWorkingKind && hasPunch && !hasSystem) ? 'no-system'
         : (isWorkingKind && !hasPunch && hasSystem && !isWFH) ? 'no-punch' : null;
@@ -350,11 +406,11 @@ module.exports = function build() {
         otBefore: (isWorkingKind && !isHolidayDate && schedStart != null && govLogin != null) ? Math.min(360, Math.max(0, schedStart - govLogin)) : 0,
         otAfter: (isWorkingKind && !isHolidayDate && schedEnd != null && govLogout != null) ? Math.min(OT_CEIL, Math.max(0, govLogout - schedEnd)) : 0,   // #13: cap aligned to ot_min ceiling so before+after reconcile
         weekNumber: weekNum(date), monthName: MONTHS[+date.slice(5, 7) - 1],
-        attendanceStatus: attStatus(c.kind, presenceLive, raw),
+        attendanceStatus: attStatus(c.kind, presenceArbitrated, raw),
         lateCategory: isWorkingKind ? ((!hasSystem && !hasPunch) ? 'No show' : lateCat(effLate)) : null,
         missingPunch: !!(isWorkingKind && !hasPunch), missingSystem: !!(isWorkingKind && !hasSystem),
         crossesMidnight: !!c.crossMidnight, originalShiftCode: c.origin || null,
-        date, day: dayName(date), status: holidayLabel ? (holidayLabel + (isWorkingKind ? ' (worked)' : '')) : raw, presence: presenceLive, location: isWFH ? 'WFH' : 'Office',
+        date, day: dayName(date), status: holidayLabel ? (holidayLabel + (isWorkingKind ? ' (worked)' : '')) : raw, presence: presenceArbitrated, location: isWFH ? 'WFH' : 'Office',
         shiftCode: c.norm, shiftCat: c.norm, schedStart, schedEnd: (schedEnd != null && schedEnd > 1440 ? schedEnd - 1440 : schedEnd),
         punchIn: hasPunch ? od.punchIn : null, punchOut: (od && od.punchOut != null) ? od.punchOut : null,
         sysLogin: (prevDayBleed || sysLogin == null) ? null : ((sysLogin % 1440) + 1440) % 1440, sysLogout: (prevDayBleed || sysLogout == null) ? null : ((sysLogout % 1440) + 1440) % 1440, loginSrc: prevDayBleed ? null : (sysSource || null),
@@ -378,6 +434,14 @@ module.exports = function build() {
           const base = (isWorkingKind && !hasSystem && !hasPunch) ? 'No punch & no system login — verify (not auto-absent)'
             : ((!c.mapped && c.kind === 'unknown') ? c.note : (dqFlag || null));
           const extra = [];
+          if (odooVerdict === 'off-day-conflict') extra.push('SCHEDULE vs HR CONFLICT — sheet says a working shift, Odoo says Off Day; not scored, verify which is right');
+          else if (odooVerdict === 'leave') extra.push('No system/punch — Odoo says ' + String(odStatus || '').trim() + '; recorded as leave, not scored');
+          else if (odooVerdict === 'sick') extra.push('No system/punch — Odoo says ' + String(odStatus || '').trim() + '; recorded as sick, not scored');
+          else if (odooVerdict === 'absent') extra.push('No system/punch — Odoo says ' + String(odStatus || '').trim() + '; recorded as absent, not scored');
+          else if (odooVerdict === 'wfh-no-evidence') extra.push('WFH per Odoo with no system session — no biometric expected; not scored');
+          else if (odooVerdict === 'unknown') extra.push('No system, no punch, and Odoo has no status — genuinely unknown, not scored');
+          if (evidenceClass === 'insufficient') extra.push('Evidence covers only ' + Math.round((seenShare || 0) * 100) + '% of the shift — too little to judge punctuality; not scored');
+          if (evidenceClass === 'displaced') extra.push('Full shift worked ' + Math.round(displacedMin / 60) + 'h from the scheduled window — SCHEDULE REVIEW, not lateness; not scored');
           if (otCappedFlag) extra.push('OT capped at 5h ceiling — raw system/punch span longer (verify; logout may be un-closed)');
           if (otSuspectForgot) extra.push('ot-suspect-forgot-logout — system tail ' + hhmm(otSystemMin || 0) + ' past shift end (raw span ' + hhmm(govDur || 0) + '), no punch corroboration, logout after midnight on a non-midnight shift; OT tail NOT credited');
           if (otRecordOnly) extra.push('OT record-only (excluded role — not payable, future-counted)');
@@ -388,7 +452,9 @@ module.exports = function build() {
         })(),
         teamMgr: idn.manager || null, teamGroup: idn.team || e.teamCol || null, gender: idn.gender || null,
         roleCat: dayExcluded ? (c.management ? 'Management' : 'Excluded') : 'Agent', expectedH: c.net != null ? +(c.net / 60).toFixed(2) : null,
-        includeTardiness: !dayExcluded,   // Agents count for tardiness rankings; Excluded/Management = record-only
+        /* A day is scored only when someone was excluded for their ROLE, and the day was
+           actually measured. evidenceUnscoreable covers both new arbitrations. */
+        includeTardiness: !dayExcluded && !evidenceUnscoreable,
         active: true,
       };
 
