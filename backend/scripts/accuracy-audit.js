@@ -94,23 +94,44 @@ const add = (id, sev, rule, title, n, unit, detail, fix) =>
         .map((p) => String(p.id));
     } catch { return []; }
   })();
+  /* Record-only is TWO things and the check has to honour both, exactly as the engine
+     does: the config list AND the role regex in recon-new-roster.js (Team Leader /
+     Senior / Resolution Specialist / RTA / WFM). Checking only the list reported Asayel
+     Sameah as a real gap — she is a Team Leader, already excluded by role. A check that
+     asks the Director to fix something the engine already handles is worse than no
+     check, because it spends the one thing that makes a check useful: being believed. */
+  const ROLE_ONLY = `(function_name ~* '(team leader|senior|resolution specialist)' OR function_name ~* '\\yrta\\y'
+                      OR function_name ~* '\\ywfm\\y' OR team_manager ~* '\\ywfm\\y')`;
   const a3 = await one(
-    `SELECT COUNT(DISTINCT person_no) FILTER (WHERE NOT (person_no = ANY($3)))::int n,
-            COUNT(DISTINCT person_no) FILTER (WHERE person_no = ANY($3))::int accepted
+    `SELECT COUNT(DISTINCT person_no) FILTER (WHERE NOT (person_no = ANY($3)) AND NOT ${ROLE_ONLY})::int n,
+            COUNT(DISTINCT person_no) FILTER (WHERE person_no = ANY($3) OR ${ROLE_ONLY})::int accepted
        FROM roster_days
       WHERE is_active AND work_date BETWEEN $1 AND $2 AND (username IS NULL OR username='')`,
     [FROM, TO, recordOnly]);
   add('A3', a3.n ? 'MED' : 'OK', 'BR-ATT-008', 'Every scored person has a system username', a3.n, 'people with no username',
-    `Without a username no Sprinklr/Ameyo session can ever match them. ${a3.accepted} further ` +
-    `record-only people also have none, which is expected and not counted.`,
+    `Without a username no Sprinklr/Ameyo session can ever match them. ${a3.accepted} record-only ` +
+    `people also have none — expected, and not counted.`,
     'add User ID to the schedule sheet');
 
   // ── B. THE SCHEDULE, WHICH IS THE AUTHORITY ────────────────────────────────
   const b1 = await one(
     `SELECT COUNT(*)::int n FROM roster_days WHERE is_active AND work_date BETWEEN $1 AND $2
        AND ${WORKED} AND (shift_start_min IS NULL OR shift_end_min IS NULL)`, [FROM, TO]);
-  add('B1', b1.n ? 'HIGH' : 'OK', 'BR-SHF-004', 'Every worked day has a shift window', b1.n, 'days with no window',
-    'No window means no expected hours: lateness, OT and coverage are all uncomputable for that day.', 'map the code in the Timing sheet');
+  /* Severity depends on WHO. A missing window on an agent's day means their lateness and
+     OT cannot be computed — serious. On a record-only supervisor it costs only their
+     contribution to the hourly coverage curve, because they were never scored anyway.
+     Measured before choosing: all 20 July cases are supervisors, 0 of them scored. */
+  const b1s = await one(
+    `SELECT COUNT(*) FILTER (WHERE include_tardiness)::int scored,
+            COUNT(DISTINCT person_no)::int people
+       FROM roster_days WHERE is_active AND work_date BETWEEN $1 AND $2
+        AND ${WORKED} AND (shift_start_min IS NULL OR shift_end_min IS NULL)`, [FROM, TO]);
+  add('B1', b1.n ? (b1s.scored ? 'HIGH' : 'MED') : 'OK', 'BR-SHF-004', 'Every worked day has a shift window',
+    b1.n, 'days with no window',
+    b1s.scored
+      ? `${b1s.scored} of them are SCORED days — lateness and OT are uncomputable for a person being judged on them.`
+      : `${b1s.people} people, none of them scored (all record-only), so nobody is judged on these. The cost is that the days contribute nothing to the hourly coverage curve.`,
+    'the sheet cell reads a bare "WFH" — give it the shift letter (WFH-M / WFH-B / WFH-N)');
 
   const winRows = await q(
     `SELECT shift_code code, COALESCE(role_category,'') role,
