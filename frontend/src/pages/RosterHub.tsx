@@ -9,12 +9,13 @@ import OtYearPage from '@/pages/OtYear';
 import ScheduleAnalysisPage from '@/pages/ScheduleAnalysis';
 import WfhHrReportPage from '@/pages/WfhHrReport';
 import DataQualityPage from '@/pages/DataQuality';
+import DataTrustPage from '@/pages/DataTrust';
 import SystemAuditPage from '@/pages/SystemAudit';
 import ScheduleChangeLogPage from '@/pages/ScheduleChangeLog';
 import ReportBuilderPage from '@/pages/ReportBuilder';
 import DashboardBuilderPage from '@/pages/DashboardBuilder';
 
-type HubTab = 'grid' | 'dashboard' | 'ot' | 'ot-tracker' | 'ot-year' | 'analysis' | 'wfh' | 'quality' | 'audit' | 'changes' | 'report-builder' | 'dashboard-builder';
+type HubTab = 'grid' | 'dashboard' | 'ot' | 'ot-tracker' | 'ot-year' | 'analysis' | 'wfh' | 'quality' | 'trust' | 'audit' | 'changes' | 'report-builder' | 'dashboard-builder';
 
 /**
  * The 10 former flat tabs regrouped into 5 groups (R1 rollout).
@@ -42,7 +43,8 @@ const GROUPS: TabGroupDef[] = [
       { key: 'ot-tracker', label: 'OT Tracker',       labelAr: 'تراكر الأوفر تايم', icon: CalendarClock },
       { key: 'ot-year',    label: 'OT Year to Date',  labelAr: 'أوفر تايم السنة',   icon: CalendarRange },
       { key: 'wfh',     label: 'WFH HR Report',   labelAr: 'تقرير WFH',       icon: Home },
-      { key: 'quality', label: 'Data Quality',    labelAr: 'جودة البيانات',   icon: ShieldCheck },
+      { key: 'trust',   label: 'Data Trust',      labelAr: 'ثقة البيانات',    icon: ShieldCheck },
+      { key: 'quality', label: 'Data Quality',    labelAr: 'جودة البيانات',   icon: FileSearch },
       { key: 'audit',   label: 'System Audit',    labelAr: 'تدقيق الأنظمة',   icon: FileSearch },
     ],
   },
@@ -87,6 +89,7 @@ export default function RosterHub() {
       {tab === 'ot-year'           && <OtYearPage />}
       {tab === 'analysis'          && <ScheduleAnalysisPage />}
       {tab === 'wfh'               && <WfhHrReportPage />}
+      {tab === 'trust'             && <DataTrustPage />}
       {tab === 'quality'           && <DataQualityPage />}
       {tab === 'audit'             && <SystemAuditPage />}
       {tab === 'changes'           && <ScheduleChangeLogPage />}
