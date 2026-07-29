@@ -194,8 +194,20 @@ module.exports = function build() {
         // since the agent stays logged in during the break) — NOT just the net 8h. So compare to gross.
         completedReq = gross != null && presenceMin >= gross;
         shortage = completedReq ? 0 : (effLate + effEarly);
-        const paid = schedEnd - schedStart;
-        const overlap = Math.max(0, Math.min(govLogout, schedEnd) - Math.max(govLogin, schedStart));
+        /* BR-MAT-001 has to hold in the DENOMINATOR too, not only in the early-out count.
+           The maternity-7h mothers work a legitimate 7-hour day. effEarly already zeroes
+           their early-out — but conformance was still dividing their real 7h of presence
+           by a 9h scheduled window on any day carrying a 9h code, which is 420/540 =
+           78%. Measured: Shaima Saoud reads 100% on her B7 days and 78.2% / 75.3% on B
+           and N. Same person, same behaviour, penalised only where the code happened to
+           be written long. Honouring a rule in one metric and ignoring it in the next is
+           how a protected employee ends up looking like the worst performer on a team.
+           The WFH HR report already caps their window this way; conformance now agrees. */
+        const MATERNITY_WINDOW = 420;
+        const paidRaw = schedEnd - schedStart;
+        const paid = isMother ? Math.min(paidRaw, MATERNITY_WINDOW) : paidRaw;
+        const effSchedEnd = isMother ? schedStart + paid : schedEnd;
+        const overlap = Math.max(0, Math.min(govLogout, effSchedEnd) - Math.max(govLogin, schedStart));
         const permitted = (coversLate ? lateMin : 0) + (coversEarly ? earlyMin : 0);
         conf = paid > 0 ? Math.min(100, Math.round(100 * Math.min(overlap + permitted, paid) / paid)) : '';
         // OT = system worked past shift end (credited up to the 5h plausible ceiling by pickWindow's cap).

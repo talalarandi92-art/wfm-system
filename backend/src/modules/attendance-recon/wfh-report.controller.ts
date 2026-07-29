@@ -47,7 +47,8 @@ export class WfhReportController {
       `SELECT work_date::text date, day_name, person_no, employee_no, clean_name,
               role_function, role_category, team_manager, shift_code, shift_start_min, shift_end_min,
               sys_login_min, sys_logout_min, login_src, presence, permission_type, permission_duration,
-              comp_off, comp_worked_min, ot_min, ot_before_min, ot_after_min, offday_ot_min, holiday_ot_min, include_tardiness
+              comp_off, comp_worked_min, ot_min, ot_before_min, ot_after_min, offday_ot_min, holiday_ot_min, include_tardiness,
+              data_quality
          FROM roster_days
         WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3
           AND punch_in_min IS NULL AND sys_login_min IS NOT NULL
@@ -72,7 +73,14 @@ export class WfhReportController {
       const effEnd = start + gross;
       const breakMin = 60;
       const requiredNet = Math.max(0, gross - breakMin);
-      const excludedRole = !r.include_tardiness || this.WFH_EXCLUDE_RE.test(`${r.role_category || ''} ${r.role_function || ''}`);
+      /* `include_tardiness` is false for TWO different reasons and they must not share a
+         label. A supervisory ROLE is a valid exclusion. A day the engine could not
+         measure (2026-07-29 evidence arbitration — under 25% of the shift seen, or a
+         full shift displaced from its window) is a DATA problem, and telling HR it was
+         an "Excluded role" would misdescribe 17 July agents as supervisors. Weak
+         evidence goes where this report has always sent it: data quality, never HR. */
+      const excludedRole = this.WFH_EXCLUDE_RE.test(`${r.role_category || ''} ${r.role_function || ''}`);
+      const unmeasured = !r.include_tardiness && !excludedRole ? (r.data_quality || 'Day not scored — evidence insufficient') : null;
       const holiday = holSet.has(r.date);
       // any presence other than a clean 'wfh' (sick/absent/leave/off/holiday/office…) +
       // no fingerprint is an internal contradiction → route to Data Quality, never HR.
@@ -109,9 +117,10 @@ export class WfhReportController {
 
       let bucket: string, hrAction = false, reason = '';
       if (dq) { bucket = 'data_quality'; reason = dq; }
+      else if (unmeasured) { bucket = 'data_quality'; reason = unmeasured; }
       else if (onLeave) { bucket = 'data_quality'; reason = `Worked while ${r.presence} — review as exception`; }
       else if (excludedRole && !includeExcluded) { bucket = 'excluded_valid'; reason = 'Excluded role (TL / Senior / RTA / Customer Care / Resolution)'; }
-      else if (holiday) { bucket = 'excluded_valid'; reason = 'Public holiday 16 Jun (Hijri New Year) — holiday work'; }
+      else if (holiday) { bucket = 'excluded_valid'; reason = 'Official holiday — holiday work, no lateness action'; }
       else if (hasPerm) { bucket = 'excluded_valid'; reason = `Approved permission${r.permission_type ? ': ' + r.permission_type : ''}`; }
       else if (hasComp) { bucket = 'excluded_valid'; reason = 'Approved COMP'; }
       else if (hasOT) { bucket = 'excluded_valid'; reason = 'Overtime / compensated same day'; }
