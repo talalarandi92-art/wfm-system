@@ -207,6 +207,19 @@ const add = (id, sev, rule, title, n, unit, detail, fix) =>
   add('D3', d3.n ? 'HIGH' : 'OK', 'BR-OT-003', 'A non-worked day carries no regular OT', d3.n, 'absent/sick days with OT',
     'Paying overtime on a day the person was absent is the most visible possible error.', 'suppress at the engine');
 
+  /* The HR Matrix renders COALESCE(hr_code, attendance_code, shift_code,'OFF'). If presence
+     and hr_code disagree, the roster and the matrix describe the same person's same day
+     differently — and the matrix is what HR acts on. This fired at 44 when the 2026-07-29
+     Odoo arbitration moved presence to leave/absent without moving hr_code with it. */
+  const d4 = await one(
+    `SELECT COUNT(*)::int n FROM roster_days
+      WHERE is_active AND work_date BETWEEN $1 AND $2
+        AND presence IN ('leave','absent','sick')
+        AND COALESCE(hr_code,'') NOT IN ('L','A','SL','DL','UPL','H','COMP','Transfer')`, [FROM, TO]);
+  add('D4', d4.n ? 'HIGH' : 'OK', 'BR-LVE-002', 'The HR matrix agrees with the roster', d4.n, 'contradicting days',
+    'A leave or absent day whose hr_code still names a worked shift shows HR a shift the roster says was never worked.',
+    'hr_code must follow presence wherever the engine arbitrates it');
+
   // ── E. TIME ────────────────────────────────────────────────────────────────
   const e1 = await one(
     `SELECT COUNT(*) FILTER (WHERE shift_end_min<=shift_start_min AND NOT crosses_midnight)::int unflagged,

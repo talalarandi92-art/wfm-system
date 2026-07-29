@@ -357,8 +357,12 @@ module.exports = function build() {
          would have erased those 16 real records and still missed 6 barely-seen days
          whose lateness happened to fall under the cut. So the gate is how much of the
          shift the evidence actually covers, not how large the number is. */
-      const schedNet = c.net != null ? c.net : null;
-      const seenShare = (isWorkingKind && schedNet > 0 && govDur != null) ? govDur / schedNet : null;
+      /* Compare the session SPAN to the GROSS shift, not the net. The agent stays logged in
+         through the break, so the span it produces is a gross-shaped number; dividing it by
+         net overstated every reported share (a 45-minute session on a 9h shift read 9% of
+         net when it is 8% of the shift the person was asked to be present for). Same basis
+         completedReq already uses. */
+      const seenShare = (isWorkingKind && grossMin > 0 && govDur != null) ? govDur / grossMin : null;
       const displacedMin = Math.max(sysLateStore || 0, sysEarlyStore || 0);
 
       let odooVerdict = null, evidenceClass = null;
@@ -400,7 +404,17 @@ module.exports = function build() {
       //    (forgot to punch) still shows its SHIFT CODE — never wrongly OFF/absent.
       const RAW = String(raw || '').toUpperCase();
       let hrCode, attCode = raw;
-      if (c.kind === 'sick')        { hrCode = 'SL'; attCode = (raw && String(raw).length > 1) ? raw : 'SL'; }
+      /* The Odoo arbitration moved PRESENCE to leave/sick/absent for days the schedule had
+         written as a working shift. hr_code has to move with it: the HR Matrix renders
+         COALESCE(hr_code, attendance_code, shift_code,'OFF'), so leaving hr_code as 'B' on a
+         day the roster calls leave made the matrix show 44 people working shifts they were
+         on leave or absent for — the roster and the HR matrix contradicting each other about
+         the same person on the same day. The raw schedule code is preserved in attendance_code,
+         which is where the original cell has always been kept. */
+      if (odooVerdict === 'leave')       { hrCode = 'L';  attCode = raw || 'L'; }
+      else if (odooVerdict === 'sick')   { hrCode = 'SL'; attCode = raw || 'SL'; }
+      else if (odooVerdict === 'absent') { hrCode = 'A';  attCode = raw || 'A'; }
+      else if (c.kind === 'sick')        { hrCode = 'SL'; attCode = (raw && String(raw).length > 1) ? raw : 'SL'; }
       else if (c.kind === 'absence'){ hrCode = 'A';  attCode = (raw && String(raw).length > 1) ? raw : 'A'; }
       else if (c.kind === 'off')    { hrCode = /transfer/i.test(RAW) ? 'Transfer' : 'OFF'; attCode = 'OFF'; }
       else if (c.kind === 'leave')  { hrCode = leaveOnHoliday ? 'H' : (['DL', 'UPL'].includes(RAW) ? RAW : 'L'); attCode = hrCode; }
