@@ -99,18 +99,60 @@ const MAP = {
         `Set RECON_FROM >= ${deleteFloor} or leave it unset for a normal rebuild.`);
     }
 
+    /* ── CRITICAL SAFETY (FIX 2 — thin-coverage wipe, 2026-07-29). Replacing a RANGE is
+       not the same as replacing what the upload actually covers. A July payload also
+       carries a handful of rows on late-June dates, because two fixed-pattern employees
+       have their weekly pattern projected backwards. rFrom therefore came out as
+       2026-06-20, and BETWEEN deleted eleven days of June — ~118 rows each — to insert
+       two. The pre-floor guard above did not fire: 2026-06-20 IS the payload's floor.
+       Nothing was lost (roster_days_recon_bak held it, restored via
+       recon-restore-range.js), but the roster read as an empty month in between.
+
+       So delete the DATES THIS UPLOAD COVERS, never a span. A date counts as covered
+       when the payload brings a real share of what is already there; a date carrying a
+       couple of projected rows is left alone and reported. Shrinkage is normal as people
+       leave, so the bar is deliberately low (20%) — this is a collapse detector, not an
+       equality check. RECON_ALLOW_THIN=1 restores the old behaviour for a deliberate
+       partial rebuild. */
+    const payloadByDate = new Map();
+    for (const d of ingDates) payloadByDate.set(d, (payloadByDate.get(d) || 0) + 1);
+    const liveByDate = new Map((await c.query(
+      `SELECT work_date::text d, COUNT(*)::int n FROM roster_days
+        WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 GROUP BY 1`, [TENANT, rFrom, rTo])).rows
+      .map((r) => [r.d, r.n]));
+
+    const covered = [], thin = [];
+    for (const [d, n] of payloadByDate) {
+      if (d < rFrom || d > rTo) continue;
+      const live = liveByDate.get(d) || 0;
+      (process.env.RECON_ALLOW_THIN === '1' || live === 0 || n >= Math.max(3, live * 0.2) ? covered : thin)
+        .push({ d, n, live });
+    }
+    covered.sort((a, b) => (a.d < b.d ? -1 : 1));
+    if (!covered.length) throw new Error('no date in ingest.json brings enough rows to replace what is stored — refusing to delete anything');
+    if (thin.length) {
+      console.log(`thin-coverage dates LEFT UNTOUCHED (payload has far fewer rows than stored):`);
+      for (const t of thin.sort((a, b) => (a.d < b.d ? -1 : 1))) console.log(`   ${t.d}  payload ${t.n} vs stored ${t.live}`);
+    }
+    const coveredDates = covered.map((x) => x.d);
+
     await c.query('BEGIN');
-    // BACKUP the affected range FRESH each run = a true "undo last ingest"
+    // BACKUP the affected dates FRESH each run = a true "undo last ingest"
     await c.query(`DROP TABLE IF EXISTS roster_days_recon_bak`);
-    await c.query(`CREATE TABLE roster_days_recon_bak AS SELECT * FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [TENANT, rFrom, rTo]);
+    await c.query(`CREATE TABLE roster_days_recon_bak AS SELECT * FROM roster_days WHERE tenant_id=$1 AND work_date::text = ANY($2)`, [TENANT, coveredDates]);
     const bakN = (await c.query('SELECT COUNT(*)::int n FROM roster_days_recon_bak')).rows[0].n;
 
-    // REPLACE only the uploaded range for this tenant with the corrected rows
-    console.log(`ingest range: ${rFrom} .. ${rTo}  (backed up ${bakN} rows before replace)`);
-    await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [TENANT, rFrom, rTo]);
+    // REPLACE only the dates this upload actually covers
+    console.log(`ingest range: ${coveredDates[0]} .. ${coveredDates[coveredDates.length - 1]}  ` +
+      `(${coveredDates.length} covered day(s)${thin.length ? `, ${thin.length} thin day(s) skipped` : ''}; backed up ${bakN} rows before replace)`);
+    await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date::text = ANY($2)`, [TENANT, coveredDates]);
     const allCols = (hasTenant ? ['tenant_id'] : []).concat(cols);
     let inserted = 0;
+    /* Only rows for the dates just cleared. Inserting a thin date's rows on top of the
+       stored ones would duplicate the person-day rather than replace it. */
+    const coveredSet = new Set(coveredDates);
     for (const r of ing) {
+      if (!coveredSet.has(r.date)) continue;
       const vals = (hasTenant ? [TENANT] : []).concat(cols.map(col => { const v = r[MAP[col]]; return v === undefined ? null : v; }));
       const ph = vals.map((_, i) => '$' + (i + 1)).join(',');
       await c.query(`INSERT INTO roster_days (${allCols.join(',')}) VALUES (${ph})`, vals);
@@ -123,8 +165,10 @@ const MAP = {
     const REVIEW_THRESHOLD = 15;
     let flagsInserted = 0;
     // drop only STALE pending flags in range (resolved decisions survive), then re-raise from current evidence
-    await c.query(`DELETE FROM ot_review_flags WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND status='pending'`, [TENANT, rFrom, rTo]);
+    // scoped to the same covered dates as the row replace — a thin date keeps its flags
+    await c.query(`DELETE FROM ot_review_flags WHERE tenant_id=$1 AND work_date::text = ANY($2) AND status='pending'`, [TENANT, coveredDates]);
     for (const r of ing) {
+      if (!coveredSet.has(r.date)) continue;
       for (const kind of ['before', 'after']) {
         const mins = Math.round(Number(kind === 'before' ? r.otBefore : r.otAfter) || 0);
         if (mins < REVIEW_THRESHOLD) continue;

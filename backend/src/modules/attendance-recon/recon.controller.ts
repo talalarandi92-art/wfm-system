@@ -232,21 +232,46 @@ export class ReconController {
     // 1) Optional: drop uploaded files into the engine's source folder, matched by name → canonical name.
     //    NOTE: the "June" in these stored names is a fixed storage ALIAS, not the data month — a July
     //    upload overwrites the same canonical slot and the engine reports the ACTUAL ingested range.
+    /* MATCHING ORDER IS LOAD-BEARING. "Odoo permissions..xlsx" contains "odoo", so a
+       broad /odoo/ rule ahead of the permission rule claimed it for the FINGERPRINT
+       slot — two different files into one slot, the second overwriting the first, and
+       the permissions file never arriving. Permissions are therefore tested FIRST, and
+       the fingerprint rule names what it actually is.
+       "sprink" (not "sprinklr") because the export gets typed by hand and arrives as
+       Sprinklir / Sprinkler often enough to matter — an unmatched Sprinklr file used to
+       leave the previous month's sessions in place and the run continued on them. */
     const targets = [
       { rx: /cc schedule|shifts/i, name: 'CC Schedule 26 June..xlsx', role: 'Roster (authority)' },
-      { rx: /odoo|fingerprint/i, name: 'Odoo Fingerprint June.xlsx', role: 'Odoo fingerprints' },
       { rx: /permission|compo/i, name: 'Permission & Compo June.xlsx', role: 'Permissions + comp' },
+      { rx: /fingerprint|odoo|attendance|punch/i, name: 'Odoo Fingerprint June.xlsx', role: 'Odoo fingerprints' },
       { rx: /ameyo/i, name: 'Ameyo login and logout.xlsx', role: 'Ameyo sessions' },
-      { rx: /sprinklr/i, name: 'Login and Logout sprinklr.xlsx', role: 'Sprinklr sessions' },
+      { rx: /sprink/i, name: 'Login and Logout sprinklr.xlsx', role: 'Sprinklr sessions' },
     ];
     const saved: { uploaded: string; storedAs: string; role: string }[] = [];
     const unmatched: string[] = [];
+    const claimed = new Map<string, string>();
     fs.mkdirSync(RECON_NEW_DIR, { recursive: true });
     for (const f of files || []) {
       const t = targets.find((x) => x.rx.test(f.originalname));
       if (!t) { unmatched.push(f.originalname); continue; }
+      const prev = claimed.get(t.name);
+      if (prev) {
+        throw new BadRequestException(
+          `"${f.originalname}" and "${prev}" both match the ${t.role} slot. One would overwrite the ` +
+          `other and the run would silently use the wrong file — rename one and upload again.`);
+      }
+      claimed.set(t.name, f.originalname);
       fs.writeFileSync(path.join(RECON_NEW_DIR, t.name), f.buffer);
       saved.push({ uploaded: f.originalname, storedAs: t.name, role: t.role });
+    }
+    /* An unmatched file is NOT a warning. The engine reads whatever is already in the
+       folder, so a Sprinklr export the matcher missed means the run quietly rebuilds on
+       LAST month's sessions and reports success. Refuse before anything is written. */
+    if (unmatched.length) {
+      throw new BadRequestException(
+        `Not recognised: ${unmatched.join(', ')}. Nothing was run — the engine would have ` +
+        `rebuilt on the previous file still in the folder. Include one of these words in the ` +
+        `name: "CC Schedule"/"Shifts", "Permission"/"Compo", "Fingerprint"/"Odoo", "Ameyo", "Sprink".`);
     }
     // 2) Locate + run the pipeline (foundation → engine → ingest).
     const scriptsDir = [path.join(process.cwd(), 'scripts'), path.join(__dirname, '../../../scripts'), path.join(__dirname, '../../../../scripts')]

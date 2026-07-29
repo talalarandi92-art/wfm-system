@@ -148,33 +148,60 @@ function loadRaw(file) {
 }
 const localDateFromSerial = (serial) => serialToISO(serial); // raw integer serial already = calendar date
 
-// ---- ODOO ---- Code,Date,Day,In,Out,Total,Late In,Early Out,OT,Status
+/* COLUMNS ARE RESOLVED BY HEADER NAME, NOT POSITION (L-009 — the lesson the Sprinklr
+   loader below already applies; these two were still positional).
+   What that cost: the June "Permission & Compo" export carried an extra `Extra Hours`
+   column before `Status`, so `r[7]` read 0 / 2 / "" as the approval status. Zero of the
+   six HR-approved permissions were recognised, and BR-PRM-001 only lets an APPROVED
+   permission cover late-in / early-out — so those people were charged lateness they had
+   approval for. July's export dropped that column, which is the only reason the same
+   line works this month. A layout that shifts by one silently is not something to keep
+   depending on. `pos` stays as the fallback so a missing header degrades to today's
+   behaviour instead of throwing. */
+const colFinder = (headerRow) => {
+  const H = (headerRow || []).map((x) => String(x == null ? '' : x).toLowerCase().replace(/\s+/g, ' ').trim());
+  return (pos, ...names) => {
+    for (const n of names) { const i = H.indexOf(String(n).toLowerCase()); if (i >= 0) return i; }
+    return pos;
+  };
+};
+
+// ---- ODOO ---- ID/Code,Date,Day,In,Out,Total,Late In,Early Out,OT,Status
 const odoo = {}; // key id|date -> {in,out,status}
 let odooStatusByKey = {};
 {
-  const R = loadRaw('Odoo Fingerprint June.xlsx').slice(1);
-  for (const r of R) {
-    const id = r[0]; if (typeof id !== 'number') continue;
-    const date = localDateFromSerial(r[1]); if (!date) continue;
-    const inMin = serialTimeMin(r[3]); const outMin = serialTimeMin(r[4]);
-    const status = r[9] == null ? null : String(r[9]).replace(/\s+/g, ' ').trim();
-    odoo[id + '|' + date] = { punchIn: (r[3] != null ? inMin : null), punchOut: (r[4] != null ? outMin : null), status };
+  const RAW = loadRaw('Odoo Fingerprint June.xlsx');
+  const c = colFinder(RAW[0]);
+  // the header flipped from "Code" to "ID" between June and July — both resolve here
+  const cId = c(0, 'id', 'code', 'employee id'), cDate = c(1, 'date'),
+        cIn = c(3, 'in'), cOut = c(4, 'out'), cStatus = c(9, 'status');
+  for (const r of RAW.slice(1)) {
+    const id = r[cId]; if (typeof id !== 'number') continue;
+    const date = localDateFromSerial(r[cDate]); if (!date) continue;
+    const inMin = serialTimeMin(r[cIn]); const outMin = serialTimeMin(r[cOut]);
+    const status = r[cStatus] == null ? null : String(r[cStatus]).replace(/\s+/g, ' ').trim();
+    odoo[id + '|' + date] = { punchIn: (r[cIn] != null ? inMin : null), punchOut: (r[cOut] != null ? outMin : null), status };
   }
   console.log('odoo fingerprints loaded: ' + Object.keys(odoo).length + ' keyed (id|date)');
 }
 
-// ---- PERMISSION & COMP ---- Employee,ID,Date,Type,From,To,TotalHrs,Status
+// ---- PERMISSION & COMP ---- Employee,ID,Date,Type,From,To,TotalHrs,[Extra Hours,]Status
 const perms = {}; // key id|date -> [ {kind:'perm'|'comp', type, fromMin, toMin, hours, approved, status} ]
 {
-  const R = loadRaw('Permission & Compo June.xlsx').slice(1);
+  const RAW = loadRaw('Permission & Compo June.xlsx');
+  const c = colFinder(RAW[0]);
+  const pId = c(1, 'id', 'employee id'), pDate = c(2, 'date'), pType = c(3, 'permission type', 'type'),
+        pFrom = c(4, 'time from', 'from'), pTo = c(5, 'time to', 'to'),
+        pHours = c(6, 'total hours', 'hours'), pStatus = c(7, 'status');
+  const R = RAW.slice(1);
   for (const r of R) {
-    const id = r[1]; if (typeof id !== 'number') continue;
-    const date = localDateFromSerial(r[2]); if (!date) continue;
-    const type = String(r[3] || '').trim();
-    const status = String(r[7] || '').trim();
+    const id = r[pId]; if (typeof id !== 'number') continue;
+    const date = localDateFromSerial(r[pDate]); if (!date) continue;
+    const type = String(r[pType] || '').trim();
+    const status = String(r[pStatus] || '').trim();
     const approved = /approved/i.test(status); // "HR Approved" => true; Pending/Waiting => false
     const isComp = /comp off/i.test(type);
-    const rec = { kind: isComp ? 'comp' : 'perm', type, fromMin: parseClock(r[4]), toMin: parseClock(r[5]), hours: (typeof r[6] === 'number' ? r[6] : null), approved, status,
+    const rec = { kind: isComp ? 'comp' : 'perm', type, fromMin: parseClock(r[pFrom]), toMin: parseClock(r[pTo]), hours: (typeof r[pHours] === 'number' ? r[pHours] : null), approved, status,
       covers: /late in/i.test(type) ? 'late' : /early out/i.test(type) ? 'early' : /full day/i.test(type) ? 'full' : /out\/in/i.test(type) ? 'both' : 'other' };
     (perms[id + '|' + date] = perms[id + '|' + date] || []).push(rec);
   }
@@ -224,7 +251,18 @@ const sprinkSessions = {}; // id -> [{aLogin, aLogout}]
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, blankrows: false, raw: true });
   const H = (rows[0] || []).map(x => String(x || '').toLowerCase().trim());
   const ci = (...names) => { for (const n of names) { const i = H.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
-  const cId = ci('id', 'user id', 'username'), cLd = ci('login date'), cLt = ci('login time'), cOd = ci('logout date'), cOt = ci('logout tim', 'logout time');
+  /* The July export writes ONE logical column, "Login Timestamp", as a date cell and a
+     time cell — and splits the header text across the two: ["login tim", "estamp"].
+     Exact-name lookup finds neither "login date" nor "login time", every row then fails
+     the date parse, and the month builds with ZERO sessions while reporting success.
+     So: exact names first (June's shape), then fall back to the first header that
+     STARTS WITH login/logout and treat the next column as its time half. */
+  const startsWith = (p) => H.findIndex((h) => h.startsWith(p));
+  const cId = ci('id', 'user id', 'username');
+  let cLd = ci('login date'), cLt = ci('login time');
+  let cOd = ci('logout date'), cOt = ci('logout tim', 'logout time');
+  if (cLd < 0) { const i = startsWith('login'); if (i >= 0) { cLd = i; cLt = i + 1; } }
+  if (cOd < 0) { const i = startsWith('logout'); if (i >= 0) { cOd = i; cOt = i + 1; } }
   const R = rows.slice(1);
   let matched = 0, unmatched = 0, degenerate = 0;
   for (const r of R) {
@@ -239,6 +277,16 @@ const sprinkSessions = {}; // id -> [{aLogin, aLogout}]
     matched++;
   }
   console.log('sprinklr: matched=' + matched + ' unmatched=' + unmatched + ' degenerateSkipped=' + degenerate + ' employees=' + Object.keys(sprinkSessions).length);
+  /* A parse that yields nothing must STOP the run. Without this the engine happily
+     produced 2,990 July records with no login on any of them — a whole month that looks
+     built and says everyone is missing their system login. An empty file is a legitimate
+     reason to see zero; a file with rows in it is not. */
+  if (matched === 0 && R.length > 0) {
+    throw new Error(`Sprinklr: 0 of ${R.length} rows produced a session (unmatched ids ${unmatched}, ` +
+      `degenerate ${degenerate}). Columns resolved to id=${cId} loginDate=${cLd} loginTime=${cLt} ` +
+      `logoutDate=${cOd} logoutTime=${cOt} from header [${H.join(', ')}]. Refusing to build a month ` +
+      `with no system evidence — fix the column mapping first.`);
+  }
 }
 
 // dates whose SYSTEM evidence came from the sheet itself (recon-build relabels login_src honestly)
