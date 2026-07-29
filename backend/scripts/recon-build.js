@@ -65,7 +65,7 @@ module.exports = function build() {
   for (const e of F.employees) {
     const idn = F.identity[e.id] || { id: e.id, name: e.name, userId: e.username, email: null, manager: null, gender: null, location: e.location, team: e.teamCol };
     const fn = e.function || '';
-    const excluded = isExcludedRole(fn, idn.team);
+    const excluded = isExcludedRole(fn, idn.team, e.id);
     const isMother = (e.id === 12375 || e.id === 12434);
 
     for (const date in e.days) {
@@ -439,7 +439,7 @@ module.exports = function build() {
 
   // Role lookup
   const roleSet = {};
-  for (const e of F.employees) { const idn = F.identity[e.id] || {}; const fn = e.function || ''; const ex = isExcludedRole(fn, idn.team); const k = fn || '(none)'; roleSet[k] = roleSet[k] || { Role: fn, IncludeHR: ex ? 'No' : 'Yes', IncludeTardiness: ex ? 'No' : 'Yes', DefaultGrossH: 9, BreakH: 1, ReqNetH: 8, Count: 0, Note: ex ? 'Supervisory/excluded — record-only' : 'Agent — included' }; roleSet[k].Count++; }
+  for (const e of F.employees) { const idn = F.identity[e.id] || {}; const fn = e.function || ''; const ex = isExcludedRole(fn, idn.team, e.id); const k = fn || '(none)'; roleSet[k] = roleSet[k] || { Role: fn, IncludeHR: ex ? 'No' : 'Yes', IncludeTardiness: ex ? 'No' : 'Yes', DefaultGrossH: 9, BreakH: 1, ReqNetH: 8, Count: 0, Note: ex ? 'Supervisory/excluded — record-only' : 'Agent — included' }; roleSet[k].Count++; }
   const roleRows = Object.values(roleSet).sort((a, b) => b.Count - a.Count);
 
   // ---- Employee_Tardiness_Summary: count + total duration per employee over the period (RAW always; covered vs uncovered) ----

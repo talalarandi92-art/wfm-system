@@ -29,11 +29,28 @@ const WORKED = `presence IN ('office','wfh')`;
 
 /* BR-SHF-005 — the canonical windows. Never invent one; a code whose stored window
    disagrees is either a Timing-sheet corruption or a real schedule change, and both
-   need a human. Minutes from local midnight; >1440 = next day. */
+   need a human. Minutes from local midnight; >1440 = next day.
+ *
+ * THE EE FAMILY IS ROLE-DEPENDENT (Director, 2026-07-29): it starts at 18:00 for
+ * everyone, but an AGENT works 9 hours to 03:00 while an ADMIN works 8 to 02:00. The
+ * first version of this table had one flat EE20 = 18:00-02:00 and duly reported the
+ * only EE20 row in the data as "drifted" — the row was correct and the constant was
+ * wrong. A canonical table that is not itself checked against the business just moves
+ * the error somewhere quieter. */
 const CANON = {
   M: [420, 960], B: [540, 1080], C: [660, 1200], N: [780, 1320],
-  E: [960, 1500], EE20: [1080, 1560], MD: [1320, 1860], MN: [1380, 1920],
+  E: [960, 1500], MD: [1320, 1860], MN: [1380, 1920],
   M20: [480, 960], B20: [600, 1080], C20: [660, 1200], N20: [840, 1320],
+};
+/** code → { agent, admin } where the window depends on who works it. */
+const CANON_BY_ROLE = {
+  EE:   { agent: [1080, 1620], admin: [1080, 1560] },
+  EE20: { agent: [1080, 1620], admin: [1080, 1560] },
+};
+const canonFor = (code, role) => {
+  const byRole = CANON_BY_ROLE[code];
+  if (byRole) return /agent/i.test(role || '') ? byRole.agent : byRole.admin;
+  return CANON[code] || null;
 };
 
 const findings = [];
@@ -67,11 +84,26 @@ const add = (id, sev, rule, title, n, unit, detail, fix) =>
   add('A2', a2.n ? 'HIGH' : 'OK', 'BR-ATT-008', 'Every roster row resolves to an employee', a2.n, 'unresolved person-days',
     'Unresolved rows silently vanish from anything that joins employees — coverage, scorecard, People 360.', 'backfill employee_identity');
 
+  /* Record-only people (BR-ROL-002 + recon-config recordOnlyPeople) legitimately do not
+     open the operational system — management and standing-pattern staff. Counting them
+     as a username gap turns an accepted fact into a permanent warning, and a check that
+     cries wolf is a check people stop reading. They are reported separately. */
+  const recordOnly = (() => {
+    try {
+      return (JSON.parse(fs.readFileSync(path.join(__dirname, 'recon-config.json'), 'utf8')).recordOnlyPeople || [])
+        .map((p) => String(p.id));
+    } catch { return []; }
+  })();
   const a3 = await one(
-    `SELECT COUNT(DISTINCT person_no)::int n FROM roster_days
-      WHERE is_active AND work_date BETWEEN $1 AND $2 AND (username IS NULL OR username='')`, [FROM, TO]);
-  add('A3', a3.n ? 'MED' : 'OK', 'BR-ATT-008', 'Every person has a system username', a3.n, 'people with no username',
-    'Without a username no Sprinklr/Ameyo session can ever match them — they are permanently evidence-blind.', 'add User ID to the schedule sheet');
+    `SELECT COUNT(DISTINCT person_no) FILTER (WHERE NOT (person_no = ANY($3)))::int n,
+            COUNT(DISTINCT person_no) FILTER (WHERE person_no = ANY($3))::int accepted
+       FROM roster_days
+      WHERE is_active AND work_date BETWEEN $1 AND $2 AND (username IS NULL OR username='')`,
+    [FROM, TO, recordOnly]);
+  add('A3', a3.n ? 'MED' : 'OK', 'BR-ATT-008', 'Every scored person has a system username', a3.n, 'people with no username',
+    `Without a username no Sprinklr/Ameyo session can ever match them. ${a3.accepted} further ` +
+    `record-only people also have none, which is expected and not counted.`,
+    'add User ID to the schedule sheet');
 
   // ── B. THE SCHEDULE, WHICH IS THE AUTHORITY ────────────────────────────────
   const b1 = await one(
@@ -81,14 +113,22 @@ const add = (id, sev, rule, title, n, unit, detail, fix) =>
     'No window means no expected hours: lateness, OT and coverage are all uncomputable for that day.', 'map the code in the Timing sheet');
 
   const winRows = await q(
-    `SELECT shift_code code, MODE() WITHIN GROUP (ORDER BY shift_start_min) ss,
+    `SELECT shift_code code, COALESCE(role_category,'') role,
+            MODE() WITHIN GROUP (ORDER BY shift_start_min) ss,
             MODE() WITHIN GROUP (ORDER BY shift_end_min) se, COUNT(*)::int n
        FROM roster_days WHERE is_active AND work_date BETWEEN $1 AND $2 AND ${WORKED}
-        AND shift_start_min IS NOT NULL GROUP BY 1`, [FROM, TO]);
-  const drift = winRows.filter(r => CANON[r.code] && (CANON[r.code][0] !== r.ss || CANON[r.code][1] !== (r.se <= r.ss ? r.se + 1440 : r.se)));
+        AND shift_start_min IS NOT NULL GROUP BY 1,2`, [FROM, TO]);
+  const drift = winRows.filter((r) => {
+    const want = canonFor(r.code, r.role);
+    if (!want) return false;
+    const end = r.se <= r.ss ? r.se + 1440 : r.se;      // stored ends wrap; canonical does not
+    return want[0] !== r.ss || want[1] !== end;
+  });
   add('B2', drift.length ? 'MED' : 'OK', 'BR-SHF-005', 'Stored windows match the canonical times',
     drift.reduce((s, r) => s + r.n, 0), 'days on a drifted window',
-    drift.length ? drift.map(r => `${r.code} stored ${r.ss}-${r.se} vs canonical ${CANON[r.code].join('-')}`).join('; ') : 'all codes canonical',
+    drift.length
+      ? drift.map(r => `${r.code}/${r.role || '?'} stored ${r.ss}-${r.se <= r.ss ? r.se + 1440 : r.se} vs canonical ${canonFor(r.code, r.role).join('-')}`).join('; ')
+      : 'all codes canonical, including the role-dependent EE family',
     'confirm with the Timing sheet, then pin');
 
   const b3 = await one(

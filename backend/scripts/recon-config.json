@@ -6,6 +6,12 @@
     { "id": 13863, "name": "Amthal Alrashid", "code": "B", "wfh": true, "offDays": ["Friday", "Saturday"], "function": "OMT", "gender": "Female" },
     { "id": 13540, "name": "Athari Almulla",  "code": "B", "wfh": true, "offDays": ["Friday", "Saturday"], "function": "OMT", "gender": "Female" }
   ],
+  "_note_recordOnlyPeople": "Director 2026-07-29: people who legitimately do not open the operational system — management and standing-pattern staff. They stay in the record and still raise alerts, but system-based lateness/early-out never counts against them (BR-ROL-002, the same treatment the role regex gives Team Leader / Senior / Resolution Specialist / RTA / WFM). This is a LIST, not another hardcoded name in the engine, so a role that the regex cannot express is one edit here. Shereen Torabi 10108 already matches by function (Resolution Specialist) and is listed only so the intent survives a function rename.",
+  "recordOnlyPeople": [
+    { "id": 13863, "name": "Amthal Alrashid", "why": "OMT, standing WFH pattern — does not open the system" },
+    { "id": 13540, "name": "Athari Almulla", "why": "OMT, standing WFH pattern — does not open the system" },
+    { "id": 10108, "name": "Shereen Torabi", "why": "management — already matched by role, listed for durability" }
+  ],
   "_note_supplementalMatrices": "Director-managed people (his direct team) whose schedule lives in HIS matrix files, not the ops sheet. Matrix format: Name | ID | serial-date columns with day codes. Only the listed ids are merged (others already come from the ops sheet). Add/replace paths as new matrix files arrive, then re-run the refresh.",
   "_note_supplementalMatrices_deploy": "DEPLOY: each 'path' below is an ABSOLUTE HOST path, read literally by recon-extract-foundation-v2.js (XLSX.readFile). They are environment-specific — on a server, repoint them to the server paths or omit them; an unreadable path is skipped gracefully (logged as 'supplemental matrix unreadable', reconciliation still runs). Not needed for normal server operation: the recon pipeline runs where the month source workbooks live (see deploy/prod.env.example RECON_* and deploy/DEPLOY_RUNBOOK.md).",
   "supplementalMatrices": [

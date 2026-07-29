@@ -127,7 +127,23 @@ function classifyCode(rawIn, empId) {
 // SCOPE (policy 2026-06-30): "excluded/record-only" suppresses HR-action + tardiness *deductions* ONLY.
 // It does NOT exempt anyone from opening the system: the no-system-no-punch flag (recon-build _ingest.dq)
 // is role-blind and fires for these roles too — everyone, leaders included, must open the system.
-function isExcludedRole(fn, team) {
+/* RECORD-ONLY (BR-ROL-002): the person stays in the record and still raises alerts,
+   but system-based lateness and early-out never count against them.
+   The regex covers roles whose TITLE says it. It cannot cover someone whose function
+   reads "OMT" but who, in fact, does not open the operational system — Amthal Alrashid
+   was being scored on a system she never logs into. That is a per-person fact, so it
+   lives in recon-config.json where it can be changed without touching the engine. */
+const RECORD_ONLY_IDS = new Set(
+  (() => {
+    try {
+      return (JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'recon-config.json'), 'utf8'))
+        .recordOnlyPeople || []).map((p) => String(p.id));
+    } catch { return []; }
+  })(),
+);
+
+function isExcludedRole(fn, team, empId) {
+  if (empId != null && RECORD_ONLY_IDS.has(String(empId))) return true;
   const f = (fn || '').toLowerCase(); const t = (team || '').toLowerCase();
   if (/team leader|senior|resolution specialist/.test(f)) return true;
   if (/\brta\b/.test(f) || f === 'rta') return true;
