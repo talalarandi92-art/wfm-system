@@ -441,6 +441,13 @@ module.exports = function build() {
         punchIn: hasPunch ? od.punchIn : null, punchOut: (od && od.punchOut != null) ? od.punchOut : null,
         sysLogin: (prevDayBleed || sysLogin == null) ? null : ((sysLogin % 1440) + 1440) % 1440, sysLogout: (prevDayBleed || sysLogout == null) ? null : ((sysLogout % 1440) + 1440) % 1440, loginSrc: prevDayBleed ? null : (sysSource || null),
         lateMin: punchLateMin || 0, earlyMin: punchEarlyMin || 0, sysLate: sysLateStore, sysEarly: sysEarlyStore,
+        /* The RAW tardiness, before an approved permission or COMP forgives it. Conformance
+           credits the raw minutes back, but only the forgiven (zeroed) value was ever stored —
+           so a 100% day on a 39-minute-late login could not be re-derived from its own row.
+           The reason was always recorded; the arithmetic was not reproducible. Storing both
+           makes every conformance figure verifiable from the row that states it. */
+        rawSysLate: computable ? Math.round(lateMin || 0) : null,
+        rawSysEarly: computable ? Math.round(earlyMin || 0) : null,
         otMin, offdayOt, holidayOt, otRecordOnly, offWorkedMin, offWorkedHrReview,
         // worked_min: a WORKED day = the gov session (capped at a sane 16h to kill never-logged-out bleed);
         // a non-working day (OFF/leave/holiday-off/absence/sick) has NO scheduled shift, so its raw system
@@ -477,7 +484,13 @@ module.exports = function build() {
           return [base, ...extra].filter(Boolean).join(' | ') || null;
         })(),
         teamMgr: idn.manager || null, teamGroup: idn.team || e.teamCol || null, gender: idn.gender || null,
-        roleCat: dayExcluded ? (c.management ? 'Management' : 'Excluded') : 'Agent', expectedH: c.net != null ? +(c.net / 60).toFixed(2) : null,
+        roleCat: dayExcluded ? (c.management ? 'Management' : 'Excluded') : 'Agent',
+        /* BR-MAT-001 in the THIRD place it has to hold. Conformance was fixed to divide the
+           maternity-7h mothers by a 7h window; expected_hours still told them they owed 8h on
+           any day whose code carried the 9h form — 11 July days for Shaima Saoud reading 8.00h
+           against a 6.00h obligation. A rule honoured in two metrics and missed in the third is
+           still a rule that fails the person it protects. */
+        expectedH: c.net != null ? +((isMother ? Math.min(c.net, 360) : c.net) / 60).toFixed(2) : null,
         /* A day is scored only when someone was excluded for their ROLE, and the day was
            actually measured. evidenceUnscoreable covers both new arbitrations. */
         includeTardiness: !dayExcluded && !evidenceUnscoreable,

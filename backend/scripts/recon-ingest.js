@@ -19,6 +19,7 @@ const MAP = {
   shift_code: 'shiftCode', shift_category: 'shiftCat', shift_start_min: 'schedStart', shift_end_min: 'schedEnd',
   punch_in_min: 'punchIn', punch_out_min: 'punchOut', sys_login_min: 'sysLogin', sys_logout_min: 'sysLogout', login_src: 'loginSrc',
   late_min: 'lateMin', early_min: 'earlyMin', sys_late_min: 'sysLate', sys_early_min: 'sysEarly',
+  raw_sys_late_min: 'rawSysLate', raw_sys_early_min: 'rawSysEarly',
   ot_min: 'otMin', offday_ot_min: 'offdayOt', holiday_ot_min: 'holidayOt', ot_record_only: 'otRecordOnly', worked_min: 'worked',
   off_worked_min: 'offWorkedMin', off_worked_hr_review: 'offWorkedHrReview',   // migration 082 (Director decision 1)
   adherence_pct: 'adherence', conforming: 'conforming', permission: 'permission', permission_status: 'permissionStatus', permission_type: 'permType', permission_duration: 'permDur',
@@ -36,6 +37,9 @@ const MAP = {
   await c.connect();
   try {
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS username text`); // User ID (a.wahab) — durable across re-ingest
+    /* Pre-forgiveness tardiness — makes conformance reproducible from the row (2026-07-29). */
+    await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS raw_sys_late_min integer`);
+    await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS raw_sys_early_min integer`);
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS ot_record_only boolean NOT NULL DEFAULT false`); // migration 081 (Director rule 4) — self-heal like username
     // migration 082 (Director decision 1) — OFF-worked → HR clarify, NOT auto-OT; self-heal so a refresh never NULLs
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS off_worked_min integer NOT NULL DEFAULT 0`);
