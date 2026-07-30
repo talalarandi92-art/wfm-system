@@ -36,7 +36,7 @@ interface ExplainStep {
 interface ExplainResp {
   who: { name: string; fn: string; date: string; day: string; personNo: string };
   steps: ExplainStep[];
-  selfCheck: { recomputed: number|null; stored: number|null; agrees: boolean; note: string };
+  selfCheck: { recomputed: number|null; stored: number|null; agrees: boolean; verifiable?: boolean; note: string };
   flags: string[];
 }
 interface OtFn { fn: string; ot_h: number; offday_h: number; ot_days: number; }
@@ -877,21 +877,33 @@ function WhyPanel({ ar, busy, chain, onClose }: { ar: boolean; busy: boolean; ch
 
         {/* The verdict on the explanation itself, before the explanation */}
         {sc && sc.recomputed != null && (
-          <div style={{
-            padding: '10px 20px', fontSize: 12.5, lineHeight: 1.55, display: 'flex', alignItems: 'center', gap: 8,
-            background: sc.agrees ? 'rgba(16,185,129,0.10)' : 'rgba(244,63,94,0.12)',
-            color: sc.agrees ? 'var(--text-2)' : '#fda4af', borderBottom: '1px solid var(--border)',
-          }}>
-            {sc.agrees ? <CheckCircle2 size={15} style={{ color: '#10b981', flexShrink: 0 }} />
-                       : <AlertTriangle size={15} style={{ flexShrink: 0 }} />}
-            <span>
-              {sc.agrees
-                ? (ar ? `أعدنا اشتقاق الالتزام من المدخلات ونتج ${sc.recomputed}% — مطابق للمخزّن. الرقم بينحكى فيه.`
-                      : `Conformance re-derived from the inputs comes to ${sc.recomputed}% — matching what is stored. The number holds.`)
-                : (ar ? `إعادة الاشتقاق أعطت ${sc.recomputed}% والمخزّن ${sc.stored}% — ما بينطابقوا. لا تعتمد هالرقم لحد ما ينحل.`
-                      : `The re-derivation gives ${sc.recomputed}% but ${sc.stored}% is stored — they disagree. Do not rely on this number until that is resolved.`)}
-            </span>
-          </div>
+          /* Three states, not two. "Cannot be checked" is not "is wrong": rows before
+             2026-07-30 lack the columns recording what a permission forgave, so a legitimately
+             forgiven day re-derives low. Painting that red would brand 14% of May and June as
+             untrustworthy when nothing is actually contradicted. */
+          (() => {
+            const ok = sc.agrees, unknown = !sc.agrees && sc.verifiable === false;
+            return (
+              <div style={{
+                padding: '10px 20px', fontSize: 12.5, lineHeight: 1.55, display: 'flex', alignItems: 'center', gap: 8,
+                background: ok ? 'rgba(16,185,129,0.10)' : unknown ? 'rgba(245,158,11,0.12)' : 'rgba(244,63,94,0.12)',
+                color: ok ? 'var(--text-2)' : unknown ? '#fcd34d' : '#fda4af', borderBottom: '1px solid var(--border)',
+              }}>
+                {ok ? <CheckCircle2 size={15} style={{ color: '#10b981', flexShrink: 0 }} />
+                    : <AlertTriangle size={15} style={{ flexShrink: 0 }} />}
+                <span>
+                  {ok
+                    ? (ar ? `أعدنا اشتقاق الالتزام من المدخلات ونتج ${sc.recomputed}% — مطابق للمخزّن. الرقم بينحكى فيه.`
+                          : `Conformance re-derived from the inputs comes to ${sc.recomputed}% — matching what is stored. The number holds.`)
+                    : unknown
+                      ? (ar ? `ما بنقدر نفحص هالرقم من هالصف — أقدم من أعمدة التدقيق، فرصيد الإذن مش مسجّل. المخزّن ${sc.stored}%، وما في إشي بيكذّبه.`
+                            : `This number cannot be re-checked from this row — it predates the audit columns, so a permission credit is not recorded. Stored ${sc.stored}%, and nothing here contradicts it.`)
+                      : (ar ? `إعادة الاشتقاق أعطت ${sc.recomputed}% والمخزّن ${sc.stored}% — ما بينطابقوا. لا تعتمد هالرقم لحد ما ينحل.`
+                            : `The re-derivation gives ${sc.recomputed}% but ${sc.stored}% is stored — they disagree. Do not rely on this number until that is resolved.`)}
+                </span>
+              </div>
+            );
+          })()
         )}
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 32px' }}>

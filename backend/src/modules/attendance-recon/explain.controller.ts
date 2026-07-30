@@ -224,8 +224,18 @@ export class ExplainController {
     });
 
     /* ── 5. Conformance, re-derived ─────────────────────────────────────────── */
-    let confCheck: { recomputed: number | null; stored: number | null; agrees: boolean; note: string } =
-      { recomputed: null, stored: n(r.adherence_pct), agrees: true, note: 'not computable on this row' };
+    /* `verifiable` is separate from `agrees` on purpose. The raw_sys_* columns — the only
+       record of what a permission forgave — were added on 2026-07-30, so every row before
+       July lacks them. On such a row a forgiven day cannot be reconstructed: the credit is
+       invisible, the recomputation lands low, and reporting that as "disagrees" would tell
+       the reader a correct number is untrustworthy. Measured on the live table that is 14%
+       of May and June (239 of 1,823 June days, 333 of 2,293 May), against 0% of July.
+       "I cannot check this" and "this is wrong" must never share a message. */
+    let confCheck: {
+      recomputed: number | null; stored: number | null;
+      agrees: boolean; verifiable: boolean; note: string;
+    } = { recomputed: null, stored: n(r.adherence_pct), agrees: true, verifiable: true, note: 'not computable on this row' };
+    const preAudit = r.raw_sys_late_min == null && r.raw_sys_early_min == null;
 
     if (hasSystem && ss != null && se != null && login != null && logout != null) {
       const paidRaw = se - ss;
@@ -238,15 +248,20 @@ export class ExplainController {
       /* One point of tolerance: the stored value was rounded at write time from the same
          formula, and a re-round of a re-read can legitimately land a point away. Anything
          wider is a real disagreement and must not be smoothed over. */
-      const agrees = recomputed == null || stored == null || Math.abs(recomputed - stored) <= 1;
+      const matches = recomputed == null || stored == null || Math.abs(recomputed - stored) <= 1;
+      /* A pre-audit row that matches anyway is still a match worth reporting; only a MISS on
+         such a row is unverifiable, because the missing credit is the one thing that could
+         explain the gap. */
+      const verifiable = matches || !preAudit;
       confCheck = {
-        recomputed, stored, agrees,
-        note: agrees ? 'the re-derivation matches what is stored'
-                     : 'the re-derivation DISAGREES with the stored value — treat this number as unverified',
+        recomputed, stored, agrees: matches, verifiable,
+        note: matches ? 'the re-derivation matches what is stored'
+          : verifiable ? 'the re-derivation DISAGREES with the stored value — treat this number as unverified'
+          : 'this row predates the audit columns, so a permission credit cannot be reconstructed — unverifiable here, not wrong',
       };
 
       steps.push({
-        id: 'conformance', tone: agrees ? (recomputed != null && recomputed >= 95 ? 'good' : 'warn') : 'bad',
+        id: 'conformance', tone: matches ? (recomputed != null && recomputed >= 95 ? 'good' : 'warn') : verifiable ? 'bad' : 'warn',
         title: 'Conformance', titleAr: 'الالتزام',
         rule: 'BR-TRD-003',
         inputs: [
@@ -257,12 +272,16 @@ export class ExplainController {
           { k: 'Re-derived here', kAr: 'المعاد اشتقاقه', v: recomputed != null ? `${recomputed}%` : '—' },
         ],
         text: `100 × min(overlap ${overlap} + permitted ${permitted}, paid ${paid}) ÷ paid ${paid} = ${recomputed}%. ` +
-          (agrees
+          (matches
             ? 'This matches the stored value, so the number can be quoted.'
-            : `The stored value is ${stored}%. The two do not agree, which means either this row or the engine changed since it was written — do not quote this number until that is resolved.`),
+            : verifiable
+              ? `The stored value is ${stored}%. The two do not agree, which means either this row or the engine changed since it was written — do not quote this number until that is resolved.`
+              : `The stored value is ${stored}%. This row predates the columns that record what a permission forgave, so the credit cannot be reconstructed and the gap is expected. The stored figure is not contradicted here — it simply cannot be re-checked from this row.`),
         textAr: `١٠٠ × أقل من (تداخل ${overlap} + معفى ${permitted}، مدفوع ${paid}) ÷ ${paid} = ${recomputed}%. ` +
-          (agrees ? 'مطابق للمخزّن، فالرقم بينحكى فيه.'
-                  : `المخزّن ${stored}% — مش مطابقين، يعني إما الصف أو المحرّك تغيّر بعد ما انكتب. ما تحكي بهالرقم لحد ما ينحل.`),
+          (matches ? 'مطابق للمخزّن، فالرقم بينحكى فيه.'
+            : verifiable
+              ? `المخزّن ${stored}% — مش مطابقين، يعني إما الصف أو المحرّك تغيّر بعد ما انكتب. ما تحكي بهالرقم لحد ما ينحل.`
+              : `المخزّن ${stored}%. هالصف أقدم من الأعمدة اللي بتسجّل شو أعفى الإذن، فما بنقدر نعيد بناء الرصيد والفرق متوقّع. الرقم المخزّن مش مكذَّب هون — بس ما بينفحص من هالصف.`),
         result: recomputed != null ? `${recomputed}%` : '—',
       });
     }
