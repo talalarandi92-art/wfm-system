@@ -45,7 +45,10 @@ export default function WfhHrReportPage() {
     ['lateLogin',ar?'تأخير':'Late'],['earlyLogout',ar?'خروج مبكر':'Early out'],['systemSpan',ar?'ساعات السيستم':'Sys hours'],['requiredNet',ar?'المطلوب صافي':'Req net'],
     ['shortage',ar?'النقص':'Shortage'],['permission',ar?'استئذان':'Permission'],['comp','COMP'],['reason',ar?'السبب':'Reason'],
   ];
-  const rows = tab==='hr'?d?.action : tab==='audit'?d?.rows : tab==='excluded'?d?.excludedValid : tab==='dq'?d?.dataQuality : null;
+  /* Audit-All is the union of the three buckets, rebuilt here rather than shipped again.
+     The server used to send it as `rows` alongside them, duplicating every row and doubling
+     a one-month payload to 1,069 KB. */
+  const rows = tab==='hr'?d?.action : tab==='audit'?[...(d?.action||[]),...(d?.excludedValid||[]),...(d?.dataQuality||[])] : tab==='excluded'?d?.excludedValid : tab==='dq'?d?.dataQuality : null;
   const summary = tab==='agent'?d?.summaryByAgent : tab==='tl'?d?.summaryByTeamLeader : tab==='function'?d?.summaryByFunction : tab==='date'?d?.summaryByDate : null;
 
   const tile = (icon:any, label:string, val:any, c:string) => (

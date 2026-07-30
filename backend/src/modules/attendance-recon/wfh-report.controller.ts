@@ -156,7 +156,12 @@ export class WfhReportController {
       topAgents: groupSum('name').filter((g) => g.hr > 0).slice(0, 10),
       topDates: groupSum('date').filter((g) => g.hr > 0).slice(0, 10),
     };
-    return { from, to, includeExcluded, rows: out, action, excludedValid, dataQuality,
+    /* `rows` is dropped from the response on purpose. It was the UNION of the three
+       buckets below, so every row shipped TWICE: 529 KB of duplicate rows in a 1,069 KB
+       payload for a single month. The Audit-All view rebuilds it client-side by
+       concatenating the buckets — identical content, half the bytes over the wire, and
+       the browser stops holding two copies of the same 763 objects. */
+    return { from, to, includeExcluded, action, excludedValid, dataQuality,
       summaryByAgent: groupSum('name'), summaryByTeamLeader: groupSum('teamLeader'),
       summaryByFunction: groupSum('function'), summaryByDate: groupSum('date'), totals };
   }
@@ -189,7 +194,10 @@ export class WfhReportController {
       ws.columns = COLS.map((c) => ({ header: c.h, key: c.k, width: c.w || 11 }));
       data.forEach((r) => ws.addRow({ ...r, hrAction: r.hrAction ? 'Yes' : 'No' }));
       ws.getRow(1).font = { bold: true }; ws.views = [{ state: 'frozen', ySplit: 1 }]; };
-    sheet('WFH_HR_Action', rep.action); sheet('WFH_Audit_All', rep.rows);
+    /* Audit-All is the union of the three buckets — rebuilt rather than carried as a
+       duplicate `rows` array on the response (see the return above). */
+    const auditAll = [...rep.action, ...rep.excludedValid, ...rep.dataQuality];
+    sheet('WFH_HR_Action', rep.action); sheet('WFH_Audit_All', auditAll);
     sheet('WFH_Excluded_Valid', rep.excludedValid); sheet('WFH_Data_Quality', rep.dataQuality);
     const sumCols = [{ h: 'Name', k: 'key', w: 24 }, { h: 'Total', k: 'total' }, { h: 'HR Action', k: 'hr' }, { h: 'Excluded', k: 'excluded' }, { h: 'Data Quality', k: 'dq' }];
     const sumSheet = (name: string, label: string, data: any[]) => { const ws = wb.addWorksheet(name);
