@@ -76,6 +76,39 @@ export default function DataTrustPage() {
   const [d, setD] = useState<Trust | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  /* The drawer is where a count stops being a count. Opening it is the whole point of the
+     cards above — every number on this page was chosen because a person can answer it. */
+  const [openQ, setOpenQ] = useState<string | null>(null);
+  const [qRows, setQRows] = useState<any[] | null>(null);
+  const [qBusy, setQBusy] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const loadQueue = (key: string) => {
+    setOpenQ(key); setQRows(null); setQBusy(true);
+    apiClient.get('/attendance-recon/roster-v2/data-trust/queue?queue=' + key)
+      .then((r: any) => setQRows(r.data.rows || []))
+      .catch(() => setQRows([]))
+      .finally(() => setQBusy(false));
+  };
+
+  /* Optimistic, but only on the row that was answered — and the row keeps showing its
+     answer instead of vanishing, so a mistaken call can be seen and changed. The headline
+     number does not move until the next rebuild, and the drawer says so rather than
+     letting someone refresh and conclude it failed. */
+  const decide = async (row: any, decision: string) => {
+    const id = row.person_no + '|' + row.date;
+    setSaving(id);
+    try {
+      await apiClient.post('/attendance-recon/roster-v2/data-trust/decide',
+        { personNo: row.person_no, date: row.date, queue: openQ, decision });
+      setQRows(rows => (rows || []).map(r =>
+        r.person_no === row.person_no && r.date === row.date
+          ? { ...r, decision, decided_by: ar ? 'you' : 'you' } : r));
+    } catch (e: any) {
+      alert((ar ? 'ما انحفظ القرار: ' : 'Could not record the decision: ') +
+        (e?.response?.data?.message || e?.message || ''));
+    } finally { setSaving(null); }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -239,9 +272,15 @@ export default function DataTrustPage() {
           const T = TONE[q.tone || 'slate'] || TONE.slate;
           const Icon = ICON[q.key] || AlertTriangle;
           return (
-            <article key={q.key} style={{
-              ...card, padding: 16, borderColor: T.ring, display: 'flex', flexDirection: 'column', gap: 9,
-            }}>
+            <article key={q.key} role="button" tabIndex={0}
+              onClick={() => q.days > 0 && loadQueue(q.key)}
+              onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && q.days > 0) { e.preventDefault(); loadQueue(q.key); } }}
+              style={{
+                ...card, padding: 16, borderColor: T.ring, display: 'flex', flexDirection: 'column', gap: 9,
+                cursor: q.days > 0 ? 'pointer' : 'default', transition: 'transform .16s ease, box-shadow .16s ease',
+              }}
+              onMouseEnter={e => { if (q.days > 0) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--elev-2)'; } }}
+              onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = 'var(--elev-1)'; }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                 <span style={{ width: 30, height: 30, borderRadius: 9, background: T.bg, color: T.text, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
                   <Icon size={16} />
@@ -259,7 +298,7 @@ export default function DataTrustPage() {
               <div style={{
                 marginTop: 'auto', paddingTop: 8, borderTop: '1px dashed var(--border)',
                 fontSize: 12, fontWeight: 600, color: T.text,
-              }}>{q.action}</div>
+              }}>{q.days > 0 ? (ar ? q.action + ' — افتح واحسمها' : q.action + ' — open and settle them') : q.action}</div>
             </article>
           );
         })}
@@ -307,6 +346,9 @@ export default function DataTrustPage() {
         </section>
       )}
 
+      {openQ && <QueueDrawer queue={openQ} rows={qRows} busy={qBusy} saving={saving} ar={ar} dark={!!dark}
+        onClose={() => { setOpenQ(null); setQRows(null); }} onDecide={decide} />}
+
       {/* ── What the page cannot see, said on the page ─────────────────────── */}
       {d.caveats?.length > 0 && (
         <footer style={{ marginTop: 18, padding: '13px 16px', background: 'var(--surface-2)', border: '1px dashed var(--border-strong)', borderRadius: 12 }}>
@@ -318,6 +360,176 @@ export default function DataTrustPage() {
           ))}
         </footer>
       )}
+    </div>
+  );
+}
+
+/* ── The drawer ────────────────────────────────────────────────────────────────────
+   Every row states the case before it offers the buttons: what the schedule said, what the
+   systems saw, what was counted, and the engine's own sentence explaining why it stopped.
+   A reviewer should be able to answer without opening another screen — and should never be
+   asked to answer from a label alone. */
+const hhmm = (m: any) => (m == null ? '—'
+  : String(Math.floor((m % 1440) / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'));
+
+type Choice = { v: string; en: string; ar: string; good?: boolean; bad?: boolean };
+const CHOICES: Record<string, Choice[]> = {
+  schedule_vs_hr: [
+    { v: 'schedule', en: 'The schedule was right — it was a working day', ar: 'الجدول صح — كان يوم دوام', good: true },
+    { v: 'hr',       en: 'Odoo was right — it was an off day',            ar: 'أودو صح — كان يوم عطلة' },
+  ],
+  displaced_shift: [
+    { v: 'schedule_wrong', en: 'The shift code is wrong — re-measure against what was worked', ar: 'كود الشفت غلط — قيس على الي اشتغله', bad: true },
+    { v: 'keep',           en: 'Code is right — leave it unscored',                            ar: 'الكود صح — خلّيه بدون تقييم' },
+  ],
+  thin_evidence: [
+    { v: 'worked',     en: 'They worked the shift — the evidence is just incomplete', ar: 'اشتغل الشفت — الدليل ناقص بس', good: true },
+    { v: 'not_worked', en: 'They did not work it',                                    ar: 'ما اشتغله', bad: true },
+    { v: 'keep',       en: 'Still unclear — leave it open',                           ar: 'لسا مش واضح — خلّيه مفتوح' },
+  ],
+  unknown: [
+    { v: 'worked',     en: 'Worked — confirmed off-system', ar: 'اشتغل — تأكّد خارج السيستم', good: true },
+    { v: 'not_worked', en: 'Did not work',                  ar: 'ما اشتغل', bad: true },
+    { v: 'keep',       en: 'Leave it open',                 ar: 'خلّيه مفتوح' },
+  ],
+};
+
+function QueueDrawer({ queue, rows, busy, saving, ar, dark, onClose, onDecide }: {
+  queue: string; rows: any[] | null; busy: boolean; saving: string | null; ar: boolean; dark: boolean;
+  onClose: () => void; onDecide: (row: any, decision: string) => void;
+}) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onClose]);
+
+  const choices = CHOICES[queue] || CHOICES.unknown;
+  const list = rows || [];
+  const open = list.filter(r => !r.decision).length;
+  const done = list.length - open;
+
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(2,6,23,.55)',
+      backdropFilter: 'blur(3px)', display: 'flex', justifyContent: ar ? 'flex-start' : 'flex-end',
+    }}>
+      <div onClick={e => e.stopPropagation()} dir={ar ? 'rtl' : 'ltr'} style={{
+        width: 'min(760px, 100%)', height: '100%', background: 'var(--bg)',
+        borderInlineStart: '1px solid var(--border)', boxShadow: '0 0 60px rgba(0,0,0,.35)',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        <header style={{
+          padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
+              {ar ? 'احسم البنود المفتوحة' : 'Settle the open items'}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2 }}>
+              {busy ? (ar ? 'جارٍ التحميل…' : 'Loading…')
+                : ar ? (open + ' مفتوح · ' + done + ' انحسم') : (open + ' open · ' + done + ' already answered')}
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-1)',
+            borderRadius: 9, padding: '7px 13px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}>{ar ? 'إغلاق' : 'Close'}</button>
+        </header>
+
+        {/* The honest banner. The answer is recorded now; the numbers move on the next
+            rebuild, because the rules live in the engine rather than being written over the
+            data — which also means the decision is re-applied every run instead of decaying
+            into a one-off edit. Saying so is what stops someone refreshing and thinking it
+            failed. */}
+        <div style={{
+          padding: '9px 20px', fontSize: 12.5, lineHeight: 1.55,
+          background: dark ? 'rgba(99,102,241,.13)' : 'rgba(99,102,241,.09)',
+          color: 'var(--text-2)', borderBottom: '1px solid var(--border)',
+        }}>
+          {ar
+            ? 'القرار بينحفظ هلق وبينطبّق مع أول إعادة بناء — لأنه القواعد بتعيش بالمحرّك، مش بتنكتب فوق الداتا. وبينعاد تطبيقه كل مرة، فما بيضيع.'
+            : 'Your answer is recorded now and applied on the next rebuild — the rules live in the engine rather than being written over the data, so the decision is re-applied every run instead of decaying into a one-off edit.'}
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px 30px' }}>
+          {busy && <div style={{ color: 'var(--text-2)', fontSize: 13, padding: 20 }}>{ar ? 'جارٍ التحميل…' : 'Loading…'}</div>}
+          {!busy && rows && rows.length === 0 &&
+            <div style={{ color: 'var(--text-2)', fontSize: 13, padding: 20 }}>{ar ? 'ما في بنود بهالطابور.' : 'Nothing open in this queue.'}</div>}
+
+          {list.map(r => {
+            const id = r.person_no + '|' + r.date;
+            const isSaving = saving === id;
+            const answered = choices.find(c => c.v === r.decision);
+            const seen = r.login == null && r.punch == null
+              ? (ar ? 'ولا إشي' : 'nothing')
+              : [r.login != null ? hhmm(r.login) + '→' + hhmm(r.logout) : null,
+                 r.punch != null ? (ar ? 'بصمة ' + hhmm(r.punch) : 'punch ' + hhmm(r.punch)) : null]
+                .filter(Boolean).join(' · ');
+            return (
+              <article key={id} style={{
+                background: 'var(--surface)',
+                border: '1px solid ' + (r.decision ? (dark ? '#065f46' : '#a7f3d0') : 'var(--border)'),
+                borderRadius: 13, padding: 14, marginBottom: 11,
+                opacity: isSaving ? .6 : 1, transition: 'opacity .2s ease, border-color .2s ease',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, flexWrap: 'wrap' }}>
+                  <b style={{ fontSize: 14, color: 'var(--text-1)' }}>{r.name}</b>
+                  <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{r.fn || '—'}{r.tl ? ' · ' + r.tl : ''}</span>
+                  <span style={{ marginInlineStart: 'auto', fontSize: 12.5, fontWeight: 600, color: 'var(--text-2)' }}>
+                    {r.day ? r.day + ' · ' : ''}{r.date}
+                  </span>
+                </div>
+
+                {/* The case, in the order a human reasons about it */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, margin: '11px 0 9px' }}>
+                  {[
+                    { k: ar ? 'الجدول قال' : 'Schedule said', v: (r.shift_code || '—') + (r.ss != null ? '  ' + hhmm(r.ss) + '→' + hhmm(r.se) : '') },
+                    { k: ar ? 'السيستم شاف' : 'Systems saw', v: seen },
+                    { k: ar ? 'محسوب شغل' : 'Counted as worked', v: r.worked ? (r.worked / 60).toFixed(1) + 'h' : '0h' },
+                    { k: ar ? 'كود الحضور' : 'Attendance cell', v: r.attendance_code || '—' },
+                  ].map(({ k, v }) => (
+                    <div key={k} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 9, padding: '7px 10px' }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-2)', letterSpacing: '.02em' }}>{k}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)', marginTop: 2 }}>{v || '—'}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {r.reason && (
+                  <p style={{ margin: '0 0 11px', fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55, fontStyle: 'italic' }}>
+                    {r.reason}
+                  </p>
+                )}
+
+                {r.decision ? (
+                  <div style={{
+                    fontSize: 12.5, fontWeight: 600, color: dark ? '#6ee7b7' : '#047857',
+                    display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap',
+                  }}>
+                    <CheckCircle2 size={14} />
+                    {(ar ? answered?.ar : answered?.en) || r.decision}
+                    {r.decided_by ? ' — ' + (ar ? 'حسمها ' : 'answered by ') + r.decided_by : ''}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {choices.map(c => (
+                      <button key={c.v} disabled={isSaving} onClick={() => onDecide(r, c.v)} style={{
+                        border: '1px solid ' + (c.good ? (dark ? '#065f46' : '#6ee7b7') : c.bad ? (dark ? '#7f1d1d' : '#fecaca') : 'var(--border)'),
+                        background: c.good ? (dark ? 'rgba(5,150,105,.16)' : '#ecfdf5') : c.bad ? (dark ? 'rgba(225,29,72,.15)' : '#fef2f2') : 'var(--surface-2)',
+                        color: c.good ? (dark ? '#6ee7b7' : '#065f46') : c.bad ? (dark ? '#fda4af' : '#9f1239') : 'var(--text-1)',
+                        borderRadius: 9, padding: '8px 13px', fontSize: 12.5, fontWeight: 600,
+                        cursor: isSaving ? 'wait' : 'pointer', lineHeight: 1.3, textAlign: 'start',
+                      }}>{ar ? c.ar : c.en}</button>
+                    ))}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

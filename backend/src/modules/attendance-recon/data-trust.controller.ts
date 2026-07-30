@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -171,5 +171,96 @@ export class DataTrustController {
         `Evidence is judged against the scheduled span including the break, the same basis a completed shift uses.`,
       ].filter(Boolean),
     };
+  }
+
+  /* ── The open items themselves, with enough context to judge without leaving ─────
+     A queue that only shows counts is a report. To decide "was this person meant to
+     work?" you need the two claims side by side: what the schedule said, what Odoo said,
+     and what evidence exists. That is what this returns — one row per open question. */
+  @Get('roster-v2/data-trust/queue')
+  @RequirePermissions('attendance.view_team')
+  @ApiOperation({ summary: 'The open decisions in one queue, each with the evidence needed to settle it' })
+  async queue(@Req() req: any, @Query('queue') queue?: string, @Query('from') from?: string,
+              @Query('to') to?: string, @Query('limit') limit?: string) {
+    const t = req.user.tenantId;
+    const MATCH: Record<string, string> = {
+      schedule_vs_hr: '%SCHEDULE vs HR CONFLICT%',
+      displaced_shift: '%SCHEDULE REVIEW%',
+      thin_evidence: '%Evidence covers only%',
+      unknown: '%genuinely unknown%',
+    };
+    const like = MATCH[queue || ''];
+    if (!like) throw new BadRequestException(`queue must be one of ${Object.keys(MATCH).join(', ')}`);
+    const range = (await this.ds.query(
+      `SELECT MIN(work_date)::text a, MAX(work_date)::text b FROM roster_days WHERE tenant_id=$1 AND is_active`, [t]))[0];
+    const dTo = to || range?.b, dFrom = from || range?.a;
+    const G = DataTrustController.GROSS;
+    const rows = await this.ds.query(
+      `SELECT rd.person_no, rd.employee_no, rd.clean_name AS name, rd.function_name AS fn,
+              rd.team_manager AS tl, rd.work_date::text AS date, rd.day_name AS day,
+              rd.shift_code, rd.attendance_code, rd.shift_start_min AS ss, rd.shift_end_min AS se, ${G} AS gross,
+              rd.sys_login_min AS login, rd.sys_logout_min AS logout, rd.punch_in_min AS punch,
+              rd.worked_min AS worked, rd.data_quality AS reason, rd.login_src,
+              d.decision, d.decided_by, d.decided_at, d.note
+         FROM roster_days rd
+         LEFT JOIN roster_decisions d
+           ON d.tenant_id = rd.tenant_id AND d.person_no = rd.person_no
+          AND d.work_date = rd.work_date AND d.queue = $4
+        WHERE rd.tenant_id = $1 AND rd.is_active AND rd.work_date BETWEEN $2 AND $3
+          AND rd.data_quality ILIKE $5
+        ORDER BY rd.work_date DESC, rd.clean_name
+        LIMIT $6`,
+      [t, dFrom, dTo, queue, like, Math.min(Number(limit) || 300, 1000)]);
+    return {
+      queue, from: dFrom, to: dTo, count: rows.length,
+      /* Decided items stay in the response, marked. Hiding them would make the queue look
+         like it shrank by magic and give no way to review or reverse a call. */
+      open: rows.filter((r: any) => !r.decision).length,
+      rows,
+    };
+  }
+
+  /* ── Recording the answer ────────────────────────────────────────────────────────
+     The decision is stored, never applied to roster_days directly: the rules live in the
+     engine, and a value written straight into the data is overwritten by the next rebuild
+     (BR-ING-005). The next refresh reads this table and applies it — which also means the
+     decision is re-applied every time, rather than being a one-off edit that decays. */
+  @Post('roster-v2/data-trust/decide')
+  @RequirePermissions('schedule.publish')
+  @ApiOperation({ summary: 'Record a human decision on one open item; applied by the next rebuild' })
+  async decide(@Req() req: any, @Body() body: { personNo: string; date: string; queue: string; decision: string; note?: string }) {
+    const t = req.user.tenantId;
+    const ALLOWED: Record<string, string[]> = {
+      schedule_vs_hr: ['schedule', 'hr'],
+      displaced_shift: ['schedule_wrong', 'keep'],
+      thin_evidence: ['worked', 'not_worked', 'keep'],
+      unknown: ['worked', 'not_worked', 'keep'],
+    };
+    const opts = ALLOWED[body?.queue];
+    if (!opts) throw new BadRequestException(`unknown queue "${body?.queue}"`);
+    if (!opts.includes(body?.decision)) throw new BadRequestException(`decision for ${body.queue} must be one of ${opts.join(' | ')}`);
+    if (!body?.personNo || !/^\d{4}-\d{2}-\d{2}$/.test(body?.date || '')) throw new BadRequestException('personNo and date (YYYY-MM-DD) are required');
+    /* The item must actually be open — otherwise a stale screen could decide a day that
+       has since been resolved by a rebuild, and nobody would know the answer no longer
+       applies to anything. */
+    const [exists] = await this.ds.query(
+      `SELECT 1 FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date=$3::date AND is_active LIMIT 1`,
+      [t, body.personNo, body.date]);
+    if (!exists) throw new BadRequestException(`no active roster day for ${body.personNo} on ${body.date}`);
+
+    const who = req.user?.email || req.user?.username || req.user?.sub || 'unknown';
+    await this.ds.query(
+      `INSERT INTO roster_decisions (tenant_id, person_no, work_date, queue, decision, note, decided_by)
+       VALUES ($1,$2,$3::date,$4,$5,$6,$7)
+       ON CONFLICT (tenant_id, person_no, work_date, queue)
+       DO UPDATE SET decision=EXCLUDED.decision, note=EXCLUDED.note,
+                     decided_by=EXCLUDED.decided_by, decided_at=now()`,
+      [t, body.personNo, body.date, body.queue, body.decision, body.note || null, who]);
+    await this.ds.query(
+      `INSERT INTO audit_logs (tenant_id, actor_email, action, module, entity_type, new_value, notes)
+       VALUES ($1,$2,'decide','attendance-recon','roster_day',$3,$4)`,
+      [t, who, JSON.stringify({ person_no: body.personNo, date: body.date, queue: body.queue, decision: body.decision }),
+       `Data Trust decision — takes effect on the next roster rebuild.`]).catch(() => {});
+    return { ok: true, appliedOn: 'next rebuild', personNo: body.personNo, date: body.date, queue: body.queue, decision: body.decision };
   }
 }

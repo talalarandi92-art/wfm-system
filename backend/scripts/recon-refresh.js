@@ -51,6 +51,10 @@ try {
     step('recon-emit-odoo-fingerprint.js', '1.7  AUTO-INGEST: emit Odoo fingerprint ← odoo_staging (hr.attendance)');
     step('recon-emit-odoo-permissions.js', '1.8  AUTO-INGEST: emit Odoo permission/comp ← odoo_staging');
   }
+  /* Human decisions travel to the engine the same way the WFH evidence does: exported to
+     JSON just before the build. The engine stays a pure files-in/payload-out script, which
+     is what makes the whole reconciliation reproducible from a folder of spreadsheets. */
+  step('recon-export-decisions.js', '1.9  export human decisions → engine scratch');
   step('recon-new-roster.js', '2/4  corrected reconciliation engine → ingest payload');
   step('recon-ingest.js', '3/4  ingest → LIVE roster_days (backed up first)');
   // Step 4 (2026-07-06, one-spine fix): resync attendance_records from the canonical

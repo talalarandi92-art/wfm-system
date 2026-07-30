@@ -25,6 +25,21 @@ module.exports = function build() {
   const HOLIDAY_RE = /new year|eid|arafat|national day|liberation|isra|mi'?raj|hijri|public holiday|ascension|prophet/i;
   const holidayDates = new Set(HOLIDAY_NAME.keys());
   try { for (const k in odoo) { const od = odoo[k]; if (od && HOLIDAY_RE.test(String(od.status || ''))) holidayDates.add(k.split('|')[1]); } } catch (e) { /* odoo not keyed id|date */ }
+  /* HUMAN DECISIONS (2026-07-30). The engine leaves a question open rather than guessing
+     — 147 schedule-vs-HR conflicts, displaced shifts, thin-evidence days. Without this the
+     same queue reappeared identical after every rebuild, which makes it a report and not a
+     workflow. A decision recorded in roster_decisions is read here and applied, so a day
+     answered once stays answered. The rule still lives in the engine; what the human
+     supplies is the FACT the engine could not observe. */
+  const DECISIONS = new Map();   // "person|date" -> { queue, decision }
+  try {
+    const dj = require('path').join(SCRATCH, 'decisions.json');
+    if (require('fs').existsSync(dj))
+      for (const d of JSON.parse(require('fs').readFileSync(dj, 'utf8')))
+        DECISIONS.set(`${d.person_no}|${String(d.work_date).slice(0, 10)}`, d);
+    if (DECISIONS.size) console.log('human decisions loaded: ' + DECISIONS.size);
+  } catch (e) { console.warn('decisions load skipped: ' + e.message); }
+
   const HR_MIN = 7;            // user rule 2026-06-30: tardiness > 6 min => HR/deduct; <= 6 min tolerated
   const CONFLICT_MIN = 60;     // ameyo vs sprinklr disagreement threshold
   const MAX_HR_DEV = 120;      // late/early-out > 2h => likely swap/incomplete capture => Manual Review (fairness)
@@ -365,10 +380,21 @@ module.exports = function build() {
       const seenShare = (isWorkingKind && grossMin > 0 && govDur != null) ? govDur / grossMin : null;
       const displacedMin = Math.max(sysLateStore || 0, sysEarlyStore || 0);
 
+      /* A decision, where one exists, replaces the engine's refusal to choose — and only
+         there. It cannot make a day something neither system claimed: the choice is between
+         the two witnesses that already disagree. */
+      const decided = DECISIONS.get(`${e.id}|${date}`) || null;
       let odooVerdict = null, evidenceClass = null;
       if (isWorkingKind && !hasSystem && !hasPunch) {
         const s = String(odStatus || '').trim();
-        if (/^off\s*day/i.test(s)) odooVerdict = 'off-day-conflict';
+        if (/^off\s*day/i.test(s)) {
+          /* schedule-vs-HR: the human names the winner. 'schedule' = the sheet is right,
+             the person worked and the day scores normally once evidence allows; 'hr' = Odoo
+             is right, the day was never a working day. Undecided stays a conflict. */
+          odooVerdict = decided && decided.queue === 'schedule_vs_hr'
+            ? (decided.decision === 'hr' ? 'off-day-confirmed' : 'schedule-confirmed')
+            : 'off-day-conflict';
+        }
         else if (/annual leave/i.test(s)) odooVerdict = 'leave';
         else if (/maternity/i.test(s)) odooVerdict = 'leave';
         else if (/unpaid/i.test(s)) odooVerdict = 'leave';
@@ -391,7 +417,20 @@ module.exports = function build() {
 
       /* Never SCORE a day nobody measured, and never score one measured wrongly. The
          day stays in the record with its reason — excluded, not deleted. */
-      const evidenceUnscoreable = !!odooVerdict || evidenceClass === 'insufficient' || evidenceClass === 'displaced';
+      /* A decision settles WHICH SYSTEM WAS RIGHT about whether the day was worked. It does
+         not, and cannot, supply evidence of HOW the person performed — those are different
+         questions and conflating them is how a confirmed day becomes a scored day with
+         nothing behind it. The accuracy audit caught exactly that on the first decision
+         recorded: confirming the schedule flipped include_tardiness to true on a day with no
+         login and no punch, which is precisely the BR-ATT-005 violation this engine spent the
+         morning eliminating.
+         So: a confirmed schedule leaves the QUEUE (the conflict is answered) but stays
+         unscored while the evidence is absent. Deciding removes the question, never the
+         requirement to have measured something. */
+      const hasAnyEvidence = hasSystem || hasPunch;
+      const evidenceUnscoreable =
+        odooVerdict === 'schedule-confirmed' ? !hasAnyEvidence
+        : (!!odooVerdict || evidenceClass === 'insufficient' || evidenceClass === 'displaced');
 
       const holidayLabel = isHolidayDate ? ('Official Holiday — ' + (HOLIDAY_NAME.get(date) || (HOLIDAY_RE.test(odStatus) ? String(odStatus).replace(/[-–—].*$/, '').replace(/\d{4}/, '').trim() : 'Holiday'))) : null;
       const mismatchLive = (isWorkingKind && hasPunch && !hasSystem) ? 'no-system'
@@ -468,6 +507,8 @@ module.exports = function build() {
             : ((!c.mapped && c.kind === 'unknown') ? c.note : (dqFlag || null));
           const extra = [];
           if (odooVerdict === 'off-day-conflict') extra.push('SCHEDULE vs HR CONFLICT — sheet says a working shift, Odoo says Off Day; not scored, verify which is right');
+          else if (odooVerdict === 'schedule-confirmed') extra.push('Schedule confirmed by ' + (decided.decided_by || 'a reviewer') + ' — Odoo said Off Day, the sheet was right' + (hasAnyEvidence ? '; scored normally' : '; a working day, but still no evidence to score it'));
+          else if (odooVerdict === 'off-day-confirmed') extra.push('Off day confirmed by ' + (decided.decided_by || 'a reviewer') + ' — the schedule was wrong for this day; not a working day');
           else if (odooVerdict === 'leave') extra.push('No system/punch — Odoo says ' + String(odStatus || '').trim() + '; recorded as leave, not scored');
           else if (odooVerdict === 'sick') extra.push('No system/punch — Odoo says ' + String(odStatus || '').trim() + '; recorded as sick, not scored');
           else if (odooVerdict === 'absent') extra.push('No system/punch — Odoo says ' + String(odStatus || '').trim() + '; recorded as absent, not scored');

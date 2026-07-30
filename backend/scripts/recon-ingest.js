@@ -44,6 +44,20 @@ const MAP = {
     // migration 082 (Director decision 1) — OFF-worked → HR clarify, NOT auto-OT; self-heal so a refresh never NULLs
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS off_worked_min integer NOT NULL DEFAULT 0`);
     await c.query(`ALTER TABLE roster_days ADD COLUMN IF NOT EXISTS off_worked_hr_review boolean NOT NULL DEFAULT false`);
+    /* DECISIONS (2026-07-30) — a human's answer to a question the engine refused to settle.
+       The engine deliberately leaves 147 schedule-vs-HR conflicts, displaced shifts and
+       thin-evidence days unresolved rather than guessing. Until now that queue simply
+       reappeared identical after every rebuild, which makes it a report rather than a
+       workflow. A decision recorded here is read by recon-build on the NEXT rebuild and
+       applied, so answering a day answers it permanently.
+       Keyed person+date+queue and never touched by the ingest, exactly like ot_review_flags:
+       rebuilding the roster must never erase what a person decided about it. */
+    await c.query(`CREATE TABLE IF NOT EXISTS roster_decisions (
+      id bigserial PRIMARY KEY, tenant_id uuid NOT NULL, person_no text NOT NULL, work_date date NOT NULL,
+      queue text NOT NULL, decision text NOT NULL, note text,
+      decided_by text, decided_at timestamptz NOT NULL DEFAULT now())`);
+    await c.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_roster_decision ON roster_decisions (tenant_id, person_no, work_date, queue)`);
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_roster_decision_date ON roster_decisions (tenant_id, work_date)`);
     // migration 083 (Director decision 2) — before/after-shift OT review flags (preserve-on-rebuild)
     await c.query(`CREATE TABLE IF NOT EXISTS ot_review_flags (
       id bigserial PRIMARY KEY, tenant_id uuid NOT NULL, person_no text NOT NULL, work_date date NOT NULL,
