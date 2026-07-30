@@ -42,7 +42,12 @@ export default function App() {
     // Use ar-u-hc-h23 to keep Arabic text support while forcing 24h clock in datetime pickers
     document.documentElement.lang = lang === 'ar' ? 'ar-u-hc-h23' : 'en-GB';
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    document.documentElement.classList.toggle('dark', dark);
+    /* The theme classes have ONE owner: applyTheme() in ui.store, which sets `dark`,
+       `theme-glass` and `theme-light` together so they can never disagree. This effect
+       used to toggle `dark` on its own from a derived boolean — a second writer for the
+       same class, keyed on [lang, dark], so a language switch could re-assert `dark`
+       without touching the other two and leave the document in a state no theme
+       describes. Direction and lang stay here; the theme does not. */
   }, [lang, dark]);
 
   // Hydrate user from token on page reload

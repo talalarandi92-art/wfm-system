@@ -1036,6 +1036,18 @@ html[dir="rtl"].theme-glass .sidebar-item.active { background: linear-gradient(2
    lighter grey so they lift gently off it. */
 .theme-light { --bg: #e6e8ef; --surface: #f4f6fa; --surface-2: #edf0f6; }
 
+/* NO CANVAS OVERRIDE HERE, DELIBERATELY.
+   A light-mode body was measured painting #07090f, which would have left every page
+   region without a card behind it as dark-on-dark — a page header read 1.11:1. Three
+   !important canvas pins were written to fix it. They were then reverted, because the
+   measurement was wrong: the browser pane used for the check was not compositing frames,
+   so `background-color` transitions froze mid-flight and getComputedStyle kept returning
+   the PREVIOUS theme's colour indefinitely. Disabling transitions and forcing a reflow
+   showed body resolving correctly to #e6e8ef the whole time.
+   `body { background-color: var(--bg) }` and the per-theme --bg values are sufficient.
+   Left as a note so nobody re-derives the same phantom: when a computed colour looks
+   one theme behind, suspect the observer before the cascade. */
+
 /* dark-canvas data surfaces (Schedule grid, Chat shell, modal) → light-grey in
    Light mode. text/cells on them follow the normal light overrides. */
 .theme-light [style*="rgba(7, 9, 15, 0.6)"]   { background: #f4f6fa !important; }   /* schedule grid wrapper */

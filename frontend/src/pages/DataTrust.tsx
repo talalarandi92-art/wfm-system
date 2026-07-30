@@ -109,11 +109,10 @@ export default function DataTrustPage() {
   };
 
   return (
-    /* The page paints its OWN canvas rather than trusting <body> to. In light mode the
-       app's body keeps the dark background, so any region without a card behind it puts
-       near-black text on near-black — the header here measured 1.11:1. That is an
-       app-level bug worth fixing at the root, but a page that only reads correctly when
-       something above it behaves is a page that will break again. */
+/* The page paints its own canvas so it never depends on an ancestor to do it. Cheap,
+       and it keeps the surface self-contained. (An earlier version of this comment claimed
+       it worked around a light-mode body bug — that bug was a measurement artifact from a
+       non-compositing preview pane, not a real defect.) */
     <div style={{ padding: '20px 22px 40px', maxWidth: 1320, margin: '0 auto', background: 'var(--bg)', minHeight: '100%' }} dir={ar ? 'rtl' : 'ltr'}>
 
       {/* ── Header: what this is, and the period it speaks for ─────────────── */}
