@@ -83,6 +83,11 @@ export default function DataTrustPage() {
   const [qBusy, setQBusy] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
 
+  /* Only these four have a queue behind them. The other two cards are statements of fact —
+     WFH with no session, and days the HR record already settled — and there is nothing for a
+     human to answer. Inviting a click that can only 400 is worse than no affordance at all. */
+  const DECIDABLE = new Set(['schedule_vs_hr', 'displaced_shift', 'thin_evidence', 'unknown']);
+
   const loadQueue = (key: string) => {
     setOpenQ(key); setQRows(null); setQBusy(true);
     apiClient.get('/attendance-recon/roster-v2/data-trust/queue?queue=' + key)
@@ -271,15 +276,18 @@ export default function DataTrustPage() {
         {d.queues.map(q => {
           const T = TONE[q.tone || 'slate'] || TONE.slate;
           const Icon = ICON[q.key] || AlertTriangle;
+          const canOpen = q.days > 0 && DECIDABLE.has(q.key);
+          /* role/tabIndex only when there is genuinely something behind the click — a card
+             announced as a button that does nothing is a lie told to a screen reader. */
           return (
-            <article key={q.key} role="button" tabIndex={0}
-              onClick={() => q.days > 0 && loadQueue(q.key)}
-              onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && q.days > 0) { e.preventDefault(); loadQueue(q.key); } }}
+            <article key={q.key} role={canOpen ? 'button' : undefined} tabIndex={canOpen ? 0 : undefined}
+              onClick={() => canOpen && loadQueue(q.key)}
+              onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && canOpen) { e.preventDefault(); loadQueue(q.key); } }}
               style={{
                 ...card, padding: 16, borderColor: T.ring, display: 'flex', flexDirection: 'column', gap: 9,
-                cursor: q.days > 0 ? 'pointer' : 'default', transition: 'transform .16s ease, box-shadow .16s ease',
+                cursor: canOpen ? 'pointer' : 'default', transition: 'transform .16s ease, box-shadow .16s ease',
               }}
-              onMouseEnter={e => { if (q.days > 0) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--elev-2)'; } }}
+              onMouseEnter={e => { if (canOpen) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--elev-2)'; } }}
               onMouseLeave={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = 'var(--elev-1)'; }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                 <span style={{ width: 30, height: 30, borderRadius: 9, background: T.bg, color: T.text, display: 'grid', placeItems: 'center', flexShrink: 0 }}>
@@ -298,7 +306,7 @@ export default function DataTrustPage() {
               <div style={{
                 marginTop: 'auto', paddingTop: 8, borderTop: '1px dashed var(--border)',
                 fontSize: 12, fontWeight: 600, color: T.text,
-              }}>{q.days > 0 ? (ar ? q.action + ' — افتح واحسمها' : q.action + ' — open and settle them') : q.action}</div>
+              }}>{canOpen ? (ar ? q.action + ' — افتح واحسمها' : q.action + ' — open and settle them') : q.action}</div>
             </article>
           );
         })}
