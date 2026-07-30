@@ -396,6 +396,32 @@ const BASE = process.argv[2] || 'http://localhost:3000';
                unit: '' };
     }, 0);
 
+  await check('Roster export: a filtered range exports the whole range, not the page',
+    'The export asked for limit=50000 in one request. The query-params guard caps limit at 5000, ' +
+    'so it returned 400 — and a catch fell back to the VISIBLE PAGE, producing 100 rows of ' +
+    'whatever was on screen and, if the presence filter had just changed, the previous filter’s ' +
+    'rows. It now pages through. Assert the paged total equals SQL for a FILTERED range, because ' +
+    'the filter is the half that failed silently.',
+    async () => {
+      const PAGE = 5000;
+      const url = (o) => `/attendance-recon/roster-v2?from=${FROM}&to=${TO}&sort=date_desc&limit=${PAGE}&offset=${o}&presence=wfh`;
+      const first = await api(url(0));
+      let n = (first.rows || []).length;
+      const total = first.total ?? n;
+      let guard = 0;
+      while (n < total && guard++ < 20) {
+        const nxt = await api(url(n));
+        const b2 = (nxt.rows || []).length;
+        if (!b2) break;
+        n += b2;
+      }
+      const [q] = await sql(
+        `SELECT COUNT(*)::int n FROM roster_days
+          WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3 AND presence='wfh'`,
+        [T, FROM, TO]);
+      return { a: n, b: Number(q.n), labelA: 'paged export rows (presence=wfh)', labelB: 'SQL wfh rows', unit: '' };
+    }, 0);
+
   // ── 10. Attrition: the headline rate and the list beneath it ───────────
   await check('Attrition: the separations list matches the stated count',
     'The classic dashboard lie is a headline larger than the table under it.',

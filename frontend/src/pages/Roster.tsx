@@ -302,18 +302,50 @@ export default function RosterPage() {
 
   const dl = (blob: Blob, name: string) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); };
   const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState<string | null>(null);
   const exportCSV = async () => {
     if (exporting) return;
-    setExporting(true);
+    setExporting(true); setExportMsg(null);
     try {
-      // fetch the FULL filtered range (every matching day across from→to), not just the visible page
-      const p = new URLSearchParams({ from, to, sort, limit: '50000', offset: '0' });
-      if (q) p.set('q', q); if (presence) p.set('presence', presence); if (shift) p.set('shift', shift);
-      let rows: Row[] = data?.rows || [];
-      try { const r: any = await apiClient.get(`/attendance-recon/roster-v2?${p}`); if (r.data?.rows) rows = r.data.rows; } catch { /* fall back to current page */ }
+      /* PAGE THROUGH the range. This used to ask for limit=50000 in one shot, which the
+         query-params guard rejects with a 400 (it caps limit at 5000 so a typo cannot ask
+         for a million rows and stall the box). The 400 was swallowed by a catch that fell
+         back to `data.rows` — the VISIBLE PAGE. So "Export all" quietly produced 100 rows
+         of whatever was on screen, and if the presence filter had just been changed and the
+         grid had not refetched yet, the previous filter's rows. A file that looks right and
+         is not is worse than no file, so the fallback is gone: a failed page aborts loudly.
+         The cap stays as it is — it protects every other endpoint too. */
+      const PAGE = 5000;
+      const qs = (offset: number) => {
+        const p = new URLSearchParams({ from, to, sort, limit: String(PAGE), offset: String(offset) });
+        if (q) p.set('q', q); if (presence) p.set('presence', presence); if (shift) p.set('shift', shift);
+        return p.toString();
+      };
+      const first: any = await apiClient.get(`/attendance-recon/roster-v2?${qs(0)}`);
+      const total: number = first.data?.total ?? (first.data?.rows?.length || 0);
+      let rows: Row[] = first.data?.rows || [];
+      while (rows.length < total) {
+        setExportMsg(ar ? `${rows.length} من ${total}…` : `${rows.length} of ${total}…`);
+        const next: any = await apiClient.get(`/attendance-recon/roster-v2?${qs(rows.length)}`);
+        const batch: Row[] = next.data?.rows || [];
+        if (!batch.length) break;                       // server has no more — stop rather than loop
+        rows = rows.concat(batch);
+      }
+      /* Say what came out, so a short export is visible instead of assumed complete. */
+      if (rows.length < total) throw new Error(ar ? `اكتمل ${rows.length} من ${total} صف فقط` : `only ${rows.length} of ${total} rows returned`);
+
       const h = ['Date','Day','Emp No','Name','Function','Team','Team Mgr','Gender','Presence','Shift','Shift Start','Shift End','Punch In','Punch Out','Sys Login','Sys Logout','Src','Worked(min)','Sys Late(min)','Early Out(min)','OT(min)','Adherence%','Mismatch','Permission','Comp Off','Sick','Note'];
       const csvRows = rows.map(r => [r.date, r.day_name || dayFull(r.date), r.employee_no, r.name, r.function_name, r.team_group, r.team_manager, r.gender, r.presence, r.shift_code, hhmm(r.shift_start_min), hhmm(r.shift_end_min), hhmm(r.punch_in_min), hhmm(r.punch_out_min), hhmm(r.sys_login_min), hhmm(r.sys_logout_min), r.login_src, r.worked_min, r.sys_late_min, r.sys_early_min, r.ot_min, r.adherence_pct, r.mismatch, r.permission, r.comp_off, r.sick, r.note]);
-      dl(new Blob(['﻿'+[h,...csvRows].map(rr=>rr.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\n')],{type:'text/csv'}), `roster_${from}_${to}.csv`);
+      /* The filename carries the filter, so two exports taken minutes apart are never
+         mistaken for each other on someone's desktop. */
+      const tag = [presence && `presence-${presence}`, shift && `shift-${shift}`, q && 'filtered'].filter(Boolean).join('_');
+      const NL = String.fromCharCode(10);   // written this way so no build step can eat the escape
+      dl(new Blob(['﻿'+[h,...csvRows].map(rr=>rr.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join(NL)],{type:'text/csv;charset=utf-8'}),
+         `roster_${from}_${to}${tag ? '_' + tag : ''}.csv`);
+      setExportMsg(ar ? `تم — ${rows.length} صف` : `Done — ${rows.length} rows`);
+      setTimeout(() => setExportMsg(null), 4000);
+    } catch (e: any) {
+      setExportMsg((ar ? 'فشل التصدير: ' : 'Export failed: ') + (e?.response?.data?.message || e?.message || ''));
     } finally { setExporting(false); }
   };
   const hrMatrix = async () => {
@@ -450,6 +482,7 @@ export default function RosterPage() {
           <button onClick={() => fileRef.current?.click()} title={ar?'ارفع ملفات الشهر (CC Schedule / أودو / استئذانات / Ameyo / Sprinklr) → يشتغل المحرّك المصحّح ويعيد بناء الروستر بكل القواعد المتفق عليها':'Upload the month sources (CC Schedule / Odoo / Permissions / Ameyo / Sprinklr) → runs the corrected engine and rebuilds the roster with every agreed rule'} className={btn('')} style={{ background:'rgba(16,185,129,0.16)', color:'#34d399' }}><Upload size={13} />{uploading?(ar?'جارٍ البناء…':'Rebuilding…'):(ar?'رفع وإعادة بناء':'Upload & Rebuild')}</button>
           <input ref={fileRef} type="file" multiple hidden onChange={onUpload} accept=".xlsx,.xls,.xlsm,.csv" />
           <button onClick={exportCSV} disabled={exporting} title={ar?'تصدير كامل النطاق المحدّد (كل الأيام، مش الصفحة فقط)':'Export the full selected range (all days, not just this page)'} className={btn('')} style={{ background:'rgba(34,197,94,0.18)', color:'#22c55e' }}><Download size={13} />{exporting?(ar?'جارٍ…':'Exporting…'):(ar?'تصدير الكل':'Export all')}</button>
+          {exportMsg && <span style={{ fontSize:11.5, fontWeight:600, color: /فشل|failed/i.test(exportMsg) ? '#f87171' : 'var(--text-2)' }}>{exportMsg}</span>}
         </div>
       </div>
 
