@@ -141,15 +141,17 @@ const add = (level, name, detail, fix) => { items.push({ level, name, detail, fi
          still a warning, because then nobody knows. */
       let confirmed = null;
       try { confirmed = JSON.parse(fs.readFileSync(path.join(__dirname, 'recon-config.json'), 'utf8')).holidaysConfirmedThrough || null; } catch { /* leave null */ }
-      const today = new Date().toISOString().slice(0, 10);
+      /* The exposure is a holiday inside data ALREADY SCORED, not one in the future: an
+         unrecorded holiday in the roster's range silently costs someone x2.0 OT and charges
+         a leave day the rule returns. Compared against TODAY this warned the morning after
+         it was confirmed, every day, which is how a caveat becomes wallpaper. Compared
+         against the roster end it fires exactly when it matters. */
       const coverTo = confirmed && confirmed > h.last ? confirmed : h.last;
-      const behindToday = coverTo < today;
-      const shortOfRoster = h.roster_end && coverTo < h.roster_end;
-      const stale = behindToday || shortOfRoster;
+      const stale = !!(h.roster_end && coverTo < h.roster_end);
       add(stale ? 'warn' : 'ok', 'Holiday calendar',
         `${h.n} day(s) configured, last ${h.last}` +
         (confirmed ? ` · checked through ${confirmed}` : ' · never confirmed') +
-        (stale ? ` — ${shortOfRoster ? `roster runs to ${h.roster_end}` : `${Math.round((Date.parse(today) - Date.parse(coverTo)) / 86400000)} day(s) behind today`}` : ''),
+        (stale ? ` — roster runs to ${h.roster_end}, past the checked window` : ''),
         stale
           ? 'Confirm the official calendar up to the roster end and set "holidaysConfirmedThrough" in ' +
             'backend/scripts/recon-config.json (add any holidays found). Until then a holiday in the ' +
