@@ -253,7 +253,15 @@ export class RosterIngestionService {
       if (r.permissionType) {
         permTotal++;
         const st = String(r.permissionStatus || '').toLowerCase();
-        if (st.includes('approv')) permApproved++; else if (st.includes('refus') || st.includes('reject')) permRefused++; else permPending++;
+        /* Order and precision both matter here. "approv" matches "Waiting 1st Approval" and
+           "Approval Refused" as readily as "HR Approved", and testing approval FIRST meant the
+           55 rows reading "Approval Refused" were counted as approved and never reached the
+           refused branch at all. Across the live table that is 84 rows misclassified, and a
+           refused permission presented as approved is the exact inversion BR-PRM-001 exists to
+           prevent. Refusal is checked first, and only the full word "approved" counts. */
+        if (st.includes('refus') || st.includes('reject')) permRefused++;
+        else if (st.includes('approved')) permApproved++;
+        else permPending++;
         permByType.set(r.permissionType, (permByType.get(r.permissionType) || 0) + 1);
       }
 
@@ -691,7 +699,11 @@ export class RosterIngestionService {
     const counts = { total: rows.length, approved: 0, refused: 0, pending: 0 };
     for (const r of rows) {
       const s = String(r.status).toLowerCase();
-      if (s.includes('approv')) counts.approved++; else if (s.includes('refus') || s.includes('reject')) counts.refused++; else counts.pending++;
+      /* Same trap as the permission counter above: refusal first, and the full word
+         "approved" — "Approval Refused" and "Waiting 1st Approval" are not approvals. */
+      if (s.includes('refus') || s.includes('reject')) counts.refused++;
+      else if (s.includes('approved')) counts.approved++;
+      else counts.pending++;
     }
     const byType: Record<string, number> = {};
     for (const r of rows) byType[r.type] = (byType[r.type] || 0) + 1;

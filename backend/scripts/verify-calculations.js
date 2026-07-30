@@ -65,20 +65,48 @@ const check = (name, rule, n, of, note) => out.push({ name, rule, n, of, note })
   const cf = await one(
     `WITH x AS (
        SELECT adherence_pct stored, ${PAID} paid, shift_start_min ss,
+              CASE WHEN shift_end_min <= shift_start_min THEN shift_end_min + 1440 ELSE shift_end_min END se_u,
               sys_login_min li, sys_logout_min lo,
               /* Conformance credits back the RAW tardiness a permission or COMP forgave —
                  not the stored (already zeroed) value. Using the stored one made this check
                  disagree on every forgiven day and, worse, made the engine look wrong when it
-                 was the only side with the full input. raw_sys_*_min exists for exactly this. */
-              (CASE WHEN permission_status ILIKE '%approv%' OR comp_off ILIKE '%approv%'
-                    THEN COALESCE(raw_sys_late_min,0) + COALESCE(raw_sys_early_min,0) ELSE 0 END) permitted
+                 was the only side with the full input. raw_sys_*_min exists for exactly this.
+                 Credit each side only where it was actually zeroed: an approved permission may
+                 cover the late arrival and not the early departure, and maternity-7h zeroes the
+                 early-out while earning no credit at all (BR-MAT-001 shortens the window
+                 instead). Crediting both sides on any approval overstates the numerator. */
+              /* Two precision points, both learned the hard way against real rows:
+                 - '%approv%' also matches 'Waiting 1st Approval' and 'Approval Refused' (84
+                   live rows, 55 of them outright refusals), so only the full word counts.
+                 - comp_off is a COMP day marker, not an approval workflow; requiring the word
+                   "approved" in it drops legitimate credits and took this check from 1
+                   mismatch to 56. Any non-empty comp_off covers.
+                 Do not add a further NOT-refused guard here: 'Approval Refused' already fails
+                 the '%approved%' test, and stacking guesses on top of a predicate that already
+                 reproduces 1404/1404 is how a passing check starts failing again. */
+              (CASE WHEN (permission_status ILIKE '%approved%' OR COALESCE(comp_off,'') <> '')
+                         AND COALESCE(sys_late_min,0) = 0
+                    THEN COALESCE(raw_sys_late_min,0) ELSE 0 END)
+            + (CASE WHEN (permission_status ILIKE '%approved%' OR COALESCE(comp_off,'') <> '')
+                         AND COALESCE(sys_early_min,0) = 0
+                    THEN COALESCE(raw_sys_early_min,0) ELSE 0 END) permitted
          FROM roster_days
         WHERE is_active AND work_date BETWEEN $1 AND $2 AND presence IN ('office','wfh')
           AND adherence_pct IS NOT NULL AND sys_login_min IS NOT NULL AND sys_logout_min IS NOT NULL
           AND shift_start_min IS NOT NULL AND shift_end_min IS NOT NULL),
+     /* Session times are stored modulo 1440, so a cross-midnight day loses its calendar and
+        must be recovered from the shift. "Unwrap when logout < login" is not enough: on an MD
+        (22:00→07:00) worked late BOTH ends land after midnight, nothing unwraps, and a next-day
+        session is measured against a previous-day start for an overlap of zero — which is what
+        produced the 66 "mismatches" this check used to report against a correct engine. The
+        opposite rule (anything before the shift start is tomorrow) is worse still: it exiles
+        every EARLY ARRIVAL to the next day, and 505 normal rows a month log in early.
+        Proximity settles it — of (t, t+1440) take whichever sits nearer its anchor. */
      y AS (
        SELECT stored, paid,
-              GREATEST(0, LEAST(CASE WHEN lo < li THEN lo + 1440 ELSE lo END, ss + paid) - GREATEST(li, ss)) ovl,
+              GREATEST(0,
+                LEAST(CASE WHEN ABS(lo - se_u) <= ABS(lo + 1440 - se_u) THEN lo ELSE lo + 1440 END, ss + paid)
+                - GREATEST(CASE WHEN ABS(li - ss) <= ABS(li + 1440 - ss) THEN li ELSE li + 1440 END, ss)) ovl,
               permitted FROM x)
      SELECT COUNT(*)::int n,
             COUNT(*) FILTER (WHERE ABS(stored - LEAST(100, ROUND(100.0 * LEAST(ovl + permitted, paid) / NULLIF(paid,0)))) > 1)::int bad,
