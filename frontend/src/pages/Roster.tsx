@@ -4,6 +4,7 @@ import {
   Users, Search, Download, Home, Building2, UserX, ArrowRight, Upload, BarChart3,
   ChevronRight, ChevronDown, ChevronLeft, CalendarDays, Clock, ShieldCheck, AlertTriangle,
   LogOut, FileSpreadsheet, UserCog, StickyNote, Timer, Wrench, LayoutDashboard, GitCompareArrows, BarChart4, UserSearch, Flame,
+  Sparkles, X, CheckCircle2,
 } from 'lucide-react';
 import { apiClient } from '@/api/client';
 import { useUiStore } from '@/store/ui.store';
@@ -23,6 +24,20 @@ interface Row {
   username?: string|null; total_work_sys_min?: number|null; sys_login2_min?: number|null; sys_logout2_min?: number|null;
   sys_late_min: number; sys_early_min: number; adherence_pct: number|null; mismatch: string|null;
   team_manager: string|null; team_group: string|null; gender: string|null; worked_min: number|null; note: string|null;
+  person_no?: string|null;
+}
+/* One step of the reasoning chain behind a number — see backend explain.controller.ts. */
+interface ExplainStep {
+  id: string; title: string; titleAr: string; rule?: string;
+  inputs: { k: string; kAr: string; v: string }[];
+  text: string; textAr: string; result?: string;
+  tone: 'plain'|'good'|'warn'|'bad';
+}
+interface ExplainResp {
+  who: { name: string; fn: string; date: string; day: string; personNo: string };
+  steps: ExplainStep[];
+  selfCheck: { recomputed: number|null; stored: number|null; agrees: boolean; note: string };
+  flags: string[];
 }
 interface OtFn { fn: string; ot_h: number; offday_h: number; ot_days: number; }
 interface Resp { from: string; to: string; total: number; limit: number; offset: number; summary: any; range?: { a: string|null; b: string|null }; otByFunction?: OtFn[]; dailyTrend?: { date: string; conformance: number|null; present: number }[]; shiftCodes?: string[]; rows: Row[]; }
@@ -254,6 +269,21 @@ export default function RosterPage() {
   const nav = useNavigate();
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
+  /* The drill-down: which row is being asked "why", and the chain that came back. */
+  const [why, setWhy] = useState<{ personNo: string; date: string } | null>(null);
+  const [chain, setChain] = useState<ExplainResp | null>(null);
+  const [chainBusy, setChainBusy] = useState(false);
+
+  useEffect(() => {
+    if (!why) { setChain(null); return; }
+    let alive = true;
+    setChainBusy(true); setChain(null);
+    apiClient.get(`/attendance-recon/roster-v2/explain?personNo=${encodeURIComponent(why.personNo)}&date=${why.date}`)
+      .then((res: any) => { if (alive) setChain(res.data); })
+      .catch(() => { if (alive) setChain(null); })
+      .finally(() => { if (alive) setChainBusy(false); });
+    return () => { alive = false; };
+  }, [why]);
   const [q, setQ] = useState('');
   const [presence, setPresence] = useState('');
   const [shift, setShift] = useState('');
@@ -706,7 +736,16 @@ export default function RosterPage() {
                             </div>
                           ))}
                         </div>
-                        {/* metrics */}
+                        {/* metrics — each one answerable, not just displayed */}
+                        {r.person_no && (
+                          <button
+                            onClick={() => { setWhy({ personNo: r.person_no!, date: r.date }); }}
+                            className="self-start inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition"
+                            style={{ background:'rgba(99,102,241,0.14)', color:'#a5b4fc', border:'1px solid rgba(99,102,241,0.35)' }}>
+                            <Sparkles size={12} />
+                            {ar ? 'ليش هالأرقام هيك؟' : 'Why these numbers?'}
+                          </button>
+                        )}
                         <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5">
                           {([
                             [ar?'كونفورمانس':'Conformance', r.adherence_pct!=null?r.adherence_pct+'%':'—', adhColor(r.adherence_pct)],
@@ -782,6 +821,134 @@ export default function RosterPage() {
           </div>
         )}
       </>)}
+
+      {why && <WhyPanel ar={ar} busy={chainBusy} chain={chain} onClose={() => setWhy(null)} />}
+    </div>
+  );
+}
+
+/* ── "Why these numbers?" ──────────────────────────────────────────────────────────
+   The chain the engine actually followed, in its own order, with the rule that governed
+   each step. The self-check sits at the top rather than the bottom: if the re-derivation
+   disagrees with the stored value, the reader needs to know that BEFORE reading a story
+   about a number they should not quote. */
+const TONE_OF = (tone: string, dark = true) => (
+  tone === 'good' ? { bar: '#10b981', text: dark ? '#6ee7b7' : '#047857', bg: 'rgba(16,185,129,0.10)' }
+  : tone === 'warn' ? { bar: '#f59e0b', text: dark ? '#fcd34d' : '#b45309', bg: 'rgba(245,158,11,0.10)' }
+  : tone === 'bad' ? { bar: '#f43f5e', text: dark ? '#fda4af' : '#be123c', bg: 'rgba(244,63,94,0.10)' }
+  : { bar: '#6366f1', text: dark ? '#a5b4fc' : '#4338ca', bg: 'rgba(99,102,241,0.08)' }
+);
+
+function WhyPanel({ ar, busy, chain, onClose }: { ar: boolean; busy: boolean; chain: ExplainResp | null; onClose: () => void }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onClose]);
+
+  const sc = chain?.selfCheck;
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 95, background: 'rgba(2,6,23,.6)', backdropFilter: 'blur(3px)',
+      display: 'flex', justifyContent: ar ? 'flex-start' : 'flex-end',
+    }}>
+      <div onClick={e => e.stopPropagation()} dir={ar ? 'rtl' : 'ltr'} style={{
+        width: 'min(720px, 100%)', height: '100%', background: 'var(--bg)',
+        borderInlineStart: '1px solid var(--border)', display: 'flex', flexDirection: 'column',
+      }}>
+        <header style={{
+          padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--surface)',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-1)' }}>
+              {ar ? 'من وين إجت هالأرقام' : 'Where these numbers came from'}
+            </div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2 }}>
+              {busy ? (ar ? 'جارٍ الاشتقاق…' : 'Re-deriving…')
+                : chain ? `${chain.who.name} · ${chain.who.day || ''} ${chain.who.date}` : (ar ? 'تعذّر التحميل' : 'Could not load')}
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-1)',
+            borderRadius: 9, padding: '6px 10px', cursor: 'pointer', display: 'grid', placeItems: 'center',
+          }}><X size={15} /></button>
+        </header>
+
+        {/* The verdict on the explanation itself, before the explanation */}
+        {sc && sc.recomputed != null && (
+          <div style={{
+            padding: '10px 20px', fontSize: 12.5, lineHeight: 1.55, display: 'flex', alignItems: 'center', gap: 8,
+            background: sc.agrees ? 'rgba(16,185,129,0.10)' : 'rgba(244,63,94,0.12)',
+            color: sc.agrees ? 'var(--text-2)' : '#fda4af', borderBottom: '1px solid var(--border)',
+          }}>
+            {sc.agrees ? <CheckCircle2 size={15} style={{ color: '#10b981', flexShrink: 0 }} />
+                       : <AlertTriangle size={15} style={{ flexShrink: 0 }} />}
+            <span>
+              {sc.agrees
+                ? (ar ? `أعدنا اشتقاق الالتزام من المدخلات ونتج ${sc.recomputed}% — مطابق للمخزّن. الرقم بينحكى فيه.`
+                      : `Conformance re-derived from the inputs comes to ${sc.recomputed}% — matching what is stored. The number holds.`)
+                : (ar ? `إعادة الاشتقاق أعطت ${sc.recomputed}% والمخزّن ${sc.stored}% — ما بينطابقوا. لا تعتمد هالرقم لحد ما ينحل.`
+                      : `The re-derivation gives ${sc.recomputed}% but ${sc.stored}% is stored — they disagree. Do not rely on this number until that is resolved.`)}
+            </span>
+          </div>
+        )}
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 32px' }}>
+          {busy && <div style={{ color: 'var(--text-2)', fontSize: 13 }}>{ar ? 'جارٍ الاشتقاق…' : 'Re-deriving…'}</div>}
+          {!busy && !chain && <div style={{ color: 'var(--text-2)', fontSize: 13 }}>{ar ? 'ما قدرنا نجيب السلسلة لهاليوم.' : 'The chain could not be loaded for this day.'}</div>}
+
+          {(chain?.steps || []).map((s, i) => {
+            const t = TONE_OF(s.tone);
+            return (
+              <section key={s.id} style={{ display: 'flex', gap: 12, marginBottom: 4 }}>
+                {/* the spine: a step is a link in a chain, and the rail says so */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 22, flexShrink: 0 }}>
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 999, background: t.bar, color: '#fff',
+                    display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0,
+                  }}>{i + 1}</div>
+                  {i < (chain!.steps.length - 1) && <div style={{ flex: 1, width: 2, background: 'var(--border)', minHeight: 14 }} />}
+                </div>
+
+                <div style={{
+                  flex: 1, minWidth: 0, marginBottom: 14, padding: '12px 14px', borderRadius: 12,
+                  background: 'var(--surface)', border: '1px solid var(--border)', borderInlineStartWidth: 3,
+                  borderInlineStartColor: t.bar,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 7 }}>
+                    <b style={{ fontSize: 13.5, color: 'var(--text-1)' }}>{ar ? s.titleAr : s.title}</b>
+                    {s.rule && <code style={{ fontSize: 10.5, color: 'var(--text-2)', background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 5 }}>{s.rule}</code>}
+                    {s.result && <span style={{ marginInlineStart: 'auto', fontSize: 12.5, fontWeight: 700, color: t.text }}>{s.result}</span>}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 6, marginBottom: 8 }}>
+                    {s.inputs.map(inp => (
+                      <div key={inp.k} style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 9px' }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)' }}>{ar ? inp.kAr : inp.k}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-1)', marginTop: 1, wordBreak: 'break-word' }}>{inp.v}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-2)', lineHeight: 1.6 }}>{ar ? s.textAr : s.text}</p>
+                </div>
+              </section>
+            );
+          })}
+
+          {!!chain?.flags?.length && (
+            <div style={{ marginTop: 6, padding: '11px 14px', borderRadius: 12, background: 'var(--surface-2)', border: '1px dashed var(--border-strong)' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-2)', marginBottom: 5 }}>
+                {ar ? 'ملاحظات المحرّك على هاليوم' : 'WHAT THE ENGINE FLAGGED ON THIS DAY'}
+              </div>
+              {chain.flags.map((f, i) => (
+                <div key={i} style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.55 }}>· {f}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

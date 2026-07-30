@@ -112,7 +112,11 @@ export class RosterReportsController {
               (COALESCE(r.ot_min,0)+COALESCE(r.offday_ot_min,0)+COALESCE(r.holiday_ot_min,0)) total_ot,
               r.permission, r.permission_type, r.permission_duration, r.comp_off, r.sick, r.conforming,
               r.shift_code, r.attendance_code, r.hr_code, r.shift_category, r.shift_start_min, r.shift_end_min, r.sys_late_min, r.sys_early_min, r.adherence_pct, r.mismatch, r.data_quality, r.daily_note,
-              r.team_manager, r.team_group, r.gender, r.worked_min, n.note
+              r.team_manager, r.team_group, r.gender, r.worked_min, n.note,
+              /* The canonical person key travels with the row so a drill-down can ask about
+                 THIS person rather than re-resolving an employee_no that may be either half
+                 of a folded intern/full-time identity (BR-ATT-008). */
+              r.person_no
          FROM roster_days r
          LEFT JOIN roster_notes n ON n.tenant_id=r.tenant_id AND n.employee_no=r.employee_no AND n.work_date=r.work_date
         WHERE ${where} ORDER BY ${order} LIMIT ${lim} OFFSET ${off}`, params);
