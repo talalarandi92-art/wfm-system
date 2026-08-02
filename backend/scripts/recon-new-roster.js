@@ -236,6 +236,17 @@ const absToDM = (abs) => { const dayIdx = Math.floor(abs / 1440), min = ((abs % 
 // which used to shift every position-read by one and drop ALL login data (matched=0).
 const ameyoSessions = {}; // id -> [{aLogin, aLogout}]
 {
+  /* Ameyo stopped being a source from July 2026 — the floor moved wholly to Sprinklr — so its
+     export simply does not exist for newer periods. Demanding it turned a legitimate
+     Sprinklr-only month into a hard crash before a single record was built. Absent is now a
+     valid state; the zero-session guard on the Sprinklr side is what protects against a
+     genuinely empty floor. Note the distinction being kept: a MISSING Ameyo file is fine, a
+     PRESENT one that parses to nothing is still a fault. */
+  const ameyoPath = SRCDIR + 'Ameyo login and logout.xlsx';
+  const sprinklrOnly = String(process.env.RECON_SYS_MODE || '').toLowerCase() === 'sprinklr-only';
+  if (!fs.existsSync(ameyoPath)) {
+    console.log('ameyo: no export present' + (sprinklrOnly ? ' (sprinklr-only mode)' : '') + ' — floor is Sprinklr alone');
+  } else {
   const rows = loadRaw('Ameyo login and logout.xlsx');
   const H = (rows[0] || []).map(x => String(x || '').toLowerCase().trim());
   const ci = (...names) => { for (const n of names) { const i = H.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
@@ -256,6 +267,7 @@ const ameyoSessions = {}; // id -> [{aLogin, aLogout}]
     matched++;
   }
   console.log('ameyo: matched rows=' + matched + ' unmatched=' + unmatched + ' employees=' + Object.keys(ameyoSessions).length);
+  }
 }
 
 // ---- SPRINKLR ---- same; degenerate sessions guarded. Read BY HEADER NAME (L-009). The Sprinklr `ID` is a
@@ -265,7 +277,21 @@ const sprinkSessions = {}; // id -> [{aLogin, aLogout}]
 {
   const wb = XLSX.readFile(SRCDIR + 'Login and Logout sprinklr.xlsx', { cellDates: false, raw: true });
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null, blankrows: false, raw: true });
-  const H = (rows[0] || []).map(x => String(x || '').toLowerCase().trim());
+  /* The header is not reliably the first row. Sprinklr's widget export prefixes the sheet
+     with title/interval banner rows ("Dashboard: … TIME_INTERVAL: From:07-25-26 …"), so the
+     2026-08-02 drop carried its real header on row 3. Assuming row 0 made every column
+     lookup fail, which the zero-session guard below would have turned into a hard stop —
+     correct, but a stop is not a load. Find the first row that actually looks like a header
+     instead; it costs a scan of a handful of rows and makes the loader indifferent to how
+     many banner lines the export decides to carry this time. */
+  const looksLikeHeader = (r) => {
+    const c = (r || []).map(x => String(x || '').toLowerCase().trim());
+    return c.some(x => x.startsWith('login')) && c.some(x => x.startsWith('logout'));
+  };
+  let hRow = rows.findIndex(looksLikeHeader);
+  if (hRow < 0) hRow = 0;
+  if (hRow > 0) console.log('sprinklr: header found on row ' + (hRow + 1) + ' (banner rows above it were skipped)');
+  const H = (rows[hRow] || []).map(x => String(x || '').toLowerCase().trim());
   const ci = (...names) => { for (const n of names) { const i = H.indexOf(n.toLowerCase()); if (i >= 0) return i; } return -1; };
   /* The July export writes ONE logical column, "Login Timestamp", as a date cell and a
      time cell — and splits the header text across the two: ["login tim", "estamp"].
@@ -279,7 +305,7 @@ const sprinkSessions = {}; // id -> [{aLogin, aLogout}]
   let cOd = ci('logout date'), cOt = ci('logout tim', 'logout time');
   if (cLd < 0) { const i = startsWith('login'); if (i >= 0) { cLd = i; cLt = i + 1; } }
   if (cOd < 0) { const i = startsWith('logout'); if (i >= 0) { cOd = i; cOt = i + 1; } }
-  const R = rows.slice(1);
+  const R = rows.slice(hRow + 1);
   let matched = 0, unmatched = 0, degenerate = 0;
   for (const r of R) {
     const lo = String(r[cId] || '').toLowerCase().trim();
