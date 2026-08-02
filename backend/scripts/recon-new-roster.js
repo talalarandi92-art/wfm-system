@@ -300,11 +300,23 @@ const sprinkSessions = {}; // id -> [{aLogin, aLogout}]
      So: exact names first (June's shape), then fall back to the first header that
      STARTS WITH login/logout and treat the next column as its time half. */
   const startsWith = (p) => H.findIndex((h) => h.startsWith(p));
-  const cId = ci('id', 'user id', 'username');
+  /* The agent key is whatever the export happens to call it. Sprinklr's Login/Logout widget
+     groups by "Agent Email ID"; older pulls used "ID" or "Username". All of them resolve
+     through the same two maps below (byUser then byEmail), so the only thing that has to
+     widen is the list of names we recognise. */
+  const cId = ci('id', 'user id', 'username', 'agent email id', 'agent email', 'agent', 'email');
   let cLd = ci('login date'), cLt = ci('login time');
   let cOd = ci('logout date'), cOt = ci('logout tim', 'logout time');
-  if (cLd < 0) { const i = startsWith('login'); if (i >= 0) { cLd = i; cLt = i + 1; } }
-  if (cOd < 0) { const i = startsWith('logout'); if (i >= 0) { cOd = i; cOt = i + 1; } }
+  /* Two different export shapes, and guessing wrong silently costs a whole month:
+       SPLIT      "Login Date" | "Login Time"   → the time lives in the NEXT column
+       SINGLE     "Login Timestamp"             → one cell holds the full datetime
+     serialTimeMin() already takes the fractional part of any serial, and localDateFromSerial()
+     the integer part, so a single timestamp column just means pointing the time index back at
+     the SAME column instead of the next one. Reading i+1 on a single-timestamp export lands on
+     "Logout Timestamp" as the login TIME — which is how a 704-row file produced 0 sessions. */
+  const single = (i) => /timestamp|date ?time/.test(H[i] || '');
+  if (cLd < 0) { const i = startsWith('login'); if (i >= 0) { cLd = i; cLt = single(i) ? i : i + 1; } }
+  if (cOd < 0) { const i = startsWith('logout'); if (i >= 0) { cOd = i; cOt = single(i) ? i : i + 1; } }
   const R = rows.slice(hRow + 1);
   let matched = 0, unmatched = 0, degenerate = 0;
   for (const r of R) {
