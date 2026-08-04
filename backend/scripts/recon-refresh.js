@@ -30,12 +30,25 @@
 const { execSync } = require('child_process');
 const path = require('path');
 const dir = __dirname;
-const step = (script, label) => {
+/* --dry-run builds the month into roster_days_dryrun and leaves the live table alone, so the
+   change can be inspected before anyone commits to it. The flag is forwarded to the ingest,
+   and the steps that write OUTSIDE roster_days are skipped — a rehearsal that resyncs the raw
+   spine or moves the review queue is not a rehearsal.
+
+   This exists because it was assumed to exist: a refresh was run with an invented
+   ROSTER_OUT_TABLE=scratch flag, believed to gate the write. No script read it, and 828 rows
+   went straight to the live table. A guard you trust but never tested is worse than none,
+   because it makes you bold. */
+const DRY = process.argv.includes('--dry-run');
+const step = (script, label, args) => {
   console.log('\n▶ ' + label + '  (' + script + ')');
-  execSync('node --max-old-space-size=4096 "' + path.join(dir, script) + '"', { stdio: 'inherit', env: process.env });
+  execSync('node --max-old-space-size=4096 "' + path.join(dir, script) + '"' + (args ? ' ' + args : ''),
+    { stdio: 'inherit', env: process.env });
 };
 
-console.log('=== RECON REFRESH — rebuild the corrected roster + push it LIVE ===');
+console.log(DRY
+  ? '=== RECON REFRESH (DRY RUN) — rebuild into roster_days_dryrun; the live table is NOT touched ==='
+  : '=== RECON REFRESH — rebuild the corrected roster + push it LIVE ===');
 const t0 = Date.now();
 try {
   step('recon-extract-foundation-v2.js', '1/4  foundation from your final "Shifts." sheet (exact shift times)');
@@ -56,13 +69,17 @@ try {
      is what makes the whole reconciliation reproducible from a folder of spreadsheets. */
   step('recon-export-decisions.js', '1.9  export human decisions → engine scratch');
   step('recon-new-roster.js', '2/4  corrected reconciliation engine → ingest payload');
-  step('recon-ingest.js', '3/4  ingest → LIVE roster_days (backed up first)');
+  step('recon-ingest.js',
+    DRY ? '3/4  build → roster_days_dryrun (live table untouched)' : '3/4  ingest → LIVE roster_days (backed up first)',
+    DRY ? '--dry-run' : '');
   // Step 4 (2026-07-06, one-spine fix): resync attendance_records from the canonical
   // roster_days for the ingested range, so dashboard/RTA/scorecard/coverage (the raw-spine
   // readers) show the SAME OT/late/presence as the roster pages. Generated future weeks
   // ('[generated %' notes) are preserved. APPLY=1 = the pipeline just ingested, write for real.
-  process.env.APPLY = '1';
-  step('recon-sync-attendance.js', '4/4  resync attendance_records ← roster_days (one spine)');
+  if (!DRY) {
+    process.env.APPLY = '1';
+    step('recon-sync-attendance.js', '4/4  resync attendance_records ← roster_days (one spine)');
+  }
   // GATE (2026-07-06, risk #9): the golden master asserts the pay rules on the SHIPPED data
   // (classifyCode dictionary + pickWindow bleed + live clamps). A refresh that violates a pay
   // invariant FAILS the pipeline — restore with: node scripts/recon-ingest.js --restore

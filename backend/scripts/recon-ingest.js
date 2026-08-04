@@ -154,11 +154,34 @@ const MAP = {
     }
     const coveredDates = covered.map((x) => x.d);
 
+    /* ── DRY RUN ────────────────────────────────────────────────────────────────────
+       `--dry-run` builds the month into roster_days_dryrun and leaves the live table
+       untouched, so the change can be diffed before anyone commits to it.
+
+       This exists because it was assumed to exist. A refresh was run with an invented
+       ROSTER_OUT_TABLE=scratch flag, on the belief that it gated the write; the flag was
+       never read by this script and 828 rows went straight to the live table. The data
+       happened to be correct, which is not the same as the process being safe — and the
+       next load might not be as lucky. A guard you believe in but never tested is worse
+       than no guard, because it makes you bold.
+
+       The dry-run table holds ONLY the newly built rows; recon-diff.js compares it
+       against the live rows for the same person-days. */
+    const DRY = process.argv.includes('--dry-run');
+    const T = DRY ? 'roster_days_dryrun' : 'roster_days';
+
     await c.query('BEGIN');
-    // BACKUP the affected dates FRESH each run = a true "undo last ingest"
-    await c.query(`DROP TABLE IF EXISTS roster_days_recon_bak`);
-    await c.query(`CREATE TABLE roster_days_recon_bak AS SELECT * FROM roster_days WHERE tenant_id=$1 AND work_date::text = ANY($2)`, [TENANT, coveredDates]);
-    const bakN = (await c.query('SELECT COUNT(*)::int n FROM roster_days_recon_bak')).rows[0].n;
+    let bakN = 0;
+    if (DRY) {
+      await c.query(`DROP TABLE IF EXISTS ${T}`);
+      await c.query(`CREATE TABLE ${T} (LIKE roster_days INCLUDING DEFAULTS)`);
+      console.log('DRY RUN — building into ' + T + '; roster_days will NOT be touched.');
+    } else {
+      // BACKUP the affected dates FRESH each run = a true "undo last ingest"
+      await c.query(`DROP TABLE IF EXISTS roster_days_recon_bak`);
+      await c.query(`CREATE TABLE roster_days_recon_bak AS SELECT * FROM roster_days WHERE tenant_id=$1 AND work_date::text = ANY($2)`, [TENANT, coveredDates]);
+      bakN = (await c.query('SELECT COUNT(*)::int n FROM roster_days_recon_bak')).rows[0].n;
+    }
 
     // REPLACE only the dates this upload actually covers
     console.log(`ingest range: ${coveredDates[0]} .. ${coveredDates[coveredDates.length - 1]}  ` +
@@ -168,9 +191,10 @@ const MAP = {
        replace, so after the July load its max date was 2026-07-03 and the resync covered
        06-20..07-03 while the ingest had written through 07-28. The raw spine silently
        stopped 25 days short of the roster. */
-    fs.writeFileSync(SCRATCH + '/last-ingest-range.json',
+    if (!DRY) fs.writeFileSync(SCRATCH + '/last-ingest-range.json',
       JSON.stringify({ from: coveredDates[0], to: coveredDates[coveredDates.length - 1], dates: coveredDates, at: new Date().toISOString() }));
-    await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date::text = ANY($2)`, [TENANT, coveredDates]);
+    /* Nothing to clear in a dry run — the table was just created empty. */
+    if (!DRY) await c.query(`DELETE FROM roster_days WHERE tenant_id=$1 AND work_date::text = ANY($2)`, [TENANT, coveredDates]);
     const allCols = (hasTenant ? ['tenant_id'] : []).concat(cols);
     let inserted = 0;
     /* Only rows for the dates just cleared. Inserting a thin date's rows on top of the
@@ -180,7 +204,7 @@ const MAP = {
       if (!coveredSet.has(r.date)) continue;
       const vals = (hasTenant ? [TENANT] : []).concat(cols.map(col => { const v = r[MAP[col]]; return v === undefined ? null : v; }));
       const ph = vals.map((_, i) => '$' + (i + 1)).join(',');
-      await c.query(`INSERT INTO roster_days (${allCols.join(',')}) VALUES (${ph})`, vals);
+      await c.query(`INSERT INTO ${T} (${allCols.join(',')}) VALUES (${ph})`, vals);
       inserted++;
     }
     // ── Director decision 2 (2026-07-11): populate before/after-shift OT REVIEW FLAGS.
@@ -191,7 +215,7 @@ const MAP = {
     let flagsInserted = 0;
     // drop only STALE pending flags in range (resolved decisions survive), then re-raise from current evidence
     // scoped to the same covered dates as the row replace — a thin date keeps its flags
-    await c.query(`DELETE FROM ot_review_flags WHERE tenant_id=$1 AND work_date::text = ANY($2) AND status='pending'`, [TENANT, coveredDates]);
+    if (!DRY) await c.query(`DELETE FROM ot_review_flags WHERE tenant_id=$1 AND work_date::text = ANY($2) AND status='pending'`, [TENANT, coveredDates]);
     for (const r of ing) {
       if (!coveredSet.has(r.date)) continue;
       for (const kind of ['before', 'after']) {
@@ -207,7 +231,14 @@ const MAP = {
       }
     }
     await c.query('COMMIT');
-    console.log('INGEST OK — backed up ' + bakN + ' rows → roster_days_recon_bak; replaced June with ' + inserted + ' corrected rows (cols=' + cols.length + '); raised ' + flagsInserted + ' pending OT-review flag(s)');
+    if (DRY) {
+      console.log('DRY RUN OK — ' + inserted + ' rows built into roster_days_dryrun (cols=' + cols.length + '). ' +
+        'roster_days is UNCHANGED.');
+      console.log('   next:  node scripts/recon-diff.js        → see exactly what would change');
+      console.log('          node scripts/recon-refresh.js     → apply it for real, once the diff looks right');
+    } else {
+      console.log('INGEST OK — backed up ' + bakN + ' rows → roster_days_recon_bak; replaced June with ' + inserted + ' corrected rows (cols=' + cols.length + '); raised ' + flagsInserted + ' pending OT-review flag(s)');
+    }
   } catch (e) {
     await c.query('ROLLBACK').catch(() => {});
     console.log('INGEST FAILED (rolled back): ' + e.message);
