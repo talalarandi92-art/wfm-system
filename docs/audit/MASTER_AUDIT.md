@@ -218,3 +218,62 @@ so a defect found downstream is genuinely the page's own and not inherited.
 
 *Every entry above states how it was established. Where something is not yet established, it
 says so and names the next step. Nothing in this document is an adjective.*
+
+---
+
+### F-005 · Sweep v2 — the corrected harness, and what it found — `VERIFIED`
+
+The harness corrections A-1/A-2/A-3 are implemented. `scripts/audit-sweep.js` now harvests its
+endpoints from every `apiClient.get` call site, reads role expectations from `role_permissions`,
+and caches tokens so the login throttle is never the thing under test.
+
+**Result over the real surface — 108 harvested GET paths × 6 roles = 756 checks:**
+
+```
+HIGH 0 · REVIEW 8 · LOW 1
+```
+
+Zero server errors. Zero 404s. Every role authenticated:
+
+```
+admin  Platform Admin   73 perms      hr     HR Specialist   17 perms
+wfm    WFM Analyst      68 perms      agent  Agent           11 perms
+rta    RTA Agent        65 perms
+tl     Team Leader      65 perms
+```
+
+That statement is worth something, unlike v1's. It is bounded honestly: it proves the endpoints
+respond and are permission-gated. It does NOT prove the numbers they return are correct — that
+is the page-by-page work still queued.
+
+**The 8 REVIEW items, judged individually:**
+
+Seven are reference catalogues an agent legitimately needs to render their own screens —
+`/breaks/types`, `/chat/users`, `/knowledge-base/categories`, `/schedule/available-weeks`,
+`/schedule/functions`, `/settings/functions`, `/settings/shift-codes` (the 142-code dictionary).
+Row parity with admin is correct for a catalogue. **CLOSED — not defects.**
+
+---
+
+### F-006 · `/requests/employees` exposes `gender` to every agent — `OPEN · DIRECTOR`
+
+**Established:** an Agent calling `/requests/employees` receives 100 colleague records with
+fields `id · employee_no · gender · full_name · function_name · function_id · team_name` —
+byte-identical to what Platform Admin receives.
+
+**Why most of it is right:** an agent raising a shift swap must pick a colleague, so name,
+employee number, function and team are necessary.
+
+**Why `gender` is a question:** it is personal data on 100 colleagues handed to every agent.
+There IS a defensible reason — BR-GEN-001 means a swap placing a female agent on MD/MN is
+invalid, so the picker may filter candidates by gender to stop an invalid proposal being made.
+
+**Not changed, deliberately.** Removing the field could break swap validation; leaving it is a
+privacy choice that belongs to the Directorate, not to me. Two clean options:
+
+1. Keep it, and record the business justification (swap eligibility) against the field.
+2. Remove `gender` from the payload and enforce the female-shift rule server-side at
+   submission, where it is enforced anyway — the client then never needs the attribute.
+
+Option 2 is the stronger design: the rule is already validated on the server, so the client
+holding the attribute buys nothing and costs privacy.
