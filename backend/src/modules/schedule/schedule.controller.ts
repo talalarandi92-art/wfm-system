@@ -8,6 +8,7 @@ import { JwtAuthGuard }  from '../../common/guards/jwt-auth.guard';
 import { CurrentUser }   from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { ScheduleService } from './schedule.service';
+import { rosterCacheInvalidate } from '../../common/ttl-cache.interceptor';
 
 const EDIT_TYPES = [
   'employee_request', 'business_need', 'wfm_adjustment', 'correction',
@@ -113,11 +114,17 @@ export class ScheduleController {
   @RequirePermissions('schedule.edit')
   @ApiOperation({ summary: 'Edit schedule cell — stores full audit in notes' })
   @ApiBody({ type: EditCellDto })
-  editCell(
+  /* The write must clear the read cache, or the edit is invisible for up to 90 seconds and
+     looks like it silently failed. The roster grids sit behind an in-process TTL cache; every
+     other writer (recon upload, ingest, schedule-change, swap, revert) already invalidates it,
+     and this one — the most-used write in the product — did not. The row changed in the
+     database and the screen kept showing the old shift, which reads as "the edit does nothing"
+     and invites the user to do it again. */
+  async editCell(
     @CurrentUser() user: any,
     @Body() body: EditCellDto,
   ) {
-    return this.svc.editCell(
+    const res = await this.svc.editCell(
       user.tenantId,
       user.userId ?? user.id,
       user.email,
@@ -128,6 +135,8 @@ export class ScheduleController {
       body.reason,
       body.override === true,
     );
+    rosterCacheInvalidate();
+    return res;
   }
 
   /** Available shift codes catalogue */
@@ -233,10 +242,12 @@ export class ScheduleController {
   @Patch('week-status')
   @ApiOperation({ summary: 'Publish, lock, or revert a schedule week' })
   @RequirePermissions('schedule.publish')
-  setWeekStatus(
+  async setWeekStatus(
     @CurrentUser() user: any,
     @Body() body: { weekStart: string; action: 'publish' | 'lock' | 'unlock' | 'revert_to_draft'; notes?: string },
   ) {
-    return this.svc.setWeekStatus(user.tenantId, body.weekStart, user.userId, body.action, body.notes);
+    const res = await this.svc.setWeekStatus(user.tenantId, body.weekStart, user.userId, body.action, body.notes);
+    rosterCacheInvalidate();   // publishing or reverting a week changes what every grid shows
+    return res;
   }
 }

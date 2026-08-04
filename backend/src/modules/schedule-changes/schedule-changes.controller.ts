@@ -12,6 +12,7 @@ import { normalizeShiftCode } from '@common/shift-normalize';
 import { RejectDto } from '@common/dto/reject.dto';
 import { CreateScheduleChangeDto } from './dto/create-schedule-change.dto';
 
+import { rosterCacheInvalidate } from '../../common/ttl-cache.interceptor';
 /**
  * Schedule Change requests (Phase-1 new type).
  * Agent/TL requests changing a shift on a date. On approval the new shift's
@@ -256,6 +257,9 @@ export class ScheduleChangesController {
        JSON.stringify({ date, shift: row.requested_shift_code, start, end })],
     ).catch(() => {});
 
+    /* Approving APPLIES the change to the schedule, so the read cache has to go with it —
+       otherwise the approval succeeds and the grid keeps showing the pre-approval shift. */
+    rosterCacheInvalidate();
     return { id, status: 'approved', applied: true, shift: row.requested_shift_code };
   }
 

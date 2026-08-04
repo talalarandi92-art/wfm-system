@@ -1,0 +1,248 @@
+[
+ {
+  "sev": "HIGH",
+  "area": "Auth",
+  "what": "role hr (demo.hr@boutiqaat.wfm) cannot log in",
+  "evidence": "HTTP 429 \"ThrottlerException: Too Many Requests\"",
+  "why": "A role that cannot authenticate cannot be audited, and if it is a real role, cannot work.",
+  "at": "2026-08-04T19:31:57.064Z"
+ },
+ {
+  "sev": "HIGH",
+  "area": "Auth",
+  "what": "role agent (demo.agent@boutiqaat.wfm) cannot log in",
+  "evidence": "HTTP 429 \"ThrottlerException: Too Many Requests\"",
+  "why": "A role that cannot authenticate cannot be audited, and if it is a real role, cannot work.",
+  "at": "2026-08-04T19:31:57.092Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Command Center",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/dashboard/command-center",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:31:57.102Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Command Center",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/control-dashboard/overview",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:31:57.471Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Command Center",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/dashboard/wfm-overview",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:31:57.496Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Roster & Reconciliation",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/attendance-recon/roster-v2/rows?from=2026-07-01&to=2026-07-31&limit=50",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:31:57.519Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Roster & Reconciliation",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/attendance-recon/roster-v2/summary?from=2026-07-01&to=2026-07-31",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:31:57.545Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Capacity & Forecast",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/forecasting/backtest",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:10.827Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Live Ops / RTA",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/coverage/live",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:11.612Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Requests & Approvals",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/breaks/today",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:15.838Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Scorecard & People",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/scorecard/monthly?month=2026-07",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.135Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Scorecard & People",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/scorecard/agent-scores",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.159Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Scorecard & People",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/coaching",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.657Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Scorecard & People",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/attrition/summary",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.680Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Scorecard & People",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/productivity/summary",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.698Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Analytics & Reports",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/reports/catalogue",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.718Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Analytics & Reports",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/operations-analytics/summary",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.738Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Analytics & Reports",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/workforce-analytics/summary",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.757Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Analytics & Reports",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/report-builder/sources",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:16.777Z"
+ },
+ {
+  "sev": "HIGH",
+  "area": "Admin & Integrations",
+  "role": "wfm",
+  "what": "reaches an admin-only surface",
+  "path": "/users?limit=25",
+  "evidence": "HTTP 200 for tier-2 role",
+  "why": "Admin-only means settings and user administration; a lower tier reading it is a privilege leak.",
+  "at": "2026-08-04T19:32:16.899Z"
+ },
+ {
+  "sev": "HIGH",
+  "area": "Admin & Integrations",
+  "role": "wfm",
+  "what": "reaches an admin-only surface",
+  "path": "/settings",
+  "evidence": "HTTP 200 for tier-2 role",
+  "why": "Admin-only means settings and user administration; a lower tier reading it is a privilege leak.",
+  "at": "2026-08-04T19:32:17.035Z"
+ },
+ {
+  "sev": "HIGH",
+  "area": "Admin & Integrations",
+  "role": "rta",
+  "what": "reaches an admin-only surface",
+  "path": "/settings",
+  "evidence": "HTTP 200 for tier-2 role",
+  "why": "Admin-only means settings and user administration; a lower tier reading it is a privilege leak.",
+  "at": "2026-08-04T19:32:17.077Z"
+ },
+ {
+  "sev": "HIGH",
+  "area": "Admin & Integrations",
+  "role": "tl",
+  "what": "reaches an admin-only surface",
+  "path": "/settings",
+  "evidence": "HTTP 200 for tier-2 role",
+  "why": "Admin-only means settings and user administration; a lower tier reading it is a privilege leak.",
+  "at": "2026-08-04T19:32:17.121Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Admin & Integrations",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/audit-log?limit=25",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:17.557Z"
+ },
+ {
+  "sev": "MED",
+  "area": "Admin & Integrations",
+  "role": "admin",
+  "what": "route not found",
+  "path": "/import/batches",
+  "evidence": "HTTP 404",
+  "why": "Either the page calls a route that does not exist, or this probe has the wrong path — both need resolving.",
+  "at": "2026-08-04T19:32:17.573Z"
+ }
+]
