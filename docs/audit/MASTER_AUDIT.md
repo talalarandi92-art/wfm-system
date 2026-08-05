@@ -438,3 +438,91 @@ accuracy audit 2026-07-01 → 08-01:  15/19 clean · 1 HIGH (C4) · 2 med · 1 l
 
 **Decision needed:** is Assil Alhamada currently employed? If yes, `employee_identity` needs
 refreshing against roster activity. If no, the roster rows after 19 June need explaining.
+
+---
+
+### F-010 · Assil Alhamada restored to the reports — `FIXED`
+
+Director confirmed 2026-08-05: still employed. Fixed at the **source**, not the derived table —
+a value patched into `employee_identity` is erased by the next backfill (BR-ING-005).
+
+```
+employees.status          inactive → active   (13772)
+backfill-identity re-run  → employee_identity.is_active true, two records grouped as one person
+fairness offDistribution  117 → 118 people · 866 → 877 weekend-OFF days
+Assil now reads           11 weekend-OFF of 19 OFF (58%) · 32 worked days
+current week visibility   104/105 → 105/105
+```
+
+The last day is fully accounted for: **878 = 877 active + 1 Fayza Mahgoub**, whose last roster
+day was 2026-06-07 and whose inactive status is correct. Nothing is unexplained.
+
+Accuracy check **C4 now passes**.
+
+---
+
+### F-011 · The B3 check overstated a rule breach that was not happening — `FIXED`
+
+B3 reported **238 HIGH** "scored days with zero evidence". Investigated before acting:
+`adherence_pct` is NULL on **every one**, and `raw_sys_late_min` is NULL on every one — they are
+pre-2026-07-25 rows where `include_tardiness` was left true before that flag encoded the
+evidence gate. **Nothing was scored. No average polluted. Nobody judged.**
+
+B3 was testing the *flag* and reporting it as the *outcome*. A check that reports 238 breaches
+of a rule that is not being broken trains the reader to skip the section — and the day a real
+one appears, they skip that too.
+
+Split into two honest checks:
+
+| Check | Tests | Severity | Now |
+|---|---|---|---|
+| **B3** | a day carrying a CONFORMANCE FIGURE with zero measured work | HIGH | **passes** |
+| **B3b** | old-engine rows whose `include_tardiness` predates the evidence gate | LOW | 201, clears on rebuild |
+
+---
+
+### F-012 · A one-minute session produced a 0% conformance score — `FIX WRITTEN · NOT PROMOTED`
+
+**The real defect the corrected B3 was hiding.**
+
+```
+Elyas Najar  2026-07-12   worked   1 min   conformance 0.0%
+Sham Ali     2026-07-30   worked   2 min   conformance 0.0%
+Sham Ali     2026-07-25   worked   2 min   conformance 0.0%
+Elyas Najar  2026-07-04   worked  23 min   conformance 5.0%
+```
+
+The engine **knew**: it flagged "Evidence covers only 0% of the shift" and set
+`include_tardiness = false`. Then it wrote a zero anyway, because the arithmetic was possible.
+
+`roster-analytics.controller.ts` averages `adherence_pct` three times — **line 101 gates on
+`include_tardiness`; lines 68 and 78 do not.** So the excluded score comes straight back in on
+two of three surfaces, and those people read as catastrophic performers because a session
+lasted a minute.
+
+```
+July conformance   ungated 94.10% over 1727 days   ← lines 68/78
+                   gated   94.68% over 1625 days   ← line 101
+```
+
+The 0.58-point aggregate is not the point. The point is the individual carrying a 0% they never
+earned, on a day the system had already decided not to judge.
+
+**Fix written** in `recon-build.js`: a day the engine declines to score carries no figure at all.
+
+**One over-correction, caught by the diff before it shipped.** The first version also nulled the
+score for record-only roles — Dana Khaled 89.0 → —, Noureldeen Elnaggar 97.0 → —. BR-ROL-002
+makes those roles record-only for **deductions**: "tracked and visible, no deduction computed".
+Deleting their figure does not stop a deduction, it stops them being seen. Excluded from
+consequence is not excluded from measurement. Condition narrowed to evidence failure only;
+changes fell 47 → 24.
+
+**NOT PROMOTED, deliberately.** The remaining diff contains two rows I cannot yet account for —
+Amthal Alrashid and Athari Almulla flip `include_tardiness` true → false with no conformance
+change, and the identity backfill reclassified them Excluded → OMT in between, which muddies
+the comparison. Promoting a number-changing rebuild containing a change I cannot explain would
+break the rule this audit is built on. It waits for that explanation.
+
+```
+dry run: ARRIVING 0 · LEAVING 0 · CHANGED 24 · IDENTICAL 804 · live table untouched
+```

@@ -152,13 +152,37 @@ const add = (id, sev, rule, title, n, unit, detail, fix) =>
       : 'all codes canonical, including the role-dependent EE family',
     'confirm with the Timing sheet, then pin');
 
+  /* "Scored" must mean CARRIES A SCORE, not "carries a flag that once meant scored".
+     Measured 2026-08-05: this check reported 238 HIGH on days where adherence_pct is NULL on
+     every single one — nothing was scored, no average polluted, nobody judged. They are
+     pre-2026-07-25 rows where include_tardiness was left true before that flag encoded the
+     evidence gate; raw_sys_late_min is NULL on all of them, which dates them precisely.
+     A check that reports 238 violations of a rule that is not actually being broken is the
+     same cry-wolf failure this audit keeps finding elsewhere: it trains the reader to skip
+     the section, and the day a real one appears they skip that too. The condition now names
+     what BR-ATT-005 actually forbids — a CONFORMANCE FIGURE standing on no evidence. */
   const b3 = await one(
     `SELECT COUNT(*)::int n, COUNT(DISTINCT person_no)::int people FROM roster_days
       WHERE is_active AND work_date BETWEEN $1 AND $2 AND ${WORKED}
-        AND (worked_min IS NULL OR worked_min=0) AND include_tardiness`, [FROM, TO]);
-  add('B3', b3.n ? 'HIGH' : 'OK', 'BR-ATT-005', 'A scored working day has evidence', b3.n, 'scored days with zero evidence',
-    `${b3.people} people. Odoo explains most of these (Off Day / leave / WFH) but the engine does not consult it for this case.`,
-    'use Odoo Status as the arbiter when no session or punch exists');
+        AND (worked_min IS NULL OR worked_min=0)
+        AND include_tardiness AND adherence_pct IS NOT NULL`, [FROM, TO]);
+  add('B3', b3.n ? 'HIGH' : 'OK', 'BR-ATT-005', 'A scored working day has evidence', b3.n,
+    'days carrying a conformance score with zero measured work',
+    `${b3.people} people. A conformance figure on a day nothing was measured on is a judgement with no basis.`,
+    'the day must be flagged for review and left unscored, never given a score');
+
+  /* The stale flag is still worth surfacing — just not as a rule breach. It is a rebuild
+     backlog: days built before the evidence gate existed still say "scored" in a column
+     nothing reads for scoring. Harmless today, misleading to anyone who queries the column. */
+  const b3b = await one(
+    `SELECT COUNT(*)::int n FROM roster_days
+      WHERE is_active AND work_date BETWEEN $1 AND $2 AND ${WORKED}
+        AND (worked_min IS NULL OR worked_min=0)
+        AND include_tardiness AND adherence_pct IS NULL AND raw_sys_late_min IS NULL`, [FROM, TO]);
+  add('B3b', b3b.n ? 'LOW' : 'OK', 'BR-ATT-005', 'include_tardiness reflects the evidence gate', b3b.n,
+    'old-engine days whose include_tardiness flag predates the evidence gate',
+    'They carry no score, so no figure is affected — but the column reads "scored" and a future query could believe it.',
+    'clears when these dates are rebuilt on the current engine');
 
   // ── C. EVIDENCE QUALITY ────────────────────────────────────────────────────
   const c1 = await one(

@@ -494,7 +494,29 @@ module.exports = function build() {
         // worked = PROVEN system/punch span (capped 16h). NO evidence (no system AND no punch) => 0, NOT the
         // scheduled net — we must never show "worked 8h" for a day we can't prove (it carries the no-evidence flag).
         worked: isWorkingKind ? (govDur != null ? Math.min(Math.max(0, govDur), 960) : 0) : (offWorkedMin || offdayOt || holidayOt || 0),
-        adherence: conf === '' ? null : conf, conforming: conf !== '' && conf >= 90,
+        /* A day the engine has decided NOT to score must not carry a score. Until now
+           adherence was written whenever it was arithmetically computable, even on days
+           include_tardiness had already excluded — and two of the three analytics surfaces
+           average adherence_pct WITHOUT that gate, so the excluded score came back in.
+
+           What it cost, measured 2026-08-05: Elyas Najar 2026-07-12, one minute of measured
+           work, conformance 0.0%. Sham Ali twice, two minutes each, 0.0%. The engine knew the
+           evidence was too thin — it flagged the day and set include_tardiness false — and
+           then wrote a zero anyway. On the ungated surfaces those people read as catastrophic
+           performers because a session lasted a minute. A number nobody should have trusted
+           was published because it happened to be calculable.
+
+           Deciding not to score a day now means exactly that: no figure at all. The overall
+           July conformance moves 94.10 → 94.68 on 102 days; the point is not the 0.58, it is
+           the individuals carrying a 0% they never earned. */
+        /* Only an EVIDENCE failure nulls the score. The first version also nulled it for
+           record-only roles, and the diff caught that immediately: Dana Khaled 89.0 → —,
+           Noureldeen Elnaggar 97.0 → —. BR-ROL-002 makes those roles record-only for
+           DEDUCTIONS — "tracked and visible, no deduction computed". Deleting their figure
+           does not stop a deduction, it stops them being seen, which is a different and worse
+           thing. Excluded from consequence is not excluded from measurement. */
+        adherence: (conf === '' || evidenceUnscoreable) ? null : conf,
+        conforming: conf !== '' && !evidenceUnscoreable && conf >= 90,
         permission: permStatus || null, permissionStatus: permStatus || null,   // #11: also populate the permission_status column (was unmapped → left blank)
         permType: (pm.find(p => p.kind === 'perm') || {}).type || null,
         permDur: (() => { const pr = pm.find(p => p.kind === 'perm'); return (pr && pr.fromMin != null) ? (clock12(pr.fromMin) + ' → ' + clock12(pr.toMin) + (pr.hours != null && pr.hours !== '' ? ' (' + pr.hours + 'h)' : '')) : null; })(),
