@@ -78,7 +78,9 @@ export class MeService {
   private async adherence(tenantId: string, employeeId: string) {
     const [agg] = await this.ds.query(
       `SELECT COUNT(*)                                  AS days,
-              ROUND(AVG(adherence_pct)::numeric, 1)     AS avg_adherence,
+              /* Gated: an agent must never open their own page and find a 0% earned by a
+                 one-minute session on a day the engine had already declined to score. */
+              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness)::numeric, 1) AS avg_adherence,
               ROUND(AVG(conformance_pct)::numeric, 1)   AS avg_conformance
        FROM adherence_daily
        WHERE tenant_id = $1 AND employee_id = $2

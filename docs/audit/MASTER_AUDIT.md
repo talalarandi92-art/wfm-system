@@ -526,3 +526,77 @@ break the rule this audit is built on. It waits for that explanation.
 ```
 dry run: ARRIVING 0 · LEAVING 0 · CHANGED 24 · IDENTICAL 804 · live table untouched
 ```
+
+---
+
+### F-012 · resolved and promoted — `FIXED`
+
+**The blocker cleared itself once I stopped guessing and read the config.** Amthal Alrashid and
+Athari Almulla are listed explicitly in `recon-config.json`:
+
+```json
+recordOnlyPeople: [
+  { id: 13863, name: "Amthal Alrashid", why: "OMT, standing WFH pattern — does not open the system" },
+  { id: 13540, name: "Athari Almulla",  why: "OMT, standing WFH pattern — does not open the system" }
+]
+```
+
+Which is the Director's own instruction, verbatim from 2026-07-24: *"they don't open the
+system … keep them in the record."* So the dry-run (`Excluded`, not scored) was **correct** and
+the live rows (`OMT`, scored) were **wrong** — the rebuild fixes a second defect I had not
+targeted. Promoted.
+
+**Then the surface fix**, because the engine writing NULL only helps rebuilt data:
+
+| Site | Was |
+|---|---|
+| `roster-analytics` — 8 averages incl. the **lowest-performer list** (`HAVING AVG(adherence_pct)<70`) | ungated |
+| `roster-analytics` — decline detection ("conformance dropped sharply") | ungated |
+| `roster-reports` — 5 averages | ungated |
+| `me.service` — **the agent's own page** | ungated |
+
+The lowest-performer list is the one that mattered most: a one-minute session scoring 0% could
+place a real person in front of a manager as a poor performer. `me.service` is the second — an
+agent opening their own page and finding a zero they never earned.
+
+Two deliberate exceptions, left alone: Data Trust reports `mean` **and** `mean_strong`
+side by side on purpose, and the Report Builder metric now self-corrects because the engine
+writes NULL.
+
+**Verified:**
+
+```
+626/626 unit tests pass
+Elyas Najar / Sham Ali thin-evidence days → adherence_pct NULL on every one
+accuracy 17/20 clean · 0 HIGH   (was 3 HIGH)
+calculation verify 7/7           (was 5/7)
+explain self-check 461/461
+golden master PASS
+```
+
+---
+
+### F-013 · Widening the weekend without widening its complement double-counted Saturday — `FIXED`
+
+**Caught by the cross-check, not by me.** After F-008 the partition check failed:
+
+```
+✗ Shrinkage: weekday and weekend partition the same scheduled days
+    overall scheduled = 18,113 days   vs   weekday + weekend = 20,661
+    DIFFER by 2,548 (12.3%)
+```
+
+I updated every `DOW IN (4,5)` to `(4,5,6)` and missed the three `DOW NOT IN (4,5)` twins. So
+Saturday satisfied **both** predicates and every weekday/weekend split counted it twice.
+
+A rule and its complement are one fact expressed twice; changing one without the other is not a
+partial fix, it is a contradiction. Fixed in `roster-fairness.controller.ts` and
+`analytics.service.ts`.
+
+```
+31/31 cross-checks agree — "Every screen tells the same story."
+```
+
+**Why this belongs in the record even though it lasted an hour:** it is the strongest argument
+for the `weekendSql()` helper introduced in F-008. Sixteen literals plus three complements is
+nineteen places to remember. One function is one place.

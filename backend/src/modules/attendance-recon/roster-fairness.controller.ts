@@ -50,7 +50,7 @@ export class RosterFairnessController {
              COUNT(*) FILTER (WHERE ${work} AND cat='midnight')::int midnight,
              COUNT(*) FILTER (WHERE r.presence='off')::int off_days,
              COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) IN (4,5,6))::int weekend_off,
-             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) NOT IN (4,5))::int weekday_off,
+             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) NOT IN (4,5,6))::int weekday_off,
              (nt.person_no IS NOT NULL) night_team
         FROM r LEFT JOIN fairness_night_team nt ON nt.tenant_id=$1 AND nt.person_no=r.person_no
        WHERE ${w}

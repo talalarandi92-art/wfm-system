@@ -81,7 +81,7 @@ export class RosterReportsController {
               ROUND(SUM(worked_min)/60.0)::int worked_hours,
               COUNT(*) FILTER (WHERE permission IS NOT NULL)::int permissions,
               COUNT(*) FILTER (WHERE sick IS NOT NULL)::int sick_days,
-              ROUND(AVG(adherence_pct),1) conformance_pct
+              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance_pct
          FROM roster_days r WHERE ${where}`, params))[0];
 
     // OT by function (so the OT spotlight can highlight the heavy teams — e.g. Refund this month)
@@ -178,7 +178,7 @@ export class RosterReportsController {
              COALESCE(SUM(${TRUE_OT}) FILTER (WHERE NOT COALESCE(ot_record_only,false)),0)::int ot_total,
              COALESCE(SUM(${TRUE_OT}) FILTER (WHERE COALESCE(ot_record_only,false)),0)::int ot_record_only_min,
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
-             ROUND(AVG(adherence_pct),1) conformance
+             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
         FROM roster_days r WHERE ${w}`, p))[0];
 
     // Rank by the canonical PERSON (person_no) so an old/new intern-id pair or a
@@ -198,13 +198,13 @@ export class RosterReportsController {
       rank(`SUM(ot_before_min)::int`, `SUM(ot_before_min) DESC`),
       rank(`COUNT(*) FILTER (WHERE presence='absent')::int`, `COUNT(*) FILTER (WHERE presence='absent') DESC`),
       rank(`COUNT(*) FILTER (WHERE presence='sick')::int`, `COUNT(*) FILTER (WHERE presence='sick') DESC`),
-      this.ds.query(`SELECT person_no employee_no, ${REP}, ROUND(AVG(adherence_pct),1) v FROM roster_days r WHERE ${wTardy} AND adherence_pct IS NOT NULL AND r.person_no IS NOT NULL GROUP BY person_no HAVING COUNT(*) FILTER (WHERE adherence_pct IS NOT NULL)>=3 ORDER BY AVG(adherence_pct) ASC LIMIT ${lim}`, p),
+      this.ds.query(`SELECT person_no employee_no, ${REP}, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) v FROM roster_days r WHERE ${wTardy} AND adherence_pct IS NOT NULL AND r.person_no IS NOT NULL GROUP BY person_no HAVING COUNT(*) FILTER (WHERE adherence_pct IS NOT NULL)>=3 ORDER BY AVG(adherence_pct) ASC LIMIT ${lim}`, p),
       rank(`COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int`, `COUNT(*) FILTER (WHERE permission_type IS NOT NULL) DESC`),
     ]);
 
     const dist = async (col: string) => this.ds.query(
       `SELECT COALESCE(${col},'—') k, COUNT(*)::int n, COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
-              ROUND(AVG(adherence_pct),1) conformance, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int late, COALESCE(SUM(ot_after_min),0)::int ot_after
+              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int late, COALESCE(SUM(ot_after_min),0)::int ot_after
          FROM roster_days r WHERE ${w} GROUP BY ${col} ORDER BY n DESC`, p);
     const [byShift, byFunction, byRole, byTeamManager, byPresence] = await Promise.all([
       dist('shift_code'), dist('canon_fn(role_function)'), dist('role_category'), dist('team_manager'), dist('presence'),
@@ -294,7 +294,7 @@ export class RosterReportsController {
       otBefore:{agg:'SUM(ot_before_min)',label:'OT Before (min)'}, otAfter:{agg:'SUM(ot_after_min)',label:'OT After (min)'},
       offdayOt:{agg:'SUM(offday_ot_min)',label:'OFF-day OT'}, holidayOt:{agg:'SUM(holiday_ot_min)',label:'Holiday OT'},
       avgLate:{agg:'ROUND(AVG(sys_late_min) FILTER (WHERE sys_late_min BETWEEN 7 AND 240))',label:'Avg Late'}, avgWorked:{agg:'ROUND(AVG(worked_min) FILTER (WHERE worked_min>0))',label:'Avg Worked (min)'},
-      conformance:{agg:'ROUND(AVG(adherence_pct),1)',label:'Conformance %'}, missingPunch:{agg:'COUNT(*) FILTER (WHERE missing_punch)',label:'Missing Punch'},
+      conformance:{agg:'ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1)',label:'Conformance %'}, missingPunch:{agg:'COUNT(*) FILTER (WHERE missing_punch)',label:'Missing Punch'},
       missingSystem:{agg:'COUNT(*) FILTER (WHERE missing_system)',label:'Missing System'}, mismatch:{agg:'COUNT(*) FILTER (WHERE mismatch IS NOT NULL)',label:'Mismatch'},
       agents:{agg:'COUNT(DISTINCT COALESCE(person_no,employee_no))',label:'Agents'},
       // official scorecard (joined per-person via the sc CTE) — Net Points + KPI scores.

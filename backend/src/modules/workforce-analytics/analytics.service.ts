@@ -197,7 +197,7 @@ export class AnalyticsService {
     };
     const [overall] = await compute('');
     const [weekend] = await compute(`AND EXTRACT(DOW FROM attendance_date) IN (4,5,6)`);
-    const [weekday] = await compute(`AND EXTRACT(DOW FROM attendance_date) NOT IN (4,5)`);
+    const [weekday] = await compute(`AND EXTRACT(DOW FROM attendance_date) NOT IN (4,5,6)`);
     return { period: { from: f, to: t }, overall: pack(overall), weekend: pack(weekend), weekday: pack(weekday) };
   }
 
@@ -277,7 +277,7 @@ export class AnalyticsService {
       `SELECT e.employee_no, e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS name, f.name AS function_name,
               COUNT(*) FILTER (WHERE ar.attendance_marker='sick')                                                 AS total_sick,
               COUNT(*) FILTER (WHERE ar.attendance_marker='sick' AND EXTRACT(DOW FROM ar.attendance_date) IN (4,5,6)) AS weekend_sick,
-              COUNT(*) FILTER (WHERE ar.attendance_marker='sick' AND EXTRACT(DOW FROM ar.attendance_date) NOT IN (4,5)) AS weekday_sick
+              COUNT(*) FILTER (WHERE ar.attendance_marker='sick' AND EXTRACT(DOW FROM ar.attendance_date) NOT IN (4,5,6)) AS weekday_sick
        FROM employees e
        JOIN attendance_records ar ON ar.employee_id=e.id AND ar.tenant_id=e.tenant_id AND ar.attendance_date BETWEEN $2 AND $3
        LEFT JOIN functions f ON f.id=e.function_id

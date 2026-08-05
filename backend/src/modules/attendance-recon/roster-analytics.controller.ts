@@ -65,7 +65,11 @@ export class RosterAnalyticsController {
              COUNT(*) FILTER (WHERE ${CRED_EARLY})::int "earlyDays", COALESCE(SUM(sys_early_min) FILTER (WHERE ${CRED_EARLY}),0)::int "totalEarlyMin",
              COALESCE(SUM(ot_before_min),0)::int "otBefore", COALESCE(SUM(ot_after_min),0)::int "otAfter",
              COALESCE(SUM(${TRUE_OT}),0)::int "otTotal", COALESCE(SUM(offday_ot_min),0)::int "offdayOt", COALESCE(SUM(holiday_ot_min),0)::int "holidayOt",
-             ROUND(AVG(adherence_pct),1) conformance,
+             /* Gated on include_tardiness like every other conformance figure. Ungated, a day
+                the engine declined to score still reached the average — a one-minute session
+                scored 0% pulled real people down on this surface while the gated surface
+                excluded it, so two screens reported different conformance for one period. */
+             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance,
              COUNT(*) FILTER (WHERE missing_punch)::int "missingPunch", COUNT(*) FILTER (WHERE missing_system)::int "missingSystem",
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions
         FROM roster_days WHERE ${W}`, p);
@@ -75,7 +79,7 @@ export class RosterAnalyticsController {
     for (const r of sr) shiftRate[r.cat] = r.n;
     const byMonth = await this.ds.query(`
       SELECT month_name "month", COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
-             COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int "lateMin", COALESCE(SUM(${TRUE_OT}),0)::int "otMin", ROUND(AVG(adherence_pct),1) conformance
+             COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int "lateMin", COALESCE(SUM(${TRUE_OT}),0)::int "otMin", ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
         FROM roster_days WHERE ${W} GROUP BY month_name ORDER BY MIN(work_date)`, p);
     const recent = await this.ds.query(`
       SELECT work_date::text date, day_name, shift_code, attendance_status, presence,
@@ -232,7 +236,7 @@ export class RosterAnalyticsController {
               COUNT(*) FILTER (WHERE presence IN ('office','wfh')) worked,
               COUNT(*) FILTER (WHERE presence='absent') absent, COUNT(*) FILTER (WHERE presence='sick') sick,
               COUNT(*) FILTER (WHERE ${CRED_LATE}) latedays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int latemin,
-              COUNT(*) FILTER (WHERE missing_system) misssys, ROUND(AVG(adherence_pct),1) conf, COALESCE(SUM(${TRUE_OT}),0)::int otmin
+              COUNT(*) FILTER (WHERE missing_system) misssys, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf, COALESCE(SUM(${TRUE_OT}),0)::int otmin
          FROM roster_days r WHERE ${w} AND person_no IS NOT NULL
          GROUP BY person_no HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh'))>=5`, p);
     const clamp = (v: number) => Math.max(0, Math.min(100, v));
@@ -279,9 +283,9 @@ export class RosterAnalyticsController {
 
     // 1) coaching candidates — low conformance, enough working days, tardiness-eligible roles
     const lowConf = await this.ds.query(
-      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, ROUND(AVG(adherence_pct),1) conf, COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd
+      `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conf, COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd
          FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness AND adherence_pct IS NOT NULL
-         GROUP BY person_no HAVING AVG(adherence_pct)<70 AND COUNT(*) FILTER (WHERE presence IN ('office','wfh'))>=10 ORDER BY conf ASC LIMIT 6`, [t, dFrom, dTo]);
+         GROUP BY person_no HAVING AVG(adherence_pct) FILTER (WHERE include_tardiness) < 70 AND COUNT(*) FILTER (WHERE presence IN ('office','wfh'))>=10 ORDER BY conf ASC LIMIT 6`, [t, dFrom, dTo]);
     if (lowConf.length) push('critical', 'coaching', `${lowConf.length} ${lowConf.length === 1 ? 'agent needs' : 'agents need'} coaching (conformance < 70%)`,
       lowConf.map((r: any) => `${r.name} ${r.conf}%`).join(' · '), '/data-quality');
 
@@ -289,13 +293,13 @@ export class RosterAnalyticsController {
     const mid = new Date(new Date(dFrom).getTime() + Math.floor(days / 2) * 86400000).toISOString().slice(0, 10);
     const declining = await this.ds.query(
       `SELECT mode() WITHIN GROUP (ORDER BY clean_name) name,
-              ROUND(AVG(adherence_pct) FILTER (WHERE work_date < $4),1) h1,
-              ROUND(AVG(adherence_pct) FILTER (WHERE work_date >= $4),1) h2
+              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness AND work_date < $4),1) h1,
+              ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness AND work_date >= $4),1) h2
          FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness AND adherence_pct IS NOT NULL
          GROUP BY person_no
         HAVING COUNT(*) FILTER (WHERE work_date < $4) >= 5 AND COUNT(*) FILTER (WHERE work_date >= $4) >= 5
-           AND AVG(adherence_pct) FILTER (WHERE work_date >= $4) - AVG(adherence_pct) FILTER (WHERE work_date < $4) < -15
-        ORDER BY AVG(adherence_pct) FILTER (WHERE work_date >= $4) - AVG(adherence_pct) FILTER (WHERE work_date < $4) ASC LIMIT 6`, [t, dFrom, dTo, mid]);
+           AND AVG(adherence_pct) FILTER (WHERE include_tardiness AND work_date >= $4) - AVG(adherence_pct) FILTER (WHERE include_tardiness AND work_date < $4) < -15
+        ORDER BY AVG(adherence_pct) FILTER (WHERE include_tardiness AND work_date >= $4) - AVG(adherence_pct) FILTER (WHERE include_tardiness AND work_date < $4) ASC LIMIT 6`, [t, dFrom, dTo, mid]);
     if (declining.length) push('warning', 'declining', `${declining.length} agent(s) declining (conformance dropped ≥15 pts)`,
       declining.map((r: any) => `${r.name} ${r.h1}%→${r.h2}%`).join(' · '), '/agent-360');
 
@@ -330,8 +334,8 @@ export class RosterAnalyticsController {
     if (ot[0]?.otm > 0) push('info', 'overtime', `OT concentrated on the ${ot[0].shift_code} shift`, `${Math.round(ot[0].otm / 60)}h total overtime`, '/report-builder');
 
     // 6) conformance trend vs previous equal-length period
-    const [cur] = await this.ds.query(`SELECT ROUND(AVG(adherence_pct),1) v FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness`, [t, dFrom, dTo]);
-    const [prev] = await this.ds.query(`SELECT ROUND(AVG(adherence_pct),1) v FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness`, [t, prevFrom, prevTo]);
+    const [cur] = await this.ds.query(`SELECT ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) v FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness`, [t, dFrom, dTo]);
+    const [prev] = await this.ds.query(`SELECT ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) v FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND is_active AND include_tardiness`, [t, prevFrom, prevTo]);
     if (cur?.v != null && prev?.v != null) { const delta = Math.round((cur.v - prev.v) * 10) / 10;
       push(delta < -3 ? 'warning' : 'info', 'trend', `Conformance ${delta >= 0 ? 'up' : 'down'} ${Math.abs(delta)} pts vs previous period`, `${prev.v}% → ${cur.v}%`, '/roster-dashboard', delta); }
 
@@ -367,7 +371,7 @@ export class RosterAnalyticsController {
              COUNT(*) FILTER (WHERE ${CRED_EARLY})::int earlyDays,
              COALESCE(SUM(ot_before_min),0)::int otBefore, COALESCE(SUM(ot_after_min),0)::int otAfter, COALESCE(SUM(${TRUE_OT}),0)::int otTotal,
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
-             ROUND(AVG(adherence_pct),1) conformance
+             ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
         FROM roster_days WHERE ${W}`, p);
     const agents = await this.ds.query(`
       SELECT person_no, mode() WITHIN GROUP (ORDER BY clean_name) name, mode() WITHIN GROUP (ORDER BY role_function) function_name,
@@ -375,7 +379,7 @@ export class RosterAnalyticsController {
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              COUNT(*) FILTER (WHERE ${CRED_LATE})::int lateDays, COALESCE(SUM(sys_late_min) FILTER (WHERE ${CRED_LATE}),0)::int lateMin,
              COALESCE(SUM(${TRUE_OT}),0)::int otMin, COUNT(*) FILTER (WHERE presence='sick')::int sick,
-             COUNT(*) FILTER (WHERE presence='absent')::int absent, ROUND(AVG(adherence_pct),1) conformance
+             COUNT(*) FILTER (WHERE presence='absent')::int absent, ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
         FROM roster_days WHERE ${W} AND person_no IS NOT NULL GROUP BY person_no ORDER BY conformance ASC NULLS LAST`, p);
     const byShift = await this.ds.query(`SELECT shift_code k, COUNT(*)::int n FROM roster_days WHERE ${W} AND presence IN ('office','wfh') GROUP BY shift_code ORDER BY n DESC`, p);
     // team-leader picker options (verified, non-hidden)
@@ -657,7 +661,7 @@ export class RosterAnalyticsController {
                COALESCE(SUM(${TRUE_OT}),0)::int "otTotal",
                COUNT(*) FILTER (WHERE missing_punch)::int "missingPunch", COUNT(*) FILTER (WHERE missing_system)::int "missingSystem",
                COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
-               ROUND(AVG(adherence_pct),1) conformance
+               ROUND(AVG(adherence_pct) FILTER (WHERE include_tardiness),1) conformance
           FROM roster_days WHERE tenant_id=$1 AND person_no=$2 AND work_date BETWEEN $3 AND $4`, [t, pn, f, to]);
       const [net] = await this.ds.query(`
         SELECT ROUND(AVG(${SC_MONTH_NET}::numeric),1) net, COUNT(*)::int months
