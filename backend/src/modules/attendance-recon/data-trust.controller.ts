@@ -66,6 +66,7 @@ export class DataTrustController {
        refused to make on its own — never a silent default. */
     const queues = await this.ds.query(
       `SELECT CASE
+                WHEN data_quality ILIKE '%RULE — female agent on a midnight%' THEN 'rule_female_midnight'
                 WHEN data_quality ILIKE '%SCHEDULE vs HR CONFLICT%'  THEN 'schedule_vs_hr'
                 WHEN data_quality ILIKE '%SCHEDULE REVIEW%'          THEN 'displaced_shift'
                 WHEN data_quality ILIKE '%Evidence covers only%'     THEN 'thin_evidence'
@@ -77,6 +78,7 @@ export class DataTrustController {
          FROM roster_days
         WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3 AND data_quality IS NOT NULL
         GROUP BY 1 HAVING CASE
+                WHEN data_quality ILIKE '%RULE — female agent on a midnight%' THEN 'rule_female_midnight'
                 WHEN data_quality ILIKE '%SCHEDULE vs HR CONFLICT%'  THEN 'schedule_vs_hr'
                 WHEN data_quality ILIKE '%SCHEDULE REVIEW%'          THEN 'displaced_shift'
                 WHEN data_quality ILIKE '%Evidence covers only%'     THEN 'thin_evidence'
@@ -88,6 +90,16 @@ export class DataTrustController {
     /* Each queue carries what it MEANS and what it costs to leave it open — a count with
        no consequence attached is a number people learn to scroll past. */
     const META: Record<string, { title: string; why: string; action: string; tone: string }> = {
+      /* A rule breach is not a data-quality problem and must not read like one. The others on
+         this page mean "we could not measure this"; this one means "the roster broke an agreed
+         rule". It is listed first because an override may be perfectly legitimate — coverage is
+         the governing priority — but an override nobody can see is not an override, it is a
+         gap in the record. */
+      rule_female_midnight: {
+        title: 'Female agent on a midnight shift',
+        why: 'BR-GEN-003 does not assign MD/MN to female agents except by an explicit, logged, audited override. These days carry no such override on record. Coverage may well have required it — the rule allows that — but the decision has to be visible and attributable.',
+        action: 'Confirm the override and who authorised it, or correct the schedule', tone: 'rose',
+      },
       schedule_vs_hr: {
         title: 'Schedule says work, HR says off',
         why: 'The roster sheet scheduled a shift; Odoo records the day as an Off Day. One of the two is wrong and neither is allowed to win automatically.',

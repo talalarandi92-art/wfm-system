@@ -277,3 +277,89 @@ privacy choice that belongs to the Directorate, not to me. Two clean options:
 
 Option 2 is the stronger design: the rule is already validated on the server, so the client
 holding the attribute buys nothing and costs privacy.
+
+---
+
+## Queue item 2 — Schedule & Generator
+
+### F-007 · Business rules are enforced where the system AUTHORS a schedule, and nowhere on the path every live row actually takes — `FIXED (partial)`
+
+**How it surfaced.** `scripts/audit-schedule.js` checks the agreed scheduling rules against
+live data rather than against the code that claims to implement them.
+
+**Established, from the database:**
+
+```
+female agents on midnight shifts   138 person-days · 11 women · ZERO flagged
+   worst: one agent, 56 MD days, 2026-03-11 → 2026-08-01
+minimum-rest breaches (<10h)        10 in July alone · worst 360 min (6h) · ZERO flagged
+3+ consecutive OFF days              7 occurrences June onward   · ZERO flagged
+
+engine data_quality flags in total  4,179
+   ...of which rest-rule flags           0
+   ...of which gender-rule flags         0
+```
+
+**Root cause.** The rules ARE implemented — in `schedule-generator/generator.engine.ts`
+(`femaleNightViolation`, `femaleRule`, `genderCheck`, 21 references to `femaleLate`). That
+engine validates a schedule the platform *generates*. **Every row in this database arrives
+through the recon ingest instead**, and that path carries `gender` as a field (recon-build.js
+lines 81, 527, 544) while never once testing it. The generator guards a door the data does not
+use.
+
+**Why it matters beyond the count.** BR-GEN-003 does not forbid a midnight assignment outright
+— it permits an explicit, logged, audited override, because coverage is the governing priority.
+So the defect is not that these women worked nights. It is that **an override nobody can see is
+not an override**; it is an absence of record. The rule's own enforcement clause ("the system
+must flag violations clearly") was the part not built.
+
+**Fix implemented.** `recon-build.js` now raises a rule flag on the ingest path, and Data Trust
+carries it as its own queue, listed first and toned `rose` — a rule breach is not a
+data-quality problem and must not read like one.
+
+**Verified live:**
+
+```
+dry run → diff → promote → restart → API
+  ARRIVING 0 · LEAVING 0 · CHANGED 1 (from the source file, not this change)
+  scored days 747→747 · conformance 93.7→93.7 · TRUE_OT 3520→3520 · absent 22→22
+  GOLDEN MASTER PASS
+
+  Data Trust now returns:  rule_female_midnight — 6 days · 1 person
+```
+
+Zero numbers moved. `data_quality` does not feed `include_tardiness` or any score — that comes
+from the evidence path — so the flag adds visibility without touching a figure.
+
+**A judgement made during the fix, and why.** The first version also flagged female agents on
+the N shift. It produced **46 flags in one week against 6 midnight days**. BR-GEN-002 permits
+the N shift where operationally necessary, and the measurement says it is routine rather than
+exceptional — so flagging it per day buries the six that are a real breach. That is precisely
+the failure this audit document warns about: a check that cries wolf teaches people to close it
+without reading. N-shift exposure is a *distribution* question and belongs in the fairness
+report as a count per person, not as a per-row alarm. The N flag was removed before shipping.
+
+**Still open from this finding — the same gap, other rules:**
+
+| Rule | Live breaches | Flagged | Status |
+|---|---|---|---|
+| Female on MD/MN (BR-GEN-003) | 138 person-days | **now yes** | FIXED |
+| Minimum 10h rest (BR-RST-001) | 10 in July | no | **OPEN** |
+| Never 3+ consecutive OFF (BR-OFF-002) | 7 June onward | no | **OPEN** |
+| Exactly 2 OFF per week (BR-OFF-001) | 25% of person-weeks | no | **OPEN** |
+
+Rest and OFF need a window function across adjacent days, which the per-day engine loop does
+not currently have in scope. They are a second pass, not an afterthought — recorded here so
+they are not lost.
+
+### Verified correct on this surface
+
+| Check | Evidence |
+|---|---|
+| Stored shift windows match the canonical dictionary | 12 known codes verified against BR-SHF-005 |
+| No shift ends at 21:00 | 0 rows |
+| Schedule surface has no server error for any role | 6 paths × 6 roles |
+
+**Not yet proven on this surface:** the grid-vs-`roster_days` cell comparison (S1) and the
+generator's own output rules (S5) — the harness tokens expired mid-run and those two checks
+returned 401 rather than a result. They are re-runnable: `node scripts/audit-schedule.js`.

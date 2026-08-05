@@ -1,0 +1,50 @@
+[
+ {
+  "id": "S1",
+  "name": "grid vs roster_days",
+  "ok": false,
+  "detail": "the grid returned no rows for 2026-08-01 (HTTP 401) — keys: message,error,statusCode"
+ },
+ {
+  "id": "S3",
+  "name": "stored shift windows match the canonical dictionary",
+  "ok": true,
+  "detail": "12 known codes verified"
+ },
+ {
+  "id": "S3b",
+  "name": "no shift ends at 21:00",
+  "ok": true,
+  "detail": "0 rows end at 21:00"
+ },
+ {
+  "id": "S4a",
+  "name": "minimum 10h rest between consecutive shifts",
+  "ok": false,
+  "detail": "10 violations (worst first):\n        Sami Sayed 2026-07-22→2026-07-23: 360 min rest\n        Rand Chbib 2026-07-31→2026-08-01: 480 min rest\n        Dima Awada 2026-07-01→2026-07-02: 540 min rest\n        Dima Awada 2026-07-07→2026-07-08: 540 min rest\n        Dima Awada 2026-07-20→2026-07-21: 540 min rest"
+ },
+ {
+  "id": "S4b",
+  "name": "no female agent on a midnight shift",
+  "ok": false,
+  "detail": "10 rows:\n        Line Khaled 2026-08-01 MD\n        Line Khaled 2026-07-31 MD\n        Line Khaled 2026-07-30 MD\n        Line Khaled 2026-07-29 MD\n        Line Khaled 2026-07-28 MD"
+ },
+ {
+  "id": "S4c",
+  "name": "never 3 or more consecutive OFF days",
+  "ok": false,
+  "detail": "7 occurrences (middle day shown):\n        Mariam Albarqawi 2026-07-24\n        Ameenah Almusallam 2026-07-24\n        Raghad Qamhieh 2026-07-23\n        Khaled Elshahhat 2026-07-22\n        Khwlaa Elmoutiaa 2026-07-22"
+ },
+ {
+  "id": "S5",
+  "name": "week-status endpoint answers",
+  "ok": false,
+  "detail": "HTTP 401 · status=\"{\"message\":\"Invalid or expired token\",\"error\":\"Unauthorized\"\""
+ },
+ {
+  "id": "S6",
+  "name": "schedule surface has no server errors for any role",
+  "ok": true,
+  "detail": ""
+ }
+]

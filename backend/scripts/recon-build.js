@@ -522,6 +522,37 @@ module.exports = function build() {
           if (offWorkedHrReview) extra.push('Scheduled OFF but worked this day (' + hhmm(offWorkedMin) + ') — HR clarify, NOT auto-paid as off-day OT');
           if (otLoginOnly) extra.push('OFF/holiday OT on system-login only (no biometric punch) — verify');
           if (tardyBleedFlag) extra.push('Cross-midnight late/early >4h = logout bleed — credited tardiness capped at 240m');
+
+          /* ── BUSINESS-RULE VIOLATIONS (2026-08-05) ──────────────────────────────────
+             Until now the engine flagged EVIDENCE problems — missing punch, thin session,
+             OT it could not corroborate — and said nothing about RULE violations. The rules
+             were enforced only in schedule-generator/generator.engine.ts, which validates a
+             schedule the system AUTHORS. Every row in this database arrives through the
+             ingest path instead, and that path checked nothing.
+
+             What that cost, measured before this was written: 138 female-agent midnight-shift
+             days across 11 women, none flagged. One agent carried 56 of them across five
+             months. BR-GEN-003 permits a midnight assignment by explicit override — but
+             requires it to be flagged and audited, and nothing was flagging it.
+
+             These flags FLAG, they never alter. Coverage is the governing priority and an
+             override is legitimate; what is not legitimate is an override nobody can see.
+             data_quality does not feed include_tardiness or any score (that comes from the
+             evidence path), so adding a note here changes no number — it only makes a rule
+             breach visible on the page and countable in the Data Trust queues. */
+          if (isWorkingKind) {
+            const G = String(idn.gender || '').trim().toLowerCase();
+            if (G.startsWith('f') && /^(MD|MN|MDR|MNR)$/i.test(String(c.norm || '').trim()))
+              extra.push('RULE — female agent on a midnight shift (' + String(c.norm).toUpperCase() +
+                '); permitted only by an explicit logged override [BR-GEN-003]');
+            /* The N shift is deliberately NOT flagged per day. BR-GEN-002 permits it where
+               operationally necessary, and measurement says it is routine rather than
+               exceptional: 46 N-shift person-days for women in a single week against 6
+               midnight days. Flagging the routine 46 buries the 6 that are actually a breach,
+               and a queue that cries wolf teaches people to close it without reading. N-shift
+               exposure belongs in the fairness report as a COUNT per person, not as a per-row
+               alarm — a distribution question, not an incident. */
+          }
           return [base, ...extra].filter(Boolean).join(' | ') || null;
         })(),
         teamMgr: idn.manager || null, teamGroup: idn.team || e.teamCol || null, gender: idn.gender || null,
