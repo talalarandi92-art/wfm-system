@@ -182,6 +182,26 @@ const add = (id, sev, rule, title, n, unit, detail, fix) =>
   add('C3', c3.n ? 'LOW' : 'OK', 'BR-ATT-001', 'Punch-only days are recognised', c3.n, 'punch but no system login',
     'Legitimate (biometric without a system session) but the shift start rests on one witness.', 'none — informational');
 
+  /* C4 — the identity table and the roster must agree about who is still here.
+     Found 2026-08-05: an employee flagged inactive with last_working_date 2026-06-19 had 64
+     roster rows running through 2026-08-01. Every people-level report joins through
+     employee_identity, so a person in that state is not merely mislabelled — they are
+     INVISIBLE. Fairness could not see her, which means if her rotation were unfair nobody
+     would ever learn it from this system. The person disappears from the very report meant
+     to protect them. */
+  const c4 = await one(
+    `SELECT COUNT(*)::int n, MIN(rd.clean_name) AS example, MAX(rd.work_date)::text AS latest
+       FROM roster_days rd JOIN employee_identity ei ON ei.person_no = rd.person_no
+      WHERE rd.is_active AND NOT ei.is_active AND COALESCE(ei.alias_of,'') = ''
+        AND rd.work_date BETWEEN $1 AND $2 AND rd.shift_start_min IS NOT NULL`, [FROM, TO]);
+  add('C4', c4.n ? 'HIGH' : 'OK', 'BR-ATT-008', 'Identity and roster agree on who is active',
+    c4.n, 'worked days by people the identity table calls inactive',
+    c4.n ? `e.g. ${c4.example}, still on the roster to ${c4.latest}. People-level reports join through ` +
+           `employee_identity, so these person-days are invisible to fairness, scorecard and 360s.`
+         : 'no contradiction',
+    c4.n ? 'Refresh employee_identity.is_active / last_working_date against real roster activity, ' +
+           'or correct the roster if the person truly left.' : 'none');
+
   // ── D. DERIVED NUMBERS ─────────────────────────────────────────────────────
   const d1 = await one(
     `SELECT COUNT(*) FILTER (WHERE worked_min < 0)::int neg,

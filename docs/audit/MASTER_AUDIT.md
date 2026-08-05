@@ -363,3 +363,78 @@ they are not lost.
 **Not yet proven on this surface:** the grid-vs-`roster_days` cell comparison (S1) and the
 generator's own output rules (S5) — the harness tokens expired mid-run and those two checks
 returned 401 rather than a result. They are re-runnable: `node scripts/audit-schedule.js`.
+
+---
+
+### F-008 · Weekend rule changed to Thursday + Friday + Saturday — `FIXED` · Director's ruling 2026-08-05
+
+**The change requested:** weekend = Thu + Fri + Sat (was Thu + Fri, ruled 2026-07-02).
+
+**What implementing it exposed.** The platform was running **two different weekends at once**:
+
+```
+13 SQL sites   EXTRACT(DOW FROM …)    IN (4,5)   = Thursday + Friday
+ 2 SQL sites   EXTRACT(ISODOW FROM …) IN (5,6)   = FRIDAY + SATURDAY   ← OT tracker
+ 1 TypeScript  wfm-calc.isWeekend                = Thursday + Friday
+ 1 TypeScript  generator.service (private copy)  = Thursday + Friday
+```
+
+The OT tracker had been tinting **Saturday** as weekend while fairness counted **Thursday**.
+The 2026-07-02 ruling's own comment claimed it "resolves the old Thu/Fri/Sat vs Fri/Sat drift"
+— it did not, because the rule lived in sixteen separate literals and one was missed.
+
+**Implemented:**
+
+| Change | Why |
+|---|---|
+| `WEEKEND_DOW = [4,5,6]` + `weekendSql(col)` in `wfm-calc.ts` | One definition. A rule in sixteen literals drifts the moment one is missed. |
+| All 16 SQL sites → `IN (4,5,6)` (ISODOW sites corrected to Thu/Fri/Sat too) | Ends the split |
+| `generator.service.isWeekend` now delegates to `wfm-calc` | It held a private copy — exactly how the drift happened |
+| `wfm-calc.spec.ts` asserts the new rule | The old test asserted Saturday was *not* weekend *because* it starts the week — a non-sequitur that outlived its ruling. Week boundary answers "which seven days"; weekend answers "which are desirable". Both can be true of Saturday. |
+
+**Verified:** 14/14 unit tests pass · build clean · restarted · fairness endpoint 200.
+
+```
+weekend-OFF days, June→Aug:   600 (Thu+Fri)  →  878 (Thu+Fri+Sat)
+weekend DATES in window:       18            →   27   (denominator +50%)
+API offDistribution total:                       866  — see F-009 for the 12-day gap
+```
+
+---
+
+### F-009 · An actively-working employee is invisible to every people-level report — `VERIFIED · DIRECTOR`
+
+**How it surfaced.** Verifying F-008 the API reported 866 weekend-OFF days where SQL said 878.
+Chasing the 12 rather than rounding it off found the cause.
+
+**Established:**
+
+```
+employee_identity (13772, Assil Alhamada)
+  status "inactive" · is_active false · last_working_date 2026-06-19
+  is_canonical true · alias_of null        → NOT a folded duplicate
+roster_days
+  64 rows · working through 2026-08-01     → the last day of data
+```
+
+The identity table says she left on 19 June. The roster says she worked through 1 August.
+
+**Why this is worse than a mislabelled row.** Every people-level report joins through
+`employee_identity`, so she is not merely wrong — she is **absent**. This week the fairness
+report can see **104 of 105** working people. If her rotation were unfair, no report in this
+system would ever say so. The person vanishes from the report built to protect her.
+
+**Not fixed unilaterally.** Whether she left and returned, or never left, is an employment fact
+I cannot verify from data. Flipping the flag would be inventing an HR record.
+
+**What was built instead — check C4 in `accuracy-audit.js`:** any person the identity table
+calls inactive while the roster still shows them working now raises HIGH. It fires on this case
+today, and will catch the next one on the day it appears rather than during an audit months
+later.
+
+```
+accuracy audit 2026-07-01 → 08-01:  15/19 clean · 1 HIGH (C4) · 2 med · 1 low
+```
+
+**Decision needed:** is Assil Alhamada currently employed? If yes, `employee_identity` needs
+refreshing against roster activity. If no, the roster rows after 19 June need explaining.

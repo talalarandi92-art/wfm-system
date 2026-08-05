@@ -5,12 +5,27 @@
  */
 
 /**
- * Boutiqaat weekend = THURSDAY (DOW 4) + FRIDAY (5) ONLY. DOW: 0=Sun … 6=Sat.
- * OFFICIAL RULING by the Director 2026-07-02 (resolves the old Thu/Fri/Sat vs
- * Fri/Sat drift). Must stay in sync with generator isWeekend + all analytics.
+ * Boutiqaat weekend = THURSDAY (4) + FRIDAY (5) + SATURDAY (6). DOW: 0=Sun … 6=Sat.
+ *
+ * Director's ruling 2026-08-05, superseding the 2026-07-02 Thu+Fri ruling.
+ *
+ * The earlier ruling was recorded here as resolving "the old Thu/Fri/Sat vs Fri/Sat drift",
+ * and it did not: thirteen call sites moved to DOW IN (4,5) while the OT tracker stayed on
+ * ISODOW IN (5,6) — which is FRIDAY + SATURDAY. The platform has been running two different
+ * weekends, so the OT tracker tinted Saturday as weekend while fairness counted Thursday.
+ * A definition that lives in fifteen SQL literals drifts the moment one is missed.
+ *
+ * Hence WEEKEND_DOW below. Every consumer — TypeScript and SQL — now reads the same list,
+ * and a future change is one edit rather than a search.
  */
+export const WEEKEND_DOW = [4, 5, 6] as const;
+
+/** SQL predicate for the weekend, so a query cannot disagree with the code. Takes the date
+ *  column, e.g. `weekendSql('r.work_date')` → `EXTRACT(DOW FROM r.work_date) IN (4,5,6)`. */
+export const weekendSql = (col: string) => `EXTRACT(DOW FROM ${col}) IN (${WEEKEND_DOW.join(',')})`;
+
 export function isWeekend(dow: number): boolean {
-  return dow === 4 || dow === 5;
+  return (WEEKEND_DOW as readonly number[]).includes(dow);
 }
 
 /**

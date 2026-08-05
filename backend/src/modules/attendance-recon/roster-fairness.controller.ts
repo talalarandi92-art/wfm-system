@@ -49,7 +49,7 @@ export class RosterFairnessController {
              COUNT(*) FILTER (WHERE ${work} AND cat='night')::int night,
              COUNT(*) FILTER (WHERE ${work} AND cat='midnight')::int midnight,
              COUNT(*) FILTER (WHERE r.presence='off')::int off_days,
-             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) IN (4,5))::int weekend_off,
+             COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) IN (4,5,6))::int weekend_off,
              COUNT(*) FILTER (WHERE r.presence='off' AND EXTRACT(DOW FROM r.work_date) NOT IN (4,5))::int weekday_off,
              (nt.person_no IS NOT NULL) night_team
         FROM r LEFT JOIN fairness_night_team nt ON nt.tenant_id=$1 AND nt.person_no=r.person_no
@@ -62,10 +62,10 @@ export class RosterFairnessController {
     // currently-employed persons (employee_identity.is_active = any employee row active) — used to
     // keep the FORWARD rebalance proposal to schedulable staff while the report keeps full history.
     const activeNow = new Set((await this.ds.query(`SELECT person_no FROM employee_identity WHERE tenant_id=$1 AND is_active`, [t])).map((x: any) => x.person_no));
-    // total weekend (THU/FRI — Director's ruling 2026-07-02) dates in the window — the denominator for "what share of
+    // total weekend (THU/FRI/SAT — Director's ruling 2026-08-05) dates in the window — the denominator for "what share of
     // available weekends did this person actually get off".
     const totalWeekendDays = Number((await this.ds.query(
-      `SELECT COUNT(DISTINCT work_date)::int n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND EXTRACT(DOW FROM work_date) IN (4,5)`, [t, dFrom, dTo]))[0]?.n || 0);
+      `SELECT COUNT(DISTINCT work_date)::int n FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3 AND EXTRACT(DOW FROM work_date) IN (4,5,6)`, [t, dFrom, dTo]))[0]?.n || 0);
     const agents = rows.map(r => {
       const wd = r.wd || 1, nm = r.night + r.midnight, off = r.off_days || 0;
       // dominant shift category + how "stuck" on it (never rotates) — rotation health

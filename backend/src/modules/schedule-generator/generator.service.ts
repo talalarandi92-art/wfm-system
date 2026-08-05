@@ -19,6 +19,7 @@ import { StaffingService } from '../capacity/staffing.service';
 import { shiftCategoryFromCode } from '@common/shift-category';
 import { normalizeShiftCode } from '@common/shift-normalize';
 
+import { isWeekend as isWeekendDow } from '../../common/wfm-calc';
 const DEFAULT_OPTIONS: GeneratorOptions = {
   minRestHours: 10,
   offDaysPerWeek: 2,   // business rule: 2 OFF days/week (one weekend + one mid-week)
@@ -609,11 +610,12 @@ export class GeneratorService {
     return this.deriveShiftFromStart(start).code;
   }
 
-  // Helper: is a date a weekend day. OFFICIAL RULING (Director, 2026-07-02):
-  // weekend = THURSDAY + FRIDAY only. JS getDay(): Thu=4, Fri=5.
+  /* Weekend = Thursday + Friday + Saturday (Director's ruling 2026-08-05).
+     This used to be a private copy of the rule, which is how the platform ended up running
+     two different weekends at once. It now delegates to wfm-calc, so the generator cannot
+     drift from analytics again. */
   private isWeekend(dateStr: string): boolean {
-    const d = new Date(dateStr + 'T00:00:00');
-    return d.getDay() === 4 || d.getDay() === 5; // Thu, Fri
+    return isWeekendDow(new Date(dateStr + 'T00:00:00').getDay());
   }
 
   // ── Load YTD shift distribution ─────────────────────────────────────────────

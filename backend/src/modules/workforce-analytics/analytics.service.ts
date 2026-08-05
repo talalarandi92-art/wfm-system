@@ -196,7 +196,7 @@ export class AnalyticsService {
       };
     };
     const [overall] = await compute('');
-    const [weekend] = await compute(`AND EXTRACT(DOW FROM attendance_date) IN (4,5)`);
+    const [weekend] = await compute(`AND EXTRACT(DOW FROM attendance_date) IN (4,5,6)`);
     const [weekday] = await compute(`AND EXTRACT(DOW FROM attendance_date) NOT IN (4,5)`);
     return { period: { from: f, to: t }, overall: pack(overall), weekend: pack(weekend), weekday: pack(weekday) };
   }
@@ -242,17 +242,17 @@ export class AnalyticsService {
     const rows = await this.ds.query(
       `SELECT e.id, e.employee_no, e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS name,
               f.name AS function_name,
-              COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5))                              AS weekend_days,
-              COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5) AND ar.attendance_marker='off') AS weekend_off,
+              COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5,6))                              AS weekend_days,
+              COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5,6) AND ar.attendance_marker='off') AS weekend_off,
               COUNT(*) FILTER (WHERE ar.attendance_marker='off')                                                  AS total_off
        FROM employees e
        JOIN attendance_records ar ON ar.employee_id=e.id AND ar.tenant_id=e.tenant_id AND ar.attendance_date BETWEEN $2 AND $3
        LEFT JOIN functions f ON f.id=e.function_id
        WHERE e.tenant_id=$1 AND e.status='active'${ff.clause('ar')}
        GROUP BY e.id, e.employee_no, e.first_name_en, e.last_name_en, f.name
-       HAVING COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5)) > 0
-       ORDER BY (COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5) AND ar.attendance_marker='off'))::float
-              / NULLIF(COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5)),0) DESC`,
+       HAVING COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5,6)) > 0
+       ORDER BY (COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5,6) AND ar.attendance_marker='off'))::float
+              / NULLIF(COUNT(*) FILTER (WHERE EXTRACT(DOW FROM ar.attendance_date) IN (4,5,6)),0) DESC`,
       [tenantId, f, t, ...ff.params],
     );
     const n = (v: any) => parseInt(v ?? '0', 10);
@@ -276,7 +276,7 @@ export class AnalyticsService {
     const rows = await this.ds.query(
       `SELECT e.employee_no, e.first_name_en || ' ' || COALESCE(e.last_name_en,'') AS name, f.name AS function_name,
               COUNT(*) FILTER (WHERE ar.attendance_marker='sick')                                                 AS total_sick,
-              COUNT(*) FILTER (WHERE ar.attendance_marker='sick' AND EXTRACT(DOW FROM ar.attendance_date) IN (4,5)) AS weekend_sick,
+              COUNT(*) FILTER (WHERE ar.attendance_marker='sick' AND EXTRACT(DOW FROM ar.attendance_date) IN (4,5,6)) AS weekend_sick,
               COUNT(*) FILTER (WHERE ar.attendance_marker='sick' AND EXTRACT(DOW FROM ar.attendance_date) NOT IN (4,5)) AS weekday_sick
        FROM employees e
        JOIN attendance_records ar ON ar.employee_id=e.id AND ar.tenant_id=e.tenant_id AND ar.attendance_date BETWEEN $2 AND $3

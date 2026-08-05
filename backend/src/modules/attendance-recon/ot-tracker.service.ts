@@ -195,7 +195,7 @@ export class OtTrackerService {
     const days: OtYearGridDay[] = (await this.ds.query(
       `SELECT d::date::text AS date, EXTRACT(DAY FROM d)::int AS day,
               EXTRACT(MONTH FROM d)::int AS month, to_char(d, 'Dy') AS weekday,
-              (EXTRACT(ISODOW FROM d) IN (5, 6)) AS is_weekend
+              (EXTRACT(ISODOW FROM d) IN (4,5,6)) AS is_weekend
          FROM generate_series($1::date, $2::date, INTERVAL '1 day') d ORDER BY d`,
       [from, to],
     )).map((r: any) => ({ date: r.date, day: r.day, month: r.month, weekday: String(r.weekday).trim(), isWeekend: r.is_weekend }));
@@ -311,7 +311,7 @@ export class OtTrackerService {
       `SELECT d::date::text AS date,
               EXTRACT(DAY FROM d)::int AS day,
               to_char(d, 'Dy') AS weekday,
-              (EXTRACT(ISODOW FROM d) IN (5, 6)) AS is_weekend
+              (EXTRACT(ISODOW FROM d) IN (4,5,6)) AS is_weekend
          FROM generate_series($1::date, ($1::date + ($2::int - 1)), INTERVAL '1 day') d
         ORDER BY d`,
       [first, daysInMonth],

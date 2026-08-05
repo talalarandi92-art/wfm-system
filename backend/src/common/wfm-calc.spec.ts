@@ -3,13 +3,21 @@ import {
   shrinkagePct, mapLeaveMarker, mimeToAttachmentType, ratingSentiment,
 } from './wfm-calc';
 
-describe('isWeekend (OFFICIAL weekend = Thu + Fri — Director ruling, commit c23a1f5)', () => {
-  it('flags Thursday(4) and Friday(5) only', () => {
+describe('isWeekend (OFFICIAL weekend = Thu + Fri + Sat — Director ruling 2026-08-05)', () => {
+  it('flags Thursday(4), Friday(5) and Saturday(6)', () => {
     expect(isWeekend(4)).toBe(true);
     expect(isWeekend(5)).toBe(true);
+    expect(isWeekend(6)).toBe(true);
   });
-  it('rejects Sat–Wed (Saturday starts the WFM week — it is NOT weekend)', () => {
-    [0, 1, 2, 3, 6].forEach(d => expect(isWeekend(d)).toBe(false));
+  it('rejects Sun–Wed', () => {
+    [0, 1, 2, 3].forEach(d => expect(isWeekend(d)).toBe(false));
+  });
+  /* Saturday is both the first day of the WFM week (BR-TIM-001) AND a weekend day. Those are
+     two independent facts and the earlier rule conflated them — the old test asserted Saturday
+     was not weekend *because* it starts the week, which is a non-sequitur that outlived its
+     ruling. Week boundary answers "which seven days"; weekend answers "which are desirable". */
+  it('treats Saturday as weekend even though the WFM week starts on it', () => {
+    expect(isWeekend(6)).toBe(true);
   });
 });
 

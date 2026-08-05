@@ -296,7 +296,7 @@ export class RosterGenerateController {
       SELECT person_no, MAX(clean_name) name, MAX(gender) gender,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND sc ~ '^(N|MD|MN)') nm,
-             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5)) woff
+             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5,6)) woff
         FROM r WHERE person_no IS NOT NULL GROUP BY person_no
        HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh')) >= 1`, [t, dFrom, dTo, fn]))
       .map((e: any) => ({ personNo: e.person_no, name: e.name, male: String(e.gender || '').toLowerCase().startsWith('m'),
@@ -426,7 +426,7 @@ export class RosterGenerateController {
     if (surplusHrs > requiredHrs * 0.15) recs.push(`Overstaffing ${surplusHrs}h vs need — consider trimming the heaviest surplus hours or re-timing shifts`);
     for (const g of groups) if (g.assigned < g.want) recs.push(`${g.code}: ${g.want - g.assigned} more people needed — cross-skill move, hire, or accept the gap with OT`);
     if (shrinkRate > 0.12) recs.push(`Projected shrinkage ${Math.round(shrinkRate * 1000) / 10}% is high — review sick/absence/leave before trusting the effective numbers`);
-    if (weekend.thu < 95 || weekend.fri < 95) recs.push(`Weekend (Thu/Fri) coverage ${weekend.thu}% / ${weekend.fri}% — rebalance weekend OFFs`);
+    if (weekend.thu < 95 || weekend.fri < 95) recs.push(`Weekend (Thu/Fri/Sat) coverage ${weekend.thu}% / ${weekend.fri}% — rebalance weekend OFFs`);
 
     return {
       basis: 'demand = avg hourly HC of the source window (see generate basis); effective = scheduled × (1 − projected shrinkage)',
