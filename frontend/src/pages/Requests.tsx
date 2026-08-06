@@ -1341,6 +1341,22 @@ function SubmitForm({ dark, onSuccess, initialDate }: { dark: boolean; onSuccess
                   </span>
                 </div>
               )}
+              {/* No entitlement on file for this person (118 of 120 today). The chip above
+                  simply vanished, so the approver saw nothing where a balance belongs —
+                  indistinguishable from a balance that was checked and found fine. Say the
+                  days already taken, and say plainly that the entitlement is missing. */}
+              {leaveBal && !leaveBal.configured && (
+                <div className="rounded-xl p-3 flex items-center justify-between flex-wrap gap-2"
+                  style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.28)' }}>
+                  <span className="text-xs font-bold" style={{ color: '#f59e0b' }}>
+                    {ar ? 'لا يوجد استحقاق مسجّل لهذا النوع — الرصيد غير معروف'
+                        : 'No entitlement on file for this type — balance unknown'}
+                  </span>
+                  <span className="text-[11px]" style={{ color: tsColor(dark) }}>
+                    {ar ? 'مأخوذ حتى الآن' : 'taken so far'} {leaveBal.taken} · {ar ? 'معلّق' : 'pending'} {leaveBal.pending}
+                  </span>
+                </div>
+              )}
               {selectedType === 'sick_leave' && (
                 <div className="flex items-center gap-2 p-2 rounded-lg" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)' }}>
                   <AlertCircle size={14} className="text-amber-400" />

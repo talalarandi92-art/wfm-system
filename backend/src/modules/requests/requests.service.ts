@@ -1588,8 +1588,13 @@ export class RequestsService {
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [req.id, tenantId],
     );
-    const reqNo    = empRow[0]?.employee_no != null ? String(empRow[0].employee_no) : null;
-    const funcName = empRow[0]?.func_name ?? req.function_name ?? 'â€”';
+    // Same three joins, same fix — resolved against the FIRST day of the span.
+    const { personNo: reqNo, funcName } = await this.resolveRosterIdentity(
+      tenantId,
+      empRow[0]?.employee_no != null ? String(empRow[0].employee_no) : null,
+      empRow[0]?.func_name ?? req.function_name ?? null,
+      dates[0],
+    );
 
     // For each date, count working HC in the function.
     // Only attendance_marker = 'present' counts as coverage â€” employees already
@@ -1597,11 +1602,15 @@ export class RequestsService {
     const dateRows = await Promise.all(
       dates.map(async (d) => {
         const hcRow = await this.ds.query(
-          `SELECT COUNT(*) FILTER (WHERE presence IN ('office','wfh'))                    AS total,
-                  COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no <> $3) AS after_approval,
-                  COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no  = $3) AS requester_working
-           FROM roster_days
-           WHERE tenant_id = $1 AND is_active AND canon_fn(role_function) = canon_fn($2) AND work_date = $4::date`,   // intern-fold (bug #10): Internship X counts toward X coverage
+          `SELECT COUNT(*) FILTER (WHERE presence IN ('office','wfh'))                          AS total,
+                  COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no::text <> $3) AS after_approval,
+                  COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND person_no::text  = $3) AS requester_working
+           FROM (
+             SELECT DISTINCT ON (person_no, work_date) person_no, presence, role_function, work_date
+             FROM roster_days
+             WHERE tenant_id = $1 AND canon_fn(role_function) = canon_fn($2) AND work_date = $4::date
+             ORDER BY person_no, work_date, is_active DESC
+           ) t`,   // intern-fold (bug #10): Internship X counts toward X coverage
           [tenantId, funcName, reqNo, d],
         );
         const total   = parseInt(hcRow[0]?.total ?? '0');
@@ -1706,6 +1715,56 @@ export class RequestsService {
     };
   }
 
+
+  /**
+   * The requester as the ROSTER knows them, for a given date.
+   *
+   * Coverage impact is answered entirely out of `roster_days`, so the keys used to
+   * find the requester in it must be the roster's own keys — not the HR record's.
+   * Three separate joins were being made on the wrong side, and each one silently
+   * reported "requester is not working, no coverage impact" for somebody who was:
+   *
+   *   • `employees.employee_no` is the RAW number. An intern carries 6xxxx there
+   *     while the roster knows them by the full-time 1xxxx that `employee_identity`
+   *     folds them into (BR-ATT-008). Abdulrahman Alrashid: emp_no 6264, person_no
+   *     13762 — never matched, N 13:00–22:00 read as a day off.
+   *   • the function came from `employees.function_id`, but function is per-month
+   *     FROM THE SCHEDULE. Two people sat in "Social Media & Email" on the HR record
+   *     and "Mail & NPS" on the roster, so the whole coverage set was the wrong team.
+   *   • `AND is_active` filtered the row out. is_active marks the CANONICAL row when
+   *     a person has duplicates — it is not employment. Two people had exactly one
+   *     roster row for the date and it was is_active=false, so the filter erased the
+   *     only evidence they were scheduled.
+   *
+   * Returns the person_no to match on and the function to scope by, both taken from
+   * the roster where possible, with the HR record only as a fallback.
+   */
+  private async resolveRosterIdentity(
+    tenantId: string, rawEmployeeNo: string | null, hrFunction: string | null, onDate: string,
+  ): Promise<{ personNo: string | null; funcName: string }> {
+    let personNo = rawEmployeeNo;
+    if (rawEmployeeNo) {
+      const [id] = await this.ds.query(
+        `SELECT person_no::text FROM employee_identity
+         WHERE tenant_id = $1 AND employee_no::text = $2 LIMIT 1`,
+        [tenantId, String(rawEmployeeNo)],
+      );
+      if (id?.person_no) personNo = id.person_no;
+    }
+    let funcName = hrFunction ?? '—';
+    if (personNo) {
+      // The roster row for that date, canonical first but never filtered away.
+      const [row] = await this.ds.query(
+        `SELECT role_function FROM roster_days
+         WHERE tenant_id = $1 AND person_no::text = $2 AND work_date = $3::date
+         ORDER BY is_active DESC LIMIT 1`,
+        [tenantId, String(personNo), onDate],
+      );
+      if (row?.role_function) funcName = row.role_function;
+    }
+    return { personNo: personNo != null ? String(personNo) : null, funcName };
+  }
+
   /** Permission HC impact: simplified — show duration and function HC at that time */
   private async permissionHcImpact(tenantId: string, req: any) {
     if (!req.permission_date || !req.start_time) {
@@ -1720,23 +1779,32 @@ export class RequestsService {
        WHERE r.id = $1 AND r.tenant_id = $2`,
       [req.id, tenantId],
     );
-    const reqNo    = funcInfo[0]?.employee_no != null ? String(funcInfo[0].employee_no) : null;
-    const funcName = funcInfo[0]?.func_name ?? '—';
-
     const permDate = typeof req.permission_date === 'string'
       ? req.permission_date.substring(0, 10)
       : RequestsService.ymdLocal(new Date(req.permission_date));
+    // Match the roster on the roster's own keys — see resolveRosterIdentity.
+    const { personNo: reqNo, funcName } = await this.resolveRosterIdentity(
+      tenantId,
+      funcInfo[0]?.employee_no != null ? String(funcInfo[0].employee_no) : null,
+      funcInfo[0]?.func_name ?? null,
+      permDate,
+    );
 
     // CANONICAL schedule from roster_days — NOT the stale attendance_records grid (which can disagree,
     // e.g. it showed 09:00-18:00 for a person whose real roster shift was N 13:00-22:00, so an evening
     // permission falsely read "outside shift" and never reduced the headcount). Pull all of the
     // function's WORKING shifts on the date + cross-midnight shifts from the previous day that spill in.
     const shifts = await this.ds.query(
-      `SELECT person_no, shift_start_min AS ss, shift_end_min AS se, work_date::text AS wd
+      // DISTINCT ON, not `AND is_active`: is_active picks the canonical row among
+       // duplicates, so filtering on it deletes anyone whose only row is not flagged.
+       // One row per person per day, canonical preferred — nobody is erased.
+      `SELECT DISTINCT ON (person_no, work_date)
+              person_no, shift_start_min AS ss, shift_end_min AS se, work_date::text AS wd
        FROM roster_days
-       WHERE tenant_id = $1 AND is_active AND canon_fn(role_function) = canon_fn($2)   -- intern-fold (bug #10)
+       WHERE tenant_id = $1 AND canon_fn(role_function) = canon_fn($2)   -- intern-fold (bug #10)
          AND presence IN ('office','wfh') AND shift_start_min IS NOT NULL
-         AND work_date IN ($3::date, $3::date - 1)`,
+         AND work_date IN ($3::date, $3::date - 1)
+       ORDER BY person_no, work_date, is_active DESC`,
       [tenantId, funcName, permDate],
     );
 

@@ -1049,3 +1049,91 @@ Command Center coverage tile:  2026-07-03  →  2026-08-01
 unit tests 627/627 · cross-check 31/31 · audit-generator CLEAN · audit-capacity 108/108
 accuracy (rebuilt window) 17/20 · 0 HIGH
 ```
+
+---
+
+## Queue item 5 — Requests, Permissions, Leave, Breaks
+
+Permission HC Impact has one job: tell the approver who is left on seat if they say yes. It
+answers entirely out of `roster_days`, so the keys it uses to find the requester there must be
+the **roster's** keys, not the HR record's. Two of them were not.
+
+### F-027 · `is_active` erased people who were genuinely scheduled — `FIXED`
+
+`is_active` on `roster_days` marks the **canonical row when a person has duplicates**. It is not
+employment (BR-ATT-008). The impact queries filtered `AND is_active`, so anyone whose *only* row
+for the date carried `is_active = false` vanished from the coverage calculation entirely.
+
+Ibrahim AlAsmi, 2026-01-05: one roster row, MD 22:00–07:00, `is_active = false`. The approver was
+told *"requester not working — no coverage impact"* about a man on a midnight shift. Replaced with
+`DISTINCT ON (person_no, work_date) … ORDER BY is_active DESC`: canonical preferred, **nobody
+erased**.
+
+### F-028 · The coverage set was scoped to the wrong team — `FIXED`
+
+The function came from `employees.function_id`. Function is **per-month from the schedule**
+(BR-ATT-008), and the two stores disagree:
+
+```
+Ahmad Abuali    employees: "Social Media & Email"    roster_days: "Mail & NPS"
+Mona Abdulbaqi  employees: "Social Media & Email"    roster_days: "Mail & NPS"
+```
+
+`canon_fn` folds *Internship X → X*; it does not reconcile two different names, so the query
+counted a different team's coverage. Both paths now take the function from the requester's own
+roster row for that date.
+
+Also hardened while in there: the requester's `person_no` is now resolved through
+`employee_identity` rather than the raw `employees.employee_no`, so an intern number (6xxxx) finds
+the full-time row (1xxxx) the roster knows them by. One resolver, `resolveRosterIdentity()`, used
+by both the permission and the leave path.
+
+### F-029 · A leave request with no entitlement on file showed nothing at all — `FIXED`
+
+118 of 120 people have **no leave entitlement configured**. The API is honest about it
+(`configured: false`, `entitlement: 0`, `remaining: null` — it never invents a balance), and the
+form only rendered the balance chip `when configured`. So for almost everyone the chip simply
+**vanished** — indistinguishable, to an approver, from a balance that was checked and found fine.
+Now an amber chip says the entitlement is missing and shows the days already taken.
+
+*(The missing entitlements are HR data entry, not a code defect — surfaced here because the
+platform should say so rather than fall silent.)*
+
+### Checked and found correct
+
+- **Permission cycle and caps** — `/permission-requests/weekly-usage` returns
+  `2026-07-15 → 2026-08-14`, `max 360 min`, `max 3 requests`: the full-time cut-off (15→14) and
+  the 6h/3-permission allowance, exactly as agreed (BR-TIM-002, BR-PRM-003).
+- **BR-LVE-001 (holiday inside annual leave returns to the balance)** — implemented on **both**
+  sides: `EFFECTIVE_DAYS` subtracts holidays inside an annual-leave span, and the engine sets
+  `hr_code = 'H'` with the note *"counted as holiday, not deducted from leave balance"*. It has
+  **never fired on real data**: only two annual-leave requests exist and neither spans a holiday.
+  The two roster rows in the entire year that would exercise it (Suliman Chaar and MHD AlTamer,
+  2026-01-18, still `L` beside 44 `H`) predate the rule (2026-06-30) *and* the last rebuild — they
+  will correct themselves when January is rebuilt. Stated as **implemented, unexercised**, not as
+  verified.
+- **`/breaks/engine/status`** — running on a 45s loop and honest that its live feed is 30 hours
+  stale.
+
+> **Method note — and a correction.** I first reported **five** people wrongly flagged as "not
+> scheduled". Three of them were correct all along. I had taken `permissionDate` from the API,
+> which serializes a `date` column as a UTC instant — `2026-07-06T21:00:00.000Z` **is** 2026-07-07
+> in Kuwait — and sliced the first ten characters, shifting **every** date back a day. Each
+> permission was then compared against the wrong day's roster row. Two of the five were real, and
+> both are fixed above. The harness now reads dates from the database as `::text`, and the trap is
+> written into its header so the next person does not repeat it.
+
+`scripts/audit-requests.js` re-derives, per pending permission and per hour, whether the requester
+is rostered, whether they are working in that hour (cross-midnight aware), and whether
+`afterApproval = scheduled − 1` when they are:
+
+```
+8 pending · CLEAN — 8/8 permissions re-derive to the roster
+```
+
+### Gates
+
+```
+627/627 tests · cross-check 31/31 · audit-requests 8/8
+audit-generator CLEAN · audit-capacity 108/108
+```
