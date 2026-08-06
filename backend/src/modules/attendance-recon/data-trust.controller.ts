@@ -67,6 +67,8 @@ export class DataTrustController {
     const queues = await this.ds.query(
       `SELECT CASE
                 WHEN data_quality ILIKE '%RULE — female agent on a midnight%' THEN 'rule_female_midnight'
+                WHEN data_quality ILIKE '%RULE — only%rest before the next shift%' THEN 'rule_min_rest'
+                WHEN data_quality ILIKE '%RULE — three or more consecutive OFF%' THEN 'rule_off_run'
                 WHEN data_quality ILIKE '%SCHEDULE vs HR CONFLICT%'  THEN 'schedule_vs_hr'
                 WHEN data_quality ILIKE '%SCHEDULE REVIEW%'          THEN 'displaced_shift'
                 WHEN data_quality ILIKE '%Evidence covers only%'     THEN 'thin_evidence'
@@ -79,6 +81,8 @@ export class DataTrustController {
         WHERE tenant_id=$1 AND is_active AND work_date BETWEEN $2 AND $3 AND data_quality IS NOT NULL
         GROUP BY 1 HAVING CASE
                 WHEN data_quality ILIKE '%RULE — female agent on a midnight%' THEN 'rule_female_midnight'
+                WHEN data_quality ILIKE '%RULE — only%rest before the next shift%' THEN 'rule_min_rest'
+                WHEN data_quality ILIKE '%RULE — three or more consecutive OFF%' THEN 'rule_off_run'
                 WHEN data_quality ILIKE '%SCHEDULE vs HR CONFLICT%'  THEN 'schedule_vs_hr'
                 WHEN data_quality ILIKE '%SCHEDULE REVIEW%'          THEN 'displaced_shift'
                 WHEN data_quality ILIKE '%Evidence covers only%'     THEN 'thin_evidence'
@@ -95,6 +99,16 @@ export class DataTrustController {
          rule". It is listed first because an override may be perfectly legitimate — coverage is
          the governing priority — but an override nobody can see is not an override, it is a
          gap in the record. */
+      rule_min_rest: {
+        title: 'Less than 10 hours rest between shifts',
+        why: 'BR-RST-001 requires 10 hours between consecutive shifts, measured across midnight. Most of these are the same hand-off — a late shift ending 22:00 followed by a morning starting 07:00 is nine hours, one short. That is a pattern in the shift mix, not a series of individual mistakes.',
+        action: 'Adjust the following shift, or record the exception', tone: 'rose',
+      },
+      rule_off_run: {
+        title: 'Three or more consecutive OFF days',
+        why: 'BR-OFF-002 allows two. A longer run is not rest, it is lost capacity, and it distorts the following week. Flagged on the middle day so one run raises one item.',
+        action: 'Confirm the authorised exception, or rebalance the OFF days', tone: 'amber',
+      },
       rule_female_midnight: {
         title: 'Female agent on a midnight shift',
         why: 'BR-GEN-003 does not assign MD/MN to female agents except by an explicit, logged, audited override. These days carry no such override on record. Coverage may well have required it — the rule allows that — but the decision has to be visible and attributable.',

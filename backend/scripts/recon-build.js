@@ -770,6 +770,75 @@ module.exports = function build() {
     sysLogin: r.FinalSysLogin, sysLogout: r.FinalSysLogout, src: r.FinalSysSource,
     rawLate: r._rawLate, rawEarly: r._rawEarly, effLate: r._effLate, effEarly: r._effEarly, hr: r.HRActionRequired,
   }))));
+  /* ── CROSS-DAY RULE PASS ────────────────────────────────────────────────────────────
+     Three agreed rules cannot be checked inside the per-day loop, because each one is a
+     statement about a person's days NEXT TO EACH OTHER:
+
+       BR-RST-001  at least 10 hours rest between consecutive shifts
+       BR-OFF-002  never 3 or more consecutive OFF days
+       BR-OFF-001  exactly 2 OFF days per Saturday-to-Friday week
+
+     They were enforced in schedule-generator/generator.engine.ts — the path that AUTHORS a
+     schedule — and nowhere on the ingest path, which is where every row in this database
+     actually comes from. Measured before this pass existed: 10 rest breaches in July alone
+     (worst 6 hours between shifts), 7 runs of three-plus OFF, and only 74.7% of person-weeks
+     carrying exactly two OFF. None flagged, anywhere.
+
+     Same discipline as the female-shift flag: these FLAG, they never alter. An override may
+     be entirely legitimate — coverage is the governing priority — but an override nobody can
+     see is not an override. And as with the N shift, the weekly-OFF-count rule is deliberately
+     NOT flagged per row: a quarter of person-weeks deviate, so a per-row alarm would bury the
+     rest breaches that are genuinely rare. It belongs in the fairness report as a count. */
+  {
+    const byPerson = new Map();
+    for (const r of records) {
+      const k = String(r.EmployeeID);
+      if (!byPerson.has(k)) byPerson.set(k, []);
+      byPerson.get(k).push(r);
+    }
+    let restFlags = 0, offRunFlags = 0;
+    const addDq = (rec, msg) => {
+      const cur = rec._ingest.dq;
+      rec._ingest.dq = cur ? cur + ' | ' + msg : msg;
+    };
+    for (const [, rows] of byPerson) {
+      rows.sort((a, b) => (a.Date < b.Date ? -1 : a.Date > b.Date ? 1 : 0));
+      for (let i = 0; i < rows.length; i++) {
+        const cur = rows[i], nxt = rows[i + 1];
+
+        /* Rest: measured from THIS shift's end to the NEXT shift's start, unwrapping a
+           cross-midnight end. Only between two real shifts — an OFF day in between is rest,
+           not a violation. */
+        if (nxt) {
+          const a = cur._ingest, b = nxt._ingest;
+          if (a.schedStart != null && a.schedEnd != null && b.schedStart != null) {
+            const dayGap = (Date.parse(nxt.Date) - Date.parse(cur.Date)) / 86400000;
+            if (dayGap >= 1 && dayGap <= 2) {
+              const end = a.schedEnd <= a.schedStart ? a.schedEnd + 1440 : a.schedEnd;
+              const rest = dayGap * 1440 + b.schedStart - end;
+              if (rest >= 0 && rest < 600) {
+                addDq(cur, `RULE — only ${Math.round(rest / 60 * 10) / 10}h rest before the next shift ` +
+                  `(${nxt.Date} ${nxt.NormalizedCode}); minimum is 10h [BR-RST-001]`);
+                restFlags++;
+              }
+            }
+          }
+        }
+
+        /* Three consecutive OFF: flagged on the MIDDLE day, so one run raises one flag
+           rather than three. */
+        const prev = rows[i - 1];
+        if (prev && nxt && prev._ingest.shiftCode === 'OFF' &&
+            cur._ingest.shiftCode === 'OFF' && nxt._ingest.shiftCode === 'OFF') {
+          addDq(cur, 'RULE — three or more consecutive OFF days; allowed only by an authorised ' +
+            'exception [BR-OFF-002]');
+          offRunFlags++;
+        }
+      }
+    }
+    console.log(`cross-day rules: ${restFlags} rest breach(es), ${offRunFlags} run(s) of 3+ OFF flagged`);
+  }
+
   // live-ingest payload (raw minutes → roster_days) for recon-ingest.js
   fs.writeFileSync(SCRATCH + '/ingest.json', JSON.stringify(records.map(r => r._ingest)));
   console.log('\n=== BUILD SUMMARY ===');

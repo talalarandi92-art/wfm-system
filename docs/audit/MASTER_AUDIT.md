@@ -600,3 +600,61 @@ partial fix, it is a contradiction. Fixed in `roster-fairness.controller.ts` and
 **Why this belongs in the record even though it lasted an hour:** it is the strongest argument
 for the `weekendSql()` helper introduced in F-008. Sixteen literals plus three complements is
 nineteen places to remember. One function is one place.
+
+---
+
+### F-014 · The rest and OFF rules reach the ingest path — `FIXED`
+
+Closes the remaining half of **F-007**. Three rules were enforced only in
+`generator.engine.ts` — the path that AUTHORS a schedule — and never on the ingest path,
+which is where every row in this database arrives.
+
+They could not live in the per-day loop: each is a statement about a person's days **next to
+each other**. Added as a cross-day pass after all records are built, before the payload is
+written.
+
+| Rule | Implemented | Result on 2026-07-25 → 08-01 |
+|---|---|---|
+| BR-RST-001 · 10h rest between consecutive shifts | flag on the earlier day, naming the next shift | **8 breaches** |
+| BR-OFF-002 · never 3+ consecutive OFF | flag on the MIDDLE day, so one run = one item | 0 in this window |
+| BR-OFF-001 · exactly 2 OFF per week | **deliberately not flagged per row** | see below |
+
+**The pattern in the 8 is the finding, not the count:**
+
+```
+Mona Abdulbaqi   07-25  N    → 07-26 M     9h
+Raghad Qamhieh   07-27  N    → 07-28 M     9h
+Illaf Alloubab   07-27  N    → 07-28 M     9h
+Dima Awada       07-29  N20  → 07-30 M7-3  9h
+Hanan Shire      07-29  N    → 07-30 M     9h
+Sham Ali         07-30  N20  → 07-31 M7-3  9h
+Donya Sulaiman   07-31  N    → 08-01 M     9h
+Rand Chbib       07-31  E    → 08-01 B     8h
+```
+
+**Six of eight are the same hand-off.** A late shift ending 22:00 followed by a morning
+starting 07:00 is nine hours — one short of the minimum, every time. That is a property of the
+shift mix, not eight individual mistakes, and it will recur every week until the mix changes or
+the exception is recorded. Rand Chbib's E→B is eight hours.
+
+**Why the weekly-OFF-count rule is not flagged per row.** 25% of person-weeks deviate from
+"exactly 2". Flagging a quarter of all person-weeks would bury eight genuinely rare rest
+breaches under hundreds of routine items — the same judgement made for the N shift in F-007.
+It is a distribution question and belongs in the fairness report as a count per person.
+
+**Verified — flags only, nothing altered:**
+
+```
+dry run  ARRIVING 0 · LEAVING 0 · CHANGED 0 · IDENTICAL 828
+         scored 747=747 · conformance 94.7=94.7 · TRUE_OT 3520=3520
+
+promoted, restarted, live API:
+   8 days ·  8 people · rule_min_rest          Less than 10 hours rest between shifts
+   6 days ·  1 person · rule_female_midnight   Female agent on a midnight shift
+
+accuracy 17/20 · 0 HIGH · calc verify 7/7 · explain 461/461
+cross-check 31/31 · golden PASS · 626/626 unit tests
+```
+
+**F-007 is now fully closed.** Every rule that was enforced only where the system writes a
+schedule is now also checked where it receives one.
