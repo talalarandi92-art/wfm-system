@@ -531,12 +531,36 @@ export class StaffingService implements OnModuleInit {
       return { date, dow, functions, totalCurve48 };
     });
 
+    // How far behind the forecast's own inputs are. The window was already
+    // reported, but a date range is not a warning: nobody reads "measured
+    // 2026-05-23 → 2026-06-20" on an August schedule and computes seven weeks in
+    // their head. So the gap is measured here and named, and a schedule staffed to
+    // volume this old says so rather than presenting itself as current.
+    const newestInput = Object.values(facts.ahtWindow ?? {})
+      .map((w: any) => w?.to).filter(Boolean).sort().pop() as string | undefined;
+    const daysBehind = newestInput
+      ? Math.round((Date.parse(from) - Date.parse(newestInput)) / 86400000) : null;
+    const freshness = {
+      newestVolumeDay: newestInput ?? null,
+      daysBehind,
+      // A contact centre's mix moves week to week; a fortnight is a soft edge and
+      // a month means the curve is describing a different business.
+      level: daysBehind == null ? 'unknown' : daysBehind > 30 ? 'stale' : daysBehind > 14 ? 'ageing' : 'current',
+      note: daysBehind == null ? null
+        : daysBehind > 14
+          ? `Demand is built on volume last measured ${newestInput} — ${daysBehind} days before this schedule. ` +
+            `Required HC reflects that period, not today. · الطلب مبني على فوليوم آخر قياس له ${newestInput} — ` +
+            `أي ${daysBehind} يوم قبل هذا الجدول؛ الأرقام تصف تلك الفترة لا اليوم.`
+          : null,
+    };
+
     return {
       from, to, ordersScale,
       basisKind: 'engine-forecast' as const,
       basis: 'forecast: same-weekday 28d offered × intraday profile → effective AHT (talk[measured]+hold+ACW) → Erlang-C @ SL & occupancy cap → ÷productivity → ÷(1−shrinkage)',
       measuredAht: facts.ahtBy,
       measuredAhtWindow: facts.ahtWindow,   // the exact dates each channel's AHT was measured over (staleness is visible, never silent)
+      freshness,
       ordersPeriod: facts.ordersPeriod,
       days: result,
     };
@@ -1010,18 +1034,58 @@ export class StaffingService implements OnModuleInit {
         const absErr = Math.abs(r.forecast - r.actual);
         if (!worst || absErr > worst.absErr) worst = { date: r.date, actual: r.actual, forecast: r.forecast, absErr };
       }
+      // A trailing-mean forecast meeting a series that CHANGED LEVEL reports huge
+      // error, and the error is real — but its cause is not the model. Voice fell
+      // 8,271 → 287 offered/day over seven weeks while Ameyo was being switched off;
+      // the 2026-05-27 forecast of 4,181 against 743 actual is arithmetically exactly
+      // right for that history. Reading WAPE 156% as "the forecast is broken" would
+      // send someone to fix a model that is working. So the level shift is measured
+      // beside it and the reader is told which one they are looking at.
+      const ordered = [...rs].sort((a, b) => (a.date < b.date ? -1 : 1));
+      const half = Math.floor(ordered.length / 2);
+      const mean = (xs: any[]) => xs.length ? xs.reduce((s, r) => s + r.actual, 0) / xs.length : 0;
+      const firstHalf = mean(ordered.slice(0, half)), secondHalf = mean(ordered.slice(half));
+      const shiftPct = firstHalf > 0 ? +((100 * (secondHalf - firstHalf)) / firstHalf).toFixed(1) : null;
+      const structuralBreak = shiftPct != null && Math.abs(shiftPct) >= 40;
       return {
         channel, ...stats,
         avgDailyActual: +(rs.reduce((s, r) => s + r.actual, 0) / rs.length).toFixed(1),
+        levelShiftPct: shiftPct,
+        structuralBreak,
+        errorCause: !structuralBreak ? 'model'
+          : (shiftPct as number) < 0 ? 'series-fell' : 'series-rose',
+        note: structuralBreak
+          ? `Actual volume ${(shiftPct as number) < 0 ? 'fell' : 'rose'} ${Math.abs(shiftPct as number)}% ` +
+            `across this window, so most of the error is the level change, not the model. · ` +
+            `الفوليوم الفعلي ${(shiftPct as number) < 0 ? 'انخفض' : 'ارتفع'} ${Math.abs(shiftPct as number)}% ` +
+            `خلال هذه الفترة — الخطأ في معظمه تغيّر مستوى وليس خطأ نموذج.`
+          : null,
         worstDay: worst ? { date: worst.date, actual: worst.actual, forecast: worst.forecast,
                             errPct: worst.actual > 0 ? +((100 * (worst.forecast - worst.actual)) / worst.actual).toFixed(1) : null } : null,
       };
     }).sort((a, b) => (b.wapePct ?? 0) - (a.wapePct ?? 0));
 
+    // Which system these numbers came from, and when it last spoke. The whole table
+    // is one source today; if that source has stopped, every forecast built on it is
+    // describing a platform the centre may no longer be running.
+    const srcRows = await this.ds.query(
+      `SELECT source, max(vol_date)::text AS newest, count(*)::int AS n
+       FROM contact_volume_daily WHERE tenant_id = $1 GROUP BY source ORDER BY n DESC`,
+      [tenantId],
+    );
+    const brokenChannels = perChannel.filter((c: any) => c.structuralBreak).map((c: any) => c.channel);
+
     return {
       asOf: mx, days: nDays,
       basisKind: 'engine-forecast' as const,
       basis: 'backtest of the engine\'s own baseline: forecast(D) = mean of the previous ≤4 same-weekday measured offered, computed blind to D, vs measured offered (contact_volume_daily). WAPE = Σ|F−A|÷ΣA; bias positive = over-forecast (over-staff), negative = under-forecast (SL risk).',
+      sources: srcRows.map((r: any) => ({ source: r.source, rows: r.n, newest: r.newest })),
+      headline: brokenChannels.length
+        ? `${brokenChannels.length} of ${perChannel.length} channels changed level inside this window ` +
+          `(${brokenChannels.join(', ')}) — read the error as a level change first, the model second. · ` +
+          `${brokenChannels.length} من ${perChannel.length} قنوات تغيّر مستواها داخل هذه الفترة — ` +
+          `اقرأ الخطأ كتغيّر مستوى أولاً لا كخطأ نموذج.`
+        : null,
       overall: backtestStats(rows),
       perChannel,
       perDay: rows,

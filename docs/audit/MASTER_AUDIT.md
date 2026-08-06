@@ -811,3 +811,145 @@ accuracy (01–24 Jul, pre-rebuild data)         13/20 · 2 HIGH  ← the known 
 The two HIGH sit entirely outside the rebuilt window and are the same superseded-engine data
 already on record. Every "0 HIGH" quoted for the roster is measured on the rebuilt window — said
 here plainly so the number is never read wider than it is.
+
+---
+
+## Queue item 3 — Capacity, Forecasting and the demand behind every schedule
+
+Every cell of `/capacity/staffing/requirement` returns its full working — volume → effective AHT
+→ erlangs → agents for SL → occupancy → ÷productivity → ÷(1−shrinkage). That makes it checkable,
+so `scripts/audit-capacity.js` re-derives each step with a **textbook Erlang-C written out in the
+harness**, never imported from the engine: a check that borrows the formula it is checking cannot
+catch a wrong formula.
+
+**The maths is sound. All 108 cells re-derive.** What it is being fed is the problem.
+
+```
+K1  erlangs = vol × AHT / 3600      108/108 ✓     K5  shrinkage → scheduled HC   108/108 ✓
+K2  agents match textbook Erlang-C  108/108 ✓     K6  chat/WhatsApp concurrency = 4    ✓
+K3  occupancy = A / N               108/108 ✓     K7  more volume never needs fewer     ✓
+K4  afterProductivity divisor       108/108 ✓     K8  generator demand = this engine  43 = 43 ✓
+```
+
+> **Method note — three findings that were mine, not the engine's.** The first run reported 2 HIGH
+> and 1 MED. All three were the harness reaching past what it knew: it applied **Erlang-C to
+> throughput functions** (which have no wait-time target and are staffed to their occupancy
+> ceiling); it divided concurrency load by the raw `concurrency` when the engine models
+> **diminishing returns** (4 chats = 3.25 servers, `1 + (c−1)·0.75` — conservative, it staffs
+> *more*); and it failed **Social Media & Email** for using concurrency 3 when the confirmed rule
+> names chat and WhatsApp only, not social or email. Corrected, the engine is clean. The pattern
+> is now familiar enough to name: **a red light I cannot explain is my measurement until proven
+> otherwise.**
+
+### F-020 · A six-person team was told to cover the whole company — `FIXED`
+
+Generating for OMT alone produced **10,452 required hours against 252 staffed — 1.7% coverage,
+every day critical.** For a team of six.
+
+The requirement engine correctly passes `functionKeys` when it has a forecast. When it does not,
+the code falls back to the Sprinklr live plan — and `getLivePlan(tenantId, date)` has **no function
+dimension at all**. It is the whole centre's workload. So a function with no demand basis was
+handed the entire company's curve and judged against it.
+
+The same shape as F-017 and F-019: **a scope honoured on the primary path and dropped on the
+fallback.** Third instance in two days.
+
+The multi-function path already handles this properly — it names such functions in `noCurveFns`
+and leaves them alone. The scoped path now refuses the same way, naming them:
+
+```
+before   OMT → 201, coverage 1.7%, 7 critical days   (fabricated)
+after    OMT → 400  "No demand basis for OMT … the measured live plan is centre-wide,
+                     so it cannot stand in for one function."
+         Inbound → 201, coverage 85.7%   (unchanged)
+         ALL     → 201, coverage 84.6%   (unchanged)
+```
+
+A gap the generator invented is worse than a gap it cannot see.
+
+### F-021 · The demand behind every schedule is 55 days old, from a system being switched off
+
+Not a code defect — a fact the platform was not saying loudly enough.
+
+```
+contact_volume_daily   every row source = 'ameyo'   newest 2026-06-21
+order_aggregates       newest "2026-06 (1-14)"
+roster_days            newest 2026-08-01        today 2026-08-06
+```
+
+The Director's own note: from July the centre is fully on Sprinklr, no Ameyo. So the table feeding
+every staffing calculation holds **only** the decommissioned system's data, and it stops seven
+weeks back. Monthly means show the wind-down across all five channels:
+
+```
+voice     01: 375  02: 260  03: 762  04:1659  05:2430  06: 537
+chat      01: 821  02: 688  03:1637  04: 605  05: 158  06:  41
+whatsapp                    03:  50  04: 928  05:2720  06: 829
+```
+
+The engine reported its measurement window, but a date range is not a warning — nobody reads
+"measured 2026-05-23 → 2026-06-20" on an August schedule and computes seven weeks in their head.
+The requirement response now returns a `freshness` verdict (`daysBehind`, `level`,
+current/ageing/stale) which the generator carries up, and the screen shows it beside the green
+badge: **⚠ الفوليوم متأخر 55 يوم (آخر قياس 2026-06-21)**.
+
+**For the Director:** the maths is correct and the inputs are not current. Loading Sprinklr volume
+is the fix; nothing in the code can substitute for it.
+
+### F-022 · WAPE 125% was measuring a decommissioning, not a forecast
+
+The backtest reported **overall WAPE 124.8%, bias +124%** — error larger than the actual volume,
+which reads as a broken model. It is not. Voice Wednesdays:
+
+```
+04-29: 8271 · 05-06: 4319 · 05-13: 2412 · 05-20: 1723 · 05-27: 743 · 06-03: 1289 · 06-17: 287
+forecast(05-27) = mean(8271, 4319, 2412, 1723) = 4181.25   — reported 4181.3, exactly right
+```
+
+A trailing-mean forecast meeting a series in freefall reports huge error, and the error is real —
+but its cause is the level change, not the model. Sending someone to fix a working model is the
+expensive outcome. The endpoint now measures the level shift beside the error and says which one
+you are looking at:
+
+```
+voice     WAPE 155.7  levelShift −76.1%  series-fell      sources: [{ameyo, 3030 rows, newest 2026-06-21}]
+chat      WAPE 120.9  levelShift −73.6%  series-fell      headline: 3 of 5 channels changed level
+whatsapp  WAPE 115.4  levelShift −58.2%  series-fell      inside this window — read the error as a
+email     WAPE  90.9  levelShift −26.6%  model            level change first, the model second.
+social    WAPE  84.3  levelShift −39.1%  model
+```
+
+### F-023 · The six-day week was fixed in a file that never runs — `FIXED`
+
+F-018 changed `offDaysPerWeek` from 1 to 2 in `pages/ScheduleGenerator.tsx`. The generator screen
+renders **`pages/schedule/GeneratorPanel.tsx`**. `ScheduleGenerator.tsx` — 1,285 lines — is
+imported by nothing: dead, and near-identical, which is exactly why the edit looked right.
+
+Caught by the build hash: after the edit the bundle name did not change, so the edit was not in
+the build. Fixed in the live file and the dead duplicate deleted, so the next person cannot make
+the same edit in the same wrong place.
+
+**Verified on the running screen, not asserted:** 105 scheduled people × 2 OFF = **210**, × 5 shifts
+= **525**. The arithmetic closes exactly.
+
+### F-024 · Fifteen people got no schedule and the screen did not say so — `FIXED`
+
+`525 shifts + 210 OFF` over `120 employees` reads as a full week. It is 735 of 840 person-days.
+The missing 105 were **15 people with a completely empty week** — whole functions with no demand
+basis (OMT 6, Team Leader 4, RTA 3, Resolution Specialist 2).
+
+The engine was honest: `verdict.unscheduled` names every one of them by function. The KPI row
+simply dropped it. Added as a tile that is grey at zero and rose otherwise, carrying the
+breakdown:
+
+```
+الموظفون 120 · بلا جدول 15 (OMT: 6 · Resolution Specialist: 2 · RTA: 3 · Team Leader: 4)
+ورديات مخططة 525 · أيام OFF 210
+```
+
+### Gates
+
+```
+audit-capacity  108/108 cells CLEAN   ·   audit-generator G1–G7 CLEAN
+unit tests 627/627   ·   cross-check 31/31   ·   explain 1401/1401
+```

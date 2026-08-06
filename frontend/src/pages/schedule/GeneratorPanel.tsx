@@ -416,7 +416,10 @@ export default function GeneratorPanel() {
   const [selectedWeek, setSelectedWeek] = useState(currentSat());
   const [selectedFns, setSelectedFns]   = useState<string[]>([]);
   const [femaleLateFns, setFemaleLateFns] = useState<string[]>([]);  // per-function female-N exception (classic)
-  const [options, setOptions]   = useState({ minRestHours: 10, offDaysPerWeek: 1, allowFemaleN: false });
+  // offDaysPerWeek defaults to 2 — the agreed rule (BR-OFF-001) and the backend's
+  // own default. It sat at 1 here, so every schedule generated from this screen gave
+  // everyone a six-day week; the switch is still there to lower it deliberately.
+  const [options, setOptions]   = useState({ minRestHours: 10, offDaysPerWeek: 2, allowFemaleN: false });
   // Engine mode (D-077): demand-driven is THE generator; classic kept for comparison
   const [engine, setEngine] = useState<'demand' | 'classic'>('demand');
   const [demandOpts, setDemandOpts] = useState<{ offStrategy: 'lowest-demand' | 'weekend-fair'; rotationFairness: boolean }>({
@@ -767,6 +770,20 @@ export default function GeneratorPanel() {
                 {ar ? '⚡ المصدر المتوقع: فوركاست + Erlang (demand.source)' : '⚡ Expected source: forecast + Erlang (demand.source)'}
               </span>
             )}
+            {/* A green "forecast + Erlang" badge over volume measured weeks ago reads as
+                current when it is not. The engine returns how far behind its own inputs
+                are; past a fortnight it is said out loud, right next to the badge. */}
+            {(dr?.demand as any)?.freshness?.note && (
+              <span className="px-2.5 py-1 rounded-lg text-[11px] font-bold"
+                title={(dr!.demand as any).freshness.note}
+                style={(dr!.demand as any).freshness.level === 'stale'
+                  ? { background: 'rgba(244,63,94,0.12)', color: '#fb7185', border: '1px solid rgba(244,63,94,0.35)' }
+                  : { background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)' }}>
+                {ar
+                  ? `⚠ الفوليوم متأخر ${(dr!.demand as any).freshness.daysBehind} يوم (آخر قياس ${(dr!.demand as any).freshness.newestVolumeDay})`
+                  : `⚠ volume ${(dr!.demand as any).freshness.daysBehind}d behind (last measured ${(dr!.demand as any).freshness.newestVolumeDay})`}
+              </span>
+            )}
             {dr?.demand?.basis && (
               <span className="text-[10px]" style={{ color: 'var(--text-3)' }}>{dr.demand.basis}</span>
             )}
@@ -989,15 +1006,27 @@ export default function GeneratorPanel() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                   {[
                     { la: 'الموظفون',      le: 'Employees',      v: dr.summary.employees,            c: '#818cf8' },
+                    // The engine already names everyone it could not place (verdict.unscheduled)
+                    // and this row dropped it: 525 shifts + 210 OFF over 120 people reads as a
+                    // full week, but 105 of those 840 person-days belonged to 15 people who got
+                    // NOTHING — whole functions with no demand basis. A tile that is invisible
+                    // at zero and loud otherwise.
+                    { la: 'بلا جدول',      le: 'Unscheduled',    v: (dr as any).verdict?.unscheduled?.people ?? 0,
+                      c: ((dr as any).verdict?.unscheduled?.people ?? 0) ? '#fb7185' : '#64748b',
+                      t: (dr as any).verdict?.unscheduled?.byFunction
+                        ? Object.entries((dr as any).verdict.unscheduled.byFunction).map(([k, n]) => `${k}: ${n}`).join(' · ')
+                        : undefined },
                     { la: 'ورديات مخططة', le: 'Shifts planned', v: dr.summary.totalShiftsPlanned,   c: '#34d399' },
                     { la: 'أيام OFF',      le: 'OFF days',       v: dr.summary.totalOffDays,          c: '#94a3b8' },
                     { la: 'شواغر',         le: 'Unfilled',       v: dr.summary.unfilledSlots,         c: dr.summary.unfilledSlots ? '#f87171' : '#64748b' },
                     { la: 'فترات عجز',     le: 'Gap intervals',  v: dr.summary.residualGapIntervals,  c: dr.summary.residualGapIntervals ? '#fbbf24' : '#64748b' },
                     { la: 'أيام حرجة',     le: 'Critical days',  v: dr.summary.criticalDays,          c: dr.summary.criticalDays ? '#f87171' : '#4ade80' },
-                  ].map(t => (
-                    <div key={t.le} className="rounded-2xl p-4" style={{ background: `${t.c}12`, border: `1px solid ${t.c}30` }}>
+                  ].map((t: any) => (
+                    <div key={t.le} className="rounded-2xl p-4" title={t.t}
+                      style={{ background: `${t.c}12`, border: `1px solid ${t.c}30` }}>
                       <p className="text-2xl font-extrabold" style={{ color: t.c }}>{t.v}</p>
                       <p className="text-xs text-slate-400 mt-0.5">{ar ? t.la : t.le}</p>
+                      {t.t && <p className="text-[10px] mt-1" style={{ color: t.c }}>{t.t}</p>}
                     </div>
                   ))}
                 </div>

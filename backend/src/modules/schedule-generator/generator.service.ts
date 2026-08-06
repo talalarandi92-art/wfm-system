@@ -69,6 +69,7 @@ export class GeneratorService {
     // date → canonFn → 48-slot required curve — the per-function allocation inside ONE generate
     let fnCurveByDate: Map<string, Map<string, number[]>> | null = null;
     let forecastBasis = '';
+    let forecastFreshness: any = null;
     try {
       // scope the requirement to the same functions the pool is scoped to
       let functionKeys: string[] | undefined;
@@ -82,6 +83,9 @@ export class GeneratorService {
       const req = await this.staffing.hourlyRequirement(tenantId, weekStart, buildWeekDates(weekStart)[6], { functionKeys });
       const total = req.days.reduce((s: number, d: any) => s + d.totalCurve48.reduce((a: number, b: number) => a + b, 0), 0);
       if (total > 0) {
+        // Carry the requirement engine's own freshness verdict up with the curve —
+        // the schedule is only as current as the volume behind it.
+        forecastFreshness = (req as any).freshness ?? null;
         forecastByDate = new Map(req.days.map((d: any) => [d.date, d.totalCurve48]));
         fnCurveByDate = new Map(req.days.map((d: any) => [
           d.date,
@@ -94,6 +98,29 @@ export class GeneratorService {
         forecastBasis = req.basis;
       }
     } catch (e) { /* no staffing params / no volume history → fall back below */ }
+
+    // The fallback below is the Sprinklr live plan, and getLivePlan has NO function
+    // dimension — it is the whole centre's workload. That is the right basis for an
+    // unscoped run and a fabrication for a scoped one: asked for OMT alone, the
+    // generator demanded the entire company's curve from six people and called every
+    // day critical at 1.7% coverage — 10,452 required hours for a team that can supply
+    // 252. A gap the generator invented is worse than a gap it cannot see, so a scoped
+    // run with no requirement basis refuses and says which functions lack one. The
+    // multi-function path already names them the same way (noCurveFns, below).
+    if (!forecastByDate && options.functionIds?.length) {
+      const named = await this.ds.query(
+        `SELECT name FROM functions WHERE tenant_id = $1 AND id = ANY($2::uuid[]) ORDER BY name`,
+        [tenantId, options.functionIds],
+      );
+      const list = named.map((r: any) => r.name).join(', ');
+      throw new BadRequestException(
+        `No demand basis for ${list} — these functions are not demand-staffed in staffing_params, ` +
+        `and the measured live plan is centre-wide, so it cannot stand in for one function. ` +
+        `Use the classic engine or the ladder for them, or add their volume data. · ` +
+        `لا يوجد أساس طلب لـ ${list} — غير مُدرجة بمحرك المتطلبات، والخطة المقاسة على مستوى المركز كله ` +
+        `فلا تصلح بديلاً لقسم واحد. استخدم المحرك الكلاسيكي أو الروتيشن التدريجي، أو أضف بيانات الفوليوم.`,
+      );
+    }
 
     // weekday (0-6) → list of measured 48-curves (fallback basis)
     const byWeekday = new Map<number, number[][]>();
@@ -352,6 +379,7 @@ export class GeneratorService {
             ? `P90 per weekday over ${allCurves.length} measured days (live-plan fallback — staffing engine had no volume data)`
             : `sparse history (${allCurves.length} measured day(s)) — same curve applied to all weekdays; accuracy improves as data accumulates`,
         source: forecastByDate ? 'forecast-erlang' : 'live-plan-history',
+        freshness: forecastFreshness,
         demandScale,
         days,
       },
