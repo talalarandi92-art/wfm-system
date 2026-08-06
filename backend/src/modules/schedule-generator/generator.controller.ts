@@ -38,6 +38,19 @@ class SaveDto extends GenerateDto {
   label?: string;
 }
 
+/**
+ * The two generate endpoints share one DTO but read the function scope from two
+ * different places: /generate takes `body.functionIds`, the demand path reads
+ * `options.functionIds`. A caller that filled in the top-level field — the one
+ * the DTO advertises — got a whole-company schedule back from the demand path
+ * with no error and no clue. Same request, same DTO, silently different scope.
+ * Fold them into one so either spelling means the same thing.
+ */
+function scopeOptions(body: GenerateDto) {
+  const fnIds = body.options?.functionIds ?? body.functionIds;
+  return fnIds?.length ? { ...body.options, functionIds: fnIds } : body.options;
+}
+
 @Controller('schedule-generator')
 @UseGuards(JwtAuthGuard)
 @RequirePermissions('schedule.view_draft')
@@ -77,7 +90,7 @@ export class GeneratorController {
     @Request() req: any,
     @Body() body: GenerateDto,   // validated: offStrategy IsIn, rotationFairness IsBoolean, bounds on offDaysPerWeek/internProductivity (was `options?: any` — bypassed the DTO)
   ) {
-    return this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
+    return this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, scopeOptions(body));
   }
 
   /**
@@ -91,9 +104,10 @@ export class GeneratorController {
     @Request() req: any,
     @Body() body: SaveDto,   // validated (SaveDto extends GenerateDto) — was `options?: any`, bypassing the DTO
   ) {
-    const result = await this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, body.options);
+    const scoped = scopeOptions(body);
+    const result = await this.svc.generateDemandDriven(req.user.tenantId, body.weekStart, scoped);
     const versionId = await this.svc.saveDemandDraft(req.user.tenantId, result, req.user.userId, body.label);
-    await this.svc.logFemaleOverride(req.user.tenantId, req.user.userId ?? null, body.options);
+    await this.svc.logFemaleOverride(req.user.tenantId, req.user.userId ?? null, scoped);
     return { ...result, versionId };
   }
 

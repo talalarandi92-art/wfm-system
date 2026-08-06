@@ -369,7 +369,10 @@ export default function ScheduleGeneratorPage() {
   const [selectedWeek, setSelectedWeek] = useState(currentSat());
   const [selectedFns, setSelectedFns]   = useState<string[]>([]);
   const [femaleLateFns, setFemaleLateFns] = useState<string[]>([]);  // per-function female-N exception
-  const [options, setOptions]   = useState({ minRestHours: 10, offDaysPerWeek: 1, allowFemaleN: false });
+  // offDaysPerWeek defaults to 2 — the agreed rule (BR-OFF-001) and the backend's
+  // own default. It sat at 1 here, so every schedule generated from this screen
+  // gave everyone a six-day week; the switch is still there to lower it deliberately.
+  const [options, setOptions]   = useState({ minRestHours: 10, offDaysPerWeek: 2, allowFemaleN: false });
   const [showOptions, setShowOptions]   = useState(false);
   // Engine mode (D-077): demand-driven is THE generator; classic kept for comparison
   const [engine, setEngine] = useState<'demand' | 'classic'>('demand');
@@ -815,7 +818,7 @@ export default function ScheduleGeneratorPage() {
               <div className="flex gap-2">
                 {([
                   ['lowest-demand', ar ? 'أقل طلب' : 'Lowest demand', ar ? 'الـ OFF بأيام أقل احتياج — أقصى تغطية' : 'OFFs on the lowest-demand days — max coverage'],
-                  ['weekend-fair',  ar ? 'ويكند عادل' : 'Weekend-fair', ar ? 'OFF ويكند (خميس/جمعة) + OFF منتصف الأسبوع بعدالة سنوية' : 'One Thu/Fri OFF + one mid-week OFF, YTD-fair'],
+                  ['weekend-fair',  ar ? 'ويكند عادل' : 'Weekend-fair', ar ? 'OFF ويكند (خميس/جمعة/سبت) + OFF منتصف الأسبوع بعدالة سنوية' : 'One Thu/Fri/Sat OFF + one mid-week OFF, YTD-fair'],
                 ] as ['lowest-demand' | 'weekend-fair', string, string][]).map(([v, lbl, tip]) => (
                   <button key={v} title={tip} onClick={() => setDemandOpts(o => ({ ...o, offStrategy: v }))}
                     className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all border ${

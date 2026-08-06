@@ -111,6 +111,30 @@ export function functionAllowsFemaleLate(functionName?: string): boolean {
   return !!findFunctionPolicy(functionName)?.femaleAllowLate;
 }
 
+/**
+ * THE female-late (N) exception test — the only one. Three sources grant it:
+ * the permanent per-function config (OMT/Outbound), a per-run pick, or the
+ * global override.
+ *
+ * It exists because the three places that asked the question each answered it
+ * differently: shift-candidate generation honoured the function config, while
+ * validation and band rotation only looked at the global override. So OMT — six
+ * women whose operating window runs to 22:00 — were offered N, then vetoed, and
+ * every one of them landed on B. Their 18:00–22:00 window was structurally
+ * uncoverable while the config said it was allowed.
+ *
+ * 'blocked' shifts (E/EE/MD/MN) are never reachable through this — the exception
+ * only ever relaxes the 'warn' tier. BR-GEN-002.
+ */
+export function femaleLateAllowed(
+  emp: { functionId?: string; functionName?: string },
+  options: { allowFemaleN?: boolean; femaleLateFunctionIds?: string[] },
+): boolean {
+  return functionAllowsFemaleLate(emp.functionName)
+    || (!!emp.functionId && !!options.femaleLateFunctionIds?.includes(emp.functionId))
+    || !!options.allowFemaleN;
+}
+
 // ─── Employee Info ────────────────────────────────────────────────────────────
 export interface EmployeeInfo {
   id: string;
@@ -135,9 +159,11 @@ export interface ShiftDistribution {
   total: number;
   // Individual shift-code counts (M, B, C, N, E, EE, MD, MN…)
   byCodes: Record<string, number>;
-  // Weekend fairness
-  weekendOff: number;    // OFF days that fall on Thu/Fri (getDay 4=Thu, 5=Fri, 6=Sat)
-  weekendWork: number;   // Working days on Thu/Fri
+
+  // Weekend = Thu + Fri + Sat (WEEKEND_DOW in @common/wfm-calc — the one
+  // definition; these two are filled through isWeekend, never a local test).
+  weekendOff: number;    // OFF days landing on the weekend
+  weekendWork: number;   // working days landing on the weekend
   // Consecutive tracking
   maxConsecutive: number;  // historical max consecutive working days
 }

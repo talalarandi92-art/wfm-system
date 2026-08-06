@@ -835,7 +835,7 @@ export default function GeneratorPanel() {
                   {ar ? 'OFF: أقل طلب' : 'OFF: lowest demand'}
                 </Chip>
                 <Chip on={demandOpts.offStrategy === 'weekend-fair'} tone={SPAL.publish}
-                  title={ar ? 'OFF ويكند (خميس/جمعة) + OFF منتصف الأسبوع بعدالة سنوية' : 'One Thu/Fri OFF + one mid-week OFF, YTD-fair'}
+                  title={ar ? 'OFF ويكند (خميس/جمعة/سبت) + OFF منتصف الأسبوع بعدالة سنوية' : 'One Thu/Fri/Sat OFF + one mid-week OFF, YTD-fair'}
                   onClick={() => setDemandOpts(o => ({ ...o, offStrategy: 'weekend-fair' }))}>
                   {ar ? 'OFF: ويكند عادل' : 'OFF: weekend-fair'}
                 </Chip>

@@ -125,7 +125,7 @@ export default function ScheduleAnalysisPage() {
             ))}</tbody>
           </table>
         </div>
-        <p className="text-[10px] text-slate-500">{ar?'الشرينكيج = ساعات مفقودة (إجازة/سيك/غياب/عطلة + استئذانات) ÷ الساعات القابلة للجدولة. ويك-إند OFF% = حصة الـOFF الواقعة خميس/جمعة من إجمالي الـOFF. المصدر: الجدول المعتمد (roster_days).':'Shrinkage = lost hrs (leave/sick/absent/holiday + permissions) ÷ schedulable hrs. Weekend-OFF% = share of OFFs landing Thu/Fri. Source: approved schedule (roster_days).'}</p>
+        <p className="text-[10px] text-slate-500">{ar?'الشرينكيج = ساعات مفقودة (إجازة/سيك/غياب/عطلة + استئذانات) ÷ الساعات القابلة للجدولة. ويك-إند OFF% = حصة الـOFF الواقعة خميس/جمعة/سبت من إجمالي الـOFF. المصدر: الجدول المعتمد (roster_days).':'Shrinkage = lost hrs (leave/sick/absent/holiday + permissions) ÷ schedulable hrs. Weekend-OFF% = share of OFFs landing Thu/Fri/Sat. Source: approved schedule (roster_days).'}</p>
       </>)}
     </div>
   );

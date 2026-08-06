@@ -119,11 +119,32 @@ describe('validateShift', () => {
   });
 
   it('function-level female-late config: Outbound allows the late (warn) shift', () => {
-    // validateShift itself only consults options.allowFemaleN; the per-function
-    // relaxation is applied in shift selection via functionAllowsFemaleLate.
     expect(functionAllowsFemaleLate('Outbound')).toBe(true);
     expect(functionAllowsFemaleLate('Customer Care')).toBe(false);
     expect(allowedShiftCodes('Outbound')).toEqual(new Set(['B', 'N']));
+  });
+
+  // Regression — the exception used to be answered differently in each place that
+  // asked. Shift selection honoured the function config while validateShift only
+  // read options.allowFemaleN, so every OMT woman was offered N and then vetoed,
+  // and the team's 18:00–22:00 window could not be staffed at all. validateShift
+  // must ask the same question.
+  it('validateShift honours the per-function female-late exception, not just the global flag', () => {
+    const outbound = emp('f-omt', 'female', 'Outbound', 'fn-omt');
+    const care = emp('f-care', 'female', 'Customer Care', 'fn-care');
+
+    expect(validateShift(outbound, SHIFTS.N, null, opts())).toEqual([]);
+    expect(validateShift(care, SHIFTS.N, null, opts())).toContain('female_warn:N');
+
+    // the per-run pick grants it too
+    expect(validateShift(care, SHIFTS.N, null, opts({ femaleLateFunctionIds: ['fn-care'] }))).toEqual([]);
+
+    // and it NEVER reaches a blocked shift, whichever source grants it
+    for (const o of [opts(), opts({ allowFemaleN: true }), opts({ femaleLateFunctionIds: ['fn-omt'] })]) {
+      for (const s of [SHIFTS.E, SHIFTS.N2, SHIFTS.MD, SHIFTS.MN]) {
+        expect(validateShift(outbound, s, null, o)).toContain(`female_blocked:${s.code}`);
+      }
+    }
   });
 });
 

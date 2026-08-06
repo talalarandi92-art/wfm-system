@@ -658,3 +658,156 @@ cross-check 31/31 · golden PASS · 626/626 unit tests
 
 **F-007 is now fully closed.** Every rule that was enforced only where the system writes a
 schedule is now also checked where it receives one.
+
+---
+
+## Queue item 2 — The Schedule Generator
+
+The generator is the one place the system **authors** a schedule instead of receiving one, so it
+is the one place a broken rule stays invisible: nobody reviews 120 people × 7 days by eye. It was
+driven for real (`scripts/audit-generator.js`, week 2026-08-15, 840 assignments) and every rule it
+claims was re-derived from its output independently — from the shift catalog, not from its own
+report.
+
+The first run came back CLEAN. Five defects were behind that word.
+
+### F-015 · The "shift before the week" was up to 29 days old — `FIXED`
+
+`loadLastShifts` took the most recent `attendance_records` row before the week **with no date
+floor**. Generating any week past the data horizon anchored on whatever row happened to be last.
+
+```
+week requested          2026-08-15
+latest data             2026-08-01
+→ 104 people anchored on a row 14 days earlier
+→  54 people anchored on a row 29 days earlier
+```
+
+Both uses of that value are statements about the **adjacent** day: the rest check on day 1, and
+the rotation band to move on from. So the generator reported a rest violation — *Line Khaled, 0h
+rest* — between two days two weeks apart. A rule breach nobody could have caused, on a schedule
+nobody had worked.
+
+The sibling query `loadConsecutiveDays` already bounds itself to 7 days. Same file, one got it
+and one did not. Fixed with the tighter window rest actually needs:
+`AND ar.attendance_date >= $3::date - interval '1 day'`. **Reported violations 1 → 0**, and the
+independent check still finds 0 real breaches — a false alarm removed without hiding anything.
+
+### F-016 · Six women could not be scheduled on the shift their own team runs — `FIXED`
+
+Outbound/OMT is configured `codes: ['B','N'], femaleAllowLate: true` — an all-female team whose
+window runs to 22:00. The week it generated:
+
+```
+before   Aisha B  B  B  B  OFF B  B          all six women, every day, B only
+after    Aisha OFF B  B  B  B  OFF B   ·  Amthal N N N N OFF N OFF
+```
+
+Three places ask "may this woman work N?" and each answered differently:
+
+| site | consulted | result |
+|---|---|---|
+| `getWorkingShifts` | function config + per-run + global | N offered ✓ |
+| `validateShift` | **global override only** | N flagged ✗ |
+| band rotation | per-run + global | never targeted night ✗ |
+
+Candidate generation allowed N, validation vetoed it, so B won every time. The configured
+exception had never once fired, and the team's **18:00–22:00 window was structurally
+uncoverable** while the config said it was allowed. The existing spec even documented the split
+as intended — it pinned the bug in place.
+
+One predicate now, `femaleLateAllowed()`, used by both engines (the demand path also stopped
+warning "no alternative available — needs supervisor approval" on the team where N *is* the
+policy). Blocked shifts stay blocked through every path — asserted in the new regression test.
+
+Result: **15 female-N assignments, all inside the exception, 0 violations, 0 midnight,
+0 blocked-evening.**
+
+### F-017 · One DTO, two endpoints, two different meanings of "which function" — `FIXED`
+
+`/generate` reads `body.functionIds`. `/generate-demand` reads `options.functionIds` and drops
+the top-level field. A caller filling in the field the DTO advertises got a **whole-company
+schedule** back — 120 people instead of the 6 requested — with no error and no clue.
+
+```
+before   functionIds → 120 people  ·  options.functionIds → 6 people
+after    functionIds →   6 people  ·  options.functionIds → 6 people
+```
+
+### F-018 · Every schedule made from the screen gave a six-day week — `FIXED`
+
+Backend default `offDaysPerWeek: 2`, with the comment citing the rule. Frontend default: **1**.
+The screen is the only way this is used, so every generated schedule broke BR-OFF-001 — visible
+in plain sight on the page: six women, one OFF each. Default corrected; the switch stays for a
+deliberate override.
+
+### F-019 · The weekend rule reached the measurements but not the placement — `FIXED`
+
+The 2026-08-06 ruling widened the weekend to Thu+Fri+Sat and `WEEKEND_DOW` moved. The generator
+carried a **second, independent** definition:
+
+```js
+// Weekend = THURSDAY + FRIDAY only … (Saturday is a regular working day)
+const WEEKEND_DAY_INDICES = [5, 6];
+const WEEKDAY_INDICES     = [0, 1, 2, 3, 4];   // ← Saturday sat in here
+```
+
+So Saturday counted as a weekend day in every fairness measure, while OFF placement could never
+give it as the weekend OFF — it competed with Sunday–Wednesday for the mid-week slot. The same
+half-applied change that made the platform run two weekends at once. Both sets are now **derived**
+from `WEEKEND_DOW`; complements cannot drift apart again.
+
+```
+OFF days by weekday, after      Sat 40 · Thu 38 · Fri 42   ← the weekend
+                                Sun 28 · Mon 25 · Tue 34 · Wed 33
+```
+
+Also fixed alongside: `weekend` health totals carried `{thu, fri}` while its own recommendation
+text **named three days and printed two** — a Saturday at 60% raised nothing. And ten user-facing
+labels across five screens still read "Thu/Fri" (two of them "Thu/Thu/Fri") over numbers that had
+already been counting Saturday.
+
+### Two smaller ones
+
+- The rest message read **"0hh rest"** — the violation token already carries its unit and the
+  formatter appended another.
+- The publish-lock refusal told the user to *"re-publish with force=true"*. **No route accepts
+  `force`** — the parameter has exactly one caller and it never passes it. The message advertised
+  a capability that does not exist; exposing it would let a published week be rewritten under
+  agents who have already been told their shifts, so it stays the Director's call (BR-APP-006).
+  The message now points at the escape hatch that is real: edit the published version.
+
+### The publish lock itself — proven, not read
+
+`generate` never overwrites: `saveDraft` always inserts a new draft. Publishing over a published
+period is refused by a conflict guard. That was **tested, not trusted** — snapshot, attempt,
+diff:
+
+```
+snapshot 1120 rows · publish draft aef73cd7 over published Jun 20 – Jul 17
+→ HTTP 400  "A published/locked schedule already covers 2026-06-20 → 2026-06-26 …"
+attendance_records unchanged: YES   ·   version statuses unchanged: YES
+```
+
+The three overlapping published versions already in the database were all published
+2026-06-15 — **before the guard existed**. History, not a hole.
+
+> **Method note.** The first version of this harness reported G7 as a pass. Both 400s it saw were
+> **my own malformed requests** — a date key that does not exist on the response, and a `schedules`
+> field the DTO rejects. A refusal is not proof; the check now asserts the *reason* and re-reads
+> the state afterwards. Same lesson as the crying-wolf gate: a green light whose cause you have
+> not verified is not a green light.
+
+### Standing gates after this work
+
+```
+audit-generator   G1–G7 clean on real output   ·   unit tests 627/627
+explain           1401/1401 re-derive (100%)   ·   cross-check 31/31
+accuracy (rebuilt window 07-25 → 08-01)        17/20 · 0 HIGH
+accuracy (01–24 Jul, pre-rebuild data)         13/20 · 2 HIGH  ← the known limitation,
+                                                                 untouched by this work
+```
+
+The two HIGH sit entirely outside the rebuilt window and are the same superseded-engine data
+already on record. Every "0 HIGH" quoted for the roster is measured on the rebuilt window — said
+here plainly so the number is never read wider than it is.

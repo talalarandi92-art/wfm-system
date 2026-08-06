@@ -21,7 +21,7 @@
  *   the blocking reason (per project rule: show gaps honestly).
  */
 
-import { ShiftDef, SHIFTS, EmployeeInfo, ShiftDistribution, allowedShiftCodes } from './generator.types';
+import { ShiftDef, SHIFTS, EmployeeInfo, ShiftDistribution, allowedShiftCodes, femaleLateAllowed } from './generator.types';
 import { calcRestHours, assignOffDays, ROTATION_NEXT } from './generator.engine';
 
 /* ── Interval helpers ─────────────────────────────────────────────────────── */
@@ -196,6 +196,10 @@ export function assignRoster(
   priorConsecutive: Map<string, number>,
   opts: {
     minRestHours: number; offDaysPerWeek: number; maxConsecutive?: number;
+    /** Female-late (N) exception — same two switches the classic engine takes,
+     *  so both paths answer the question identically. See femaleLateAllowed. */
+    allowFemaleN?: boolean;
+    femaleLateFunctionIds?: string[];
     /** empId → dates with APPROVED leave — assigned 'L', excluded from staffing */
     onLeave?: Map<string, Set<string>>;
     /**
@@ -404,8 +408,12 @@ export function assignRoster(
           return true;
         });
 
-        // Female-N only as a true last resort (business rule 6.4)
-        const males = eligible.filter(e => !(e.gender === 'female' && shift.femaleRule === 'warn'));
+        // Female-N only as a true last resort (business rule 6.4) — EXCEPT where
+        // the exception applies (OMT's window runs to 22:00 and the team is all
+        // female): there N is ordinary work, so those women are not pushed to the
+        // back of the queue and not warned about below.
+        const males = eligible.filter(e =>
+          !(e.gender === 'female' && shift.femaleRule === 'warn' && !femaleLateAllowed(e, opts)));
         const pool = males.length > 0 ? males : eligible;
 
         if (pool.length === 0) {
@@ -441,7 +449,7 @@ export function assignRoster(
         });
         const chosen = pool[0];
 
-        if (chosen.gender === 'female' && shift.femaleRule === 'warn') {
+        if (chosen.gender === 'female' && shift.femaleRule === 'warn' && !femaleLateAllowed(chosen, opts)) {
           warnings.push(`${date}: ${chosen.name} (أنثى) أُسندت ${code} لعدم توفر بديل — يتطلب اعتماد المشرف`);
         }
 
@@ -475,8 +483,10 @@ export function assignRoster(
         const candidates = WORKING_CODES.filter(code => {
           const s = SHIFT_BY_CODE[code];
           if (allowed && !allowed.has(code)) return false;
-          // No demand necessity here → females never get 'warn' shifts in surplus
-          if (e.gender === 'female' && s.femaleRule !== 'allowed') return false;
+          // No demand necessity here → females never get 'warn' shifts in surplus,
+          // unless the exception makes that shift ordinary for them (OMT).
+          if (e.gender === 'female' && s.femaleRule !== 'allowed'
+              && !(s.femaleRule === 'warn' && femaleLateAllowed(e, opts))) return false;
           return calcRestHours(prevShift.get(e.id) ?? null, s) >= opts.minRestHours;
         });
         if (candidates.length) {

@@ -15,8 +15,9 @@ import {
   GeneratorOptions,
   GeneratorResult,
   allowedShiftCodes,
-  functionAllowsFemaleLate,
+  femaleLateAllowed,
 } from './generator.types';
+import { isWeekend } from '../../common/wfm-calc';
 
 // ─── Date Helpers ─────────────────────────────────────────────────────────────
 
@@ -83,7 +84,10 @@ export function validateShift(
   if (emp.gender === 'female') {
     if (shift.femaleRule === 'blocked') {
       violations.push(`female_blocked:${shift.code}`);
-    } else if (shift.femaleRule === 'warn' && !options.allowFemaleN) {
+    } else if (shift.femaleRule === 'warn' && !femaleLateAllowed(emp, options)) {
+      // Must ask the SAME question getWorkingShifts asks. When it only checked
+      // the global override, a function that permanently allows N (OMT) had its
+      // N candidates generated and then vetoed here — the exception never fired.
       violations.push(`female_warn:${shift.code}`);
     }
   }
@@ -106,10 +110,7 @@ function getWorkingShifts(emp: EmployeeInfo, options: GeneratorOptions): ShiftDe
   // late ('warn') shift; midnight/E/EE ('blocked') stay off-limits regardless.
   // Female late ('warn') shift allowed when: the function permanently allows it
   // (config, e.g. OMT), OR it was picked for this generation, OR the global override.
-  const femaleLateOk =
-    functionAllowsFemaleLate(emp.functionName) ||
-    !!options.femaleLateFunctionIds?.includes(emp.functionId) ||
-    options.allowFemaleN;
+  const femaleLateOk = femaleLateAllowed(emp, options);
   return Object.values(SHIFTS).filter((s) => {
     if (s.code === 'OFF' || s.code === 'L') return false;  // non-working codes
     if (allowed && !allowed.has(s.code)) return false;   // function shift policy
@@ -238,12 +239,18 @@ export function pickBestShift(
 
 // ─── OFF Day Distribution ─────────────────────────────────────────────────────
 
-// Weekend = THURSDAY + FRIDAY only — OFFICIAL RULING by the Director 2026-07-02
-// (Saturday is a regular working day; resolves the old Thu/Fri drift).
-// In a Saturday-start 7-day week:
-//   dates[0]=Sat, [1]=Sun, [2]=Mon, [3]=Tue, [4]=Wed, [5]=Thu, [6]=Fri
-const WEEKEND_DAY_INDICES = [5, 6];
-const WEEKDAY_INDICES     = [0, 1, 2, 3, 4]; // Sat, Sun, Mon, Tue, Wed
+// Weekend = Thu + Fri + Sat (WEEKEND_DOW, 2026-08-06 ruling). These two sets are
+// DERIVED from it, never written out: they were hardcoded to [5,6] under the older
+// Thu/Fri ruling, so after the rule widened, Saturday counted as a weekend day in
+// every fairness measure while OFF placement could still never give it as the
+// weekend OFF. The same half-applied-change that made the platform run two
+// weekends at once. Complements must move together — so compute both.
+//
+// Saturday-start week: dates[i] falls on DOW (6 + i) % 7.
+//   i: 0=Sat 1=Sun 2=Mon 3=Tue 4=Wed 5=Thu 6=Fri
+const DOW_AT_INDEX = (i: number) => (6 + i) % 7;
+const WEEKEND_DAY_INDICES = [0, 1, 2, 3, 4, 5, 6].filter(i => isWeekend(DOW_AT_INDEX(i)));
+const WEEKDAY_INDICES     = [0, 1, 2, 3, 4, 5, 6].filter(i => !isWeekend(DOW_AT_INDEX(i)));
 
 // Week index (whole weeks since epoch) — used only to rotate which days absorb
 // the leftover OFF slots, so the pattern is not byte-identical every week even
@@ -302,7 +309,7 @@ function spreadCapacity(
  * Assign OFF days for the week with FAIR weekend distribution.
  *
  * Structure (business rule — confirmed by WFM):
- *   • With 2 OFF days/week: each employee gets ONE weekend OFF (Thu/Fri) and
+ *   • With 2 OFF days/week: each employee gets ONE weekend OFF (Thu/Fri/Sat) and
  *     ONE mid-week OFF (Sun/Mon/Tue/Wed). The weekend OFF is rationed fairly —
  *     employees with the FEWEST year-to-date weekend OFFs pick first — and both
  *     OFFs rotate week to week so the pattern is never static.
@@ -476,7 +483,9 @@ function collectViolations(schedules: EmployeeSchedule[]): GeneratorViolation[] 
             messageEn: `${es.employee.name}: ${day.shift.labelEn} needs approval for female`,
           });
         } else if (v.startsWith('rest:')) {
-          const h = v.split(':')[1];
+          // The token already carries its unit ("rest:9.5h") — strip it before
+          // re-formatting, or the message reads "9.5hh rest".
+          const h = v.split(':')[1].replace(/h$/i, '');
           violations.push({
             type: 'rest_violation',
             employeeId: es.employee.id,
@@ -650,8 +659,11 @@ export function generateWeeklySchedule(
       // bands she may actually work: morning↔afternoon by default; + night/evening when the
       // female-late exception is enabled for her. This restores the variety the manual roster had.
       if (emp.gender === 'female') {
-        const lateOk = !!options.allowFemaleN || !!options.femaleLateFunctionIds?.includes(emp.functionId);
-        const bands = lateOk ? ['morning', 'afternoon', 'night', 'evening'] : ['morning', 'afternoon'];
+        const lateOk = femaleLateAllowed(emp, options);
+        // 'evening' (E/EE) is BLOCKED for women whatever the exception says, so
+        // rotating her into it just burns a slot and drops her back to morning.
+        // The exception opens 'night' (N) only.
+        const bands = lateOk ? ['morning', 'afternoon', 'night'] : ['morning', 'afternoon'];
         if (!bands.includes(targetCategory)) {
           const prev = lastShift?.category && bands.includes(lastShift.category) ? lastShift.category : bands[bands.length - 1];
           targetCategory = bands[(bands.indexOf(prev) + 1) % bands.length];

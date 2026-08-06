@@ -198,6 +198,8 @@ export class GeneratorService {
         const rosterF = assignRoster(dates, mixF, poolF, ytdDist, lastShifts, consecDays, {
           minRestHours: options.minRestHours,
           offDaysPerWeek: options.offDaysPerWeek,
+          allowFemaleN: options.allowFemaleN,
+          femaleLateFunctionIds: options.femaleLateFunctionIds,
           onLeave,
           offStrategy: options.offStrategy,
           rotationFairness: options.rotationFairness,
@@ -248,6 +250,8 @@ export class GeneratorService {
       roster = assignRoster(dates, mixByDate, pool, ytdDist, lastShifts, consecDays, {
         minRestHours: options.minRestHours,
         offDaysPerWeek: options.offDaysPerWeek,
+        allowFemaleN: options.allowFemaleN,
+        femaleLateFunctionIds: options.femaleLateFunctionIds,
         onLeave,
         offStrategy: options.offStrategy,
         rotationFairness: options.rotationFairness,
@@ -752,7 +756,15 @@ export class GeneratorService {
     return distMap;
   }
 
-  // ── Load last shift before week ─────────────────────────────────────────────
+  // ── Load the shift on the day IMMEDIATELY BEFORE the week ───────────────────
+  // Both engines use this value for two things: the rest check on day 1, and the
+  // rotation band to move on from. Both are statements about the ADJACENT day —
+  // so the row must BE the adjacent day. Without the floor, a week generated
+  // beyond the data horizon anchored on whatever row happened to be last: for
+  // 2026-08-15 that was 2026-08-01 for 104 people and 2026-07-17 for 54, read as
+  // if it were yesterday. It produced a rest violation nobody could have caused.
+  // Sibling loadConsecutiveDays already bounds itself to 7 days; this is the
+  // same discipline, at the tighter window rest actually needs.
   private async loadLastShifts(
     tenantId: string,
     employeeIds: string[],
@@ -766,7 +778,8 @@ export class GeneratorService {
        LEFT JOIN shift_codes sc ON sc.id = ar.scheduled_shift_code_id
        WHERE ar.tenant_id = $1
          AND ar.employee_id = ANY($2::uuid[])
-         AND ar.attendance_date < $3
+         AND ar.attendance_date <  $3::date
+         AND ar.attendance_date >= $3::date - interval '1 day'
        ORDER BY ar.employee_id, ar.attendance_date DESC`,
       [tenantId, employeeIds, beforeDate],
     );
@@ -1283,11 +1296,16 @@ export class GeneratorService {
          AND period_start <= $4::date AND period_end >= $3::date`,
       [tenantId, versionId, version.period_start, version.period_end],
     );
+    // The `force` branch below archives the old version and replaces it. It is
+    // deliberately NOT reachable from the API — no route passes force — because
+    // force-replacing a published week rewrites what agents have already been told
+    // to work; exposing it is the Director's decision (BR-APP-006), not a default.
+    // So the refusal must not advertise a switch no endpoint accepts.
     if (conflicts.length && !force) {
       throw new BadRequestException(
         `A published/locked schedule already covers ${version.period_start} → ${version.period_end}: ` +
         conflicts.map((c: any) => `"${c.label ?? c.id}" (${c.status})`).join('; ') +
-        `. Re-publish with force=true to archive it and replace, or edit the published version instead.`,
+        `. Edit the published version instead — post-publish edits are versioned and audited.`,
       );
     }
     if (conflicts.length && force) {

@@ -177,7 +177,12 @@ export default function ScheduleDemandPage() {
                     [ar ? 'نقص' : 'Shortage', week.health.totals.shortageHrs, week.health.totals.shortageHrs > 0 ? '#ef4444' : '#22c55e'],
                     [ar ? 'فائض' : 'Surplus', week.health.totals.surplusHrs, '#f59e0b'],
                     [ar ? 'التغطية' : 'Coverage', week.health.totals.coveragePct + '%', week.health.totals.coveragePct >= 95 ? '#22c55e' : '#ef4444'],
-                    [ar ? 'الويكند خ/ج' : 'Thu/Fri', `${week.health.totals.weekend.thu}/${week.health.totals.weekend.fri}%`, Math.min(week.health.totals.weekend.thu, week.health.totals.weekend.fri) >= 95 ? '#22c55e' : '#f59e0b'],
+                    // Weekend is Thu+Fri+Sat — the tile showed two of the three, so a
+                    // weak Saturday stayed green here while the day itself was short.
+                    [ar ? 'الويكند خ/ج/س' : 'Thu/Fri/Sat',
+                     `${week.health.totals.weekend.thu}/${week.health.totals.weekend.fri}/${week.health.totals.weekend.sat ?? '—'}%`,
+                     Math.min(week.health.totals.weekend.thu, week.health.totals.weekend.fri,
+                              week.health.totals.weekend.sat ?? 100) >= 95 ? '#22c55e' : '#f59e0b'],
                   ].map(([l, v, c]: any, i: number) => (
                     <div key={i} className="rounded-xl px-2 py-1.5" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
                       <div className="text-[9px] uppercase" style={{ color: 'var(--text-3)' }}>{l}</div>

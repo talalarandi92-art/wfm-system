@@ -415,7 +415,10 @@ export class RosterGenerateController {
     const critical = all.filter(c => c.status === 'red').length, warning = all.filter(c => c.status === 'yellow').length;
     const nightHrs = all.filter(c => c.hour >= 22 || c.hour < 6);
     const nightCoverage = nightHrs.length ? Math.round(1000 * nightHrs.reduce((s, c) => s + Math.min(c.effective, c.required), 0) / Math.max(1, nightHrs.reduce((s, c) => s + c.required, 0))) / 10 : 100;
-    const weekend = { thu: days[5].coveragePct, fri: days[6].coveragePct };
+    // Sat-start week: [0]=Sat … [5]=Thu [6]=Fri. The weekend is Thu+Fri+Sat, and
+    // Saturday was missing here — the recommendation below already NAMED three days
+    // while reporting two, so a Saturday that fell to 60% never raised anything.
+    const weekend = { thu: days[5].coveragePct, fri: days[6].coveragePct, sat: days[0].coveragePct };
 
     // rule-based recommended actions — concrete, ranked worst-first
     const recs: string[] = [];
@@ -426,7 +429,8 @@ export class RosterGenerateController {
     if (surplusHrs > requiredHrs * 0.15) recs.push(`Overstaffing ${surplusHrs}h vs need — consider trimming the heaviest surplus hours or re-timing shifts`);
     for (const g of groups) if (g.assigned < g.want) recs.push(`${g.code}: ${g.want - g.assigned} more people needed — cross-skill move, hire, or accept the gap with OT`);
     if (shrinkRate > 0.12) recs.push(`Projected shrinkage ${Math.round(shrinkRate * 1000) / 10}% is high — review sick/absence/leave before trusting the effective numbers`);
-    if (weekend.thu < 95 || weekend.fri < 95) recs.push(`Weekend (Thu/Fri/Sat) coverage ${weekend.thu}% / ${weekend.fri}% — rebalance weekend OFFs`);
+    if (weekend.thu < 95 || weekend.fri < 95 || weekend.sat < 95)
+      recs.push(`Weekend (Thu/Fri/Sat) coverage ${weekend.thu}% / ${weekend.fri}% / ${weekend.sat}% — rebalance weekend OFFs`);
 
     return {
       basis: 'demand = avg hourly HC of the source window (see generate basis); effective = scheduled × (1 − projected shrinkage)',

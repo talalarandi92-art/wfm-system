@@ -241,11 +241,15 @@ describe('assignRoster — weekend-fair OFF structure + rotation-band fairness',
   const noPrior = new Map<string, number>();
   const mixByDate = mixFor(DATES, { M: 2, C: 2, N: 1 });
 
-  it('weekend-fair: exactly 2 OFF each — one on Thu/Fri, one mid-week, never adjacent-only weekend pair', () => {
+  it('weekend-fair: exactly 2 OFF each — one on Thu/Fri/Sat, one mid-week, never adjacent-only weekend pair', () => {
     const result = assignRoster(DATES, mixByDate, males, emptyDist, emptyLast, noPrior, {
       ...OPTS, offStrategy: 'weekend-fair',
     });
-    const weekend = new Set([DATES[5], DATES[6]]);   // Thu, Fri (Sat-start week)
+    // Sat-start week: [0]=Sat [1]=Sun [2]=Mon [3]=Tue [4]=Wed [5]=Thu [6]=Fri.
+    // Weekend is Thu+Fri+Sat (2026-08-06 ruling) — Saturday belongs here now, and
+    // this spec pinned it to Thu/Fri only, which is why OFF placement kept Saturday
+    // out of the weekend pool while every fairness report counted it as one.
+    const weekend = new Set([DATES[0], DATES[5], DATES[6]]);
     for (const [, rows] of byEmployee(result.assignments)) {
       const offs = rows.filter((r) => r.code === 'OFF').map((r) => r.date);
       expect(offs).toHaveLength(2);
