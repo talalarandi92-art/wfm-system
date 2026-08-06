@@ -65,7 +65,14 @@ export class RtaController {
         `SELECT
            COUNT(*) FILTER (WHERE attendance_marker = 'present') AS present,
            COUNT(*) FILTER (WHERE attendance_marker = 'present' AND is_wfh) AS wfh,
-           COUNT(*) FILTER (WHERE attendance_marker IN ('absent','sick')) AS absent,
+           -- Absent means ABSENT. Sick leave is approved and carries no fault, and
+           -- this counted the two together under the word "absent" — two people on
+           -- approved sick leave appeared on an HR-flavoured tile as absentees. The
+           -- operational grouping RTA needs is kept, under a name that is true:
+           -- unavailable = not on seat, whatever the reason.
+           COUNT(*) FILTER (WHERE attendance_marker = 'absent') AS absent,
+           COUNT(*) FILTER (WHERE attendance_marker = 'sick') AS sick,
+           COUNT(*) FILTER (WHERE attendance_marker IN ('absent','sick')) AS unavailable,
            COUNT(*) FILTER (WHERE attendance_marker = 'off') AS off_day,
            COUNT(*) FILTER (WHERE attendance_marker = 'leave') AS on_leave,
            COUNT(*) FILTER (WHERE attendance_marker = 'present' AND is_missing_punch) AS missing_punch,
@@ -85,7 +92,9 @@ export class RtaController {
            (array_agg(f.id ORDER BY (canon_fn(f.name) = f.name) DESC))[1] AS function_id,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'present') AS present,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'present' AND ar.is_wfh) AS wfh,
-           COUNT(*) FILTER (WHERE ar.attendance_marker IN ('absent','sick')) AS absent,
+           COUNT(*) FILTER (WHERE ar.attendance_marker = 'absent') AS absent,
+           COUNT(*) FILTER (WHERE ar.attendance_marker = 'sick') AS sick,
+           COUNT(*) FILTER (WHERE ar.attendance_marker IN ('absent','sick')) AS unavailable,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'off') AS off_day,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'leave') AS on_leave,
            COUNT(*) FILTER (WHERE ar.attendance_marker = 'present' AND ar.is_missing_punch) AS missing_punch,
@@ -170,9 +179,13 @@ export class RtaController {
       refDate,
       freshness,
       summary: {
+        // `wfh` is a SUBSET of `present`, not a sibling — 54 present of which 33 are
+        // remote, never 87 at work. Said here because the tiles sit side by side.
         present:      toInt(s.present),
         wfh:          toInt(s.wfh),
         absent:       toInt(s.absent),
+        sick:         toInt(s.sick),
+        unavailable:  toInt(s.unavailable),
         offDay:       toInt(s.off_day),
         onLeave:      toInt(s.on_leave),
         missingPunch: toInt(s.missing_punch),
@@ -194,6 +207,8 @@ export class RtaController {
           present:      toInt(r.present),
           wfh:          toInt(r.wfh),
           absent:       toInt(r.absent),
+          sick:         toInt(r.sick),
+          unavailable:  toInt(r.unavailable),
           offDay:       toInt(r.off_day),
           onLeave:      toInt(r.on_leave),
           missingPunch: toInt(r.missing_punch),

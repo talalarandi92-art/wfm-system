@@ -16,6 +16,8 @@ import { RosterSharedService } from './roster-shared.service';
 import { OtTrackerService } from './ot-tracker.service';
 import { OtYearService } from './ot-year.service';
 import { DataSpanService } from './data-span.service';
+import { CoverageModule } from '../coverage/coverage.module';
 
-@Module({ controllers: [ReconController, RosterFairnessController, RosterHourlyController, RosterGenerateController, RosterAnalyticsController, WfhReportController, ScheduleOpsController, RosterReportsController, OtTrackerController, DataTrustController, ExplainController], providers: [ReconService, RosterIngestionService, RosterSharedService, OtTrackerService, OtYearService, DataSpanService] })
+@Module({ imports: [CoverageModule],   // CoverageRebuildService — headcount_intervals follows the roster
+  controllers: [ReconController, RosterFairnessController, RosterHourlyController, RosterGenerateController, RosterAnalyticsController, WfhReportController, ScheduleOpsController, RosterReportsController, OtTrackerController, DataTrustController, ExplainController], providers: [ReconService, RosterIngestionService, RosterSharedService, OtTrackerService, OtYearService, DataSpanService] })
 export class ReconModule {}

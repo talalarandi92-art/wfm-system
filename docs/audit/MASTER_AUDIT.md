@@ -953,3 +953,99 @@ breakdown:
 audit-capacity  108/108 cells CLEAN   ·   audit-generator G1–G7 CLEAN
 unit tests 627/627   ·   cross-check 31/31   ·   explain 1401/1401
 ```
+
+---
+
+## Queue item 4 — Live Ops / RTA
+
+The honesty layer here is already good: `/rta/live`, `/rta/intraday` and `/rta/alerts` each return
+their own age, and the Command Center prints it on every tile — *"بيانات قديمة · 29س"*,
+*"لقطة قديمة (29س) — ليست الآن"*, *"مجدول (الجسر قديم)"*. Nothing pretends to be now. So the audit
+question was not "is it honest" but **"are the numbers right, and do they agree with each other"**.
+
+### F-025 · Two people on approved sick leave were counted as absentees — `FIXED`
+
+`/rta/live` reported `absent: 6` for 2026-08-01. Both tables hold **4 absent and 2 sick**:
+
+```sql
+COUNT(*) FILTER (WHERE attendance_marker IN ('absent','sick')) AS absent
+```
+
+Operationally the grouping is right — RTA needs "not on seat, whatever the reason". The **word**
+is not: absence is unexcused and carries consequences, sick leave is approved and carries none.
+Two people who did nothing wrong sat inside a number labelled *absent* (P-5, never wrongly
+punish). Split in both the summary and the per-function breakdown, keeping the operational total
+under a name that is true:
+
+```
+before   absent 6
+after    absent 4 · sick 2 · unavailable 6
+```
+
+**Reported honestly: no screen was showing this.** `/rta/live` has no consumer today — the front
+end uses only `/rta/alerts`, and no guard agent calls it. It is a live API defect that had not yet
+reached a person, fixed before it could.
+
+`wfh` is likewise a **subset** of `present` (54 present, of which 33 remote — never 87 at work);
+that is now stated where the two fields are built, since the tiles sit side by side.
+
+### F-026 · The coverage table stopped following the roster a month ago — `FIXED`
+
+The Command Center's "Coverage now" tile was serving **2026-07-03** while the roster ran to
+**2026-08-01**. The tile disclosed the date, so this was visible rather than hidden — but the
+cause was real:
+
+```
+headcount_intervals   2026-06-01 → 2026-07-03   (20,656 rows, 33 days)
+roster_days           2026-06-01 → 2026-08-01
+```
+
+`headcount_intervals` is **derived** from `roster_days`, and nothing advanced it when the roster
+advanced. `CoverageRebuildService.rebuild()` existed and had exactly two callers: a manual
+endpoint, and the break scheduler — which only fires it when it happens to find a date *completely
+empty*. The roster refresh (`recon-refresh`, the one-command pipeline and the Upload & Rebuild
+button) parsed the ingested range, cleared caches, and never rebuilt the derivation.
+
+So the pipeline advanced the spine and left every live-coverage surface a month behind, silently
+except for a date on one tile.
+
+Fixed at the pipeline: the refresh now rebuilds coverage over **the range it actually ingested**,
+through the same service the endpoint uses — one definition, not a second copy. A failure there
+never fails the ingest, but is reported rather than swallowed.
+
+The existing month-wide gap was then backfilled and **verified against `roster_days`
+independently**, not trusted:
+
+```
+rebuild 2026-07-04           inserted    500
+backfill 2026-07-05 → 08-01  inserted 14,252
+verification, 2026-08-01, 11 interval checks:
+  07:00 sched 10/10 act 10/10 · 13:00 43/43 41/41 · 16:00 33/33 30/30 · 20:00 17/17 14/14 …
+  11/11 agree
+Command Center coverage tile:  2026-07-03  →  2026-08-01
+```
+
+> **Method note — the fourth false alarm of the day.** The first verification run reported four
+> mismatches on 2026-08-01 (engine 43 vs 41, 33 vs 30 …). I had compared the engine's
+> `scheduled_hc` — everyone **with a shift window** in that interval — against my own count of
+> everyone who **actually worked** it. Two different questions. The matching column is
+> `actual_hc`, and against it every interval agrees exactly. Same lesson as the capacity run,
+> now four times over: **an unexplained red light is my measurement until proven otherwise.**
+
+### Checked and found correct
+
+- **`permission_status ILIKE '%approved%'`** in the coverage rebuild. Given the earlier `'%approv%'`
+  bug that swallowed *"Approval Refused"*, this deserved a look at the live values rather than an
+  assumption. The full-word form is what saves it: only `HR Approved` (1,387 rows) matches;
+  `Approval Refused` (55), `HR Refused` (42), `HR Pending` (37), `Waiting 1st/2nd Approval` (18)
+  all correctly do not.
+- **`/rta/live` vs `roster_days` for 2026-08-01** — both hold exactly 104 rows and agree
+  category by category (wfh 33, off 27, leave 17, office 21, absent 4, sick 2), with zero people
+  present in one table and missing from the other.
+
+### Gates
+
+```
+unit tests 627/627 · cross-check 31/31 · audit-generator CLEAN · audit-capacity 108/108
+accuracy (rebuilt window) 17/20 · 0 HIGH
+```

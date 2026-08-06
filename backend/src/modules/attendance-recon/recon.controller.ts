@@ -13,6 +13,7 @@ import { RequirePermissions } from '@common/decorators/permissions.decorator';
 import { TRUE_OT } from '@common/wfm-metrics';
 import { rosterCacheInvalidate } from '@common/ttl-cache.interceptor';
 import { ReconService } from './recon.service';
+import { CoverageRebuildService } from '../coverage/coverage-rebuild.service';
 import { RosterIngestionService } from './roster-ingestion.service';
 import { RosterSharedService } from './roster-shared.service';
 import { kwToday } from '@common/kw-date';
@@ -42,6 +43,7 @@ export class ReconController {
     private readonly svc: ReconService,
     private readonly ingestion: RosterIngestionService,
     private readonly shared: RosterSharedService,
+    private readonly coverageRebuild: CoverageRebuildService,
     @InjectDataSource() private readonly ds: DataSource,
   ) {}
 
@@ -299,7 +301,25 @@ export class ReconController {
       `SELECT COUNT(*)::int rows, COUNT(DISTINCT person_no)::int people, MIN(work_date)::text "from", MAX(work_date)::text "to",
               ROUND(SUM(${TRUE_OT})/60.0)::int ot_hours
          FROM roster_days WHERE tenant_id=$1 AND work_date BETWEEN $2 AND $3`, [req.user.tenantId, rFrom, rTo]);
-    return { ok, error, saved, unmatched, sourceDir: RECON_NEW_DIR, log, roster, sysMode: sysMode || null };
+
+    // 4) headcount_intervals is DERIVED from roster_days, and nothing advanced it when
+    //    the roster advanced: it held 2026-06-01 → 07-03 while the roster ran to 08-01,
+    //    so every live-coverage surface served a month-old interval. It was only ever
+    //    built when the break scheduler happened to find a date empty. The derivation
+    //    now follows its source, over the range that was actually ingested, through the
+    //    SAME service the rebuild endpoint uses — one definition, not a second copy.
+    let coverage: { from: string; to: string; inserted: number } | { error: string } | null = null;
+    if (ok && m) {
+      try {
+        const res = await this.coverageRebuild.rebuild(req.user.tenantId, rFrom, rTo);
+        coverage = { from: rFrom, to: rTo, inserted: res.inserted };
+      } catch (e: any) {
+        // Never fail the ingest for a derived table — but never stay quiet about it
+        // either, or the screens go stale exactly as silently as before.
+        coverage = { error: String(e?.message || e).slice(0, 300) };
+      }
+    }
+    return { ok, error, saved, unmatched, sourceDir: RECON_NEW_DIR, log, roster, coverage, sysMode: sysMode || null };
   }
 
   @Get('hr-matrix')
