@@ -987,6 +987,41 @@ export class ScorecardController {
     });
 
     const matching = rows.filter((r: any) => r.netMatch).length;
+
+    // A bare "15.5% match" reads as "the engine is broken", and for April 2026 it is
+    // the opposite: the workbook gave EVERY chat agent +10 for AHT, from 5.2 to 20.3
+    // minutes against a 9-minute target — a constant written down the column, not a
+    // band. The engine cannot reproduce a constant, and should not. So when a KPI's
+    // workbook column carries one value across the whole batch while the engine's
+    // varies, say so, because the reader's next move depends entirely on which of the
+    // two is being questioned.
+    const kpiKeys: string[] = Array.from(
+      new Set<string>(rows.flatMap((r: any) => Object.keys(r.cells || {}))));
+    const constantColumns = kpiKeys.map((k: string) => {
+      const wb = rows.map((r: any) => r.cells?.[k]?.workbook).filter((v: any) => v != null);
+      const en = rows.map((r: any) => r.cells?.[k]?.engine).filter((v: any) => v != null);
+      const enDistinct = new Set(en);
+      const disagreeing = rows.filter((r: any) => r.cells?.[k] &&
+        r.cells[k].workbook != null && r.cells[k].workbook !== r.cells[k].engine).length;
+      // DOMINANT, not strictly constant: March 2026 is the same phenomenon as April
+      // with a single outlier — 24 of 25 chat rows flat at +10 — and a strict test
+      // would report the cause for one month and stay silent for its twin.
+      const counts = new Map<any, number>();
+      for (const v of wb) counts.set(v, (counts.get(v) ?? 0) + 1);
+      const [topValue, topCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
+      if (wb.length < 5 || topCount / wb.length < 0.9 || enDistinct.size <= 1 || !disagreeing) return null;
+      return {
+        kpi: k, workbookValue: topValue, rowsAffected: disagreeing,
+        engineDistinctValues: enDistinct.size,
+        workbookSpread: `${topCount}/${wb.length} rows`,
+        note: `The workbook scored ${k} as a flat ${topValue} for ${topCount} of ${wb.length} rows, ` +
+              `so it cannot be re-derived from any band. Either this KPI was not scored for this ` +
+              `period, or its bands differ from the seeded ones — a decision, not an engine fault. · ` +
+              `الشيت أعطى ${k} قيمة ثابتة ${topValue} لمعظم الصفوف، فلا يمكن اشتقاقها من أي نطاق: ` +
+              `إمّا أن هذا المؤشر لم يُقيَّم لهذه الفترة أو أن نطاقاته تختلف — قرار وليس خطأ محرك.`,
+      };
+    }).filter(Boolean);
+
     return {
       batch: { id: batch.id, periodName: batch.period_name, year: batch.period_year, month: batch.period_month },
       readOnly: true,
@@ -997,6 +1032,12 @@ export class ScorecardController {
         netMatching: matching,
         netMismatched: rows.length - matching,
         matchRatePct: rows.length ? Math.round((matching / rows.length) * 1000) / 10 : null,
+        // Why the rate is what it is — never just the number.
+        constantColumns,
+        cause: constantColumns.length
+          ? `${constantColumns.map((c: any) => c.kpi).join(', ')} carried a constant in this workbook — ` +
+            `the low match rate is that, not a scoring error.`
+          : null,
       },
       rows,
     };

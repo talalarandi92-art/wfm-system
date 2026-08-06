@@ -1137,3 +1137,83 @@ is rostered, whether they are working in that hour (cross-midnight aware), and w
 627/627 tests · cross-check 31/31 · audit-requests 8/8
 audit-generator CLEAN · audit-capacity 108/108
 ```
+
+---
+
+## Queue item 6 — Scorecard & Coaching
+
+The batch `verify` endpoint compares the engine's re-computed Net Points against the Director's
+workbook, per person, per KPI. Run across all four uploaded batches it says:
+
+```
+January 2026   82 rows   81 matching    1 mismatched   98.8%
+February 2026  73 rows   71 matching    2 mismatched   97.3%
+March 2026     67 rows   25 matching   42 mismatched   37.3%
+April 2026     58 rows    9 matching   49 mismatched   15.5%
+```
+
+A 15.5% match rate reads as "the engine is broken". It is the opposite.
+
+### F-030 · March and April did not score chat AHT — `FOR THE DIRECTOR`
+
+Every mismatch is dominated by one KPI. Taking the CH - WA "Final" rows and asking what AHT range
+each awarded score actually covered:
+
+```
+January   +15 for 5.3–8.8min   ·  +10 for 9.1–9.4min  ·  +5 for 9.6min  ·  −5 for 10.4–15.2min
+February  +15 for 6.2–8.2min   ·                          +5 for 9.5–9.9min  ·  −5 for 10.3–84.7min
+March     +15 for 7.6min (n=1) ·  +10 for 5.5–19.1min (n=24)
+April                             +10 for 5.2–20.3min (n=23)   ← no other score awarded at all
+```
+
+January and February reproduce the seeded bands **exactly** — 18/18 and 24/24 of the chat rows
+re-derive from 9:00 / 9:30 / 10:00 → 15/10/5/−5. In March and April the workbook gave **every
+chat agent +10 regardless of their AHT**, from 5.2 minutes to 20.3 minutes against a 9-minute
+target. That is not a band. It is a constant written down the column, and no engine can or should
+reproduce it.
+
+March carries a second one: `prr` flat at 0 for 63 of 67 rows.
+
+**This is a decision, not a defect, and nothing was changed.** Either those KPIs were suspended
+for those periods — in which case the engine needs a period-scoped rule saying so, exactly as
+migration 091 already does for other period-specific cases — or the workbooks are wrong and those
+two months' Net Points are overstated by up to 15 points for ~46 people. Only the Director knows
+which. **No score was touched.**
+
+What *was* fixed: `verify` now states the cause instead of a bare percentage. It detects a KPI
+whose workbook column carries one dominant value (≥90% of rows) while the engine's varies, and
+says so in both languages. Dominant rather than strictly constant on purpose — March is April
+with a single outlier, and a strict test would have explained one month and stayed silent about
+its twin.
+
+```
+April 2026   15.5%   aht flat 10 (53/53 rows)
+March 2026   37.3%   prr flat 0 (63/67 rows) · aht flat 10 (60/61 rows)
+February     97.3%   — no constant column
+January      98.8%   — no constant column
+```
+
+### Checked and found correct — including a stale note of my own
+
+- **The coaching guard's `low_scorecard` trigger.** A note carried in my own memory said it flags
+  *"below the function average"* — which by arithmetic condemns half of any team for being
+  ordinary. That is no longer what it does. It selects strictly below the function's **P25**, with
+  proper linear interpolation and a `MIN_POOL` guard, and the flag text names the quartile
+  threshold, the function average and the weakest KPI:
+
+  > `سكور 55 — ضمن أدنى 25% في CH - WA (حد الربع 60 · متوسط القسم 69.3) — الأضعف: الكويز`
+
+  20 flags over a 104-person population (~19%) is what a per-function bottom quartile with a pool
+  guard should produce. **The concern was already resolved; the memory note was stale, not the
+  code.** Corrected rather than repeated.
+- **Auto-scoring readiness** — still reports **11.3%** of Net Points computable from live feeds
+  (15 of 132.5 points), and names the feeds that would unlock the rest. Honest and unchanged.
+- **The engine's own provenance label** names *"Jan/May/June 100%"* — it never claimed March or
+  April. The label was right; the screen just did not carry the reason.
+
+### Gates
+
+```
+627/627 tests · cross-check 31/31 · audit-requests 8/8
+audit-capacity 108/108 · audit-generator CLEAN
+```
