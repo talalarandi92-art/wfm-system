@@ -2,10 +2,18 @@
  {
   "sev": "LOW",
   "kind": "slow",
+  "path": "/attendance-recon/roster-v2/hourly",
+  "role": "admin",
+  "evidence": "10198ms",
+  "at": "2026-08-09T12:53:26.789Z"
+ },
+ {
+  "sev": "LOW",
+  "kind": "slow",
   "path": "/attendance-recon/roster-v2/master-export",
   "role": "admin",
-  "evidence": "5446ms",
-  "at": "2026-08-04T19:42:02.820Z"
+  "evidence": "5699ms",
+  "at": "2026-08-09T12:53:33.265Z"
  },
  {
   "sev": "REVIEW",
@@ -14,7 +22,7 @@
   "role": "agent",
   "evidence": "agent 7 rows vs admin 7",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:26.889Z"
+  "at": "2026-08-09T12:54:00.776Z"
  },
  {
   "sev": "REVIEW",
@@ -23,7 +31,7 @@
   "role": "agent",
   "evidence": "agent 8 rows vs admin 8",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:28.018Z"
+  "at": "2026-08-09T12:54:02.267Z"
  },
  {
   "sev": "REVIEW",
@@ -32,7 +40,7 @@
   "role": "agent",
   "evidence": "agent 8 rows vs admin 8",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:28.900Z"
+  "at": "2026-08-09T12:54:03.319Z"
  },
  {
   "sev": "REVIEW",
@@ -41,7 +49,7 @@
   "role": "agent",
   "evidence": "agent 100 rows vs admin 100",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:31.098Z"
+  "at": "2026-08-09T12:54:05.521Z"
  },
  {
   "sev": "REVIEW",
@@ -50,7 +58,7 @@
   "role": "agent",
   "evidence": "agent 32 rows vs admin 32",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:32.036Z"
+  "at": "2026-08-09T12:54:06.616Z"
  },
  {
   "sev": "REVIEW",
@@ -59,7 +67,7 @@
   "role": "agent",
   "evidence": "agent 24 rows vs admin 24",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:32.101Z"
+  "at": "2026-08-09T12:54:06.699Z"
  },
  {
   "sev": "REVIEW",
@@ -68,7 +76,7 @@
   "role": "agent",
   "evidence": "agent 24 rows vs admin 24",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:32.540Z"
+  "at": "2026-08-09T12:54:07.155Z"
  },
  {
   "sev": "REVIEW",
@@ -77,6 +85,6 @@
   "role": "agent",
   "evidence": "agent 142 rows vs admin 142",
   "why": "An agent should be scoped to their own data; parity with admin suggests the self-scope filter is absent.",
-  "at": "2026-08-04T19:42:32.642Z"
+  "at": "2026-08-09T12:54:07.248Z"
  }
 ]

@@ -1416,3 +1416,80 @@ With the right definitions: `31 / 103 = 30.1%` over 7 months, `× 12/7 = 51.6%`.
 627/627 tests · audit-builder CLEAN · cross-check 31/31
 audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
 ```
+
+---
+
+## Queue item 10 — Admin, Settings, RBAC
+
+`scripts/audit-sweep.js` drives the real endpoint surface as every role and judges each response
+against the permissions the live `role_permissions` table actually grants:
+
+```
+roles: admin(73 perms) · wfm(68) · rta(65) · tl(65) · hr(17) · agent(11)
+756 role×endpoint checks     HIGH 0 · REVIEW 8 · LOW 2
+```
+
+**Zero privilege leaks.** Seven of the eight REVIEW items are an agent seeing the same row count
+as an admin on pure reference data — break types, KB categories, chat contacts, the function list,
+the 142-code shift dictionary. An agent needs all of those to read their own schedule; each was
+looked at and dismissed.
+
+### F-036 · Every agent could read every colleague's gender — `FIXED`
+
+The eighth was different: `/requests/employees` returns **100 people** to any authenticated
+caller, and the payload carried `e.gender`. Names, employee numbers and functions are defensible
+— you need them to pick a swap partner. Gender is not.
+
+Before removing it, the question was whether anything *used* it. Nothing does: the only
+gender-related thing the UI ever displays is `genderCheckPassed`, a boolean the **server**
+computes when it validates a swap against BR-GEN-*. The field was mapped into the frontend's
+`Employee` type and then read by nothing. Removed from the query and the type; both builds pass,
+which is TypeScript confirming there was no reader.
+
+The rule stays enforced where it belongs. The raw attribute no longer travels.
+
+```
+before  id, employee_no, gender, full_name, function_name, function_id, team_name
+after   id, employee_no,         full_name, function_name, function_id, team_name
+```
+
+*(This resolves the open F-006 question with evidence rather than a decision — there was no
+trade-off to weigh once the field turned out to be unused.)*
+
+### F-037 · My own restarts had silently stopped working — `FIXED (method)`
+
+Verifying the gender fix, the endpoint kept returning `gender` while `dist` plainly did not
+select it. The running process was started at **11:02** and its command line reads
+`dist\main.js` — a **backslash**. Every restart I had issued matched `*dist/main*`, with a forward
+slash, so `Stop-Process` never matched it. `Start-Process` then launched a second process that
+died on the already-bound port, and the 11:02 build kept serving.
+
+**What this invalidated:** the F-034 verification. I had compared payload hashes "before and
+after" a restart that never happened — both samples came from the same process, so identical
+hashes proved nothing at all.
+
+Redone properly, with git supplying the pre-refactor sources and the PID printed on both sides so
+the comparison cannot lie again:
+
+```
+BEFORE — pre-refactor build, PID 16640      AFTER — refactored build, PID 24852
+200  de4310cd7daf21ea  78648b  fairness     200  de4310cd7daf21ea  78648b  fairness
+200  06b44aa54700584a  93756b  fairness     200  06b44aa54700584a  93756b  fairness
+200  2246a998c3f0079c   5746b  team-360     200  2246a998c3f0079c   5746b  team-360
+200  e28c9f917b415972  64581b  ot-tracker   200  e28c9f917b415972  64581b  ot-tracker
+```
+
+Byte-identical across two different processes and two different builds — including the OT tracker,
+the one site that had been on ISODOW. **F-034 is now genuinely verified.** The matcher is now
+`dist[\/]+main\.js`, and the restart prints the new PID.
+
+> The lesson is the same one this audit keeps teaching, turned on myself: a green result whose
+> mechanism you have not confirmed is not a result. I checked that the numbers matched and never
+> checked that anything had changed underneath them.
+
+### Gates
+
+```
+627/627 tests · audit-sweep 756 checks, 0 HIGH · audit-builder CLEAN
+cross-check 31/31 · audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
+```

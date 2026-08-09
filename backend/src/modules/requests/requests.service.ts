@@ -408,7 +408,12 @@ export class RequestsService {
       searchClause = `AND (LOWER(e.first_name_en || ' ' || e.last_name_en) LIKE $2 OR LOWER(e.employee_no) LIKE $2)`;
     }
     return this.ds.query(
-      `SELECT e.id, e.employee_no, e.gender,
+      /* `e.gender` was selected here and returned to EVERY authenticated caller — an
+         agent picking a swap partner received the gender of all 100 colleagues. Nothing
+         consumed it: the only gender the UI shows is `genderCheckPassed`, a boolean the
+         server computes when it validates a swap (BR-GEN-*). The rule is enforced where
+         it belongs; the raw attribute does not need to travel. Removed. */
+      `SELECT e.id, e.employee_no,
               e.first_name_en || ' ' || e.last_name_en AS full_name,
               f.name AS function_name, f.id AS function_id,
               t.name AS team_name

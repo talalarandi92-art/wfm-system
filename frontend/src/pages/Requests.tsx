@@ -83,7 +83,6 @@ interface Employee {
   id: string;
   employee_no: string;
   full_name: string;
-  gender: string;
   function_name: string;
   function_id: string;
   team_name?: string;
@@ -103,7 +102,6 @@ function linkedToEmployee(e: LinkedEmployee | null | undefined): Employee | null
     id: e.id,
     employee_no: e.employeeNo,
     full_name: e.fullName,
-    gender: e.gender,
     function_id: e.functionId ?? '',
     function_name: e.functionName ?? '',
   };
