@@ -1273,3 +1273,75 @@ lost. Recorded because "the server was down" is worth distinguishing from "the s
 627/627 tests · cross-check 31/31 · audit-requests 8/8
 audit-capacity 108/108 · audit-generator CLEAN
 ```
+
+---
+
+## Queue item 8 — Analytics & the Report/Dashboard Builder
+
+The builder is the widest surface in the platform for a metric to quietly acquire a **second
+definition**: anyone can assemble a report, and the number it produces looks exactly as official
+as the dedicated screen's. So every metric was re-derived three ways — the builder, the endpoint
+that owns it, and raw SQL over `roster_days`.
+
+`scripts/audit-builder.js`:
+
+```
+B1  bad sourceKey → 400 that names the valid keys, not 500     ✓
+B2  every source in the catalogue runs             14/14       ✓
+B3  attendance day counts == raw roster_days        6/6        ✓
+B4  grouped sum == ungrouped total   3381/3381 · 1986/1986     ✓
+```
+
+**The builder agrees with the database and with itself.** Grouping by function reproduces the
+ungrouped total exactly, which is the property that matters most: a self-service report cannot
+invent or lose rows.
+
+### F-033 · A malformed builder request returned a bare 500 — `FIXED`
+
+`getSource()` raises `BuilderValidationError` for a missing or mistyped `sourceKey` — the right
+error in the wrong place. Every caller invoked it *before* the `try/catch` that converts those
+into a 400, so a body without `sourceKey` came back as `{"statusCode":500,"message":"Internal
+server error"}` with nothing to act on. Routed through a `resolveSource()` helper that converts
+it and lists the valid keys.
+
+*(Found by sending the wrong field names myself — `source`/`from`/`to` instead of
+`sourceKey`/`dateFrom`/`dateTo`. The mistake was mine; the 500 was not.)*
+
+### F-034 · The weekend lived in eighteen separate SQL literals — `FIXED`
+
+`WEEKEND_DOW` and `weekendSql()` exist precisely so the weekend has one definition. Eighteen
+call sites across five files still wrote it out by hand:
+
+```
+ot-tracker.service.ts           2      roster-generate.controller.ts   1
+roster-fairness.controller.ts   3      schedule-ops.controller.ts      3
+analytics.service.ts            9
+```
+
+All eighteen currently agree with Thu/Fri/Sat, so **nothing was wrong today** — but this is
+exactly how F-019 happened: the generator's `[5, 6]` survived a rule change because it was a copy,
+not a reference. One of these is worse than a copy: `ot-tracker` uses **ISODOW** where the others
+use **DOW**. Those two functions differ by one and agree here only because Thu/Fri/Sat sits at
+the offset where they happen to overlap — an accident that holds until a weekend includes Sunday.
+
+Added `weekdaySql()` (the complement — the pair is where drift happens; widening one without the
+other once double-counted 2,548 days) and routed all eighteen through the two helpers. Zero
+hardcoded sites remain.
+
+**Proven to change nothing**, not asserted — payload hashes across every weekend-sensitive
+endpoint, before and after:
+
+```
+BEFORE                                    AFTER
+200  de4310cd7daf21ea  78648b  fairness   200  de4310cd7daf21ea  78648b  fairness
+200  2246a998c3f0079c   5746b  team-360   200  2246a998c3f0079c   5746b  team-360
+```
+
+Byte-identical.
+
+### Gates
+
+```
+627/627 tests · audit-builder CLEAN · cross-check 31/31
+audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
+```

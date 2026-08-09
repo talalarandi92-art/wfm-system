@@ -10,6 +10,7 @@ import { shiftCategoryFromCode, shiftCategoryCaseSql } from '@common/shift-categ
 import { RosterSharedService } from './roster-shared.service';
 import { scoreScheduleQuality, QualityRow } from '../schedule-generator/verdict.engine';
 import { kwToday } from '@common/kw-date';
+import { weekendSql } from '@common/wfm-calc';
 
 /* Schedule generators (ladder / demand mix / weekly assignment), drafts and
  * publish/unpublish, split VERBATIM out of the monolithic ReconController
@@ -296,7 +297,7 @@ export class RosterGenerateController {
       SELECT person_no, MAX(clean_name) name, MAX(gender) gender,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh')) wd,
              COUNT(*) FILTER (WHERE presence IN ('office','wfh') AND sc ~ '^(N|MD|MN)') nm,
-             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5,6)) woff
+             COUNT(*) FILTER (WHERE presence='off' AND ${weekendSql('work_date')}) woff
         FROM r WHERE person_no IS NOT NULL GROUP BY person_no
        HAVING COUNT(*) FILTER (WHERE presence IN ('office','wfh')) >= 1`, [t, dFrom, dTo, fn]))
       .map((e: any) => ({ personNo: e.person_no, name: e.name, male: String(e.gender || '').toLowerCase().startsWith('m'),

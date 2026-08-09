@@ -24,6 +24,12 @@ export const WEEKEND_DOW = [4, 5, 6] as const;
  *  column, e.g. `weekendSql('r.work_date')` → `EXTRACT(DOW FROM r.work_date) IN (4,5,6)`. */
 export const weekendSql = (col: string) => `EXTRACT(DOW FROM ${col}) IN (${WEEKEND_DOW.join(',')})`;
 
+/** The COMPLEMENT — every day that is not the weekend. It exists because the pair is
+ *  where the drift happens: widening the weekend without widening its opposite counted
+ *  Saturday on both sides of a partition and silently double-counted 2,548 days. The two
+ *  must move together, so they are derived from the same list. */
+export const weekdaySql = (col: string) => `EXTRACT(DOW FROM ${col}) NOT IN (${WEEKEND_DOW.join(',')})`;
+
 export function isWeekend(dow: number): boolean {
   return (WEEKEND_DOW as readonly number[]).includes(dow);
 }

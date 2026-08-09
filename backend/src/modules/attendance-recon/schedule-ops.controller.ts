@@ -14,6 +14,7 @@ import { payableOtMin } from '@common/ot-review';
 import { rosterCacheInvalidate } from '@common/ttl-cache.interceptor';
 import { RosterSharedService, SHIFT_CAT } from './roster-shared.service';
 import { coversIntervalOnDate, sampledHourlyMinutes } from './coverage-core';
+import { weekendSql } from '@common/wfm-calc';
 
 /* Schedule operations & analysis: soft-lock endpoints, OT & exceptions (+Excel),
  * schedule-analysis, interval-headcount, coverage-impact, and the manual
@@ -381,8 +382,8 @@ export class ScheduleOpsController {
              COUNT(*) FILTER (WHERE presence='sick')::int sick,
              COUNT(*) FILTER (WHERE presence='absent')::int absent,
              COUNT(*) FILTER (WHERE presence='holiday')::int holiday,
-             COUNT(*) FILTER (WHERE EXTRACT(DOW FROM work_date) IN (4,5,6))::int weekend,
-             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5,6))::int "weekendOff",
+             COUNT(*) FILTER (WHERE ${weekendSql('work_date')})::int weekend,
+             COUNT(*) FILTER (WHERE presence='off' AND ${weekendSql('work_date')})::int "weekendOff",
              COUNT(*) FILTER (WHERE permission_type IS NOT NULL)::int permissions,
              COUNT(DISTINCT person_no)::int people, COUNT(DISTINCT work_date)::int days
         FROM roster_days WHERE ${w}`, p);
@@ -394,7 +395,7 @@ export class ScheduleOpsController {
              COUNT(*) FILTER (WHERE presence IN ('office','wfh'))::int worked,
              COUNT(*) FILTER (WHERE presence='off')::int "off",
              COUNT(*) FILTER (WHERE presence IN ('leave','sick','absent','holiday'))::int lost,
-             COUNT(*) FILTER (WHERE presence='off' AND EXTRACT(DOW FROM work_date) IN (4,5,6))::int "weekendOff",
+             COUNT(*) FILTER (WHERE presence='off' AND ${weekendSql('work_date')})::int "weekendOff",
              COUNT(DISTINCT person_no)::int people
         FROM roster_days WHERE ${w} GROUP BY canon_fn(role_function) ORDER BY scheduled DESC`, p);
     const tlOpts = await this.ds.query(`SELECT DISTINCT team_manager v FROM roster_days WHERE tenant_id=$1 AND team_manager IS NOT NULL AND team_manager<>'' ORDER BY 1`, [t]);

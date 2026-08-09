@@ -42,7 +42,7 @@ export class ReportBuilderV2Service {
 
   /** Full dims+metrics for one source (if permitted). */
   sourceDetail(perms: string[], key: string) {
-    const src = getSource(key);
+    const src = this.resolveSource(key);
     if (!this.has(perms, src.permission)) throw new ForbiddenException('Not permitted to read this data source');
     return {
       key: src.key, label_en: src.label_en, label_ar: src.label_ar, group: src.group,
@@ -90,8 +90,28 @@ export class ReportBuilderV2Service {
   }
 
   /** Compile + execute a builder request with RBAC + agent self-scope. */
+
+  /**
+   * getSource() throws BuilderValidationError for an unknown or missing key — the
+   * right error, raised in the wrong place: every caller invoked it BEFORE the
+   * try/catch that turns those into a 400, so a body with no `sourceKey` (or a
+   * mistyped one) came back as a bare 500 "Internal server error" with nothing to
+   * act on. Resolve through here instead, and say which keys are valid.
+   */
+  private resolveSource(key: any) {
+    try {
+      return getSource(key);
+    } catch (e) {
+      if (e instanceof BuilderValidationError) {
+        throw new BadRequestException(
+          `${e.message}. Valid sourceKey values: ${listCatalog(['*']).map((s: any) => s.key).join(', ')}`);
+      }
+      throw e;
+    }
+  }
+
   async run(user: { tenantId: string; employeeId?: string | null; permissionCodes: string[] }, body: any) {
-    const src = getSource(body?.sourceKey);
+    const src = this.resolveSource(body?.sourceKey);
     const enforced = await this.resolveScope(user, src);
 
     const input: CompileInput = {
@@ -119,7 +139,7 @@ export class ReportBuilderV2Service {
    * catalog keys reach SQL. Returns up to `cap` rows with a `truncated` flag.
    */
   async drill(user: { tenantId: string; employeeId?: string | null; permissionCodes: string[] }, body: any) {
-    const src = getSource(body?.sourceKey);
+    const src = this.resolveSource(body?.sourceKey);
     const enforced = await this.resolveScope(user, src);
     const cap = Math.min(Math.max(1, Number(body?.limit) || 500), 500);
 
