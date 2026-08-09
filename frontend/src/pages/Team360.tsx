@@ -87,7 +87,12 @@ export default function Team360Page() {
         {/* compare two teams side-by-side */}
         {d2?.summary && (() => {
           const A=s, B=d2.summary; const an=d.teamLeader, bn=d2.teamLeader;
-          const rows:[string,string,number][] = [['agents',ar?'موظفون':'Agents',0],['workeddays',ar?'أيام عمل':'Worked',1],['conformance',ar?'كونفورمانس %':'Conformance %',1],['latedays',ar?'أيام تأخير':'Late days',-1],['sick',ar?'سيك':'Sick',-1],['absent',ar?'غياب':'Absent',-1],['permissions',ar?'استئذانات':'Permissions',-1],['otafter',ar?'OT بعد':'OT after',0]];
+          const rows:[string,string,number][] = [['agents',ar?'موظفون':'Agents',0],['workeddays',ar?'أيام عمل':'Worked',1],['conformance',ar?'كونفورمانس %':'Conformance %',1],['latedays',ar?'أيام تأخير':'Late days',-1],['sick',ar?'سيك':'Sick',-1],['absent',ar?'غياب':'Absent',-1],['permissions',ar?'استئذانات':'Permissions',-1],
+            // Was `otafter` — the RAW span after the shift, before caps and the evidence
+            // gate, and the only OT figure on this screen. Two teams were being compared
+            // on a pre-cap number. `ottotal` is TRUE_OT: ot + off-day + holiday, the three
+            // credited buckets (BR-OT-001) — the figure everything else in the platform uses.
+            ['ottotal',ar?'إجمالي OT (معتمد)':'Total OT (credited)',0]];
           return (
             <div className="rounded-2xl p-4" style={{ background:'rgba(6,182,212,0.06)', border:'1px solid rgba(6,182,212,0.2)' }}>
               <div className="flex items-center gap-2 mb-3"><Users size={15} className="text-cyan-300"/><h3 className="text-sm font-bold text-white">{ar?'مقارنة فريقين':'Compare teams'}</h3>

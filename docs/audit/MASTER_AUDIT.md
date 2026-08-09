@@ -1217,3 +1217,59 @@ January      98.8%   — no constant column
 627/627 tests · cross-check 31/31 · audit-requests 8/8
 audit-capacity 108/108 · audit-generator CLEAN
 ```
+
+---
+
+## Queue item 7 — People pages (Agent 360 · Team 360)
+
+Both endpoints answer from `roster_days` and every figure in them re-derives. The defect here is
+not a wrong number — it is three correct numbers placed so that the obvious reading of them is
+wrong.
+
+### F-031 · "OT before / OT after / Total OT" are not parts and a whole — `FIXED`
+
+Agent 360 showed three adjacent tiles in the same green. A reader takes the first two as a split
+of the third. They are not related that way at all:
+
+```
+all rows, 2026-07-01 → 08-01
+  ot_min          22,937        ot_before_min   12,264
+  offday_ot_min        0        ot_after_min    23,976
+  holiday_ot_min       0        before + after  36,240   ← 58% MORE than credited
+  TRUE_OT         22,937
+```
+
+`ot_before_min` / `ot_after_min` are the **raw span outside the shift window** on each side,
+*before* the 5h ceiling, the bleed guards and the evidence gate. `otTotal` is **TRUE_OT** — the
+three credited buckets (BR-OT-001). Neither direction of the arithmetic holds, and on a real agent
+it fails the other way:
+
+```
+OT قبل (خام)   27h 34m  ┐ sum 59h 12m
+OT بعد (خام)   31h 38m  ┘
+إجمالي OT     169h 57m   ← of which 32h off-day · 78h 30m holiday
+```
+
+The credited total is nearly **three times** the raw sum, because most of it is off-day and
+holiday OT that the before/after split never touches. Both tiles are now muted, named
+`OT قبل (خام)` / `OT before (raw)`, and carry *"pre-cap span, not part of Total"*.
+
+### F-032 · Two teams were being compared on a pre-cap number — `FIXED`
+
+Team 360's side-by-side comparison listed `otafter` — and it was the **only** OT figure on the
+screen. So a team leader comparing their team against another was comparing raw after-shift spans,
+with off-day and holiday OT absent entirely. Replaced with `ottotal` (TRUE_OT), labelled
+*"إجمالي OT (معتمد)" / "Total OT (credited)"* — the same definition every other surface uses.
+
+### Note
+
+The backend process was gone at the start of this item — several days had passed since the last
+turn and the detached process did not survive. Restarted from `dist`, no crash in the log, nothing
+lost. Recorded because "the server was down" is worth distinguishing from "the server fell over".
+
+### Gates
+
+```
+627/627 tests · cross-check 31/31 · audit-requests 8/8
+audit-capacity 108/108 · audit-generator CLEAN
+```

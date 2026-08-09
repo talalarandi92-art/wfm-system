@@ -127,8 +127,15 @@ export default function Agent360Page() {
     { ic:Briefcase, l:ar?'أيام عمل':'Worked', v:s.workedDays, sub:`${s.officeDays} ${ar?'مكتب':'office'} · ${s.wfhDays} WFH`, c:'#6366f1', tr:trWorked },
     { ic:ShieldCheck, l:ar?'كونفورمانس':'Conformance', v:s.conformance!=null?s.conformance+'%':'—', c:adhC(s.conformance), tr:trConf },
     { ic:Clock, l:ar?'تأخير':'Late', v:s.lateDays, sub:dur(s.totalLateMin), c:'#f59e0b' },
-    { ic:TimerReset, l:ar?'OT قبل':'OT before', v:dur(s.otBefore), c:'#10b981' },
-    { ic:Timer, l:ar?'OT بعد':'OT after', v:dur(s.otAfter), c:'#10b981' },
+    // OT before/after is the RAW span outside the shift window on each side, before the
+    // caps, bleed guards and evidence gate. It is NOT a split of credited OT: across
+    // 2026-07 the two sum to 36,240 min against 22,937 credited — 58% larger. Sat next
+    // to "Total OT" in the same green they read as parts of a whole, so they are muted
+    // and labelled with what they are.
+    { ic:TimerReset, l:ar?'OT قبل (خام)':'OT before (raw)', v:dur(s.otBefore),
+      sub:ar?'قبل السقوف — ليس جزءاً من الإجمالي':'pre-cap span, not part of Total', c:'#64748b' },
+    { ic:Timer, l:ar?'OT بعد (خام)':'OT after (raw)', v:dur(s.otAfter),
+      sub:ar?'قبل السقوف — ليس جزءاً من الإجمالي':'pre-cap span, not part of Total', c:'#64748b' },
     { ic:Timer, l:ar?'إجمالي OT':'Total OT', v:dur(s.otTotal), sub:`${ar?'منها':'incl'} ${dur(s.offdayOt)} ${ar?'OFF':'off'} · ${dur(s.holidayOt)} ${ar?'عطلة':'hol'}`, c:'#22d3ee', tr:trOt },
     { ic:Coffee, l:ar?'سيك':'Sick', v:s.sickDays, c:'#f59e0b' },
     { ic:UserX, l:ar?'غياب':'Absent', v:s.absenceDays, c:'#f43f5e' },
