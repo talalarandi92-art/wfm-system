@@ -1572,3 +1572,80 @@ Director's session — nothing in the code can substitute for it.
 627/627 tests · audit-builder CLEAN · cross-check 31/31
 audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
 ```
+
+---
+
+## Queue item 12 — The AI guard team (Chief + agents)
+
+First question: are they real or shells? **Real.** The Chief's self-test probes all six guards and
+all six answer:
+
+```
+selfTest 6/6 — health · analyst · security · reporter · automode · scorecard
+llm: false        (no API key — the LLM advisor is off, as agreed)
+```
+
+The briefing is substantive: posture, a ranked directive list, three domain lines, learning,
+auto-mode state, last report. And the priorities are **derived, not invented** — each traces to
+the analyst's assessment, which traces to real coverage rows.
+
+### F-040 · The Chief's top directive measured against the wrong thing — `FIXED`
+
+The headline directive read:
+
+> *"Priority 1 — Coverage shortfall: CH - WA. **Cover 14** at 13:00 with overtime/cross-skill and
+> don't approve leave."*
+
+Traced down: analyst → `bottleneck { hour: 13, required: 24, available: 10, gap: −14 }`. Real
+numbers. But on the **same date, same function, same hour**, the platform's own requirement engine
+says:
+
+```
+/capacity/staffing/requirement  CH - WA @13 on 2026-08-01
+  volume 59.9 · AHTeff 1102s · erlangs 18.33 · agentsForSl 8 · requiredScheduledHc 15
+analyst                        CH - WA @13
+  required 24
+```
+
+**15 against 24 — a 60% divergence at the single most consequential number in the platform.**
+
+The cause is a second definition. The analyst computes `required` as
+`Math.round(a.reqSum[h] / nH)` — the **mean headcount rostered at that hour over the last ~6
+days**. That is "what we usually staff", not the demand-derived requirement (forecast → effective
+AHT → Erlang → productivity → shrinkage) that the requirement engine produces, that the generator
+consumes, and that this audit verified 108/108.
+
+Both measures are legitimate and they answer different questions. Calling one by the other's name
+turned a **staffing-pattern deviation** into a **demand shortfall**, at the top of the executive
+briefing.
+
+The measure is kept — it covers every function, including the ones the staffing engine has no
+volume for (OMT, Team Leader, RTA…) where the requirement engine would say nothing at all. What
+changed is that it now says what it is, at every surface it reaches:
+
+```
+before  نقص تغطية: CH - WA — غطِّ 14 عند 13:00 …
+after   أقل من المعتاد: CH - WA — أقل بـ14 عن المعتاد (24) عند 13:00 — غطِّ بأوفرتايم/cross-skill
+        ولا توافق إجازات. الأساس: متوسط التجديل ٦ أيام، لا طلب الفوركاست.
+```
+
+**For the Director:** whether the Chief should instead be driven by the forecast→Erlang
+requirement is a real choice, not a bug fix. Repointing it would make the guard consistent with
+every other screen — and would blind it on the functions that have no volume data. Left as it is,
+correctly labelled, until you decide.
+
+### Noted
+
+The briefing is dated **2026-08-01** and carries no age field, while today is 2026-08-09. It is
+computed over the newest data that exists, which is right — but every other surface in this audit
+learned to declare how far behind "now" it sits, and the executive face is where that matters
+most. Recorded rather than changed: the fix belongs with the same `freshness` treatment applied to
+the requirement engine (F-021), and is worth doing as one consistent pass rather than a twelfth
+one-off.
+
+### Gates
+
+```
+627/627 tests · audit-builder CLEAN · cross-check 31/31
+audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
+```

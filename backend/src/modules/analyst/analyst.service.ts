@@ -189,6 +189,16 @@ export class AnalystService {
     const recs: any[] = [];
     for (const a of fns.values()) {
       const nH = Math.max(a.dates.size, 1);
+      /* `required` here is the TYPICAL STAFFING at this hour — the mean headcount
+         rostered over the last ~6 days — NOT the demand-derived requirement from
+         forecast → Erlang → productivity → shrinkage that /capacity/staffing/requirement
+         produces and the generator consumes.
+         The two answer different questions and they diverge: for CH - WA at 13:00 on
+         2026-08-01 the requirement engine says 15 and this says 24. Both numbers are
+         defensible; calling this one "required" and letting it drive the Chief's top
+         directive presented a STAFFING-PATTERN deviation as a DEMAND shortfall.
+         The measure is kept — it covers every function, including the ones the staffing
+         engine has no volume for — but it now says what it is, everywhere it surfaces. */
       const opHours: { hour: number; required: number; available: number; gap: number }[] = [];
       for (let h = 0; h < 24; h++) {
         const required = Math.round(a.reqSum[h] / nH);
@@ -203,9 +213,9 @@ export class AnalystService {
 
       let summary: string, recommendation: string, summaryEn: string, recommendationEn: string;
       if (verdict === 'danger') {
-        summary = `نقص تغطية: القسم ${a.name} يقصّر ${-bottleneck.gap} عند الساعة ${pad(bottleneck.hour)} (مطلوب ${bottleneck.required}, متاح ${bottleneck.available}).`;
+        summary = `أقل من المعتاد: القسم ${a.name} ينقصه ${-bottleneck.gap} عند الساعة ${pad(bottleneck.hour)} (المعتاد ${bottleneck.required}, متاح ${bottleneck.available}) — الأساس: متوسط التجديل آخر ٦ أيام، وليس طلب الفوركاست.`;
         recommendation = `خطر — لا توافق على إجازات/استئذان بهالساعة. غطِّ النقص بأوفرتايم أو نقل cross-skill أو استدعاء، خصوصاً ${pad(bottleneck.hour)}.`;
-        summaryEn = `Coverage shortfall: ${a.name} is short ${-bottleneck.gap} at ${pad(bottleneck.hour)} (required ${bottleneck.required}, available ${bottleneck.available}).`;
+        summaryEn = `Below its usual staffing: ${a.name} is ${-bottleneck.gap} under at ${pad(bottleneck.hour)} (typical ${bottleneck.required}, available ${bottleneck.available}) — basis: mean rostered HC over the last 6 days, not forecast demand.`;
         recommendationEn = `Risk — don't approve leave/permission at this hour. Fill the gap with overtime, cross-skill transfer or call-in, especially ${pad(bottleneck.hour)}.`;
       } else if (verdict === 'caution') {
         summary = `تغطية محدودة: أضيق نقطة بالقسم ${a.name} فائض ${bottleneck.gap} فقط عند ${pad(bottleneck.hour)}.`;

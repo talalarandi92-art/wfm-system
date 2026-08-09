@@ -82,7 +82,15 @@ export class ChiefService {
     const priorities: { sev: Sev; domain: string; title: string; action: string }[] = [];
     if (assess) {
       for (const f of assess.coverage.functions.filter((x: any) => x.verdict === 'danger'))
-        priorities.push({ sev: 'risk', domain: L('Operations', 'العمليات'), title: L(`Coverage shortfall: ${f.functionName}`, `نقص تغطية: ${f.functionName}`), action: L(`Cover ${-f.bottleneck.gap} at ${pad(f.bottleneck.hour)} with overtime/cross-skill and don't approve leave.`, `غطِّ ${-f.bottleneck.gap} عند ${pad(f.bottleneck.hour)} بأوفرتايم/cross-skill ولا توافق إجازات.`) });
+        /* The analyst's bottleneck is measured against TYPICAL STAFFING (6-day mean
+           rostered HC), not the forecast→Erlang requirement — see analyst.service.ts.
+           The directive used to read "cover 14" as if 14 bodies of demand were
+           unmet; it means "14 fewer than this hour usually gets". Same number, and
+           now the same meaning as its source. */
+        priorities.push({ sev: 'risk', domain: L('Operations', 'العمليات'),
+          title: L(`Below usual staffing: ${f.functionName}`, `أقل من المعتاد: ${f.functionName}`),
+          action: L(`${-f.bottleneck.gap} under the usual ${f.bottleneck.required} at ${pad(f.bottleneck.hour)} — cover with overtime/cross-skill and don't approve leave. Basis: 6-day rostered mean, not forecast demand.`,
+                    `أقل بـ${-f.bottleneck.gap} عن المعتاد (${f.bottleneck.required}) عند ${pad(f.bottleneck.hour)} — غطِّ بأوفرتايم/cross-skill ولا توافق إجازات. الأساس: متوسط التجديل ٦ أيام، لا طلب الفوركاست.`) });
       for (const q of assess.queues.queues.slice(0, 3))
         priorities.push({ sev: q.sla < 50 ? 'risk' : 'caution', domain: L('Queues', 'الكيوز'), title: L(`Struggling queue: ${q.name}`, `كيو متعثّر: ${q.name}`), action: L(`SLA ${q.sla}% — route available agents or cut breaks.`, `SLA ${q.sla}% — وجّه المتاحين أو قلّل البريكات.`) });
       if (assess.compliance.offenders.length)
