@@ -1493,3 +1493,82 @@ the one site that had been on ISODOW. **F-034 is now genuinely verified.** The m
 627/627 tests · audit-sweep 756 checks, 0 HIGH · audit-builder CLEAN
 cross-check 31/31 · audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
 ```
+
+---
+
+## Queue item 11 — Integrations (Sprinklr · Odoo · Ameyo)
+
+The Director's Sprinklr session was never touched — this item audits what the platform holds and
+what it reports about its own feeds.
+
+```
+sprinklr_live      green   169s     20 queues · 180 agents   ← pushing right now
+sprinklr_reports   green  1127s     323 staged rows
+odoo               amber  2,487,496s = 28.8 days   1,122 rows
+ameyo_live         amber  never     0 queues · 0 agents
+```
+
+### F-038 · The same feed was "stale" and "green" at the same instant — `FIXED`
+
+`/integrations/sprinklr/live` carried its own literal — `> 120_000` ms — while the bridge-health
+page read `HEALTH_THRESHOLDS.sprinklrLiveSec: 5 * 60`. Between two and five minutes the same
+Sprinklr feed reported **stale on the RTA surfaces and green on the health page simultaneously**.
+Caught by reading 129s → `isStale: true` on one and 169s → `verdict: green` on the other, seconds
+apart.
+
+Which value is right was settled by **measuring the bridge**, not by preference:
+
+```
+141 pushes in 24h · gap p50 10s · p90 20s · p99 60s · max 60s
+gaps over 120s: 0 of 140      gaps over 300s: 0 of 140
+```
+
+A feed silent for 120s has missed at least two consecutive pushes. Five minutes is **five times
+the worst normal gap** — it would let a genuinely stopped bridge read green through roughly thirty
+missed pushes. So the two are now one constant at **120s**, and the health page inherits the
+evidence-based value.
+
+Verified on a genuinely restarted process — both surfaces now report the same age and the same
+verdict at every moment:
+
+```
+thresholds  { sprinklrLiveSec: 120, … }
+live endpoint  age 363s  isStale true
+health page    age 363s  isStale true  verdict amber
+```
+
+*(That 363s is itself real: the bridge had stopped pushing by then. Under the old 300s threshold
+the health page would have gone amber at the same moment — the fix is that the two screens can no
+longer disagree at any age, not that one of them was blind.)*
+
+**Flagged for the Director:** the health page will now turn amber sooner than before. That is
+deliberate and measured, but it is a visible change to a screen you watch — say the word if it
+proves twitchy in practice.
+
+### F-039 · A retired system shown as a degraded one — `FIXED`
+
+`ameyo_live` sat permanently amber. Ameyo is not broken — it was **switched off**: the centre moved
+fully to Sprinklr in July 2026, and every row in `contact_volume_daily` is `source='ameyo'` and
+stops 2026-06-21 (F-021). A permanent amber on something deliberately retired is noise, and noise
+on a health page is how a real amber gets ignored.
+
+The verdict is unchanged — the feed *is* silent — but it now carries `retired: true` and says why,
+so the page can render a retired bridge differently from a broken one:
+
+```
+ameyo_live  amber  RETIRED  "Ameyo was retired when the centre moved fully to Sprinklr
+                             (July 2026) — silence here is expected, not a fault."
+```
+
+### Noted, not changed
+
+**Odoo staging is 28.8 days old** (1,122 rows: permissions, attendance, comp, leave). Its
+threshold is 24h, so the amber is correct and already visible. Refreshing it is a bridge run on the
+Director's session — nothing in the code can substitute for it.
+
+### Gates
+
+```
+627/627 tests · audit-builder CLEAN · cross-check 31/31
+audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
+```

@@ -22,7 +22,15 @@ import { DataSource } from 'typeorm';
 
 // ── Staleness thresholds (documented) ────────────────────────────────────────
 export const HEALTH_THRESHOLDS = {
-  sprinklrLiveSec: 5 * 60,       // Sprinklr live RTA snapshot — every ~30-60s when the tab is open
+  /* 120s, MEASURED — not guessed. Over 141 pushes in 24h the gap between Sprinklr
+     snapshots was p50 10s, p90 20s, p99 60s, max 60s. A feed silent for 120s has
+     therefore missed at least two consecutive pushes; the previous 5 minutes was
+     five times the worst normal gap and would let a genuinely stopped bridge read
+     green for ~30 missed pushes.
+     This constant is also THE definition: sprinklr.service.ts used to carry its own
+     `> 120_000` literal, so between 2 and 5 minutes the same feed was "stale" on the
+     RTA surfaces and "green" on this page AT THE SAME INSTANT. One number now. */
+  sprinklrLiveSec: 120,          // Sprinklr live RTA snapshot — pushes every ~10-60s while the tab is open
   sprinklrReportSec: 24 * 3600,  // Sprinklr reporting-table staging — captured per reporting session
   odooSec: 24 * 3600,            // Odoo staging (attendance/permission/comp/leave)
   ameyoLiveSec: 5 * 60,          // Ameyo live snapshot
@@ -230,6 +238,13 @@ export class IntegrationHealthService {
     // Ameyo bridge is discovery-stage — treat "never captured" as amber/awaiting, not red.
     const verdict: Verdict = !row ? 'amber' : isStale ? 'amber' : 'green';
 
+    /* A permanent amber on a system that was deliberately switched off is noise, and
+       noise on a health page is how a real amber gets ignored. The centre moved fully
+       to Sprinklr in July 2026 and every row in contact_volume_daily is ameyo-sourced
+       and stops 2026-06-21. So the verdict is left alone — it IS silent — but it says
+       WHY, and the page can render a retired bridge differently from a broken one. */
+    const retired = !row || (ageSec != null && ageSec > 14 * 24 * 3600);
+
     return {
       key: 'ameyo_live',
       kind: 'live' as const,
@@ -238,6 +253,11 @@ export class IntegrationHealthService {
       isStale,
       verdict,
       awaiting: !row,
+      retired,
+      note: retired
+        ? 'Ameyo was retired when the centre moved fully to Sprinklr (July 2026) — silence here is expected, not a fault. · '
+          + 'تم إيقاف أميو عند الانتقال الكامل إلى سبرينكلر (تموز ٢٠٢٦) — الصمت هنا متوقّع وليس عطلاً.'
+        : null,
       detail: { queues: row?.queue_count ?? 0, agents: row?.agent_count ?? 0 },
     };
   }
