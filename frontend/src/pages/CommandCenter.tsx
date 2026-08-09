@@ -126,14 +126,33 @@ export default function CommandCenter() {
         )}
       </div>
 
-      {/* ── HERO GAUGES (4) ── */}
+      {/* ── HERO GAUGES (4) ──
+          These four do NOT share a period, and the single "roster window" line in the
+          footer sat under all of them as if they did. Coverage is ONE day; conformance
+          is the roster window; both fairness scores are year-to-date, because the
+          fairness call takes no dates and a month is too short to judge how night load
+          and weekend rest are shared out. The numbers are right — the framing was not,
+          so each gauge now carries the span it was actually measured over. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          { v: coverage, l: ar ? 'التغطية' : 'Coverage', sub: ar ? 'حاضر/مخطّط' : 'present/planned', c: coverage == null ? '#64748b' : coverage >= 90 ? '#22c55e' : coverage >= 75 ? '#f59e0b' : '#ef4444' },
-          { v: conf, l: ar ? 'الكونفورمانس' : 'Conformance', sub: ar ? 'التزام الفترة' : 'period adherence', c: adhC(conf || 0) },
-          { v: fair, l: ar ? 'عدالة الشفتات' : 'Shift Fairness', sub: ar ? 'توزيع الليل' : 'night load', c: (fair || 0) >= 80 ? '#22c55e' : (fair || 0) >= 60 ? '#f59e0b' : '#ef4444' },
-          { v: weekendFair, l: ar ? 'عدالة أوف الويك-اند' : 'Weekend-OFF Fairness', sub: ar ? 'توزيع الراحة' : 'rest equity', c: (weekendFair || 0) >= 80 ? '#22c55e' : (weekendFair || 0) >= 60 ? '#f59e0b' : '#ef4444' },
-        ].map((g, i) => (
+        {(() => {
+          const span = (a?: string, b?: string) => a && b ? `${String(a).slice(5)} → ${String(b).slice(5)}` : null;
+          const fairSpan = span(d.fair?.from, d.fair?.to);
+          const rosSpan = span(rosterWindow?.from, rosterWindow?.to);
+          const withSpan = (base: string, sp: string | null) => sp ? `${base} · ${sp}` : base;
+          return [
+          { v: coverage, l: ar ? 'التغطية' : 'Coverage',
+            sub: withSpan(ar ? 'حاضر/مخطّط' : 'present/planned', d.cov?.date ? String(d.cov.date).slice(5) : null),
+            c: coverage == null ? '#64748b' : coverage >= 90 ? '#22c55e' : coverage >= 75 ? '#f59e0b' : '#ef4444' },
+          { v: conf, l: ar ? 'الكونفورمانس' : 'Conformance',
+            sub: withSpan(ar ? 'التزام الفترة' : 'period adherence', rosSpan),
+            c: adhC(conf || 0) },
+          { v: fair, l: ar ? 'عدالة الشفتات' : 'Shift Fairness',
+            sub: withSpan(ar ? 'توزيع الليل' : 'night load', fairSpan),
+            c: (fair || 0) >= 80 ? '#22c55e' : (fair || 0) >= 60 ? '#f59e0b' : '#ef4444' },
+          { v: weekendFair, l: ar ? 'عدالة أوف الويك-اند' : 'Weekend-OFF Fairness',
+            sub: withSpan(ar ? 'توزيع الراحة' : 'rest equity', fairSpan),
+            c: (weekendFair || 0) >= 80 ? '#22c55e' : (weekendFair || 0) >= 60 ? '#f59e0b' : '#ef4444' },
+          ]; })().map((g, i) => (
           <div key={i} className="rounded-2xl p-4 flex items-center justify-center" style={panel}>
             {g.v == null ? <span className="text-sm" style={{ color: 'var(--text-3)' }}>—</span>
               : <Gauge value={Number(g.v)} label={g.l} color={g.c} size={150} sub={g.sub} />}
@@ -224,7 +243,11 @@ export default function CommandCenter() {
         {rosterWindow && (
           <span className="inline-flex items-center gap-1" style={{ color: 'var(--text-2)' }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#8b5cf6', display: 'inline-block' }} />
-            {ar ? `نافذة الروستر: ${rosterWindow.from} → ${rosterWindow.to}` : `roster window: ${rosterWindow.from} → ${rosterWindow.to}`}
+            {/* "roster window" is the window for the CORRECTED tiles only. It never
+                covered the fairness gauges (year-to-date) or coverage (a single day),
+                which now state their own span, so this says which tiles it governs. */}
+            {ar ? `نافذة الروستر (للأرقام المُصحّحة): ${rosterWindow.from} → ${rosterWindow.to}`
+                : `roster window (corrected figures): ${rosterWindow.from} → ${rosterWindow.to}`}
           </span>
         )}
       </div>

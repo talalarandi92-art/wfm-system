@@ -1345,3 +1345,74 @@ Byte-identical.
 627/627 tests · audit-builder CLEAN · cross-check 31/31
 audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
 ```
+
+---
+
+## Queue item 9 — Command Center (executive)
+
+Every headline on the exec screen was traced to its source and re-derived.
+
+```
+الموظفون 120            = employees.status='active'                          ✓
+حاضرون اليوم 54          = /rta/live present, same 2026-08-01 rows            ✓
+طلبات معلّقة 21          = /requests/stats pending                            ✓
+ساعات OT (الفترة) 382س   = 22,937 min TRUE_OT by raw SQL — exact             ✓
+التغطية 90% · الكونفورمانس 94.8% · العدالة 80/71  = their endpoints           ✓
+```
+
+The date rendering was checked too, because the API serializes `refDate` as a UTC instant
+(`2026-07-31T21:00:00.000Z` **is** 2026-08-01 in Kuwait) — the trap that cost me three false
+findings in queue item 5. The screen prints **2026-08-01**. Correct; checked rather than assumed.
+
+### F-035 · Four gauges in a row, three different periods, one window label — `FIXED`
+
+The hero row shows Coverage, Conformance, Shift Fairness and Weekend-OFF Fairness side by side,
+with a single footer line reading *"roster window: 2026-07-01 → 2026-08-01"* under all of them.
+They do not share a period:
+
+```
+Coverage            2026-08-01                one day
+Conformance         2026-07-01 → 08-01        the stated window
+Shift fairness      2026-01-01 → 08-01        YEAR TO DATE
+Weekend-OFF fairn.  2026-01-01 → 08-01        YEAR TO DATE
+```
+
+The fairness call takes no dates, so it returns the full year — and that is almost certainly
+right: a single month is too short to judge how night load and weekend rest are shared out. The
+numbers are correct. The framing was not: an executive reading "fairness 80%" under a July window
+is reading a year-to-date figure.
+
+Each gauge now states the span it was actually measured over, and the footer says which tiles its
+window governs:
+
+```
+90%    حاضر/مخطّط · 08-01
+94.8%  التزام الفترة · 07-01 → 08-01
+80%    توزيع الليل · 01-01 → 08-01
+71%    توزيع الراحة · 01-01 → 08-01
+نافذة الروستر (للأرقام المُصحّحة): 2026-07-01 → 2026-08-01
+```
+
+### Checked and found correct — annual attrition 51.6%
+
+A 51.6% annual attrition rate on an executive screen is the kind of number that drives decisions,
+so it was re-derived. My first attempt disagreed (46.3%) — and my query was the wrong one, for the
+third time this session:
+
+| | endpoint | my check | who is right |
+|---|---|---|---|
+| separations | 31 | 30 | **endpoint** — it reads `COALESCE(shift_code, attendance_code)`, so a separation recorded outside `hr_code` still counts |
+| avg headcount | 103 | 111 | **endpoint** — it counts people who actually **worked** that month (`presence IN ('office','wfh')`); mine counted anyone with a row, including OFF and leave |
+
+With the right definitions: `31 / 103 = 30.1%` over 7 months, `× 12/7 = 51.6%`. **Verified.**
+
+> Three times now a red light has been my measurement rather than the system's. The pattern is
+> consistent enough to state as a rule: when a check disagrees with a screen, find which of the
+> two is asking the wrong question **before** writing it down as a finding.
+
+### Gates
+
+```
+627/627 tests · audit-builder CLEAN · cross-check 31/31
+audit-requests 8/8 · audit-capacity 108/108 · audit-generator CLEAN
+```
